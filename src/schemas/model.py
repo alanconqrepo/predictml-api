@@ -6,6 +6,25 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+class ModelDeleteResponse(BaseModel):
+    """Résumé de la suppression de toutes les versions d'un modèle"""
+    name: str
+    deleted_versions: List[str]
+    mlflow_runs_deleted: List[str]
+    minio_objects_deleted: List[str]
+
+
+class ModelUpdateInput(BaseModel):
+    """Champs modifiables d'un modèle (tous optionnels)"""
+    description: Optional[str] = None
+    is_production: Optional[bool] = None
+    accuracy: Optional[float] = None
+    features_count: Optional[int] = None
+    classes: Optional[List[Any]] = None
+
+    model_config = {"from_attributes": True}
+
+
 class ModelCreateResponse(BaseModel):
     """Réponse après création d'un modèle"""
     id: int

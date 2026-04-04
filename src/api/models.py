@@ -5,13 +5,13 @@ import json
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import verify_token
 from src.db.database import get_db
 from src.db.models import ModelMetadata, User
-from src.schemas.model import ModelCreateResponse
+from src.schemas.model import ModelCreateResponse, ModelDeleteResponse, ModelUpdateInput
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
 
@@ -71,14 +71,16 @@ async def create_model(
 
     Nécessite un token Bearer valide.
     """
-    # Vérifier l'unicité du nom
+    # Vérifier l'unicité name + version
     result = await db.execute(
-        select(ModelMetadata).where(ModelMetadata.name == name)
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.version == version)
+        )
     )
     if result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Un modèle avec le nom '{name}' existe déjà.",
+            detail=f"Un modèle '{name}' version '{version}' existe déjà.",
         )
 
     # Lire le contenu du fichier
@@ -122,3 +124,177 @@ async def create_model(
     await db.refresh(metadata)
 
     return metadata
+
+
+@router.patch("/models/{name}/{version}", response_model=ModelCreateResponse)
+async def update_model(
+    name: str,
+    version: str,
+    payload: ModelUpdateInput,
+    user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Met à jour les métadonnées d'un modèle (name + version).
+
+    Champs modifiables : `description`, `is_production`, `accuracy`, `features_count`, `classes`.
+
+    - Si **is_production** passe à `true`, toutes les autres versions du même modèle
+      passent automatiquement à `false`.
+
+    Nécessite un token Bearer valide.
+    """
+    # Récupérer le modèle cible
+    result = await db.execute(
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.version == version)
+        )
+    )
+    model = result.scalar_one_or_none()
+
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' version '{version}' introuvable.",
+        )
+
+    # Si is_production passe à True → retirer is_production des autres versions
+    if payload.is_production is True:
+        other_versions = await db.execute(
+            select(ModelMetadata).where(
+                and_(
+                    ModelMetadata.name == name,
+                    ModelMetadata.version != version,
+                    ModelMetadata.is_production == True,
+                )
+            )
+        )
+        for other in other_versions.scalars().all():
+            other.is_production = False
+
+    # Appliquer uniquement les champs fournis (non-None)
+    update_data = payload.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(model, field, value)
+
+    await db.commit()
+    await db.refresh(model)
+
+    return model
+
+
+# ---------------------------------------------------------------------------
+# Helpers suppression
+# ---------------------------------------------------------------------------
+
+def _delete_mlflow_run(run_id: str) -> bool:
+    """Supprime le run MLflow. Retourne False si MLflow est indisponible."""
+    try:
+        from mlflow.tracking import MlflowClient
+        MlflowClient().delete_run(run_id)
+        return True
+    except Exception as e:
+        print(f"⚠️  MLflow suppression impossible pour run {run_id}: {e}")
+        return False
+
+
+def _delete_minio_object(object_key: str) -> bool:
+    """Supprime l'objet MinIO. Retourne False si MinIO est indisponible."""
+    try:
+        return minio_service.delete_model(object_key)
+    except Exception as e:
+        print(f"⚠️  MinIO suppression impossible pour {object_key}: {e}")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# DELETE routes
+# ---------------------------------------------------------------------------
+
+@router.delete("/models/{name}/{version}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_model_version(
+    name: str,
+    version: str,
+    user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Supprime une version spécifique d'un modèle.
+
+    - Supprime l'entrée en base PostgreSQL.
+    - Supprime le run MLflow associé (si `mlflow_run_id` renseigné).
+    - Supprime l'objet `.pkl` dans MinIO.
+
+    Retourne **204 No Content** en cas de succès.
+    """
+    result = await db.execute(
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.version == version)
+        )
+    )
+    model = result.scalar_one_or_none()
+
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' version '{version}' introuvable.",
+        )
+
+    if model.mlflow_run_id:
+        _delete_mlflow_run(model.mlflow_run_id)
+
+    _delete_minio_object(model.minio_object_key)
+
+    await db.delete(model)
+    await db.commit()
+
+
+@router.delete("/models/{name}", response_model=ModelDeleteResponse)
+async def delete_model_all_versions(
+    name: str,
+    user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Supprime toutes les versions d'un modèle.
+
+    - Supprime toutes les entrées PostgreSQL pour ce nom.
+    - Supprime chaque run MLflow associé.
+    - Supprime chaque objet `.pkl` dans MinIO.
+
+    Retourne un résumé des suppressions effectuées.
+    """
+    result = await db.execute(
+        select(ModelMetadata).where(ModelMetadata.name == name)
+    )
+    models = result.scalars().all()
+
+    if not models:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Aucun modèle trouvé avec le nom '{name}'.",
+        )
+
+    deleted_versions = []
+    mlflow_runs_deleted = []
+    minio_objects_deleted = []
+
+    for model in models:
+        deleted_versions.append(model.version)
+
+        if model.mlflow_run_id and _delete_mlflow_run(model.mlflow_run_id):
+            mlflow_runs_deleted.append(model.mlflow_run_id)
+
+        if _delete_minio_object(model.minio_object_key):
+            minio_objects_deleted.append(model.minio_object_key)
+
+        await db.delete(model)
+
+    await db.commit()
+
+    return ModelDeleteResponse(
+        name=name,
+        deleted_versions=deleted_versions,
+        mlflow_runs_deleted=mlflow_runs_deleted,
+        minio_objects_deleted=minio_objects_deleted,
+    )
