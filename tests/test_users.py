@@ -1,0 +1,285 @@
+"""
+Tests pour les endpoints /users
+"""
+import asyncio
+
+import pytest
+from fastapi.testclient import TestClient
+
+from src.main import app
+from src.services.db_service import DBService
+from tests.conftest import _TestSessionLocal
+
+client = TestClient(app)
+
+ADMIN_TOKEN = "test-token-admin-users"
+USER_TOKEN = "test-token-regular-users"
+USERNAME_PREFIX = "test_user_route"
+
+
+async def _setup():
+    async with _TestSessionLocal() as db:
+        if not await DBService.get_user_by_token(db, ADMIN_TOKEN):
+            await DBService.create_user(
+                db,
+                username=f"{USERNAME_PREFIX}_admin",
+                email=f"{USERNAME_PREFIX}_admin@test.com",
+                api_token=ADMIN_TOKEN,
+                role="admin",
+                rate_limit=10000,
+            )
+        if not await DBService.get_user_by_token(db, USER_TOKEN):
+            await DBService.create_user(
+                db,
+                username=f"{USERNAME_PREFIX}_regular",
+                email=f"{USERNAME_PREFIX}_regular@test.com",
+                api_token=USER_TOKEN,
+                role="user",
+                rate_limit=10000,
+            )
+
+
+asyncio.run(_setup())
+
+
+# ---------------------------------------------------------------------------
+# POST /users
+# ---------------------------------------------------------------------------
+
+def test_create_user_without_auth():
+    """POST /users sans auth → 401/403"""
+    r = client.post("/users", json={"username": "new", "email": "new@test.com"})
+    assert r.status_code in [401, 403]
+
+
+def test_create_user_as_non_admin():
+    """POST /users avec token non-admin → 403"""
+    r = client.post(
+        "/users",
+        headers={"Authorization": f"Bearer {USER_TOKEN}"},
+        json={"username": "new_user", "email": "new_user@test.com"},
+    )
+    assert r.status_code == 403
+
+
+def test_create_user_success():
+    """POST /users admin → 201 avec token généré"""
+    r = client.post(
+        "/users",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"username": f"{USERNAME_PREFIX}_created", "email": f"{USERNAME_PREFIX}_created@test.com"},
+    )
+    assert r.status_code == 201
+    data = r.json()
+    assert data["username"] == f"{USERNAME_PREFIX}_created"
+    assert data["role"] == "user"
+    assert data["is_active"] is True
+    assert "api_token" in data
+    assert len(data["api_token"]) > 10
+    assert "id" in data
+
+
+def test_create_user_with_role_and_rate_limit():
+    """POST /users avec role et rate_limit personnalisés → 201"""
+    r = client.post(
+        "/users",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={
+            "username": f"{USERNAME_PREFIX}_readonly",
+            "email": f"{USERNAME_PREFIX}_readonly@test.com",
+            "role": "readonly",
+            "rate_limit": 500,
+        },
+    )
+    assert r.status_code == 201
+    data = r.json()
+    assert data["role"] == "readonly"
+    assert data["rate_limit_per_day"] == 500
+
+
+def test_create_user_duplicate():
+    """POST /users avec username/email existant → 409"""
+    r = client.post(
+        "/users",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"username": f"{USERNAME_PREFIX}_admin", "email": "other@test.com"},
+    )
+    assert r.status_code == 409
+
+
+def test_create_user_invalid_role():
+    """POST /users avec rôle invalide → 422"""
+    r = client.post(
+        "/users",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"username": "bad_role", "email": "bad@test.com", "role": "superuser"},
+    )
+    assert r.status_code == 422
+
+
+def test_create_user_invalid_email():
+    """POST /users avec email invalide → 422"""
+    r = client.post(
+        "/users",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"username": "bademail", "email": "not-an-email"},
+    )
+    assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# GET /users
+# ---------------------------------------------------------------------------
+
+def test_list_users_without_auth():
+    """GET /users sans auth → 401/403"""
+    r = client.get("/users")
+    assert r.status_code in [401, 403]
+
+
+def test_list_users_as_non_admin():
+    """GET /users avec token non-admin → 403"""
+    r = client.get("/users", headers={"Authorization": f"Bearer {USER_TOKEN}"})
+    assert r.status_code == 403
+
+
+def test_list_users_success():
+    """GET /users admin → 200 avec liste d'utilisateurs"""
+    r = client.get("/users", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data, list)
+    assert len(data) >= 2
+    usernames = [u["username"] for u in data]
+    assert f"{USERNAME_PREFIX}_admin" in usernames
+    assert f"{USERNAME_PREFIX}_regular" in usernames
+
+
+# ---------------------------------------------------------------------------
+# GET /users/{user_id}
+# ---------------------------------------------------------------------------
+
+def test_get_user_without_auth():
+    """GET /users/{id} sans auth → 401/403"""
+    r = client.get("/users/1")
+    assert r.status_code in [401, 403]
+
+
+def test_get_user_self():
+    """Un utilisateur peut récupérer son propre profil"""
+    # Récupérer l'id de l'utilisateur regular via la liste admin
+    users = client.get("/users", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"}).json()
+    regular = next(u for u in users if u["username"] == f"{USERNAME_PREFIX}_regular")
+
+    r = client.get(
+        f"/users/{regular['id']}",
+        headers={"Authorization": f"Bearer {USER_TOKEN}"},
+    )
+    assert r.status_code == 200
+    assert r.json()["username"] == f"{USERNAME_PREFIX}_regular"
+
+
+def test_get_user_other_as_non_admin():
+    """Un user non-admin ne peut pas voir le profil d'un autre → 403"""
+    users = client.get("/users", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"}).json()
+    admin = next(u for u in users if u["username"] == f"{USERNAME_PREFIX}_admin")
+
+    r = client.get(
+        f"/users/{admin['id']}",
+        headers={"Authorization": f"Bearer {USER_TOKEN}"},
+    )
+    assert r.status_code == 403
+
+
+def test_get_user_as_admin():
+    """Admin peut voir n'importe quel profil"""
+    users = client.get("/users", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"}).json()
+    regular = next(u for u in users if u["username"] == f"{USERNAME_PREFIX}_regular")
+
+    r = client.get(
+        f"/users/{regular['id']}",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+    )
+    assert r.status_code == 200
+    assert r.json()["id"] == regular["id"]
+
+
+def test_get_user_not_found():
+    """GET /users/{id} avec id inexistant → 404"""
+    r = client.get("/users/999999", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
+    assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# DELETE /users/{user_id}
+# ---------------------------------------------------------------------------
+
+def test_delete_user_without_auth():
+    """DELETE /users/{id} sans auth → 401/403"""
+    r = client.delete("/users/1")
+    assert r.status_code in [401, 403]
+
+
+def test_delete_user_as_non_admin():
+    """DELETE /users/{id} non-admin → 403"""
+    users = client.get("/users", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"}).json()
+    regular = next(u for u in users if u["username"] == f"{USERNAME_PREFIX}_regular")
+
+    r = client.delete(
+        f"/users/{regular['id']}",
+        headers={"Authorization": f"Bearer {USER_TOKEN}"},
+    )
+    assert r.status_code == 403
+
+
+def test_delete_user_self():
+    """Un admin ne peut pas se supprimer lui-même → 400"""
+    users = client.get("/users", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"}).json()
+    admin = next(u for u in users if u["username"] == f"{USERNAME_PREFIX}_admin")
+
+    r = client.delete(
+        f"/users/{admin['id']}",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+    )
+    assert r.status_code == 400
+
+
+def test_delete_user_not_found():
+    """DELETE /users/{id} avec id inexistant → 404"""
+    r = client.delete("/users/999999", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
+    assert r.status_code == 404
+
+
+def test_delete_user_success():
+    """DELETE /users/{id} admin → 204, utilisateur absent ensuite"""
+    # Créer un utilisateur à supprimer
+    create_r = client.post(
+        "/users",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"username": f"{USERNAME_PREFIX}_to_delete", "email": f"{USERNAME_PREFIX}_to_delete@test.com"},
+    )
+    assert create_r.status_code == 201
+    user_id = create_r.json()["id"]
+
+    r = client.delete(f"/users/{user_id}", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
+    assert r.status_code == 204
+
+    # Plus accessible
+    r2 = client.get(f"/users/{user_id}", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
+    assert r2.status_code == 404
+
+
+def test_delete_user_twice():
+    """DELETE deux fois le même utilisateur → 204 puis 404"""
+    create_r = client.post(
+        "/users",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"username": f"{USERNAME_PREFIX}_to_delete2", "email": f"{USERNAME_PREFIX}_to_delete2@test.com"},
+    )
+    user_id = create_r.json()["id"]
+
+    r1 = client.delete(f"/users/{user_id}", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
+    assert r1.status_code == 204
+
+    r2 = client.delete(f"/users/{user_id}", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
+    assert r2.status_code == 404

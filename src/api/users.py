@@ -1,0 +1,123 @@
+"""
+Endpoints pour la gestion des utilisateurs
+"""
+import secrets
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.security import require_admin, verify_token
+from src.db.database import get_db
+from src.db.models import User, UserRole
+from src.schemas.user import UserCreateInput, UserResponse
+from src.services.db_service import DBService
+
+router = APIRouter(prefix="/users", tags=["users"])
+
+
+@router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def create_user(
+    payload: UserCreateInput,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Crée un nouvel utilisateur et génère son token Bearer.
+
+    - **username** et **email** doivent être uniques.
+    - **role** : `user` (défaut), `admin`, ou `readonly`.
+    - **rate_limit** : nombre max de prédictions par jour (défaut: 1000).
+    - Le **api_token** généré est retourné une seule fois — conservez-le.
+
+    Réservé aux administrateurs.
+    """
+    # Vérifier l'unicité username et email
+    existing = await db.execute(
+        select(User).where(
+            (User.username == payload.username) | (User.email == payload.email)
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Un utilisateur avec ce nom ou cet email existe déjà.",
+        )
+
+    api_token = secrets.token_urlsafe(32)
+    user = await DBService.create_user(
+        db,
+        username=payload.username,
+        email=payload.email,
+        api_token=api_token,
+        role=payload.role,
+        rate_limit=payload.rate_limit,
+    )
+    return user
+
+
+@router.get("", response_model=List[UserResponse])
+async def list_users(
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Liste tous les utilisateurs.
+
+    Réservé aux administrateurs.
+    """
+    return await DBService.get_all_users(db)
+
+
+@router.get("/{user_id}", response_model=UserResponse)
+async def get_user(
+    user_id: int,
+    current_user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Récupère un utilisateur par son ID.
+
+    Accessible par l'administrateur ou par l'utilisateur lui-même.
+    """
+    if current_user.role != UserRole.ADMIN and current_user.id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accès refusé : vous ne pouvez consulter que votre propre profil.",
+        )
+
+    user = await DBService.get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Utilisateur {user_id} introuvable.",
+        )
+    return user
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(
+    user_id: int,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Supprime un utilisateur et toutes ses prédictions (cascade).
+
+    Un administrateur ne peut pas se supprimer lui-même.
+
+    Réservé aux administrateurs.
+    """
+    if current_user.id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vous ne pouvez pas supprimer votre propre compte.",
+        )
+
+    deleted = await DBService.delete_user(db, user_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Utilisateur {user_id} introuvable.",
+        )
