@@ -84,6 +84,37 @@ class MinIOService:
             print(f"❌ Erreur lors de l'upload: {e}")
             raise
 
+    def upload_model_bytes(self, model_bytes: bytes, object_name: str) -> dict:
+        """
+        Upload des bytes pkl bruts vers MinIO (sans re-sérialisation)
+
+        Args:
+            model_bytes: Contenu pkl déjà sérialisé
+            object_name: Nom de l'objet dans MinIO
+
+        Returns:
+            dict avec les informations de l'upload
+        """
+        self._ensure_bucket_exists()
+        try:
+            model_stream = io.BytesIO(model_bytes)
+            result = self.client.put_object(
+                self.bucket,
+                object_name,
+                model_stream,
+                length=len(model_bytes),
+            )
+            print(f"✅ Modèle uploadé: {object_name} ({len(model_bytes)} bytes)")
+            return {
+                "bucket": self.bucket,
+                "object_name": object_name,
+                "size": len(model_bytes),
+                "etag": result.etag,
+            }
+        except S3Error as e:
+            print(f"❌ Erreur lors de l'upload: {e}")
+            raise
+
     def download_model(self, object_name: str) -> any:
         """
         Télécharge et désérialise un modèle depuis MinIO

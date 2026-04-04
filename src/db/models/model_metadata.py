@@ -36,6 +36,9 @@ class ModelMetadata(Base):
     f1_score = Column(Float, nullable=True)
     training_metrics = Column(JSON, nullable=True)  # Métriques supplémentaires
 
+    # MLflow
+    mlflow_run_id = Column(String(255), nullable=True, index=True)
+
     # Training info
     trained_by = Column(String(100), nullable=True)
     training_date = Column(DateTime, nullable=True)
