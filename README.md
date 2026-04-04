@@ -4,6 +4,8 @@ API de prédiction Machine Learning construite avec FastAPI et scikit-learn.
 
 **Version 2.0** — Multi-utilisateurs, stockage distribué, experiment tracking.
 
+[![Tests](https://github.com/alanconqrepo/predictml-api/actions/workflows/tests.yml/badge.svg)](https://github.com/alanconqrepo/predictml-api/actions/workflows/tests.yml)
+
 ## Stack
 
 - **API** : FastAPI (async) — port 8000
