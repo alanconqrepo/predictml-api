@@ -27,6 +27,8 @@ async def predict(
     Fait une prédiction avec le modèle sklearn spécifié.
 
     - **model_name**: Nom du modèle à utiliser
+    - **model_version**: Version cible (ex: `1.0.0`). Si absent, utilise la version
+      `is_production=True` ; à défaut, la version la plus récente.
     - **id_obs**: Identifiant de l'observation (optionnel, stocké en DB)
     - **features**: Features pour la prédiction — deux formats acceptés :
         - **liste** `[5.1, 3.5, 1.4, 0.2]` : l'ordre doit correspondre à celui du modèle
@@ -43,8 +45,8 @@ async def predict(
     status_str = "success"
 
     try:
-        # Charger le modèle demandé (depuis MinIO via cache)
-        model_data = await model_service.load_model(db, input_data.model_name)
+        # Charger le modèle demandé — version explicite, sinon production, sinon plus récente
+        model_data = await model_service.load_model(db, input_data.model_name, input_data.model_version)
         model = model_data["model"]
         metadata = model_data["metadata"]
 
@@ -104,6 +106,7 @@ async def predict(
 
         return PredictionOutput(
             model_name=metadata.name,
+            model_version=metadata.version,
             id_obs=input_data.id_obs,
             prediction=prediction_result,
             probability=probability

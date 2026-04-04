@@ -40,6 +40,15 @@ class PredictionInput(BaseModel):
         description="Nom du modèle à utiliser (sans extension .pkl)",
         json_schema_extra={"example": "iris_model"}
     )
+    model_version: Optional[str] = Field(
+        None,
+        description=(
+            "Version du modèle (ex: '1.0.0'). "
+            "Si absent, utilise la version is_production=True ; "
+            "à défaut, la version la plus récente."
+        ),
+        json_schema_extra={"example": "1.0.0"}
+    )
     id_obs: Optional[str] = Field(
         None,
         description="Identifiant de l'observation (stocké dans la table predictions)",
@@ -63,6 +72,7 @@ class PredictionOutput(BaseModel):
     """Résultat d'une prédiction"""
 
     model_name: str = Field(..., description="Nom du modèle utilisé")
+    model_version: str = Field(..., description="Version du modèle utilisée")
     id_obs: Optional[str] = Field(None, description="Identifiant de l'observation (si fourni)")
     prediction: float | int | str = Field(..., description="Prédiction du modèle")
     probability: Optional[List[float]] = Field(

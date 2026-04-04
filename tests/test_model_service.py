@@ -113,6 +113,46 @@ def test_load_model_cache_hit():
     assert minio_mock.download_model.call_count == 1
 
 
+def test_load_model_forwards_explicit_version():
+    """load_model avec version explicite → get_model_metadata appelé avec cette version"""
+    service = ModelService()
+    fake_model = MagicMock()
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v2.0.0.pkl")
+    metadata.version = "2.0.0"
+
+    with patch(
+        "src.services.db_service.DBService.get_model_metadata",
+        new_callable=AsyncMock,
+        return_value=metadata,
+    ) as mock_get, patch("src.services.model_service.minio_service") as minio_mock:
+        minio_mock.download_model.return_value = fake_model
+        asyncio.run(service.load_model(AsyncMock(), "test_model", "2.0.0"))
+
+    mock_get.assert_called_once()
+    _, args, kwargs = mock_get.mock_calls[0]
+    # Le troisième argument positionnel (ou kwarg 'version') doit être "2.0.0"
+    assert args[2] == "2.0.0" or kwargs.get("version") == "2.0.0"
+
+
+def test_load_model_no_version_passes_none():
+    """load_model sans version → get_model_metadata appelé avec version=None (production en priorité)"""
+    service = ModelService()
+    fake_model = MagicMock()
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl")
+
+    with patch(
+        "src.services.db_service.DBService.get_model_metadata",
+        new_callable=AsyncMock,
+        return_value=metadata,
+    ) as mock_get, patch("src.services.model_service.minio_service") as minio_mock:
+        minio_mock.download_model.return_value = fake_model
+        asyncio.run(service.load_model(AsyncMock(), "test_model"))
+
+    mock_get.assert_called_once()
+    _, args, kwargs = mock_get.mock_calls[0]
+    assert args[2] is None or kwargs.get("version") is None
+
+
 def test_load_model_not_found():
     """load_model avec un modèle inexistant → HTTPException 404"""
     from fastapi import HTTPException

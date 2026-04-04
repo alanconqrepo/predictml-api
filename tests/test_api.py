@@ -134,6 +134,20 @@ def test_predict_list_features_with_id_obs_not_rejected_by_schema():
     assert response.status_code == 401  # Auth fail, pas 422 validation error
 
 
+def test_predict_with_model_version_not_rejected_by_schema():
+    """model_version dans le body doit passer la validation et retourner 401 (auth)."""
+    response = client.post(
+        "/predict",
+        headers={"Authorization": "Bearer invalid-token"},
+        json={
+            "model_name": "iris_model",
+            "model_version": "2.0.0",
+            "features": [5.1, 3.5, 1.4, 0.2]
+        }
+    )
+    assert response.status_code == 401
+
+
 def test_predict_dict_features_with_nested_list_rejected_by_schema():
     """
     Un dict avec une valeur liste doit être rejeté par Pydantic (422).

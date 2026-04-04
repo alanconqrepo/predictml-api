@@ -45,7 +45,7 @@ class ModelService:
         self,
         db: AsyncSession,
         model_name: str,
-        version: Optional[str] = None
+        version: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Charge un modèle depuis MinIO (via cache ou download)

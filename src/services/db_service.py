@@ -175,8 +175,11 @@ class DBService:
         if version:
             query = query.where(ModelMetadata.version == version)
         else:
-            # Récupérer la version la plus récente si non spécifiée
-            query = query.order_by(ModelMetadata.created_at.desc())
+            # Sans version explicite : priorité à is_production=True, sinon la plus récente
+            query = query.order_by(
+                ModelMetadata.is_production.desc(),
+                ModelMetadata.created_at.desc()
+            )
 
         result = await db.execute(query)
         return result.scalar_one_or_none()
