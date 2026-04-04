@@ -4,6 +4,7 @@ Configuration pytest - Fixes pour asyncpg + TestClient sur Windows
 import asyncio
 import sys
 import os
+from unittest.mock import MagicMock, patch
 
 # Fix event loop sur Windows (requis par asyncpg)
 if sys.platform == "win32":
@@ -11,6 +12,19 @@ if sys.platform == "win32":
 
 # Forcer les endpoints locaux pour les tests
 os.environ.setdefault("MINIO_ENDPOINT", "localhost:9002")
+
+# Mock MinIO globalement — les tests ne nécessitent pas de vrai serveur MinIO
+_minio_mock = MagicMock()
+_minio_mock.upload_model_bytes.return_value = {
+    "bucket": "models",
+    "object_name": "mock_model/v1.0.0.pkl",
+    "size": 512,
+    "etag": "mock-etag-abc123",
+}
+_minio_mock.delete_model.return_value = True
+_minio_mock.download_model.side_effect = Exception("MinIO non disponible en tests")
+
+patch("src.api.models.minio_service", _minio_mock).start()
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.pool import NullPool
