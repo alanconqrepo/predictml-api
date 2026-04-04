@@ -47,9 +47,9 @@ async def list_cached_models():
 
 @router.post("/models", response_model=ModelCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_model(
-    file: UploadFile = File(..., description="Fichier .pkl du modèle sérialisé"),
     name: str = Form(..., description="Nom unique du modèle"),
     version: str = Form(..., description="Version du modèle (ex: 1.0.0)"),
+    file: Optional[UploadFile] = File(None, description="Fichier .pkl (optionnel si mlflow_run_id fourni)"),
     description: Optional[str] = Form(None),
     algorithm: Optional[str] = Form(None),
     mlflow_run_id: Optional[str] = Form(None),
@@ -63,11 +63,12 @@ async def create_model(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Crée un nouveau modèle : upload vers MinIO + enregistrement en base.
+    Crée un nouveau modèle et l'enregistre en base.
 
-    - **name** doit être unique — retourne 409 si le nom existe déjà.
-    - **file** : fichier `.pkl` produit par `pickle.dumps(model)`.
-    - **mlflow_run_id** : `mlflow.active_run().info.run_id` depuis le script d'entraînement.
+    - **name** + **version** doivent être uniques — retourne 409 si la combinaison existe déjà.
+    - **file** : fichier `.pkl` requis si `mlflow_run_id` n'est pas fourni.
+      Si `mlflow_run_id` est fourni, MLflow stocke déjà le modèle dans MinIO — pas de doublon.
+    - **mlflow_run_id** : ID du run MLflow. Permet de charger le modèle via MLflow à la prédiction.
 
     Nécessite un token Bearer valide.
     """
@@ -83,17 +84,28 @@ async def create_model(
             detail=f"Un modèle '{name}' version '{version}' existe déjà.",
         )
 
-    # Lire le contenu du fichier
-    model_bytes = await file.read()
-    if not model_bytes:
+    minio_bucket = None
+    minio_object_key = None
+    file_size_bytes = None
+
+    if file is not None:
+        # Lire et uploader le fichier vers MinIO
+        model_bytes = await file.read()
+        if not model_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Le fichier est vide.",
+            )
+        object_name = f"{name}/v{version}.pkl"
+        upload_info = minio_service.upload_model_bytes(model_bytes, object_name)
+        minio_bucket = upload_info["bucket"]
+        minio_object_key = object_name
+        file_size_bytes = upload_info["size"]
+    elif not mlflow_run_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Le fichier est vide.",
+            detail="Fournir un fichier .pkl ou un mlflow_run_id.",
         )
-
-    # Upload vers MinIO
-    object_name = f"{name}/v{version}.pkl"
-    upload_info = minio_service.upload_model_bytes(model_bytes, object_name)
 
     # Désérialiser les champs JSON optionnels
     classes_parsed = json.loads(classes) if classes else None
@@ -103,9 +115,9 @@ async def create_model(
     metadata = ModelMetadata(
         name=name,
         version=version,
-        minio_bucket=upload_info["bucket"],
-        minio_object_key=object_name,
-        file_size_bytes=upload_info["size"],
+        minio_bucket=minio_bucket,
+        minio_object_key=minio_object_key,
+        file_size_bytes=file_size_bytes,
         description=description,
         algorithm=algorithm,
         mlflow_run_id=mlflow_run_id,
@@ -243,7 +255,8 @@ async def delete_model_version(
     if model.mlflow_run_id:
         _delete_mlflow_run(model.mlflow_run_id)
 
-    _delete_minio_object(model.minio_object_key)
+    if model.minio_object_key:
+        _delete_minio_object(model.minio_object_key)
 
     await db.delete(model)
     await db.commit()
@@ -285,7 +298,7 @@ async def delete_model_all_versions(
         if model.mlflow_run_id and _delete_mlflow_run(model.mlflow_run_id):
             mlflow_runs_deleted.append(model.mlflow_run_id)
 
-        if _delete_minio_object(model.minio_object_key):
+        if model.minio_object_key and _delete_minio_object(model.minio_object_key):
             minio_objects_deleted.append(model.minio_object_key)
 
         await db.delete(model)

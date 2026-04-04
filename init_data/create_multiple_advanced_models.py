@@ -10,10 +10,8 @@ Ordre d'exécution :
     docker-compose up -d
     python init_data/create_multiple_advanced_models.py
 """
-import io
 import json
 import os
-import pickle
 import sys
 from pathlib import Path
 
@@ -119,14 +117,10 @@ def train_and_register(
         print(f"   Accuracy : {acc:.4f}  |  F1 : {f1:.4f}")
         print(f"   MLflow run ID : {run_id}")
 
-    # Sérialiser le modèle en bytes
-    model_bytes = pickle.dumps(pipeline)
-
-    # Envoyer via POST /models
+    # Envoyer via POST /models (mlflow_run_id uniquement, pas d'upload MinIO séparé)
     response = requests.post(
         f"{API_URL}/models",
         headers={"Authorization": f"Bearer {API_TOKEN}"},
-        files={"file": (f"{name}.pkl", io.BytesIO(model_bytes), "application/octet-stream")},
         data={
             "name": name,
             "version": MODEL_VERSION,
@@ -148,7 +142,7 @@ def train_and_register(
         print(f"   Modele '{name}' existe deja — ignore")
     else:
         print(f"   ERREUR API {response.status_code}: {response.text}")
-        raise RuntimeError(f"Echec upload {name}: {response.status_code}")
+        raise RuntimeError(f"Echec enregistrement {name}: {response.status_code}")
 
 
 # ---------------------------------------------------------------------------

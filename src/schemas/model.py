@@ -33,8 +33,8 @@ class ModelCreateResponse(BaseModel):
     description: Optional[str]
     algorithm: Optional[str]
     mlflow_run_id: Optional[str]
-    minio_bucket: str
-    minio_object_key: str
+    minio_bucket: Optional[str]
+    minio_object_key: Optional[str]
     file_size_bytes: Optional[int]
     accuracy: Optional[float]
     f1_score: Optional[float]

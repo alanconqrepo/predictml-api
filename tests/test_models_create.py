@@ -197,11 +197,31 @@ def test_create_model_missing_version():
     assert response.status_code == 422
 
 
-def test_create_model_missing_file():
-    """POST /models sans fichier → 422"""
+def test_create_model_no_file_no_mlflow_run_id():
+    """POST /models sans fichier ni mlflow_run_id → 400"""
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
         data={"name": f"{TEST_MODEL_NAME}_nofile", "version": "1.0.0"},
     )
-    assert response.status_code == 422
+    assert response.status_code == 400
+
+
+def test_create_model_with_mlflow_run_id_only():
+    """POST /models avec mlflow_run_id uniquement (sans fichier) → 201"""
+    run_id = "mlflowonly123abc456def789abc456de"
+    response = client.post(
+        "/models",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        data={
+            "name": f"{TEST_MODEL_NAME}_mlflow_only",
+            "version": "1.0.0",
+            "mlflow_run_id": run_id,
+            "description": "Modele MLflow sans upload MinIO",
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["mlflow_run_id"] == run_id
+    assert data["minio_object_key"] is None
+    assert data["minio_bucket"] is None

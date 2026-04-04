@@ -1,7 +1,10 @@
 """
 Modèle User pour la gestion multi-utilisateurs
 """
-from datetime import datetime
+from datetime import datetime, timezone
+
+def _utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 import enum
@@ -31,8 +34,8 @@ class User(Base):
     rate_limit_per_day = Column(Integer, default=1000, nullable=False)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow, nullable=False)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
     last_login = Column(DateTime, nullable=True)
 
     # Relations

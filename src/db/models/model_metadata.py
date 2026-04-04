@@ -1,7 +1,10 @@
 """
 Modèle ModelMetadata pour gérer les métadonnées et le versioning des modèles
 """
-from datetime import datetime
+from datetime import datetime, timezone
+
+def _utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, JSON, Text
 
 from src.db.database import Base
@@ -18,8 +21,8 @@ class ModelMetadata(Base):
     version = Column(String(50), nullable=False, index=True)
 
     # Stockage MinIO
-    minio_bucket = Column(String(100), nullable=False)
-    minio_object_key = Column(String(255), nullable=False)  # Chemin dans MinIO
+    minio_bucket = Column(String(100), nullable=True)
+    minio_object_key = Column(String(255), nullable=True)  # Chemin dans MinIO (None si mlflow_run_id)
     file_size_bytes = Column(Integer, nullable=True)
     file_hash = Column(String(64), nullable=True)  # SHA256
 
@@ -50,8 +53,8 @@ class ModelMetadata(Base):
     is_production = Column(Boolean, default=False, nullable=False)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow, nullable=False)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
     deprecated_at = Column(DateTime, nullable=True)
 
     # Contrainte unique: un seul nom+version
