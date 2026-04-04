@@ -16,7 +16,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.pool import NullPool
 
 from src.core.config import settings
-from src.db.database import get_db
+from src.db.database import get_db, Base
+from src.db.models import User, Prediction, ModelMetadata  # noqa: F401 — enregistre les modèles dans Base
 from src.main import app
 
 
@@ -35,6 +36,15 @@ _TestSessionLocal = async_sessionmaker(
     autocommit=False,
     autoflush=False,
 )
+
+
+async def _setup():
+    """Crée les tables et initialise la DB de test"""
+    async with _test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
+asyncio.run(_setup())
 
 
 async def _override_get_db():
