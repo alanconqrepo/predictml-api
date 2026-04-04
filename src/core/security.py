@@ -7,7 +7,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.database import get_db
-from src.db.models import User
+from src.db.models import User, UserRole
 from src.services.db_service import DBService
 
 security = HTTPBearer()
@@ -58,4 +58,14 @@ async def verify_token(
     # Mettre à jour la dernière connexion (async, non bloquant)
     await DBService.update_user_last_login(db, user.id)
 
+    return user
+
+
+async def require_admin(user: User = Depends(verify_token)) -> User:
+    """Vérifie que l'utilisateur authentifié est admin."""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accès réservé aux administrateurs.",
+        )
     return user

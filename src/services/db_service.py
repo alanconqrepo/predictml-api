@@ -54,6 +54,22 @@ class DBService:
         return user
 
     @staticmethod
+    async def get_all_users(db: AsyncSession) -> List[User]:
+        """Récupère tous les utilisateurs"""
+        result = await db.execute(select(User).order_by(User.created_at.desc()))
+        return result.scalars().all()
+
+    @staticmethod
+    async def delete_user(db: AsyncSession, user_id: int) -> bool:
+        """Supprime un utilisateur (et ses prédictions via cascade)"""
+        user = await DBService.get_user_by_id(db, user_id)
+        if not user:
+            return False
+        await db.delete(user)
+        await db.commit()
+        return True
+
+    @staticmethod
     async def update_user_last_login(db: AsyncSession, user_id: int):
         """Met à jour la dernière connexion d'un utilisateur"""
         user = await DBService.get_user_by_id(db, user_id)
