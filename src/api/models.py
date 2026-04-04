@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.security import verify_token
 from src.db.database import get_db
 from src.db.models import ModelMetadata, User
-from src.schemas.model import ModelCreateResponse, ModelUpdateInput
+from src.schemas.model import ModelCreateResponse, ModelDeleteResponse, ModelUpdateInput
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
 
@@ -181,3 +181,120 @@ async def update_model(
     await db.refresh(model)
 
     return model
+
+
+# ---------------------------------------------------------------------------
+# Helpers suppression
+# ---------------------------------------------------------------------------
+
+def _delete_mlflow_run(run_id: str) -> bool:
+    """Supprime le run MLflow. Retourne False si MLflow est indisponible."""
+    try:
+        from mlflow.tracking import MlflowClient
+        MlflowClient().delete_run(run_id)
+        return True
+    except Exception as e:
+        print(f"⚠️  MLflow suppression impossible pour run {run_id}: {e}")
+        return False
+
+
+def _delete_minio_object(object_key: str) -> bool:
+    """Supprime l'objet MinIO. Retourne False si MinIO est indisponible."""
+    try:
+        return minio_service.delete_model(object_key)
+    except Exception as e:
+        print(f"⚠️  MinIO suppression impossible pour {object_key}: {e}")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# DELETE routes
+# ---------------------------------------------------------------------------
+
+@router.delete("/models/{name}/{version}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_model_version(
+    name: str,
+    version: str,
+    user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Supprime une version spécifique d'un modèle.
+
+    - Supprime l'entrée en base PostgreSQL.
+    - Supprime le run MLflow associé (si `mlflow_run_id` renseigné).
+    - Supprime l'objet `.pkl` dans MinIO.
+
+    Retourne **204 No Content** en cas de succès.
+    """
+    result = await db.execute(
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.version == version)
+        )
+    )
+    model = result.scalar_one_or_none()
+
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' version '{version}' introuvable.",
+        )
+
+    if model.mlflow_run_id:
+        _delete_mlflow_run(model.mlflow_run_id)
+
+    _delete_minio_object(model.minio_object_key)
+
+    await db.delete(model)
+    await db.commit()
+
+
+@router.delete("/models/{name}", response_model=ModelDeleteResponse)
+async def delete_model_all_versions(
+    name: str,
+    user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Supprime toutes les versions d'un modèle.
+
+    - Supprime toutes les entrées PostgreSQL pour ce nom.
+    - Supprime chaque run MLflow associé.
+    - Supprime chaque objet `.pkl` dans MinIO.
+
+    Retourne un résumé des suppressions effectuées.
+    """
+    result = await db.execute(
+        select(ModelMetadata).where(ModelMetadata.name == name)
+    )
+    models = result.scalars().all()
+
+    if not models:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Aucun modèle trouvé avec le nom '{name}'.",
+        )
+
+    deleted_versions = []
+    mlflow_runs_deleted = []
+    minio_objects_deleted = []
+
+    for model in models:
+        deleted_versions.append(model.version)
+
+        if model.mlflow_run_id and _delete_mlflow_run(model.mlflow_run_id):
+            mlflow_runs_deleted.append(model.mlflow_run_id)
+
+        if _delete_minio_object(model.minio_object_key):
+            minio_objects_deleted.append(model.minio_object_key)
+
+        await db.delete(model)
+
+    await db.commit()
+
+    return ModelDeleteResponse(
+        name=name,
+        deleted_versions=deleted_versions,
+        mlflow_runs_deleted=mlflow_runs_deleted,
+        minio_objects_deleted=minio_objects_deleted,
+    )
