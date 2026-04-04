@@ -43,8 +43,8 @@ async def predict(
     status_str = "success"
 
     try:
-        # Charger le modèle demandé (depuis MinIO via cache)
-        model_data = await model_service.load_model(db, input_data.model_name)
+        # Charger le modèle demandé — version explicite, sinon production, sinon plus récente
+        model_data = await model_service.load_model(db, input_data.model_name, input_data.model_version)
         model = model_data["model"]
         metadata = model_data["metadata"]
 
@@ -104,6 +104,7 @@ async def predict(
 
         return PredictionOutput(
             model_name=metadata.name,
+            model_version=metadata.version,
             id_obs=input_data.id_obs,
             prediction=prediction_result,
             probability=probability

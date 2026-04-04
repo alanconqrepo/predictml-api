@@ -110,14 +110,32 @@ def test_prediction_input_id_obs_with_dict_features():
 
 def test_prediction_output_includes_id_obs():
     """PredictionOutput expose id_obs"""
-    out = PredictionOutput(model_name="iris_model", id_obs="obs-001", prediction=1)
+    out = PredictionOutput(model_name="iris_model", model_version="1.0.0", id_obs="obs-001", prediction=1)
     assert out.id_obs == "obs-001"
 
 
 def test_prediction_output_id_obs_nullable():
     """id_obs peut être None dans la réponse (ancien format)"""
-    out = PredictionOutput(model_name="iris_model", id_obs=None, prediction=1)
+    out = PredictionOutput(model_name="iris_model", model_version="1.0.0", id_obs=None, prediction=1)
     assert out.id_obs is None
+
+
+def test_prediction_output_includes_model_version():
+    """PredictionOutput expose model_version"""
+    out = PredictionOutput(model_name="iris_model", model_version="2.0.0", prediction=1)
+    assert out.model_version == "2.0.0"
+
+
+def test_prediction_input_model_version_optional():
+    """model_version est optionnel dans PredictionInput"""
+    inp = PredictionInput(model_name="iris_model", features=[1.0, 2.0])
+    assert inp.model_version is None
+
+
+def test_prediction_input_model_version_accepted():
+    """model_version fourni est bien conservé"""
+    inp = PredictionInput(model_name="iris_model", model_version="2.0.0", features=[1.0, 2.0])
+    assert inp.model_version == "2.0.0"
 
 
 # ── Champs requis ─────────────────────────────────────────────────────────────
