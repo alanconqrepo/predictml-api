@@ -6,6 +6,17 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+class ModelUpdateInput(BaseModel):
+    """Champs modifiables d'un modèle (tous optionnels)"""
+    description: Optional[str] = None
+    is_production: Optional[bool] = None
+    accuracy: Optional[float] = None
+    features_count: Optional[int] = None
+    classes: Optional[List[Any]] = None
+
+    model_config = {"from_attributes": True}
+
+
 class ModelCreateResponse(BaseModel):
     """Réponse après création d'un modèle"""
     id: int

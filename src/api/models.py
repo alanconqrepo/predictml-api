@@ -5,13 +5,13 @@ import json
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import verify_token
 from src.db.database import get_db
 from src.db.models import ModelMetadata, User
-from src.schemas.model import ModelCreateResponse
+from src.schemas.model import ModelCreateResponse, ModelUpdateInput
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
 
@@ -71,14 +71,16 @@ async def create_model(
 
     Nécessite un token Bearer valide.
     """
-    # Vérifier l'unicité du nom
+    # Vérifier l'unicité name + version
     result = await db.execute(
-        select(ModelMetadata).where(ModelMetadata.name == name)
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.version == version)
+        )
     )
     if result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Un modèle avec le nom '{name}' existe déjà.",
+            detail=f"Un modèle '{name}' version '{version}' existe déjà.",
         )
 
     # Lire le contenu du fichier
@@ -122,3 +124,60 @@ async def create_model(
     await db.refresh(metadata)
 
     return metadata
+
+
+@router.patch("/models/{name}/{version}", response_model=ModelCreateResponse)
+async def update_model(
+    name: str,
+    version: str,
+    payload: ModelUpdateInput,
+    user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Met à jour les métadonnées d'un modèle (name + version).
+
+    Champs modifiables : `description`, `is_production`, `accuracy`, `features_count`, `classes`.
+
+    - Si **is_production** passe à `true`, toutes les autres versions du même modèle
+      passent automatiquement à `false`.
+
+    Nécessite un token Bearer valide.
+    """
+    # Récupérer le modèle cible
+    result = await db.execute(
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.version == version)
+        )
+    )
+    model = result.scalar_one_or_none()
+
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' version '{version}' introuvable.",
+        )
+
+    # Si is_production passe à True → retirer is_production des autres versions
+    if payload.is_production is True:
+        other_versions = await db.execute(
+            select(ModelMetadata).where(
+                and_(
+                    ModelMetadata.name == name,
+                    ModelMetadata.version != version,
+                    ModelMetadata.is_production == True,
+                )
+            )
+        )
+        for other in other_versions.scalars().all():
+            other.is_production = False
+
+    # Appliquer uniquement les champs fournis (non-None)
+    update_data = payload.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(model, field, value)
+
+    await db.commit()
+    await db.refresh(model)
+
+    return model

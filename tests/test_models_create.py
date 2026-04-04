@@ -153,12 +153,12 @@ def test_create_model_duplicate_name():
         data={"name": f"{TEST_MODEL_NAME}_dup", "version": "1.0.0"},
     )
 
-    # Deuxième enregistrement avec le même nom → 409
+    # Deuxième enregistrement avec le même name + même version → 409
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
         files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
-        data={"name": f"{TEST_MODEL_NAME}_dup", "version": "2.0.0"},
+        data={"name": f"{TEST_MODEL_NAME}_dup", "version": "1.0.0"},
     )
     assert response.status_code == 409
     assert "existe déjà" in response.json()["detail"]
