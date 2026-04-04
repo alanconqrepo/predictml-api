@@ -27,6 +27,8 @@ async def predict(
     Fait une prédiction avec le modèle sklearn spécifié.
 
     - **model_name**: Nom du modèle à utiliser
+    - **model_version**: Version cible (ex: `1.0.0`). Si absent, utilise la version
+      `is_production=True` ; à défaut, la version la plus récente.
     - **id_obs**: Identifiant de l'observation (optionnel, stocké en DB)
     - **features**: Features pour la prédiction — deux formats acceptés :
         - **liste** `[5.1, 3.5, 1.4, 0.2]` : l'ordre doit correspondre à celui du modèle
