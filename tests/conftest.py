@@ -39,8 +39,9 @@ _TestSessionLocal = async_sessionmaker(
 
 
 async def _setup():
-    """Crée les tables et initialise la DB de test"""
+    """Recrée les tables depuis zéro pour garantir un schéma à jour"""
     async with _test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
 
