@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Environnement virtuel
+.venv/
+venv/
+ENV/
+env/
+
+# Fichiers d'environnement (ne pas inclure les secrets)
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation (pas besoin dans l'image)
+*.md
+docs/
+
+# Scripts de développement local
+*.bat
+*.sh
+create_multiple_models.py
+test_multimodel_api.py
+init_db.py
+upload_models.py
+
+# Tests
+tests/
+test_*.py
+*_test.py
+
+# Modèles locaux (uploadés via MinIO)
+Models/
+*.pkl
+*.h5
+*.joblib
+*.model
+
+# Docker
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Claude
+.claude/
+
+# Logs
+*.log
+logs/
+
+# Temporary
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db

@@ -1,0 +1,128 @@
+"""
+Service de gestion des modèles ML (v2 - avec MinIO + DB)
+"""
+from typing import List, Dict, Any, Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from fastapi import HTTPException, status
+
+from src.services.minio_service import minio_service
+from src.services.db_service import DBService
+
+
+class ModelService:
+    """Service pour charger et gérer les modèles ML depuis MinIO"""
+
+    def __init__(self):
+        # Cache: {minio_object_key: {"model": model, "metadata": ModelMetadata}}
+        self.models_cache: Dict[str, Dict[str, Any]] = {}
+
+    async def get_available_models(self, db: AsyncSession) -> List[Dict[str, Any]]:
+        """
+        Retourne la liste des modèles disponibles depuis la base de données
+
+        Args:
+            db: Session de base de données
+
+        Returns:
+            Liste des modèles actifs avec leurs métadonnées
+        """
+        models = await DBService.get_all_active_models(db)
+        return [
+            {
+                "name": m.name,
+                "version": m.version,
+                "description": m.description,
+                "is_production": m.is_production,
+                "accuracy": m.accuracy,
+                "features_count": m.features_count,
+                "classes": m.classes,
+            }
+            for m in models
+        ]
+
+    async def load_model(
+        self,
+        db: AsyncSession,
+        model_name: str,
+        version: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Charge un modèle depuis MinIO (via cache ou download)
+
+        Args:
+            db: Session de base de données
+            model_name: Nom du modèle
+            version: Version spécifique (optionnel, prend la plus récente sinon)
+
+        Returns:
+            Dict contenant le modèle et ses métadonnées
+
+        Raises:
+            HTTPException: Si le modèle n'existe pas ou ne peut pas être chargé
+        """
+        # 1. Récupérer les métadonnées depuis la DB
+        metadata = await DBService.get_model_metadata(db, model_name, version)
+
+        if not metadata:
+            available = await self.get_available_models(db)
+            available_names = [m["name"] for m in available]
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Modèle '{model_name}' (version '{version or 'latest'}') non trouvé. "
+                       f"Modèles disponibles: {available_names}"
+            )
+
+        # 2. Vérifier le cache
+        cache_key = metadata.minio_object_key
+        if cache_key in self.models_cache:
+            print(f"♻️  Modèle '{model_name}' v{metadata.version} chargé depuis le cache")
+            return self.models_cache[cache_key]
+
+        # 3. Charger depuis MinIO
+        try:
+            print(f"📥 Téléchargement du modèle '{model_name}' v{metadata.version} depuis MinIO...")
+            model = minio_service.download_model(metadata.minio_object_key)
+
+            # 4. Mettre en cache
+            cached_data = {
+                "model": model,
+                "metadata": metadata
+            }
+            self.models_cache[cache_key] = cached_data
+
+            print(f"✅ Modèle '{model_name}' v{metadata.version} chargé et mis en cache")
+            return cached_data
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erreur lors du chargement du modèle '{model_name}': {str(e)}"
+            )
+
+    def get_cached_models(self) -> List[str]:
+        """
+        Retourne la liste des modèles actuellement en cache
+
+        Returns:
+            Liste des object keys MinIO en cache
+        """
+        return list(self.models_cache.keys())
+
+    def clear_cache(self, object_key: Optional[str] = None):
+        """
+        Vide le cache des modèles
+
+        Args:
+            object_key: Si fourni, vide uniquement ce modèle du cache
+        """
+        if object_key:
+            self.models_cache.pop(object_key, None)
+            print(f"🗑️  Cache vidé pour: {object_key}")
+        else:
+            self.models_cache.clear()
+            print(f"🗑️  Cache complet vidé")
+
+
+# Instance globale du service
+model_service = ModelService()

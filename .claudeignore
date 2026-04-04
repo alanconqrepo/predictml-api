@@ -1,0 +1,152 @@
+# .claudeignore
+# Exclude files and directories from Claude Code context
+# Similar to .gitignore syntax
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Distribution / packaging
+.eggs/
+*.egg-info/
+dist/
+build/
+wheels/
+
+# Machine Learning Models (large binary files)
+Models/
+*.pkl
+*.h5
+*.joblib
+*.model
+*.onnx
+*.pt
+*.pth
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files (contains secrets)
+.env
+.env.local
+.env.*.local
+
+# IDE settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Docker volumes and data
+docker-data/
+postgres-data/
+minio-data/
+
+# Test coverage
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+
+# Jupyter Notebooks checkpoints
+.ipynb_checkpoints/
+
+# Documentation builds
+docs/_build/
+site/
+
+# Large documentation files (keep summaries only)
+Documentation/screenshots/
+Documentation/diagrams/*.png
+Documentation/diagrams/*.jpg
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+.cache/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Git files (not needed in context)
+.git/
+.gitattributes
+
+# Node modules (if any frontend added later)
+node_modules/
+npm-debug.log
+
+# Compiled files
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+
+# Archives
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Media files (usually not needed for code context)
+*.mp4
+*.avi
+*.mov
+*.mp3
+*.wav
+
+# Large data files
+*.csv
+*.tsv
+*.parquet
+*.feather
+data/
+datasets/
+
+# Docker ignore
+.dockerignore
+
+# CI/CD artifacts
+.github/workflows/artifacts/
+
+# Lock files (reference requirements.txt instead)
+poetry.lock
+Pipfile.lock
