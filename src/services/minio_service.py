@@ -21,16 +21,19 @@ class MinIOService:
             secure=settings.MINIO_SECURE
         )
         self.bucket = settings.MINIO_BUCKET
-        self._ensure_bucket_exists()
+        self._bucket_ready = False
 
     def _ensure_bucket_exists(self):
-        """Crée le bucket s'il n'existe pas"""
+        """Crée le bucket s'il n'existe pas (appelé au premier accès)"""
+        if self._bucket_ready:
+            return
         try:
             if not self.client.bucket_exists(self.bucket):
                 self.client.make_bucket(self.bucket)
                 print(f"✅ Bucket MinIO '{self.bucket}' créé")
             else:
                 print(f"📦 Bucket MinIO '{self.bucket}' existe déjà")
+            self._bucket_ready = True
         except S3Error as e:
             print(f"❌ Erreur MinIO lors de la création du bucket: {e}")
 
@@ -51,6 +54,7 @@ class MinIOService:
         Returns:
             dict avec les informations de l'upload
         """
+        self._ensure_bucket_exists()
         try:
             # Sérialiser le modèle en bytes
             model_bytes = pickle.dumps(model)
@@ -90,6 +94,7 @@ class MinIOService:
         Returns:
             Le modèle scikit-learn désérialisé
         """
+        self._ensure_bucket_exists()
         try:
             # Télécharger l'objet
             response = self.client.get_object(self.bucket, object_name)
@@ -117,6 +122,7 @@ class MinIOService:
         Returns:
             Liste des noms d'objets
         """
+        self._ensure_bucket_exists()
         try:
             objects = self.client.list_objects(self.bucket, prefix=prefix)
             return [obj.object_name for obj in objects]
