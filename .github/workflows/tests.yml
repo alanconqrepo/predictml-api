@@ -1,0 +1,63 @@
+name: Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_secure_password_123
+          POSTGRES_DB: sklearn_api
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minio_secure_password_123
+        ports:
+          - 9002:9000
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        # minio service container ne supporte pas --console-address nativement
+        # on démarre avec la commande server
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres_secure_password_123@localhost:5434/sklearn_api
+      MINIO_ENDPOINT: localhost:9002
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minio_secure_password_123
+      SECRET_KEY: test-secret-key-for-ci
+      ADMIN_TOKEN: ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest tests/ -v
