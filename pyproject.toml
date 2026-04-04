@@ -35,6 +35,10 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning:mlflow",
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
+]
 
 [tool.black]
 line-length = 100
