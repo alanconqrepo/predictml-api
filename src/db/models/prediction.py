@@ -1,7 +1,10 @@
 """
 Modèle Prediction pour logger toutes les prédictions
 """
-from datetime import datetime
+from datetime import datetime, timezone
+
+def _utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, JSON, Text
 from sqlalchemy.orm import relationship
 
@@ -33,7 +36,7 @@ class Prediction(Base):
     response_time_ms = Column(Float, nullable=False)  # Temps de réponse en ms
 
     # Métadonnées
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    timestamp = Column(DateTime, default=_utcnow, nullable=False, index=True)
     client_ip = Column(String(45), nullable=True)  # Support IPv6
     user_agent = Column(Text, nullable=True)
 

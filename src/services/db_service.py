@@ -1,7 +1,10 @@
 """
 Service pour les opérations de base de données
 """
-from datetime import datetime
+from datetime import datetime, timezone
+
+def _utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 from typing import Optional, List
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,13 +58,13 @@ class DBService:
         """Met à jour la dernière connexion d'un utilisateur"""
         user = await DBService.get_user_by_id(db, user_id)
         if user:
-            user.last_login = datetime.utcnow()
+            user.last_login = _utcnow()
             await db.commit()
 
     @staticmethod
     async def get_user_prediction_count_today(db: AsyncSession, user_id: int) -> int:
         """Compte le nombre de prédictions d'un utilisateur aujourd'hui"""
-        today = datetime.utcnow().date()
+        today = _utcnow().date()
         result = await db.execute(
             select(func.count(Prediction.id)).where(
                 and_(
@@ -192,7 +195,7 @@ class DBService:
         metadata = await DBService.get_model_metadata(db, name, version)
         if metadata:
             metadata.is_active = False
-            metadata.deprecated_at = datetime.utcnow()
+            metadata.deprecated_at = _utcnow()
             await db.commit()
             return True
         return False

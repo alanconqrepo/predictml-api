@@ -51,6 +51,17 @@ def _create_model(name: str, version: str = "1.0.0") -> dict:
     return r.json()
 
 
+def _create_mlflow_only_model(name: str, version: str = "1.0.0", run_id: str = "fakerunid123") -> dict:
+    """Crée un modèle avec mlflow_run_id uniquement (pas de fichier → minio_object_key=None)."""
+    r = client.post(
+        "/models",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        data={"name": name, "version": version, "mlflow_run_id": run_id},
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
 def _model_exists(name: str, version: str) -> bool:
     r = client.get("/models")
     return any(m["name"] == name and m["version"] == version for m in r.json())
@@ -183,3 +194,41 @@ def test_delete_all_versions_single_version():
     assert r.status_code == 200
     assert r.json()["deleted_versions"] == ["1.0.0"]
     assert not _model_exists(name, "1.0.0")
+
+
+# ---------------------------------------------------------------------------
+# DELETE modèles mlflow-only (minio_object_key=None)
+# ---------------------------------------------------------------------------
+
+def test_delete_mlflow_only_version_success():
+    """DELETE version d'un modèle mlflow-only → 204, pas d'appel MinIO delete"""
+    from tests.conftest import _minio_mock
+
+    name = f"{MODEL_PREFIX}_mlflow_only_v"
+    _create_mlflow_only_model(name, run_id="mlflowrun001")
+
+    _minio_mock.delete_model.reset_mock()
+
+    r = client.delete(f"/models/{name}/1.0.0", headers={"Authorization": f"Bearer {TEST_TOKEN}"})
+    assert r.status_code == 204
+
+    # minio_object_key est None → delete_model ne doit pas être appelé
+    _minio_mock.delete_model.assert_not_called()
+    assert not _model_exists(name, "1.0.0")
+
+
+def test_delete_mlflow_only_all_versions():
+    """DELETE all sur modèle mlflow-only → minio_objects_deleted vide"""
+    name = f"{MODEL_PREFIX}_mlflow_only_all"
+    _create_mlflow_only_model(name, version="1.0.0", run_id="mlflowrun002")
+    _create_mlflow_only_model(name, version="2.0.0", run_id="mlflowrun003")
+
+    r = client.delete(f"/models/{name}", headers={"Authorization": f"Bearer {TEST_TOKEN}"})
+    assert r.status_code == 200
+
+    data = r.json()
+    assert sorted(data["deleted_versions"]) == ["1.0.0", "2.0.0"]
+    # Aucun objet MinIO à supprimer pour des modèles mlflow-only
+    assert data["minio_objects_deleted"] == []
+    assert not _model_exists(name, "1.0.0")
+    assert not _model_exists(name, "2.0.0")

@@ -14,7 +14,7 @@ class ModelService:
     """Service pour charger et gérer les modèles ML depuis MinIO"""
 
     def __init__(self):
-        # Cache: {minio_object_key: {"model": model, "metadata": ModelMetadata}}
+        # Cache: {"name:version": {"model": model, "metadata": ModelMetadata}}
         self.models_cache: Dict[str, Dict[str, Any]] = {}
 
     async def get_available_models(self, db: AsyncSession) -> List[Dict[str, Any]]:
@@ -74,15 +74,20 @@ class ModelService:
             )
 
         # 2. Vérifier le cache
-        cache_key = metadata.minio_object_key
+        cache_key = f"{model_name}:{metadata.version}"
         if cache_key in self.models_cache:
             print(f"♻️  Modèle '{model_name}' v{metadata.version} chargé depuis le cache")
             return self.models_cache[cache_key]
 
-        # 3. Charger depuis MinIO
+        # 3. Charger le modèle
         try:
-            print(f"📥 Téléchargement du modèle '{model_name}' v{metadata.version} depuis MinIO...")
-            model = minio_service.download_model(metadata.minio_object_key)
+            if metadata.mlflow_run_id:
+                print(f"📥 Chargement du modèle '{model_name}' v{metadata.version} depuis MLflow (run={metadata.mlflow_run_id})...")
+                import mlflow.sklearn
+                model = mlflow.sklearn.load_model(f"runs:/{metadata.mlflow_run_id}/model")
+            else:
+                print(f"📥 Téléchargement du modèle '{model_name}' v{metadata.version} depuis MinIO...")
+                model = minio_service.download_model(metadata.minio_object_key)
 
             # 4. Mettre en cache
             cached_data = {
@@ -109,16 +114,16 @@ class ModelService:
         """
         return list(self.models_cache.keys())
 
-    def clear_cache(self, object_key: Optional[str] = None):
+    def clear_cache(self, cache_key: Optional[str] = None):
         """
         Vide le cache des modèles
 
         Args:
-            object_key: Si fourni, vide uniquement ce modèle du cache
+            cache_key: Si fourni ("name:version"), vide uniquement ce modèle du cache
         """
-        if object_key:
-            self.models_cache.pop(object_key, None)
-            print(f"🗑️  Cache vidé pour: {object_key}")
+        if cache_key:
+            self.models_cache.pop(cache_key, None)
+            print(f"🗑️  Cache vidé pour: {cache_key}")
         else:
             self.models_cache.clear()
             print(f"🗑️  Cache complet vidé")
