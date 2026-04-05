@@ -1,6 +1,11 @@
 # Utiliser une image Python officielle
 FROM python:3.13-slim
 
+# Installer curl et dépendances nécessaires
+RUN apt-get update && \
+    apt-get install -y curl && \
+    rm -rf /var/lib/apt/lists/*
+
 # Définir le répertoire de travail dans le conteneur
 WORKDIR /app
 
