@@ -37,6 +37,7 @@ docs/
 # Scripts de développement local
 *.bat
 *.sh
+!entrypoint.sh
 create_multiple_models.py
 test_multimodel_api.py
 init_db.py

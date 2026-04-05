@@ -1,10 +1,14 @@
 """
-Script d'initialisation de la base de données et MinIO
+Script d'initialisation de la base de données et MinIO.
+Idempotent : peut être relancé sans créer de doublons.
 """
 import asyncio
+import os
 import secrets
 from pathlib import Path
 import pickle
+
+from sqlalchemy import select
 
 from src.db.database import init_db, AsyncSessionLocal
 from src.db.models import User, ModelMetadata
@@ -13,10 +17,18 @@ from src.core.config import settings
 
 
 async def create_default_user():
-    """Crée un utilisateur par défaut"""
+    """
+    Crée l'utilisateur admin s'il n'existe pas encore.
+    Le token est lu depuis ADMIN_TOKEN (env) ; sinon généré aléatoirement.
+    Idempotent : ne fait rien si 'admin' existe déjà.
+    """
     async with AsyncSessionLocal() as db:
-        # Générer un token unique
-        admin_token = secrets.token_urlsafe(32)
+        existing = await db.execute(select(User).where(User.username == "admin"))
+        if existing.scalar_one_or_none():
+            print("   Utilisateur admin deja present — ignore.")
+            return
+
+        admin_token = os.environ.get("ADMIN_TOKEN") or secrets.token_urlsafe(32)
 
         user = User(
             username="admin",
@@ -31,11 +43,12 @@ async def create_default_user():
         await db.commit()
         await db.refresh(user)
 
-        print(f"\nUtilisateur admin cree!")
-        print(f"   Username: {user.username}")
-        print(f"   Email: {user.email}")
+        print(f"\n   Utilisateur admin cree!")
+        print(f"   Username : {user.username}")
         print(f"   API Token: {admin_token}")
-        print(f"   \nSAUVEGARDEZ CE TOKEN - Il ne sera plus affiche!\n")
+        if not os.environ.get("ADMIN_TOKEN"):
+            print(f"   SAUVEGARDEZ CE TOKEN - Il ne sera plus affiche!")
+        print()
 
         return user
 
