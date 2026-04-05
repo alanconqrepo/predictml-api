@@ -283,3 +283,163 @@ def test_delete_user_twice():
 
     r2 = client.delete(f"/users/{user_id}", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
     assert r2.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# PATCH /users/{user_id}
+# ---------------------------------------------------------------------------
+
+def _create_patchable_user(suffix: str) -> dict:
+    """Crée un utilisateur temporaire pour les tests PATCH."""
+    r = client.post(
+        "/users",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"username": f"{USERNAME_PREFIX}_patch_{suffix}", "email": f"{USERNAME_PREFIX}_patch_{suffix}@test.com"},
+    )
+    assert r.status_code == 201
+    return r.json()
+
+
+def test_patch_user_without_auth():
+    """PATCH /users/{id} sans auth → 401/403"""
+    r = client.patch("/users/1", json={"is_active": False})
+    assert r.status_code in [401, 403]
+
+
+def test_patch_user_as_non_admin():
+    """PATCH /users/{id} non-admin → 403"""
+    user = _create_patchable_user("nonAdmin")
+    r = client.patch(
+        f"/users/{user['id']}",
+        headers={"Authorization": f"Bearer {USER_TOKEN}"},
+        json={"is_active": False},
+    )
+    assert r.status_code == 403
+
+
+def test_patch_user_not_found():
+    """PATCH /users/{id} avec id inexistant → 404"""
+    r = client.patch(
+        "/users/999999",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"is_active": False},
+    )
+    assert r.status_code == 404
+
+
+def test_patch_user_toggle_inactive():
+    """PATCH /users/{id} → désactiver un utilisateur"""
+    user = _create_patchable_user("toggleOff")
+    assert user["is_active"] is True
+
+    r = client.patch(
+        f"/users/{user['id']}",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"is_active": False},
+    )
+    assert r.status_code == 200
+    assert r.json()["is_active"] is False
+
+
+def test_patch_user_toggle_active():
+    """PATCH /users/{id} → réactiver un utilisateur désactivé"""
+    user = _create_patchable_user("toggleOn")
+
+    # Désactiver d'abord
+    client.patch(
+        f"/users/{user['id']}",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"is_active": False},
+    )
+
+    # Réactiver
+    r = client.patch(
+        f"/users/{user['id']}",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"is_active": True},
+    )
+    assert r.status_code == 200
+    assert r.json()["is_active"] is True
+
+
+def test_patch_user_change_role():
+    """PATCH /users/{id} → changer le rôle"""
+    user = _create_patchable_user("changeRole")
+    assert user["role"] == "user"
+
+    r = client.patch(
+        f"/users/{user['id']}",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"role": "readonly"},
+    )
+    assert r.status_code == 200
+    assert r.json()["role"] == "readonly"
+
+
+def test_patch_user_invalid_role():
+    """PATCH /users/{id} avec rôle invalide → 422"""
+    user = _create_patchable_user("badRole")
+    r = client.patch(
+        f"/users/{user['id']}",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"role": "superuser"},
+    )
+    assert r.status_code == 422
+
+
+def test_patch_user_change_rate_limit():
+    """PATCH /users/{id} → modifier le rate limit"""
+    user = _create_patchable_user("rateLimit")
+
+    r = client.patch(
+        f"/users/{user['id']}",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"rate_limit": 250},
+    )
+    assert r.status_code == 200
+    assert r.json()["rate_limit_per_day"] == 250
+
+
+def test_patch_user_regenerate_token():
+    """PATCH /users/{id} regenerate_token=True → nouveau token différent"""
+    user = _create_patchable_user("regenToken")
+    original_token = user["api_token"]
+
+    r = client.patch(
+        f"/users/{user['id']}",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"regenerate_token": True},
+    )
+    assert r.status_code == 200
+    new_token = r.json()["api_token"]
+    assert new_token != original_token
+    assert len(new_token) > 10
+
+
+def test_patch_user_partial_update():
+    """PATCH /users/{id} → mise à jour partielle (seul rate_limit change)"""
+    user = _create_patchable_user("partial")
+    original_role = user["role"]
+
+    r = client.patch(
+        f"/users/{user['id']}",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"rate_limit": 42},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["rate_limit_per_day"] == 42
+    assert data["role"] == original_role  # inchangé
+
+
+def test_patch_user_cannot_deactivate_self():
+    """Un admin ne peut pas se désactiver lui-même → 400"""
+    users = client.get("/users", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"}).json()
+    admin = next(u for u in users if u["username"] == f"{USERNAME_PREFIX}_admin")
+
+    r = client.patch(
+        f"/users/{admin['id']}",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        json={"is_active": False},
+    )
+    assert r.status_code == 400

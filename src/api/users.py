@@ -100,7 +100,7 @@ async def get_user(
 async def update_user(
     user_id: int,
     payload: UserUpdateInput,
-    _: User = Depends(require_admin),
+    current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -113,6 +113,11 @@ async def update_user(
 
     Réservé aux administrateurs.
     """
+    if payload.is_active is False and current_user.id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vous ne pouvez pas désactiver votre propre compte.",
+        )
     user = await DBService.update_user(
         db,
         user_id,
