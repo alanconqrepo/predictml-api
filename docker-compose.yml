@@ -52,6 +52,7 @@ services:
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       - MINIO_BUCKET=${MINIO_BUCKET:-models}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
