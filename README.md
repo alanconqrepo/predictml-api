@@ -2,15 +2,16 @@
 
 API de prédiction Machine Learning construite avec FastAPI et scikit-learn.
 
-**Version 2.0** — Multi-utilisateurs, stockage distribué, experiment tracking.
+**Version 2.0** — Multi-utilisateurs, stockage distribué, experiment tracking, dashboard admin.
 
 [![Tests](https://github.com/alanconqrepo/predictml-api/actions/workflows/tests.yml/badge.svg)](https://github.com/alanconqrepo/predictml-api/actions/workflows/tests.yml)
 
 ## Stack
 
 - **API** : FastAPI (async) — port 8000
-- **Base de données** : PostgreSQL 16 — port 5434
-- **Stockage modèles** : MinIO (S3) — port 9002 / console 9003
+- **Dashboard** : Streamlit Admin — port 8501
+- **Base de données** : PostgreSQL 16 — port 5433
+- **Stockage modèles** : MinIO (S3) — port 9000 / console 9001
 - **Experiment tracking** : MLflow — port 5000
 
 ## Démarrage rapide
@@ -20,33 +21,43 @@ docker-compose up -d --build
 docker exec predictml-api python init_data/init_db.py
 ```
 
+Le dashboard admin est accessible sur **http://localhost:8501**.
+
 Voir [documentation/QUICKSTART.md](documentation/QUICKSTART.md) pour le guide complet.
 
-## Endpoints
+## Endpoints API
 
 | Méthode | Route | Auth | Description |
 |---|---|---|---|
 | GET | `/` | Non | Statut et modèles disponibles |
 | GET | `/health` | Non | Health check |
-| GET | `/models` | Non | Liste des modèles |
-| GET | `/models/{name}` | Non | Détail d'un modèle |
+| GET | `/models` | Non | Liste des modèles actifs |
+| GET | `/models/{name}/{version}` | Non | Détail d'un modèle |
+| POST | `/models` | Oui | Uploader un nouveau modèle |
+| PATCH | `/models/{name}/{version}` | Oui | Mettre à jour (ex. passer en production) |
+| DELETE | `/models/{name}/{version}` | Oui | Supprimer une version |
+| DELETE | `/models/{name}` | Oui | Supprimer toutes les versions |
 | POST | `/predict` | Oui | Faire une prédiction |
+| GET | `/predictions` | Oui | Historique des prédictions |
+| POST | `/users` | Admin | Créer un utilisateur |
+| GET | `/users` | Admin | Lister les utilisateurs |
+| GET | `/users/{id}` | Oui | Détail d'un utilisateur |
+| PATCH | `/users/{id}` | Admin | Modifier (rôle, statut, renouveler token) |
+| DELETE | `/users/{id}` | Admin | Supprimer un utilisateur |
+| POST | `/observed-results` | Oui | Enregistrer des résultats observés |
+| GET | `/observed-results` | Oui | Consulter les résultats observés |
 
 ```bash
-# Format liste (features ordonnées)
-curl -X POST http://localhost:8000/predict \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"model_name": "iris_model", "features": [5.1, 3.5, 1.4, 0.2]}'
+export TOKEN="votre-token"
 
-# Format dict avec id_obs (features nommées — modèle entraîné sur DataFrame)
+# Prédiction
 curl -X POST http://localhost:8000/predict \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "model_name": "iris_model",
-    "id_obs": "patient-42",
-    "features": {"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}
+    "id_obs": "obs-42",
+    "features": {"sepal length (cm)": 5.1, "sepal width (cm)": 3.5, "petal length (cm)": 1.4, "petal width (cm)": 0.2}
   }'
 ```
 
