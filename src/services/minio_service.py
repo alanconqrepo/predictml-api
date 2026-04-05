@@ -2,12 +2,16 @@
 Service de gestion du stockage MinIO
 """
 import io
+import logging
 import pickle
-from typing import Optional, List
+from typing import List, Optional
+
 from minio import Minio
 from minio.error import S3Error
 
 from src.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class MinIOService:
@@ -18,7 +22,7 @@ class MinIOService:
             settings.MINIO_ENDPOINT,
             access_key=settings.MINIO_ACCESS_KEY,
             secret_key=settings.MINIO_SECRET_KEY,
-            secure=settings.MINIO_SECURE
+            secure=settings.MINIO_SECURE,
         )
         self.bucket = settings.MINIO_BUCKET
         self._bucket_ready = False
@@ -30,19 +34,14 @@ class MinIOService:
         try:
             if not self.client.bucket_exists(self.bucket):
                 self.client.make_bucket(self.bucket)
-                print(f"✅ Bucket MinIO '{self.bucket}' créé")
+                logger.info("Bucket MinIO '%s' créé", self.bucket)
             else:
-                print(f"📦 Bucket MinIO '{self.bucket}' existe déjà")
+                logger.info("Bucket MinIO '%s' existe déjà", self.bucket)
             self._bucket_ready = True
         except S3Error as e:
-            print(f"❌ Erreur MinIO lors de la création du bucket: {e}")
+            logger.error("Erreur MinIO lors de la création du bucket: %s", e)
 
-    def upload_model(
-        self,
-        model: any,
-        object_name: str,
-        metadata: Optional[dict] = None
-    ) -> dict:
+    def upload_model(self, model: any, object_name: str, metadata: Optional[dict] = None) -> dict:
         """
         Upload un modèle vers MinIO
 
@@ -56,32 +55,30 @@ class MinIOService:
         """
         self._ensure_bucket_exists()
         try:
-            # Sérialiser le modèle en bytes
             model_bytes = pickle.dumps(model)
             model_stream = io.BytesIO(model_bytes)
             file_size = len(model_bytes)
 
-            # Upload vers MinIO
             result = self.client.put_object(
                 self.bucket,
                 object_name,
                 model_stream,
                 length=file_size,
-                metadata=metadata
+                metadata=metadata,
             )
 
-            print(f"✅ Modèle uploadé: {object_name} ({file_size} bytes)")
+            logger.info("Modèle uploadé: %s (%d bytes)", object_name, file_size)
 
             return {
                 "bucket": self.bucket,
                 "object_name": object_name,
                 "size": file_size,
                 "etag": result.etag,
-                "version_id": result.version_id
+                "version_id": result.version_id,
             }
 
         except S3Error as e:
-            print(f"❌ Erreur lors de l'upload: {e}")
+            logger.error("Erreur lors de l'upload: %s", e)
             raise
 
     def upload_model_bytes(self, model_bytes: bytes, object_name: str) -> dict:
@@ -104,7 +101,7 @@ class MinIOService:
                 model_stream,
                 length=len(model_bytes),
             )
-            print(f"✅ Modèle uploadé: {object_name} ({len(model_bytes)} bytes)")
+            logger.info("Modèle uploadé: %s (%d bytes)", object_name, len(model_bytes))
             return {
                 "bucket": self.bucket,
                 "object_name": object_name,
@@ -112,7 +109,7 @@ class MinIOService:
                 "etag": result.etag,
             }
         except S3Error as e:
-            print(f"❌ Erreur lors de l'upload: {e}")
+            logger.error("Erreur lors de l'upload: %s", e)
             raise
 
     def download_model(self, object_name: str) -> any:
@@ -127,20 +124,18 @@ class MinIOService:
         """
         self._ensure_bucket_exists()
         try:
-            # Télécharger l'objet
             response = self.client.get_object(self.bucket, object_name)
             model_bytes = response.read()
             response.close()
             response.release_conn()
 
-            # Désérialiser le modèle
             model = pickle.loads(model_bytes)
 
-            print(f"✅ Modèle téléchargé: {object_name}")
+            logger.info("Modèle téléchargé: %s", object_name)
             return model
 
         except S3Error as e:
-            print(f"❌ Erreur lors du téléchargement: {e}")
+            logger.error("Erreur lors du téléchargement: %s", e)
             raise
 
     def list_models(self, prefix: str = "") -> List[str]:
@@ -158,7 +153,7 @@ class MinIOService:
             objects = self.client.list_objects(self.bucket, prefix=prefix)
             return [obj.object_name for obj in objects]
         except S3Error as e:
-            print(f"❌ Erreur lors du listing: {e}")
+            logger.error("Erreur lors du listing: %s", e)
             return []
 
     def delete_model(self, object_name: str) -> bool:
@@ -173,10 +168,10 @@ class MinIOService:
         """
         try:
             self.client.remove_object(self.bucket, object_name)
-            print(f"✅ Modèle supprimé: {object_name}")
+            logger.info("Modèle supprimé: %s", object_name)
             return True
         except S3Error as e:
-            print(f"❌ Erreur lors de la suppression: {e}")
+            logger.error("Erreur lors de la suppression: %s", e)
             return False
 
     def get_object_info(self, object_name: str) -> Optional[dict]:
@@ -196,10 +191,10 @@ class MinIOService:
                 "etag": stat.etag,
                 "content_type": stat.content_type,
                 "last_modified": stat.last_modified,
-                "metadata": stat.metadata
+                "metadata": stat.metadata,
             }
         except S3Error as e:
-            print(f"❌ Erreur lors de la récupération des infos: {e}")
+            logger.error("Erreur lors de la récupération des infos: %s", e)
             return None
 
 

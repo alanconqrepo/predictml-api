@@ -38,6 +38,19 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # Stack Grafana LGTM (Loki + Grafana + Tempo + Prometheus) + OpenTelemetry Collector
+  # Activé via ENABLE_OTEL=true — interface Grafana sur http://localhost:3000
+  grafana:
+    image: grafana/otel-lgtm:latest
+    container_name: predictml-grafana
+    ports:
+      - "3000:3000"   # Grafana UI (admin/admin)
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+    volumes:
+      - grafana_data:/data
+    restart: unless-stopped
+
   # API FastAPI
   api:
     build: .
@@ -53,6 +66,9 @@ services:
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       - MINIO_BUCKET=${MINIO_BUCKET:-models}
       - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      - ENABLE_OTEL=${ENABLE_OTEL:-false}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-predictml-api}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://grafana:4317}
     depends_on:
       postgres:
         condition: service_healthy
@@ -94,4 +110,6 @@ volumes:
   postgres_data:
     driver: local
   minio_data:
+    driver: local
+  grafana_data:
     driver: local

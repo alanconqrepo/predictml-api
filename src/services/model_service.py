@@ -1,13 +1,16 @@
 """
 Service de gestion des modèles ML (v2 - avec MinIO + DB)
 """
-from typing import List, Dict, Any, Optional
-from sqlalchemy.ext.asyncio import AsyncSession
+import logging
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.services.minio_service import minio_service
 from src.services.db_service import DBService
+from src.services.minio_service import minio_service
+
+logger = logging.getLogger(__name__)
 
 
 class ModelService:
@@ -72,39 +75,42 @@ class ModelService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Modèle '{model_name}' (version '{version or 'latest'}') non trouvé. "
-                       f"Modèles disponibles: {available_names}"
+                       f"Modèles disponibles: {available_names}",
             )
 
         # 2. Vérifier le cache
         cache_key = f"{model_name}:{metadata.version}"
         if cache_key in self.models_cache:
-            print(f"♻️  Modèle '{model_name}' v{metadata.version} chargé depuis le cache")
+            logger.info("Modèle '%s' v%s chargé depuis le cache", model_name, metadata.version)
             return self.models_cache[cache_key]
 
         # 3. Charger le modèle
         try:
             if metadata.mlflow_run_id:
-                print(f"📥 Chargement du modèle '{model_name}' v{metadata.version} depuis MLflow (run={metadata.mlflow_run_id})...")
+                logger.info(
+                    "Chargement du modèle '%s' v%s depuis MLflow (run=%s)...",
+                    model_name, metadata.version, metadata.mlflow_run_id,
+                )
                 import mlflow.sklearn
                 model = mlflow.sklearn.load_model(f"runs:/{metadata.mlflow_run_id}/model")
             else:
-                print(f"📥 Téléchargement du modèle '{model_name}' v{metadata.version} depuis MinIO...")
+                logger.info(
+                    "Téléchargement du modèle '%s' v%s depuis MinIO...",
+                    model_name, metadata.version,
+                )
                 model = minio_service.download_model(metadata.minio_object_key)
 
             # 4. Mettre en cache
-            cached_data = {
-                "model": model,
-                "metadata": metadata
-            }
+            cached_data = {"model": model, "metadata": metadata}
             self.models_cache[cache_key] = cached_data
 
-            print(f"✅ Modèle '{model_name}' v{metadata.version} chargé et mis en cache")
+            logger.info("Modèle '%s' v%s chargé et mis en cache", model_name, metadata.version)
             return cached_data
 
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erreur lors du chargement du modèle '{model_name}': {str(e)}"
+                detail=f"Erreur lors du chargement du modèle '{model_name}': {str(e)}",
             )
 
     def get_cached_models(self) -> List[str]:
@@ -125,10 +131,10 @@ class ModelService:
         """
         if cache_key:
             self.models_cache.pop(cache_key, None)
-            print(f"🗑️  Cache vidé pour: {cache_key}")
+            logger.info("Cache vidé pour: %s", cache_key)
         else:
             self.models_cache.clear()
-            print(f"🗑️  Cache complet vidé")
+            logger.info("Cache complet vidé")
 
 
 # Instance globale du service

@@ -35,5 +35,10 @@ class Settings:
     MINIO_BUCKET: str = os.getenv("MINIO_BUCKET", "models")
     MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "false").lower() == "true"
 
+    # OpenTelemetry
+    ENABLE_OTEL: bool = os.getenv("ENABLE_OTEL", "false").lower() == "true"
+    OTEL_SERVICE_NAME: str = os.getenv("OTEL_SERVICE_NAME", "predictml-api")
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+
 
 settings = Settings()
