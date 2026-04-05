@@ -24,22 +24,22 @@ _minio_mock.upload_model_bytes.return_value = {
 _minio_mock.delete_model.return_value = True
 _minio_mock.download_model.side_effect = Exception("MinIO non disponible en tests")
 
+import src.api.models  # noqa: E402 — doit être importé avant le patch
 patch("src.api.models.minio_service", _minio_mock).start()
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import StaticPool
 
-from src.core.config import settings
 from src.db.database import get_db, Base
 from src.db.models import User, Prediction, ModelMetadata, ObservedResult  # noqa: F401 — enregistre les modèles dans Base
 from src.main import app
 
 
-# Moteur sans pool de connexions (NullPool) pour éviter les conflits d'event loop
-# entre les requêtes successives du TestClient
+# Base de données SQLite en mémoire — aucun PostgreSQL requis pour les tests
 _test_engine = create_async_engine(
-    settings.DATABASE_URL,
-    poolclass=NullPool,
+    "sqlite+aiosqlite:///:memory:",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
     echo=False,
 )
 
