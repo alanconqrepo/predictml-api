@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select, and_
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import verify_token
@@ -55,14 +56,14 @@ async def get_model(
     Retourne les métadonnées complètes d'un modèle (name + version).
 
     Tente de charger le modèle en mémoire (depuis MLflow ou MinIO) :
-    - Si le chargement réussit : `model_loaded=true`, `model_type` et `feature_names` sont renseignés.
-    - Si le chargement échoue (service indisponible, etc.) : `model_loaded=false` et `load_instructions`
-      contient les informations nécessaires pour charger le modèle manuellement en Python.
+    - Si le chargement réussit : `model_loaded=true`, `model_type` et `feature_names` renseignés.
+    - Si le chargement échoue : `model_loaded=false` et `load_instructions` contient
+      les informations nécessaires pour charger le modèle manuellement en Python.
     """
     result = await db.execute(
-        select(ModelMetadata).where(
-            and_(ModelMetadata.name == name, ModelMetadata.version == version)
-        )
+        select(ModelMetadata)
+        .options(selectinload(ModelMetadata.creator))
+        .where(and_(ModelMetadata.name == name, ModelMetadata.version == version))
     )
     model_meta = result.scalar_one_or_none()
 
@@ -103,7 +104,7 @@ async def get_model(
                 "object_key": model_meta.minio_object_key,
                 "python_code": (
                     f"from minio import Minio\n"
-                    f"import pickle, io\n"
+                    f"import pickle\n"
                     f"client = Minio('localhost:9002', access_key='...', secret_key='...', secure=False)\n"
                     f"response = client.get_object('{model_meta.minio_bucket}', '{model_meta.minio_object_key}')\n"
                     f"model = pickle.loads(response.read())"
@@ -132,6 +133,8 @@ async def get_model(
         minio_object_key=model_meta.minio_object_key,
         file_size_bytes=model_meta.file_size_bytes,
         file_hash=model_meta.file_hash,
+        user_id_creator=model_meta.user_id_creator,
+        creator_username=model_meta.creator.username if model_meta.creator else None,
         is_active=model_meta.is_active,
         is_production=model_meta.is_production,
         created_at=model_meta.created_at,
@@ -227,6 +230,7 @@ async def create_model(
         training_params=training_params_parsed,
         training_dataset=training_dataset,
         trained_by=user.username,
+        user_id_creator=user.id,
         is_active=True,
         is_production=False,
     )
@@ -234,7 +238,10 @@ async def create_model(
     await db.commit()
     await db.refresh(metadata)
 
-    return metadata
+    return ModelCreateResponse(
+        **{c.name: getattr(metadata, c.name) for c in metadata.__table__.columns},
+        creator_username=user.username,
+    )
 
 
 @router.patch("/models/{name}/{version}", response_model=ModelCreateResponse)
@@ -255,11 +262,11 @@ async def update_model(
 
     Nécessite un token Bearer valide.
     """
-    # Récupérer le modèle cible
+    # Récupérer le modèle cible avec son créateur
     result = await db.execute(
-        select(ModelMetadata).where(
-            and_(ModelMetadata.name == name, ModelMetadata.version == version)
-        )
+        select(ModelMetadata)
+        .options(selectinload(ModelMetadata.creator))
+        .where(and_(ModelMetadata.name == name, ModelMetadata.version == version))
     )
     model = result.scalar_one_or_none()
 
@@ -291,7 +298,10 @@ async def update_model(
     await db.commit()
     await db.refresh(model)
 
-    return model
+    return ModelCreateResponse(
+        **{c.name: getattr(model, c.name) for c in model.__table__.columns},
+        creator_username=model.creator.username if model.creator else None,
+    )
 
 
 # ---------------------------------------------------------------------------

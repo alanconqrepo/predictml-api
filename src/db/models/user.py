@@ -40,6 +40,7 @@ class User(Base):
 
     # Relations
     predictions = relationship("Prediction", back_populates="user", cascade="all, delete-orphan")
+    created_models = relationship("ModelMetadata", back_populates="creator", foreign_keys="[ModelMetadata.user_id_creator]")
 
     def __repr__(self):
         return f"<User(id={self.id}, username='{self.username}', role='{self.role}')>"

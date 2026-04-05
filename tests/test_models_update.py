@@ -225,3 +225,17 @@ def test_update_model_empty_body():
     )
     assert response.status_code == 200
     assert response.json()["description"] == "stable"
+
+
+def test_update_returns_creator_fields():
+    """PATCH retourne user_id_creator et creator_username dans la réponse."""
+    _create_model(f"{MODEL_A}_creator")
+    response = client.patch(
+        f"/models/{MODEL_A}_creator/1.0.0",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        json={"description": "updated"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["user_id_creator"] is not None
+    assert data["creator_username"] == "test_patch_models"

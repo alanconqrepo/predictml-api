@@ -26,7 +26,7 @@ class ModelUpdateInput(BaseModel):
 
 
 class ModelCreateResponse(BaseModel):
-    """Réponse après création d'un modèle"""
+    """Réponse après création ou mise à jour d'un modèle"""
     id: int
     name: str
     version: str
@@ -44,6 +44,8 @@ class ModelCreateResponse(BaseModel):
     is_active: bool
     is_production: bool
     created_at: datetime
+    user_id_creator: Optional[int]
+    creator_username: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -79,6 +81,10 @@ class ModelGetResponse(BaseModel):
     file_size_bytes: Optional[int]
     file_hash: Optional[str]
 
+    # Créateur
+    user_id_creator: Optional[int]
+    creator_username: Optional[str]
+
     # Status
     is_active: bool
     is_production: bool
@@ -88,8 +94,10 @@ class ModelGetResponse(BaseModel):
 
     # Infos de chargement
     model_loaded: bool
-    model_type: Optional[str]        # ex: "RandomForestClassifier"
-    feature_names: Optional[List[str]]  # model.feature_names_in_ si disponible
-    load_instructions: Optional[Dict[str, Any]]  # instructions pour charger manuellement
+    model_type: Optional[str]          # ex: "RandomForestClassifier"
+    feature_names: Optional[List[str]] # model.feature_names_in_ si disponible
+    load_instructions: Optional[Dict[str, Any]]
 
     model_config = {"from_attributes": True}
+
+

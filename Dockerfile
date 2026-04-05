@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copier le code source de l'application
 COPY src/ ./src/
+COPY init_data/ ./init_data/
 
 # Créer le dossier Models
 RUN mkdir -p /app/Models

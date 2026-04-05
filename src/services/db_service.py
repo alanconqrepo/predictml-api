@@ -7,6 +7,7 @@ def _utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 from typing import Optional, List
 from sqlalchemy import select, func, and_
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import User, Prediction, ModelMetadata
@@ -224,9 +225,11 @@ class DBService:
 
     @staticmethod
     async def get_all_active_models(db: AsyncSession) -> List[ModelMetadata]:
-        """Récupère tous les modèles actifs"""
+        """Récupère tous les modèles actifs avec leur créateur"""
         result = await db.execute(
-            select(ModelMetadata).where(ModelMetadata.is_active == True)
+            select(ModelMetadata)
+            .options(selectinload(ModelMetadata.creator))
+            .where(ModelMetadata.is_active == True)
         )
         return result.scalars().all()
 

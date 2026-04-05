@@ -16,7 +16,7 @@ from tests.conftest import _TestSessionLocal
 
 client = TestClient(app)
 
-TEST_TOKEN = "test-token-get-model"
+TEST_TOKEN = "test-token-get-models"
 TEST_MODEL_NAME = "test_model_get"
 
 
@@ -31,8 +31,8 @@ async def _setup_user():
         if not await DBService.get_user_by_token(db, TEST_TOKEN):
             await DBService.create_user(
                 db,
-                username="test_get_model",
-                email="test_get_model@test.com",
+                username="test_get_models",
+                email="test_get_models@test.com",
                 api_token=TEST_TOKEN,
                 role="user",
                 rate_limit=10000,
@@ -42,14 +42,14 @@ async def _setup_user():
 asyncio.run(_setup_user())
 
 
-def _create_model(name: str, version: str) -> None:
-    """Helper : crée un modèle via POST /models."""
-    client.post(
+def _create_model(name: str, version: str = "1.0.0") -> dict:
+    response = client.post(
         "/models",
         data={"name": name, "version": version},
         files={"file": (f"{name}.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
     )
+    return response.json()
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ def test_get_model_not_found():
     assert response.status_code == 404
 
 
-def test_get_model_success_metadata():
+def test_get_model_returns_metadata():
     """La route retourne les métadonnées correctes."""
     _create_model(TEST_MODEL_NAME, "1.0.0")
     response = client.get(f"/models/{TEST_MODEL_NAME}/1.0.0")
@@ -75,13 +75,22 @@ def test_get_model_success_metadata():
     assert "load_instructions" in data
 
 
-def test_get_model_not_loaded_returns_load_instructions():
-    """MinIO est mocké pour échouer → model_loaded=False et load_instructions présent."""
+def test_get_model_returns_creator_fields():
+    """La route retourne user_id_creator et creator_username."""
     _create_model(TEST_MODEL_NAME, "2.0.0")
     response = client.get(f"/models/{TEST_MODEL_NAME}/2.0.0")
     assert response.status_code == 200
     data = response.json()
-    # MinIO renvoie une exception dans les tests (conftest mock)
+    assert data["user_id_creator"] is not None
+    assert data["creator_username"] == "test_get_models"
+
+
+def test_get_model_not_loaded_returns_load_instructions():
+    """MinIO mocké → model_loaded=False + load_instructions MinIO présent."""
+    _create_model(TEST_MODEL_NAME, "3.0.0")
+    response = client.get(f"/models/{TEST_MODEL_NAME}/3.0.0")
+    assert response.status_code == 200
+    data = response.json()
     assert data["model_loaded"] is False
     assert data["load_instructions"] is not None
     assert data["load_instructions"]["source"] == "minio"
@@ -89,7 +98,7 @@ def test_get_model_not_loaded_returns_load_instructions():
 
 
 def test_get_model_mlflow_only_returns_load_instructions():
-    """Modèle sans fichier pkl (mlflow_run_id seulement) → instructions MLflow."""
+    """Modèle MLflow uniquement → instructions MLflow."""
     client.post(
         "/models",
         data={"name": TEST_MODEL_NAME, "version": "mlflow-only", "mlflow_run_id": "abc123run"},

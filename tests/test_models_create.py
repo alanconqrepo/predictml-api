@@ -97,6 +97,8 @@ def test_create_model_success():
     assert data["accuracy"] == pytest.approx(0.97)
     assert data["is_active"] is True
     assert data["is_production"] is False
+    assert data["user_id_creator"] is not None
+    assert data["creator_username"] == "test_post_models"
     assert data["minio_object_key"] == f"{TEST_MODEL_NAME}/v1.0.0.pkl"
     assert "id" in data
     assert "created_at" in data
