@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 
 def _utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, JSON, Text
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, JSON, Text, ForeignKey
+from sqlalchemy.orm import relationship
 
 from src.db.database import Base
 
@@ -41,6 +42,10 @@ class ModelMetadata(Base):
 
     # MLflow
     mlflow_run_id = Column(String(255), nullable=True, index=True)
+
+    # Créateur
+    user_id_creator = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    creator = relationship("User", foreign_keys=[user_id_creator], back_populates="created_models")
 
     # Training info
     trained_by = Column(String(100), nullable=True)

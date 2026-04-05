@@ -37,6 +37,8 @@ class ModelService:
                 "accuracy": m.accuracy,
                 "features_count": m.features_count,
                 "classes": m.classes,
+                "user_id_creator": m.user_id_creator,
+                "creator_username": m.creator.username if m.creator else None,
             }
             for m in models
         ]
