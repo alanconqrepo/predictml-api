@@ -1,7 +1,8 @@
 """
 Schémas Pydantic pour les prédictions
 """
-from typing import Dict, List, Optional, Union
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -79,6 +80,32 @@ class PredictionOutput(BaseModel):
         None,
         description="Probabilités par classe (si disponible)"
     )
+
+
+class PredictionResponse(BaseModel):
+    """Une prédiction loggée"""
+    id: int
+    model_name: str
+    model_version: Optional[str]
+    id_obs: Optional[str]
+    input_features: Any
+    prediction_result: Any
+    probabilities: Optional[List[float]]
+    response_time_ms: float
+    timestamp: datetime
+    status: str
+    error_message: Optional[str]
+    username: Optional[str]  # depuis la relation User
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PredictionsListResponse(BaseModel):
+    """Résultat paginé de la liste des prédictions"""
+    total: int
+    limit: int
+    offset: int
+    predictions: List[PredictionResponse]
 
 
 class ModelsListResponse(BaseModel):

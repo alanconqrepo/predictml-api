@@ -2,18 +2,84 @@
 Endpoints pour les prédictions
 """
 import time
+from datetime import datetime
+from typing import Optional
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import verify_token
 from src.db.database import get_db
 from src.db.models import User
-from src.schemas.prediction import PredictionInput, PredictionOutput
+from src.schemas.prediction import PredictionInput, PredictionOutput, PredictionsListResponse, PredictionResponse
 from src.services.model_service import model_service
 from src.services.db_service import DBService
 
 router = APIRouter(tags=["predictions"])
+
+
+@router.get("/predictions", response_model=PredictionsListResponse)
+async def get_predictions(
+    name: str = Query(..., description="Nom du modèle"),
+    start: datetime = Query(..., description="Début de la période (ISO 8601, ex: 2024-01-01T00:00:00)"),
+    end: datetime = Query(..., description="Fin de la période (ISO 8601, ex: 2024-12-31T23:59:59)"),
+    version: Optional[str] = Query(None, description="Version du modèle (optionnel)"),
+    user: Optional[str] = Query(None, description="Nom d'utilisateur (optionnel)"),
+    limit: int = Query(100, ge=1, le=1000, description="Nombre max de résultats"),
+    offset: int = Query(0, ge=0, description="Décalage pour la pagination"),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retourne l'historique des prédictions avec filtres.
+
+    - **name** : nom du modèle — obligatoire
+    - **start** / **end** : plage datetime — obligatoire
+    - **version** : version du modèle — optionnel
+    - **user** : nom d'utilisateur — optionnel
+    - **limit** / **offset** : pagination (défaut : 100 résultats, max 1000)
+
+    Nécessite un token Bearer valide.
+    """
+    if start > end:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="'start' doit être antérieur à 'end'.",
+        )
+
+    predictions, total = await DBService.get_predictions(
+        db=db,
+        model_name=name,
+        start=start,
+        end=end,
+        model_version=version,
+        username=user,
+        limit=limit,
+        offset=offset,
+    )
+
+    return PredictionsListResponse(
+        total=total,
+        limit=limit,
+        offset=offset,
+        predictions=[
+            PredictionResponse(
+                id=p.id,
+                model_name=p.model_name,
+                model_version=p.model_version,
+                id_obs=p.id_obs,
+                input_features=p.input_features,
+                prediction_result=p.prediction_result,
+                probabilities=p.probabilities,
+                response_time_ms=p.response_time_ms,
+                timestamp=p.timestamp,
+                status=p.status,
+                error_message=p.error_message,
+                username=p.user.username if p.user else None,
+            )
+            for p in predictions
+        ],
+    )
 
 
 @router.post("/predict", response_model=PredictionOutput)

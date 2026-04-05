@@ -132,23 +132,45 @@ class DBService:
     @staticmethod
     async def get_predictions(
         db: AsyncSession,
-        user_id: Optional[int] = None,
-        model_name: Optional[str] = None,
+        model_name: str,
+        start: datetime,
+        end: datetime,
+        model_version: Optional[str] = None,
+        username: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
-    ) -> List[Prediction]:
-        """Récupère l'historique des prédictions avec filtres"""
-        query = select(Prediction).order_by(Prediction.timestamp.desc())
+        offset: int = 0,
+    ) -> tuple[List[Prediction], int]:
+        """
+        Récupère l'historique des prédictions avec filtres.
 
-        if user_id:
-            query = query.where(Prediction.user_id == user_id)
-        if model_name:
-            query = query.where(Prediction.model_name == model_name)
+        Returns:
+            Tuple (liste de prédictions, total sans pagination)
+        """
+        filters = [
+            Prediction.model_name == model_name,
+            Prediction.timestamp >= start,
+            Prediction.timestamp <= end,
+        ]
+        if model_version:
+            filters.append(Prediction.model_version == model_version)
+        if username:
+            filters.append(User.username == username)
 
-        query = query.limit(limit).offset(offset)
+        base_query = (
+            select(Prediction)
+            .join(User, Prediction.user_id == User.id)
+            .where(and_(*filters))
+        )
 
-        result = await db.execute(query)
-        return result.scalars().all()
+        total_result = await db.execute(
+            select(func.count()).select_from(base_query.subquery())
+        )
+        total = total_result.scalar() or 0
+
+        result = await db.execute(
+            base_query.order_by(Prediction.timestamp.desc()).limit(limit).offset(offset)
+        )
+        return result.scalars().all(), total
 
     # === Model Metadata ===
 
