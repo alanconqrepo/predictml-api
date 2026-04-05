@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.config import settings
 from src.db.database import get_db, init_db, close_db
 from src.services.model_service import model_service
-from src.api import predict, models, users
+from src.api import predict, models, users, observed_results
 
 
 @asynccontextmanager
@@ -55,6 +55,7 @@ app = FastAPI(
 app.include_router(predict.router)
 app.include_router(models.router)
 app.include_router(users.router)
+app.include_router(observed_results.router)
 
 
 @app.get("/")
