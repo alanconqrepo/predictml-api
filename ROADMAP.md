@@ -1,4 +1,5 @@
 
+# ICI 2026-04-04 20:00
 
 data = {
         "model_name": "wine_model",
@@ -29,8 +30,9 @@ Et mets à jour la documentation
 
 #
 . une route pour créer un nouveau modele dans la base postgre
-    . penser à ajouter un nouveau champ pour la table model_metadata "mlflow_run_id"    run_id = mlflow.active_run().info.run_id
-    . si name existe deja retourner une erreur
+    . penser à ajouter un nouveau champ pour la table model_metadata "mlflow_run_id"    
+    qui viendrait d'un scrupt python run_id = mlflow.active_run().info.run_id
+    . si "name" du modele existe deja retourner une erreur
      réecrire create_multiple_advanced_models.py pour qu'il fasse appel à cette nouvelle route
 
 . une route pour update une version d'un modele (name+version) :
@@ -40,13 +42,13 @@ Et mets à jour la documentation
         "accuracy": null,
         "features_count": null,
         "classes": null
-    . une seule peut avoir is_production, passer à false l'autre !
+    . une seule version peut avoir is_production, passer à false l'autre !
 
 
 
 . une route pour delete un modele (toutes les version ou une specique) dans postgre + mlflow
 
-. une route pour déposer une nouvelle version d'un modele avec le nouveau "mlflow_run_id"
+. une route pour déposer une nouvelle version d'un modele avec le nouveau "mlflow_run_id" si n'existe pas déja ?
     . c'est à dire un nouveau run dans mlflow où on souhaite register_model
     . se demander comment faire correspondre  model_metadata.version avec la version de model de mlflow ?
     . bien pointer vers la bonne version du modele registered dans mlflow
@@ -65,29 +67,50 @@ Model version = une version officielle que tu veux garder / déployer
 
 
 #
-. /predict la possibilite d'ajouter  dans le data model_version et point vers le bon modele, sinon prends le is_production à true
+. /predict la possibilite d'ajouter  dans le data model_version et point vers le bon modele -> bon run_id de mlflow, sinon prends le is_production à true
 
 
 
-#
-1.Un notebook example qui faire un apprentissage d'un modele sklearn sur un dataframe (avec pipeline de transformation), qui va tracker l'experiment/model, et sauvegarder le modele dans l'api  
 
 # une route create user
 # une route get user
 # une route delete user
 
-# une route get model name/version
 
-# une route get predictions name version datetieme start end
+#ICI 2026-04-04 22:00
 
+# relancer le build docker et voir ce qui plante...
+  .ImportError: email-validator is not installed, run `pip install 'pydantic[email]'`  when run docker-compose up --build
 
-# lui demander les améliorations qu'on peut faire ? exmple de nouvelles routes ?
+# ajoute une nouvelle une route get model,  args = name + version et qui retourne les infos de la table model_metadata, si possible charge le model (pkl objject) sinon retourne les infos nécessaires pour le charger en python ?
 
-# refaire la documentation .md avec les nouvelles fonctionnalités
+# une nouvelle route get predictions args de filtrage = name, version (optional), datetieme start end, user (optionnal)
 
-# refaire les tests
+# ajouter user_id_creator a la table model_metadata pour savoir qui a créé le modele/version
+ . modifie en conséquence les routes associées get post patch
 
-# creer un notebook qui fait l'apprentissage  iris_advanced_model
+#init_data/ n'est pas copié dans l'image. Je le lance depuis l'hôte en pointant sur la DB Docker :
+ . modifier le volume du docker compose pour que ça soit le cas
+
+# une nouvelle route GET models/name/version
+
+# ICI
+
+# dans la table prections la colonne input_features doit etre un dict de type {'feature1' : , 'feature2' : ,....} et plus une list
+ .modifie tout ce qui doit etre modifié y compris init_db et les tests si nécessaire !
+
+# creer une nouvelle table qui contient les données réelles observés :  id_obs model_name observed_result
+le but à terme sera de pouvoir comparer les prédictions avec les données observées
+une route qui permet d'ajouter une liste [{'id_obs': , , 'model_name', 'observed_result' : ,"user_id"}]
+écrase les lignes si 'id_obs': , 'model_name' existe déjà
+une route 
+
+# refaire tous les smoke-tests sur le docker en prenant en compte toutes les nouvelles routes, le lancer pour vérifer que tout est ok
+  .bien expliquer qui faut lancer docker-compose en amont et la différence avec le dossier /tests via pytetest
+
+# 04/05 09:28
+# opentelemetry compatible + grafana connection dans le docker compose pour voir les logs...
+# dans le dossier notebooks creer un notebook qui fait l'apprentissage  iris_advanced_model avec usage avancé de mlflow + appel api pour créer nouveau modele/version
     . tous les attributes renseigné
     . plusieurs metrics 
     . plusieurs parameters
@@ -98,11 +121,6 @@ Model version = une version officielle que tu veux garder / déployer
     . system metices...
     . le code python qui a permis de genere le model...
 
-# ajouter user_id a la table model_metadata pour savoir qui a créé le modele/version
-
-# creer une nouvelle table qui contient id_obs model_name observed_result
-une route qui permet d'ajouter une liste [{'id_obs': , 'model_name', 'observed_result' : ,"user_id"}]
-écrase les lignes si 'id_obs': , 'model_name' existe déjà
 
 # creer une application streamlite multipage
  . ajouter dans le docker compose
@@ -113,16 +131,36 @@ une route qui permet d'ajouter une liste [{'id_obs': , 'model_name', 'observed_r
  . pourvoir avoir des stats utiles sur les predictions : temps de réponses, répartion des prédictions, errors
  . une page qui donne un exemple de code complet mlflow + api pour créer nouveau modele/version
 
+# opentelemetry compatible + grafana connection dans le docker compose pour voir les logs...
 
-# mlops identification du drift
+ # 05/04 17:25
 
-Deepchecks + Evidently
+# Mode Plan : verifier  le plan de tests via pytests (dossier /tests), est ce que ya des choses manquantes ou en doublons corrige et relances
+
+# Mode Plan : lui demander les améliorations qu'on peut faire sur la qualité du code
+ . est ce que ya du code mort inutile 
+ . des docstrings à ajouter
+ . du lint ? 
+ . hamoniser regles de codage ?
+
+# refaire la documentation .md avec toutes les nouvelles fonctionnalités/routes schémas des données
+ doit contenir des blocs de code python exemple pour appeler les différentes routes
+ doit contenir une doc sur le schéma de la base sql, des exemples de requetes, des exemples de code python se connecter à la db et requetes sql
+ inclure le README.md 
+
+# Mode Plan : lui demander les améliorations qu'on peut faire en terme de fonctionnalités ? exmple de nouvelles routes ?
+ Role Data scientist MLOps engineer, quelles fonctionnalités pourrait être intérréssantes facile à implémenter sans devenir une usine à gaz
+
+
+
 
 # stockage des données d'apprentisage dans minio ? ou via mlflow directement ?
 
+# Mode plan sur la question du  identification du drift (mlops) des features et qualité de predictions
+ . tu peux utiliser par exemple les projets : Deepchecks + Evidently
+ . où a ton sauvegarder les données d'apprentissage
+ . En sachant qu'on a save les predictions, les features, les données observés 
 
-# interpretability : shapvalues, interpretmL
+# Mode plan sur la question : interpretability des modeles  : shapvalues, interpretmL
 https://github.com/kelvins/awesome-mlops
-
-# opentelemetry compatible + grafana connection pour voir les logs...
 
