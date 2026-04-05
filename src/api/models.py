@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.security import verify_token
 from src.db.database import get_db
 from src.db.models import ModelMetadata, User
-from src.schemas.model import ModelCreateResponse, ModelDeleteResponse, ModelUpdateInput
+from src.schemas.model import ModelCreateResponse, ModelDeleteResponse, ModelGetResponse, ModelUpdateInput
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
 
@@ -43,6 +43,105 @@ async def list_cached_models():
         "cached_models": cached,
         "count": len(cached)
     }
+
+
+@router.get("/models/{name}/{version}", response_model=ModelGetResponse)
+async def get_model(
+    name: str,
+    version: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retourne les métadonnées complètes d'un modèle (name + version).
+
+    Tente de charger le modèle en mémoire (depuis MLflow ou MinIO) :
+    - Si le chargement réussit : `model_loaded=true`, `model_type` et `feature_names` sont renseignés.
+    - Si le chargement échoue (service indisponible, etc.) : `model_loaded=false` et `load_instructions`
+      contient les informations nécessaires pour charger le modèle manuellement en Python.
+    """
+    result = await db.execute(
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.version == version)
+        )
+    )
+    model_meta = result.scalar_one_or_none()
+
+    if not model_meta:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' version '{version}' introuvable.",
+        )
+
+    # Tenter de charger le modèle
+    model_loaded = False
+    model_type = None
+    feature_names = None
+    load_instructions = None
+
+    try:
+        cached = await model_service.load_model(db, name, version)
+        ml_model = cached["model"]
+        model_loaded = True
+        model_type = type(ml_model).__name__
+        if hasattr(ml_model, "feature_names_in_"):
+            feature_names = list(ml_model.feature_names_in_)
+    except Exception:
+        # Le modèle n'a pas pu être chargé — construire les instructions manuelles
+        if model_meta.mlflow_run_id:
+            load_instructions = {
+                "source": "mlflow",
+                "run_id": model_meta.mlflow_run_id,
+                "python_code": (
+                    f"import mlflow.sklearn\n"
+                    f"model = mlflow.sklearn.load_model('runs:/{model_meta.mlflow_run_id}/model')"
+                ),
+            }
+        elif model_meta.minio_object_key:
+            load_instructions = {
+                "source": "minio",
+                "bucket": model_meta.minio_bucket,
+                "object_key": model_meta.minio_object_key,
+                "python_code": (
+                    f"from minio import Minio\n"
+                    f"import pickle, io\n"
+                    f"client = Minio('localhost:9002', access_key='...', secret_key='...', secure=False)\n"
+                    f"response = client.get_object('{model_meta.minio_bucket}', '{model_meta.minio_object_key}')\n"
+                    f"model = pickle.loads(response.read())"
+                ),
+            }
+
+    return ModelGetResponse(
+        id=model_meta.id,
+        name=model_meta.name,
+        version=model_meta.version,
+        description=model_meta.description,
+        algorithm=model_meta.algorithm,
+        features_count=model_meta.features_count,
+        classes=model_meta.classes,
+        training_params=model_meta.training_params,
+        training_metrics=model_meta.training_metrics,
+        training_dataset=model_meta.training_dataset,
+        trained_by=model_meta.trained_by,
+        training_date=model_meta.training_date,
+        accuracy=model_meta.accuracy,
+        f1_score=model_meta.f1_score,
+        precision=model_meta.precision,
+        recall=model_meta.recall,
+        mlflow_run_id=model_meta.mlflow_run_id,
+        minio_bucket=model_meta.minio_bucket,
+        minio_object_key=model_meta.minio_object_key,
+        file_size_bytes=model_meta.file_size_bytes,
+        file_hash=model_meta.file_hash,
+        is_active=model_meta.is_active,
+        is_production=model_meta.is_production,
+        created_at=model_meta.created_at,
+        updated_at=model_meta.updated_at,
+        deprecated_at=model_meta.deprecated_at,
+        model_loaded=model_loaded,
+        model_type=model_type,
+        feature_names=feature_names,
+        load_instructions=load_instructions,
+    )
 
 
 @router.post("/models", response_model=ModelCreateResponse, status_code=status.HTTP_201_CREATED)

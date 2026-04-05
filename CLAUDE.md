@@ -58,6 +58,12 @@ docker exec -it predictml-postgres psql -U postgres -d sklearn_api
 | DB | `postgres / postgres_secure_password_123` |
 | MinIO | `minioadmin / minio_secure_password_123` |
 
+## Dépendances
+
+Toute nouvelle dépendance doit être ajoutée dans **les deux fichiers** :
+- `requirements.txt` — utilisé par le Dockerfile
+- `pyproject.toml` — utilisé par la CI GitHub Actions
+
 ## Tests
 
 Les tests dans `tests/` utilisent `TestClient` de FastAPI — aucun Docker requis.

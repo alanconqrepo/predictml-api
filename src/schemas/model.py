@@ -3,7 +3,7 @@ Schémas Pydantic pour la création et la réponse de modèles
 """
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class ModelDeleteResponse(BaseModel):
@@ -44,5 +44,52 @@ class ModelCreateResponse(BaseModel):
     is_active: bool
     is_production: bool
     created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ModelGetResponse(BaseModel):
+    """Réponse détaillée d'un modèle — métadonnées complètes + infos de chargement"""
+    # Identification
+    id: int
+    name: str
+    version: str
+
+    # Métadonnées
+    description: Optional[str]
+    algorithm: Optional[str]
+    features_count: Optional[int]
+    classes: Optional[List[Any]]
+    training_params: Optional[Dict[str, Any]]
+    training_metrics: Optional[Dict[str, Any]]
+    training_dataset: Optional[str]
+    trained_by: Optional[str]
+    training_date: Optional[datetime]
+
+    # Performance
+    accuracy: Optional[float]
+    f1_score: Optional[float]
+    precision: Optional[float]
+    recall: Optional[float]
+
+    # Stockage
+    mlflow_run_id: Optional[str]
+    minio_bucket: Optional[str]
+    minio_object_key: Optional[str]
+    file_size_bytes: Optional[int]
+    file_hash: Optional[str]
+
+    # Status
+    is_active: bool
+    is_production: bool
+    created_at: datetime
+    updated_at: Optional[datetime]
+    deprecated_at: Optional[datetime]
+
+    # Infos de chargement
+    model_loaded: bool
+    model_type: Optional[str]        # ex: "RandomForestClassifier"
+    feature_names: Optional[List[str]]  # model.feature_names_in_ si disponible
+    load_instructions: Optional[Dict[str, Any]]  # instructions pour charger manuellement
 
     model_config = {"from_attributes": True}
