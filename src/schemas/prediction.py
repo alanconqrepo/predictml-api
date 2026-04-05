@@ -112,6 +112,47 @@ class PredictionsListResponse(BaseModel):
     predictions: List[PredictionResponse]
 
 
+class BatchPredictionItem(BaseModel):
+    """Un item d'entrée pour une prédiction batch"""
+
+    features: Dict[str, Union[float, int, str]] = Field(
+        ..., description="Features sous forme de dict nommé"
+    )
+    id_obs: Optional[str] = Field(None, description="Identifiant de l'observation (optionnel)")
+
+
+class BatchPredictionInput(BaseModel):
+    """Données d'entrée pour une prédiction batch"""
+
+    model_name: str = Field(..., description="Nom du modèle à utiliser (sans extension .pkl)")
+    model_version: Optional[str] = Field(
+        None, description="Version du modèle (ex: '1.0.0'). Si absent, utilise is_production=True."
+    )
+    inputs: List[BatchPredictionItem] = Field(
+        ..., min_length=1, description="Liste d'observations à scorer"
+    )
+
+
+class BatchPredictionResultItem(BaseModel):
+    """Résultat d'une prédiction individuelle dans un batch"""
+
+    id_obs: Optional[str] = Field(None, description="Identifiant de l'observation (si fourni)")
+    prediction: Union[float, int, str] = Field(..., description="Prédiction du modèle")
+    probability: Optional[List[float]] = Field(
+        None, description="Probabilités par classe (si disponible)"
+    )
+
+
+class BatchPredictionOutput(BaseModel):
+    """Résultat d'une prédiction batch"""
+
+    model_name: str = Field(..., description="Nom du modèle utilisé")
+    model_version: str = Field(..., description="Version du modèle utilisée")
+    predictions: List[BatchPredictionResultItem] = Field(
+        ..., description="Liste des résultats dans le même ordre que les inputs"
+    )
+
+
 class ModelsListResponse(BaseModel):
     """Liste des modèles disponibles"""
 

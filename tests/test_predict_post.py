@@ -339,3 +339,173 @@ def test_predict_model_not_found_returns_404():
         json={"model_name": "nonexistent_model_xyzabc", "features": {"f1": 1.0}},
     )
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /predict-batch
+# ---------------------------------------------------------------------------
+
+def test_predict_batch_success_happy_path():
+    """POST /predict-batch — batch de 2 observations → 200 avec liste de résultats."""
+    model = _make_iris_model()
+    key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
+    try:
+        response = client.post(
+            "/predict-batch",
+            headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+            json={
+                "model_name": PP_IRIS_MODEL,
+                "inputs": [
+                    {"features": {"f1": 1.0, "f2": 2.0, "f3": 0.1}},
+                    {"features": {"f1": 3.0, "f2": 4.0, "f3": 0.3}},
+                ],
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["model_name"] == PP_IRIS_MODEL
+        assert data["model_version"] == MODEL_VERSION
+        assert len(data["predictions"]) == 2
+        for pred in data["predictions"]:
+            assert "prediction" in pred
+            assert "probability" in pred
+    finally:
+        model_service.models_cache.pop(key, None)
+
+
+def test_predict_batch_with_id_obs():
+    """POST /predict-batch — les id_obs sont retournés dans le même ordre."""
+    model = _make_iris_model()
+    key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
+    try:
+        response = client.post(
+            "/predict-batch",
+            headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+            json={
+                "model_name": PP_IRIS_MODEL,
+                "inputs": [
+                    {"features": {"f1": 1.0, "f2": 2.0, "f3": 0.1}, "id_obs": "obs-a"},
+                    {"features": {"f1": 3.0, "f2": 4.0, "f3": 0.3}, "id_obs": "obs-b"},
+                ],
+            },
+        )
+        assert response.status_code == 200
+        preds = response.json()["predictions"]
+        assert preds[0]["id_obs"] == "obs-a"
+        assert preds[1]["id_obs"] == "obs-b"
+    finally:
+        model_service.models_cache.pop(key, None)
+
+
+def test_predict_batch_without_auth():
+    """POST /predict-batch sans header Authorization → 401/403."""
+    response = client.post(
+        "/predict-batch",
+        json={
+            "model_name": PP_IRIS_MODEL,
+            "inputs": [{"features": {"f1": 1.0, "f2": 2.0, "f3": 0.1}}],
+        },
+    )
+    assert response.status_code in [401, 403]
+
+
+def test_predict_batch_missing_features_returns_422():
+    """POST /predict-batch — features manquantes sur un item → 422."""
+    model = _make_iris_model()
+    key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
+    try:
+        response = client.post(
+            "/predict-batch",
+            headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+            json={
+                "model_name": PP_IRIS_MODEL,
+                "inputs": [
+                    {"features": {"f1": 1.0}},  # manque f2 et f3
+                ],
+            },
+        )
+        assert response.status_code == 422
+    finally:
+        model_service.models_cache.pop(key, None)
+
+
+def test_predict_batch_model_not_found_returns_404():
+    """POST /predict-batch — modèle inexistant → 404."""
+    response = client.post(
+        "/predict-batch",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        json={
+            "model_name": "nonexistent_batch_model_xyz",
+            "inputs": [{"features": {"f1": 1.0}}],
+        },
+    )
+    assert response.status_code == 404
+
+
+def test_predict_batch_without_predict_proba():
+    """POST /predict-batch — régresseur sans predict_proba → probability=None pour chaque item."""
+    model = _make_regressor_model()
+    key = _inject_cache(PP_REGRESSOR_MODEL, MODEL_VERSION, model)
+    try:
+        response = client.post(
+            "/predict-batch",
+            headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+            json={
+                "model_name": PP_REGRESSOR_MODEL,
+                "inputs": [
+                    {"features": {"f1": 1.0, "f2": 4.0}},
+                    {"features": {"f1": 2.0, "f2": 5.0}},
+                ],
+            },
+        )
+        assert response.status_code == 200
+        for pred in response.json()["predictions"]:
+            assert pred["probability"] is None
+    finally:
+        model_service.models_cache.pop(key, None)
+
+
+def test_predict_batch_saves_to_db():
+    """POST /predict-batch — toutes les prédictions sont persistées en base de données."""
+    model = _make_iris_model()
+    key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
+    id_obs_a = "batch-db-obs-001"
+    id_obs_b = "batch-db-obs-002"
+    try:
+        response = client.post(
+            "/predict-batch",
+            headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+            json={
+                "model_name": PP_IRIS_MODEL,
+                "inputs": [
+                    {"features": {"f1": 1.0, "f2": 2.0, "f3": 0.1}, "id_obs": id_obs_a},
+                    {"features": {"f1": 3.0, "f2": 4.0, "f3": 0.3}, "id_obs": id_obs_b},
+                ],
+            },
+        )
+        assert response.status_code == 200
+    finally:
+        model_service.models_cache.pop(key, None)
+
+    start = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    end = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    history = client.get(
+        "/predictions",
+        params={"name": PP_IRIS_MODEL, "start": start, "end": end},
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+    )
+    assert history.status_code == 200
+    data = history.json()
+    ids_obs = [p["id_obs"] for p in data["predictions"]]
+    assert id_obs_a in ids_obs
+    assert id_obs_b in ids_obs
+
+
+def test_predict_batch_empty_inputs_returns_422():
+    """POST /predict-batch avec liste vide → 422 (min_length=1)."""
+    response = client.post(
+        "/predict-batch",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        json={"model_name": PP_IRIS_MODEL, "inputs": []},
+    )
+    assert response.status_code == 422
