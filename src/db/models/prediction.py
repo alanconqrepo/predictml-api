@@ -1,18 +1,17 @@
 """
 Modèle Prediction pour logger toutes les prédictions
 """
-from datetime import datetime, timezone
 
-def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, JSON, Text
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
+from src.core.utils import _utcnow
 from src.db.database import Base
 
 
 class Prediction(Base):
     """Modèle pour stocker l'historique des prédictions"""
+
     __tablename__ = "predictions"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -47,5 +46,6 @@ class Prediction(Base):
     # Relations
     user = relationship("User", back_populates="predictions")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """Représentation lisible de la prédiction."""
         return f"<Prediction(id={self.id}, model='{self.model_name}', user_id={self.user_id})>"

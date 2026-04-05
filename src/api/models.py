@@ -1,20 +1,29 @@
 """
 Endpoints pour la gestion des modèles
 """
+
 import json
+import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from sqlalchemy import select, and_
-from sqlalchemy.orm import selectinload
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.core.security import verify_token
 from src.db.database import get_db
 from src.db.models import ModelMetadata, User
-from src.schemas.model import ModelCreateResponse, ModelDeleteResponse, ModelGetResponse, ModelUpdateInput
+from src.schemas.model import (
+    ModelCreateResponse,
+    ModelDeleteResponse,
+    ModelGetResponse,
+    ModelUpdateInput,
+)
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["models"])
 
@@ -40,10 +49,7 @@ async def list_cached_models():
         Liste des object keys MinIO en cache
     """
     cached = model_service.get_cached_models()
-    return {
-        "cached_models": cached,
-        "count": len(cached)
-    }
+    return {"cached_models": cached, "count": len(cached)}
 
 
 @router.get("/models/{name}/{version}", response_model=ModelGetResponse)
@@ -151,7 +157,9 @@ async def get_model(
 async def create_model(
     name: str = Form(..., description="Nom unique du modèle"),
     version: str = Form(..., description="Version du modèle (ex: 1.0.0)"),
-    file: Optional[UploadFile] = File(None, description="Fichier .pkl (optionnel si mlflow_run_id fourni)"),
+    file: Optional[UploadFile] = File(
+        None, description="Fichier .pkl (optionnel si mlflow_run_id fourni)"
+    ),
     description: Optional[str] = Form(None),
     algorithm: Optional[str] = Form(None),
     mlflow_run_id: Optional[str] = Form(None),
@@ -283,7 +291,7 @@ async def update_model(
                 and_(
                     ModelMetadata.name == name,
                     ModelMetadata.version != version,
-                    ModelMetadata.is_production == True,
+                    ModelMetadata.is_production.is_(True),
                 )
             )
         )
@@ -308,14 +316,16 @@ async def update_model(
 # Helpers suppression
 # ---------------------------------------------------------------------------
 
+
 def _delete_mlflow_run(run_id: str) -> bool:
     """Supprime le run MLflow. Retourne False si MLflow est indisponible."""
     try:
         from mlflow.tracking import MlflowClient
+
         MlflowClient().delete_run(run_id)
         return True
     except Exception as e:
-        print(f"⚠️  MLflow suppression impossible pour run {run_id}: {e}")
+        logger.warning("MLflow suppression impossible pour run %s: %s", run_id, e)
         return False
 
 
@@ -324,13 +334,14 @@ def _delete_minio_object(object_key: str) -> bool:
     try:
         return minio_service.delete_model(object_key)
     except Exception as e:
-        print(f"⚠️  MinIO suppression impossible pour {object_key}: {e}")
+        logger.warning("MinIO suppression impossible pour %s: %s", object_key, e)
         return False
 
 
 # ---------------------------------------------------------------------------
 # DELETE routes
 # ---------------------------------------------------------------------------
+
 
 @router.delete("/models/{name}/{version}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_model_version(
@@ -386,9 +397,7 @@ async def delete_model_all_versions(
 
     Retourne un résumé des suppressions effectuées.
     """
-    result = await db.execute(
-        select(ModelMetadata).where(ModelMetadata.name == name)
-    )
+    result = await db.execute(select(ModelMetadata).where(ModelMetadata.name == name))
     models = result.scalars().all()
 
     if not models:

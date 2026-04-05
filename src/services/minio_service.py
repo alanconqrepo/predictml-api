@@ -1,10 +1,11 @@
 """
 Service de gestion du stockage MinIO
 """
+
 import io
 import logging
 import pickle
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from minio import Minio
 from minio.error import S3Error
@@ -41,7 +42,7 @@ class MinIOService:
         except S3Error as e:
             logger.error("Erreur MinIO lors de la création du bucket: %s", e)
 
-    def upload_model(self, model: any, object_name: str, metadata: Optional[dict] = None) -> dict:
+    def upload_model(self, model: Any, object_name: str, metadata: Optional[dict] = None) -> dict:
         """
         Upload un modèle vers MinIO
 
@@ -112,7 +113,7 @@ class MinIOService:
             logger.error("Erreur lors de l'upload: %s", e)
             raise
 
-    def download_model(self, object_name: str) -> any:
+    def download_model(self, object_name: str) -> Any:
         """
         Télécharge et désérialise un modèle depuis MinIO
 

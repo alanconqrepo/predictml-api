@@ -1,11 +1,12 @@
 """
 Endpoints pour la gestion des utilisateurs
 """
+
 import secrets
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, and_
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import require_admin, verify_token
@@ -35,9 +36,7 @@ async def create_user(
     """
     # Vérifier l'unicité username et email
     existing = await db.execute(
-        select(User).where(
-            (User.username == payload.username) | (User.email == payload.email)
-        )
+        select(User).where((User.username == payload.username) | (User.email == payload.email))
     )
     if existing.scalar_one_or_none():
         raise HTTPException(

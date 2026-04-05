@@ -1,19 +1,17 @@
 """
 Modèle ObservedResult — données réelles observées pour comparer aux prédictions
 """
-from datetime import datetime, timezone
 
-def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, JSON, UniqueConstraint
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import relationship
 
+from src.core.utils import _utcnow
 from src.db.database import Base
 
 
 class ObservedResult(Base):
     """Résultats réellement observés, liés à une observation et un modèle"""
+
     __tablename__ = "observed_results"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -39,5 +37,6 @@ class ObservedResult(Base):
     # Relation
     user = relationship("User", back_populates="observed_results")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """Représentation lisible du résultat observé."""
         return f"<ObservedResult(id_obs='{self.id_obs}', model='{self.model_name}')>"

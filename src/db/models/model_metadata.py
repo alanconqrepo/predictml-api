@@ -1,18 +1,17 @@
 """
 Modèle ModelMetadata pour gérer les métadonnées et le versioning des modèles
 """
-from datetime import datetime, timezone
 
-def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, JSON, Text, ForeignKey
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
+from src.core.utils import _utcnow
 from src.db.database import Base
 
 
 class ModelMetadata(Base):
     """Métadonnées et versioning des modèles ML"""
+
     __tablename__ = "model_metadata"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -23,7 +22,9 @@ class ModelMetadata(Base):
 
     # Stockage MinIO
     minio_bucket = Column(String(100), nullable=True)
-    minio_object_key = Column(String(255), nullable=True)  # Chemin dans MinIO (None si mlflow_run_id)
+    minio_object_key = Column(
+        String(255), nullable=True
+    )  # Chemin dans MinIO (None si mlflow_run_id)
     file_size_bytes = Column(Integer, nullable=True)
     file_hash = Column(String(64), nullable=True)  # SHA256
 
@@ -62,10 +63,6 @@ class ModelMetadata(Base):
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
     deprecated_at = Column(DateTime, nullable=True)
 
-    # Contrainte unique: un seul nom+version
-    __table_args__ = (
-        {'sqlite_autoincrement': True}
-    )
-
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """Représentation lisible des métadonnées du modèle."""
         return f"<ModelMetadata(name='{self.name}', version='{self.version}', active={self.is_active})>"

@@ -1,6 +1,7 @@
 """
 Point d'entrée principal de l'application FastAPI
 """
+
 import logging
 from contextlib import asynccontextmanager
 
@@ -62,6 +63,7 @@ app = FastAPI(
 # Activer OpenTelemetry si demandé
 if settings.ENABLE_OTEL:
     from src.core.telemetry import setup_telemetry
+
     setup_telemetry(app, engine=engine)
 
 # Inclure les routers

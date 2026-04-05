@@ -34,6 +34,21 @@ notebooks/          # Jupyter
 alembic/            # Migrations DB
 ```
 
+## Qualité de code
+
+Les règles de codage sont définies dans **[CODING_STANDARDS.md](./CODING_STANDARDS.md)**.
+
+```bash
+# Vérifier le lint
+ruff check src/
+
+# Vérifier le formatage
+black --check src/
+
+# Corriger automatiquement
+ruff check src/ --fix && black src/
+```
+
 ## Commandes clés
 
 ```bash

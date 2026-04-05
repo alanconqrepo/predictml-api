@@ -1,13 +1,16 @@
 """
 Schémas Pydantic pour la création et la réponse de modèles
 """
+
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel
 
 
 class ModelDeleteResponse(BaseModel):
     """Résumé de la suppression de toutes les versions d'un modèle"""
+
     name: str
     deleted_versions: List[str]
     mlflow_runs_deleted: List[str]
@@ -16,6 +19,7 @@ class ModelDeleteResponse(BaseModel):
 
 class ModelUpdateInput(BaseModel):
     """Champs modifiables d'un modèle (tous optionnels)"""
+
     description: Optional[str] = None
     is_production: Optional[bool] = None
     accuracy: Optional[float] = None
@@ -27,6 +31,7 @@ class ModelUpdateInput(BaseModel):
 
 class ModelCreateResponse(BaseModel):
     """Réponse après création ou mise à jour d'un modèle"""
+
     id: int
     name: str
     version: str
@@ -52,6 +57,7 @@ class ModelCreateResponse(BaseModel):
 
 class ModelGetResponse(BaseModel):
     """Réponse détaillée d'un modèle — métadonnées complètes + infos de chargement"""
+
     # Identification
     id: int
     name: str
@@ -94,10 +100,8 @@ class ModelGetResponse(BaseModel):
 
     # Infos de chargement
     model_loaded: bool
-    model_type: Optional[str]          # ex: "RandomForestClassifier"
-    feature_names: Optional[List[str]] # model.feature_names_in_ si disponible
+    model_type: Optional[str]  # ex: "RandomForestClassifier"
+    feature_names: Optional[List[str]]  # model.feature_names_in_ si disponible
     load_instructions: Optional[Dict[str, Any]]
 
     model_config = {"from_attributes": True}
-
-

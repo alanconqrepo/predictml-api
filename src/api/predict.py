@@ -1,19 +1,29 @@
 """
 Endpoints pour les prédictions
 """
+
+import logging
 import time
 from datetime import datetime
 from typing import Optional
+
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import verify_token
 from src.db.database import get_db
 from src.db.models import User
-from src.schemas.prediction import PredictionInput, PredictionOutput, PredictionsListResponse, PredictionResponse
-from src.services.model_service import model_service
+from src.schemas.prediction import (
+    PredictionInput,
+    PredictionOutput,
+    PredictionResponse,
+    PredictionsListResponse,
+)
 from src.services.db_service import DBService
+from src.services.model_service import model_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["predictions"])
 
@@ -21,7 +31,9 @@ router = APIRouter(tags=["predictions"])
 @router.get("/predictions", response_model=PredictionsListResponse)
 async def get_predictions(
     name: str = Query(..., description="Nom du modèle"),
-    start: datetime = Query(..., description="Début de la période (ISO 8601, ex: 2024-01-01T00:00:00)"),
+    start: datetime = Query(
+        ..., description="Début de la période (ISO 8601, ex: 2024-01-01T00:00:00)"
+    ),
     end: datetime = Query(..., description="Fin de la période (ISO 8601, ex: 2024-12-31T23:59:59)"),
     version: Optional[str] = Query(None, description="Version du modèle (optionnel)"),
     user: Optional[str] = Query(None, description="Nom d'utilisateur (optionnel)"),
@@ -87,7 +99,7 @@ async def predict(
     input_data: PredictionInput,
     request: Request,
     user: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Fait une prédiction avec le modèle sklearn spécifié.
@@ -107,16 +119,17 @@ async def predict(
     prediction_result = None
     probability = None
     error_message = None
-    status_str = "success"
 
     try:
         # Charger le modèle demandé — version explicite, sinon production, sinon plus récente
-        model_data = await model_service.load_model(db, input_data.model_name, input_data.model_version)
+        model_data = await model_service.load_model(
+            db, input_data.model_name, input_data.model_version
+        )
         model = model_data["model"]
         metadata = model_data["metadata"]
 
         # Convertir le dict de features en array numpy
-        if not hasattr(model, 'feature_names_in_'):
+        if not hasattr(model, "feature_names_in_"):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=(
@@ -124,7 +137,7 @@ async def predict(
                     "'feature_names_in_'. Le modèle doit avoir été entraîné avec un "
                     "DataFrame pandas (les noms de colonnes sont alors automatiquement "
                     "sauvegardés par sklearn)."
-                )
+                ),
             )
         missing = set(model.feature_names_in_) - set(input_data.features.keys())
         if missing:
@@ -133,20 +146,19 @@ async def predict(
                 detail=(
                     f"Features manquantes dans la requête : {sorted(missing)}. "
                     f"Features attendues : {list(model.feature_names_in_)}"
-                )
+                ),
             )
-        X = np.array(
-            [[input_data.features[name] for name in model.feature_names_in_]],
-            dtype=object
+        x = np.array(
+            [[input_data.features[name] for name in model.feature_names_in_]], dtype=object
         )
 
         # Faire la prédiction
-        prediction = model.predict(X)[0]
-        prediction_result = prediction.item() if hasattr(prediction, 'item') else prediction
+        prediction = model.predict(x)[0]
+        prediction_result = prediction.item() if hasattr(prediction, "item") else prediction
 
         # Essayer d'obtenir les probabilités si le modèle le supporte
-        if hasattr(model, 'predict_proba'):
-            probability = model.predict_proba(X)[0].tolist()
+        if hasattr(model, "predict_proba"):
+            probability = model.predict_proba(x)[0].tolist()
 
         response_time_ms = (time.time() - start_time) * 1000
 
@@ -163,7 +175,7 @@ async def predict(
             client_ip=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
             status="success",
-            id_obs=input_data.id_obs
+            id_obs=input_data.id_obs,
         )
 
         return PredictionOutput(
@@ -171,7 +183,7 @@ async def predict(
             model_version=metadata.version,
             id_obs=input_data.id_obs,
             prediction=prediction_result,
-            probability=probability
+            probability=probability,
         )
 
     except HTTPException:
@@ -182,7 +194,6 @@ async def predict(
         # Logger l'erreur
         response_time_ms = (time.time() - start_time) * 1000
         error_message = str(e)
-        status_str = "error"
 
         try:
             await DBService.create_prediction(
@@ -198,12 +209,12 @@ async def predict(
                 user_agent=request.headers.get("user-agent"),
                 status="error",
                 error_message=error_message,
-                id_obs=input_data.id_obs
+                id_obs=input_data.id_obs,
             )
         except Exception as log_error:
-            print(f"❌ Erreur lors du logging: {log_error}")
+            logger.error("Erreur lors du logging de la prédiction: %s", log_error)
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erreur lors de la prédiction avec '{input_data.model_name}': {error_message}"
+            detail=f"Erreur lors de la prédiction avec '{input_data.model_name}': {error_message}",
         )

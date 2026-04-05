@@ -1,18 +1,18 @@
 """
 Service pour les opérations de base de données
 """
+
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime
+from typing import Any, List, Optional
 
-def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-from typing import Optional, List
-from sqlalchemy import select, func, and_
-from sqlalchemy.orm import selectinload
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from src.db.models import User, Prediction, ModelMetadata, ObservedResult
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from src.core.utils import _utcnow
+from src.db.models import ModelMetadata, ObservedResult, Prediction, User
 
 
 class DBService:
@@ -24,7 +24,7 @@ class DBService:
     async def get_user_by_token(db: AsyncSession, api_token: str) -> Optional[User]:
         """Récupère un utilisateur par son token"""
         result = await db.execute(
-            select(User).where(and_(User.api_token == api_token, User.is_active == True))
+            select(User).where(and_(User.api_token == api_token, User.is_active.is_(True)))
         )
         return result.scalar_one_or_none()
 
@@ -41,7 +41,7 @@ class DBService:
         email: str,
         api_token: str,
         role: str = "user",
-        rate_limit: int = 1000
+        rate_limit: int = 1000,
     ) -> User:
         """Crée un nouvel utilisateur"""
         user = User(
@@ -49,7 +49,7 @@ class DBService:
             email=email,
             api_token=api_token,
             role=role,
-            rate_limit_per_day=rate_limit
+            rate_limit_per_day=rate_limit,
         )
         db.add(user)
         await db.commit()
@@ -89,8 +89,8 @@ class DBService:
         return user
 
     @staticmethod
-    async def update_user_last_login(db: AsyncSession, user_id: int):
-        """Met à jour la dernière connexion d'un utilisateur"""
+    async def update_user_last_login(db: AsyncSession, user_id: int) -> None:
+        """Met à jour la dernière connexion d'un utilisateur."""
         user = await DBService.get_user_by_id(db, user_id)
         if user:
             user.last_login = _utcnow()
@@ -102,10 +102,7 @@ class DBService:
         today = _utcnow().date()
         result = await db.execute(
             select(func.count(Prediction.id)).where(
-                and_(
-                    Prediction.user_id == user_id,
-                    func.date(Prediction.timestamp) == today
-                )
+                and_(Prediction.user_id == user_id, func.date(Prediction.timestamp) == today)
             )
         )
         return result.scalar() or 0
@@ -119,14 +116,14 @@ class DBService:
         model_name: str,
         model_version: Optional[str],
         input_features: dict,
-        prediction_result: any,
+        prediction_result: Any,
         probabilities: Optional[list],
         response_time_ms: float,
         client_ip: Optional[str] = None,
         user_agent: Optional[str] = None,
         status: str = "success",
         error_message: Optional[str] = None,
-        id_obs: Optional[str] = None
+        id_obs: Optional[str] = None,
     ) -> Prediction:
         """Enregistre une prédiction"""
         prediction = Prediction(
@@ -141,7 +138,7 @@ class DBService:
             client_ip=client_ip,
             user_agent=user_agent,
             status=status,
-            error_message=error_message
+            error_message=error_message,
         )
         db.add(prediction)
         await db.commit()
@@ -176,14 +173,10 @@ class DBService:
             filters.append(User.username == username)
 
         base_query = (
-            select(Prediction)
-            .join(User, Prediction.user_id == User.id)
-            .where(and_(*filters))
+            select(Prediction).join(User, Prediction.user_id == User.id).where(and_(*filters))
         )
 
-        total_result = await db.execute(
-            select(func.count()).select_from(base_query.subquery())
-        )
+        total_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
         total = total_result.scalar() or 0
 
         result = await db.execute(
@@ -200,7 +193,7 @@ class DBService:
         version: str,
         minio_bucket: str,
         minio_object_key: str,
-        **kwargs
+        **kwargs,
     ) -> ModelMetadata:
         """Crée les métadonnées d'un modèle"""
         metadata = ModelMetadata(
@@ -208,7 +201,7 @@ class DBService:
             version=version,
             minio_bucket=minio_bucket,
             minio_object_key=minio_object_key,
-            **kwargs
+            **kwargs,
         )
         db.add(metadata)
         await db.commit()
@@ -217,16 +210,11 @@ class DBService:
 
     @staticmethod
     async def get_model_metadata(
-        db: AsyncSession,
-        name: str,
-        version: Optional[str] = None
+        db: AsyncSession, name: str, version: Optional[str] = None
     ) -> Optional[ModelMetadata]:
         """Récupère les métadonnées d'un modèle"""
         query = select(ModelMetadata).where(
-            and_(
-                ModelMetadata.name == name,
-                ModelMetadata.is_active == True
-            )
+            and_(ModelMetadata.name == name, ModelMetadata.is_active.is_(True))
         )
 
         if version:
@@ -234,8 +222,7 @@ class DBService:
         else:
             # Sans version explicite : priorité à is_production=True, sinon la plus récente
             query = query.order_by(
-                ModelMetadata.is_production.desc(),
-                ModelMetadata.created_at.desc()
+                ModelMetadata.is_production.desc(), ModelMetadata.created_at.desc()
             )
 
         result = await db.execute(query)
@@ -247,7 +234,7 @@ class DBService:
         result = await db.execute(
             select(ModelMetadata)
             .options(selectinload(ModelMetadata.creator))
-            .where(ModelMetadata.is_active == True)
+            .where(ModelMetadata.is_active.is_(True))
         )
         return result.scalars().all()
 
@@ -261,7 +248,6 @@ class DBService:
             await db.commit()
             return True
         return False
-
 
     # === Observed Results ===
 
@@ -328,9 +314,7 @@ class DBService:
             .where(and_(*filters) if filters else True)
         )
 
-        total_result = await db.execute(
-            select(func.count()).select_from(base_query.subquery())
-        )
+        total_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
         total = total_result.scalar() or 0
 
         result = await db.execute(

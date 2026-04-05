@@ -1,6 +1,7 @@
 """
 Service de gestion des modèles ML (v2 - avec MinIO + DB)
 """
+
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -75,7 +76,7 @@ class ModelService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Modèle '{model_name}' (version '{version or 'latest'}') non trouvé. "
-                       f"Modèles disponibles: {available_names}",
+                f"Modèles disponibles: {available_names}",
             )
 
         # 2. Vérifier le cache
@@ -89,14 +90,18 @@ class ModelService:
             if metadata.mlflow_run_id:
                 logger.info(
                     "Chargement du modèle '%s' v%s depuis MLflow (run=%s)...",
-                    model_name, metadata.version, metadata.mlflow_run_id,
+                    model_name,
+                    metadata.version,
+                    metadata.mlflow_run_id,
                 )
                 import mlflow.sklearn
+
                 model = mlflow.sklearn.load_model(f"runs:/{metadata.mlflow_run_id}/model")
             else:
                 logger.info(
                     "Téléchargement du modèle '%s' v%s depuis MinIO...",
-                    model_name, metadata.version,
+                    model_name,
+                    metadata.version,
                 )
                 model = minio_service.download_model(metadata.minio_object_key)
 
