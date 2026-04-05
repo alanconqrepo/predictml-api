@@ -9,6 +9,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init_data/create_mlflow_db.sql:/docker-entrypoint-initdb.d/create_mlflow_db.sql:ro
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     healthcheck:
