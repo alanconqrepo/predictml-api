@@ -1,55 +1,14 @@
 """
 Tests de validation des schémas Pydantic.
-Vérifie que PredictionInput accepte float, int, str et les types mixtes,
-ainsi que le nouveau format dict {feature_name: value} avec id_obs optionnel.
+Vérifie que PredictionInput accepte uniquement le format dict {feature_name: value}
+et rejette les listes.
 """
 import pytest
 from pydantic import ValidationError
 from src.schemas.prediction import PredictionInput, PredictionOutput
 
 
-# ── Format liste (ancien format) ──────────────────────────────────────────────
-
-def test_prediction_input_accepts_floats():
-    """Cas nominal : liste de floats (modèles numériques)"""
-    obj = PredictionInput(model_name="iris_model", features=[5.1, 3.5, 1.4, 0.2])
-    assert len(obj.features) == 4
-    assert obj.features[0] == 5.1
-
-
-def test_prediction_input_accepts_ints():
-    """Entiers acceptés et conservés comme valeurs numériques"""
-    obj = PredictionInput(model_name="iris_model", features=[5, 3, 1, 0])
-    assert len(obj.features) == 4
-
-
-def test_prediction_input_accepts_strings():
-    """Strings acceptées (features catégorielles, ex: loan_model)"""
-    obj = PredictionInput(
-        model_name="loan_model",
-        features=["employed", "bachelor", "good"]
-    )
-    assert obj.features[0] == "employed"
-
-
-def test_prediction_input_accepts_mixed_features():
-    """Cas réel loan_model : floats + strings dans la même liste"""
-    obj = PredictionInput(
-        model_name="loan_model",
-        features=[35, 65000, 15000, "employed", "bachelor", "good"]
-    )
-    assert len(obj.features) == 6
-    assert obj.features[3] == "employed"
-    assert obj.features[0] == 35
-
-
-def test_prediction_input_list_element_dict_rejected():
-    """Un dict en tant qu'élément d'une liste de features doit lever une ValidationError"""
-    with pytest.raises(ValidationError):
-        PredictionInput(model_name="test", features=[{"key": "value"}])
-
-
-# ── Format dict (nouveau format) ──────────────────────────────────────────────
+# ── Format dict (seul format accepté) ────────────────────────────────────────
 
 def test_prediction_input_accepts_dict_features():
     """Le format dict {nom_feature: valeur} est accepté"""
@@ -59,6 +18,33 @@ def test_prediction_input_accepts_dict_features():
     )
     assert isinstance(obj.features, dict)
     assert obj.features["sepal_length"] == 5.1
+
+
+def test_prediction_input_accepts_dict_with_floats():
+    """Dict avec valeurs float accepté"""
+    obj = PredictionInput(
+        model_name="iris_model",
+        features={"f1": 5.1, "f2": 3.5}
+    )
+    assert obj.features["f1"] == 5.1
+
+
+def test_prediction_input_accepts_dict_with_ints():
+    """Dict avec valeurs entières accepté"""
+    obj = PredictionInput(
+        model_name="iris_model",
+        features={"f1": 5, "f2": 3}
+    )
+    assert obj.features["f1"] == 5
+
+
+def test_prediction_input_accepts_dict_with_strings():
+    """Dict avec valeurs string accepté (features catégorielles)"""
+    obj = PredictionInput(
+        model_name="loan_model",
+        features={"status": "employed", "education": "bachelor"}
+    )
+    assert obj.features["status"] == "employed"
 
 
 def test_prediction_input_accepts_dict_with_mixed_types():
@@ -77,11 +63,40 @@ def test_prediction_input_rejects_dict_with_non_scalar_values():
         PredictionInput(model_name="test", features={"a": [1, 2, 3]})
 
 
+# ── Rejet du format liste ─────────────────────────────────────────────────────
+
+def test_prediction_input_rejects_list_features():
+    """Une liste de features doit lever une ValidationError"""
+    with pytest.raises(ValidationError):
+        PredictionInput(model_name="iris_model", features=[5.1, 3.5, 1.4, 0.2])
+
+
+def test_prediction_input_rejects_list_of_ints():
+    """Une liste d'entiers doit lever une ValidationError"""
+    with pytest.raises(ValidationError):
+        PredictionInput(model_name="iris_model", features=[5, 3, 1, 0])
+
+
+def test_prediction_input_rejects_list_of_strings():
+    """Une liste de strings doit lever une ValidationError"""
+    with pytest.raises(ValidationError):
+        PredictionInput(model_name="loan_model", features=["employed", "bachelor", "good"])
+
+
+def test_prediction_input_rejects_mixed_list():
+    """Une liste mixte (floats + strings) doit lever une ValidationError"""
+    with pytest.raises(ValidationError):
+        PredictionInput(
+            model_name="loan_model",
+            features=[35, 65000, 15000, "employed", "bachelor", "good"]
+        )
+
+
 # ── id_obs ────────────────────────────────────────────────────────────────────
 
 def test_prediction_input_id_obs_optional():
     """id_obs est optionnel (None par défaut)"""
-    obj = PredictionInput(model_name="iris_model", features=[5.1, 3.5, 1.4, 0.2])
+    obj = PredictionInput(model_name="iris_model", features={"f1": 5.1})
     assert obj.id_obs is None
 
 
@@ -90,7 +105,7 @@ def test_prediction_input_id_obs_accepted():
     obj = PredictionInput(
         model_name="iris_model",
         id_obs="obs-001",
-        features=[5.1, 3.5, 1.4, 0.2]
+        features={"sepal_length": 5.1, "sepal_width": 3.5}
     )
     assert obj.id_obs == "obs-001"
 
@@ -115,7 +130,7 @@ def test_prediction_output_includes_id_obs():
 
 
 def test_prediction_output_id_obs_nullable():
-    """id_obs peut être None dans la réponse (ancien format)"""
+    """id_obs peut être None dans la réponse"""
     out = PredictionOutput(model_name="iris_model", model_version="1.0.0", id_obs=None, prediction=1)
     assert out.id_obs is None
 
@@ -128,13 +143,13 @@ def test_prediction_output_includes_model_version():
 
 def test_prediction_input_model_version_optional():
     """model_version est optionnel dans PredictionInput"""
-    inp = PredictionInput(model_name="iris_model", features=[1.0, 2.0])
+    inp = PredictionInput(model_name="iris_model", features={"f1": 1.0, "f2": 2.0})
     assert inp.model_version is None
 
 
 def test_prediction_input_model_version_accepted():
     """model_version fourni est bien conservé"""
-    inp = PredictionInput(model_name="iris_model", model_version="2.0.0", features=[1.0, 2.0])
+    inp = PredictionInput(model_name="iris_model", model_version="2.0.0", features={"f1": 1.0})
     assert inp.model_version == "2.0.0"
 
 
@@ -149,4 +164,4 @@ def test_prediction_input_rejects_missing_features():
 def test_prediction_input_rejects_missing_model_name():
     """model_name est requis"""
     with pytest.raises(ValidationError):
-        PredictionInput(features=[1.0, 2.0])
+        PredictionInput(features={"f1": 1.0})

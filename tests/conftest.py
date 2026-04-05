@@ -31,7 +31,7 @@ from sqlalchemy.pool import NullPool
 
 from src.core.config import settings
 from src.db.database import get_db, Base
-from src.db.models import User, Prediction, ModelMetadata  # noqa: F401 — enregistre les modèles dans Base
+from src.db.models import User, Prediction, ModelMetadata, ObservedResult  # noqa: F401 — enregistre les modèles dans Base
 from src.main import app
 
 

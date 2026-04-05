@@ -96,10 +96,9 @@ async def predict(
     - **model_version**: Version cible (ex: `1.0.0`). Si absent, utilise la version
       `is_production=True` ; à défaut, la version la plus récente.
     - **id_obs**: Identifiant de l'observation (optionnel, stocké en DB)
-    - **features**: Features pour la prédiction — deux formats acceptés :
-        - **liste** `[5.1, 3.5, 1.4, 0.2]` : l'ordre doit correspondre à celui du modèle
-        - **dict** `{"sepal_length": 5.1, ...}` : le modèle doit exposer `feature_names_in_`
-          (entraîné avec un DataFrame pandas). Les clés manquantes retournent une erreur 422.
+    - **features**: Features sous forme de dict nommé `{"feature1": valeur, ...}`.
+      Le modèle doit exposer `feature_names_in_` (entraîné avec un DataFrame pandas).
+      Les clés manquantes retournent une erreur 422.
 
     Nécessite un token Bearer dans le header Authorization.
     Toutes les prédictions sont loggées dans la base de données.
@@ -116,33 +115,30 @@ async def predict(
         model = model_data["model"]
         metadata = model_data["metadata"]
 
-        # Convertir les features en array numpy selon le format fourni
-        if isinstance(input_data.features, dict):
-            if not hasattr(model, 'feature_names_in_'):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=(
-                        f"Le modèle '{input_data.model_name}' ne possède pas l'attribut "
-                        "'feature_names_in_'. Pour utiliser le format dict, le modèle doit "
-                        "avoir été entraîné avec un DataFrame pandas (les noms de colonnes "
-                        "sont alors automatiquement sauvegardés par sklearn)."
-                    )
+        # Convertir le dict de features en array numpy
+        if not hasattr(model, 'feature_names_in_'):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Le modèle '{input_data.model_name}' ne possède pas l'attribut "
+                    "'feature_names_in_'. Le modèle doit avoir été entraîné avec un "
+                    "DataFrame pandas (les noms de colonnes sont alors automatiquement "
+                    "sauvegardés par sklearn)."
                 )
-            missing = set(model.feature_names_in_) - set(input_data.features.keys())
-            if missing:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=(
-                        f"Features manquantes dans la requête : {sorted(missing)}. "
-                        f"Features attendues : {list(model.feature_names_in_)}"
-                    )
-                )
-            X = np.array(
-                [[input_data.features[name] for name in model.feature_names_in_]],
-                dtype=object
             )
-        else:
-            X = np.array([input_data.features], dtype=object)
+        missing = set(model.feature_names_in_) - set(input_data.features.keys())
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Features manquantes dans la requête : {sorted(missing)}. "
+                    f"Features attendues : {list(model.feature_names_in_)}"
+                )
+            )
+        X = np.array(
+            [[input_data.features[name] for name in model.feature_names_in_]],
+            dtype=object
+        )
 
         # Faire la prédiction
         prediction = model.predict(X)[0]
