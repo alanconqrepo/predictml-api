@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.security import require_admin, verify_token
 from src.db.database import get_db
 from src.db.models import User, UserRole
-from src.schemas.user import UserCreateInput, UserResponse
+from src.schemas.user import UserCreateInput, UserResponse, UserUpdateInput
 from src.services.db_service import DBService
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -88,6 +88,39 @@ async def get_user(
         )
 
     user = await DBService.get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Utilisateur {user_id} introuvable.",
+        )
+    return user
+
+
+@router.patch("/{user_id}", response_model=UserResponse)
+async def update_user(
+    user_id: int,
+    payload: UserUpdateInput,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Met à jour un utilisateur : statut actif, rôle, rate limit, ou renouvellement du token.
+
+    - **is_active** : activer ou désactiver le compte.
+    - **role** : changer le rôle (`admin`, `user`, `readonly`).
+    - **rate_limit** : modifier le quota journalier.
+    - **regenerate_token** : si `true`, génère un nouveau token Bearer.
+
+    Réservé aux administrateurs.
+    """
+    user = await DBService.update_user(
+        db,
+        user_id,
+        is_active=payload.is_active,
+        role=payload.role,
+        rate_limit_per_day=payload.rate_limit,
+        regenerate_token=payload.regenerate_token,
+    )
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

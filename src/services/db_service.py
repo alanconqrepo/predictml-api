@@ -1,6 +1,7 @@
 """
 Service pour les opérations de base de données
 """
+import secrets
 from datetime import datetime, timezone
 
 def _utcnow():
@@ -70,6 +71,22 @@ class DBService:
         await db.delete(user)
         await db.commit()
         return True
+
+    @staticmethod
+    async def update_user(db: AsyncSession, user_id: int, **kwargs) -> Optional["User"]:
+        """Met à jour les propriétés d'un utilisateur. Génère un nouveau token si regenerate_token=True."""
+        user = await DBService.get_user_by_id(db, user_id)
+        if not user:
+            return None
+        regenerate = kwargs.pop("regenerate_token", False)
+        for field, value in kwargs.items():
+            if value is not None and hasattr(user, field):
+                setattr(user, field, value)
+        if regenerate:
+            user.api_token = secrets.token_urlsafe(32)
+        await db.commit()
+        await db.refresh(user)
+        return user
 
     @staticmethod
     async def update_user_last_login(db: AsyncSession, user_id: int):

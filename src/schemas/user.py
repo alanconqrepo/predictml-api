@@ -6,6 +6,14 @@ from typing import Optional
 from pydantic import BaseModel, EmailStr, Field
 
 
+class UserUpdateInput(BaseModel):
+    """Données pour mettre à jour un utilisateur existant"""
+    is_active: Optional[bool] = None
+    role: Optional[str] = Field(None, pattern="^(admin|user|readonly)$")
+    rate_limit: Optional[int] = Field(None, ge=1, le=100000)
+    regenerate_token: Optional[bool] = False
+
+
 class UserCreateInput(BaseModel):
     """Données pour créer un nouvel utilisateur"""
     username: str = Field(..., min_length=3, max_length=50)
