@@ -46,7 +46,25 @@ async def verify_token(
             detail="Compte utilisateur désactivé",
         )
 
-    # Vérifier le rate limit
+    # Mettre à jour la dernière connexion (async, non bloquant)
+    await DBService.update_user_last_login(db, user.id)
+
+    return user
+
+
+async def check_prediction_rate_limit(
+    user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """
+    Vérifie que l'utilisateur n'a pas dépassé son quota journalier de prédictions.
+
+    À utiliser uniquement sur POST /predict — les autres endpoints restent accessibles
+    même si le quota est atteint.
+
+    Raises:
+        HTTPException 429: Si le nombre de prédictions du jour >= rate_limit_per_day
+    """
     today_count = await DBService.get_user_prediction_count_today(db, user.id)
     if today_count >= user.rate_limit_per_day:
         raise HTTPException(
@@ -54,10 +72,6 @@ async def verify_token(
             detail=f"Rate limit dépassé ({user.rate_limit_per_day} requêtes/jour). "
             f"Vous avez effectué {today_count} prédictions aujourd'hui.",
         )
-
-    # Mettre à jour la dernière connexion (async, non bloquant)
-    await DBService.update_user_last_login(db, user.id)
-
     return user
 
 

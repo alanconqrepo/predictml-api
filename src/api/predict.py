@@ -11,7 +11,7 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.security import verify_token
+from src.core.security import check_prediction_rate_limit, verify_token
 from src.db.database import get_db
 from src.db.models import User
 from src.schemas.prediction import (
@@ -98,7 +98,7 @@ async def get_predictions(
 async def predict(
     input_data: PredictionInput,
     request: Request,
-    user: User = Depends(verify_token),
+    user: User = Depends(check_prediction_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
     """
