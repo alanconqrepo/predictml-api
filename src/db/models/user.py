@@ -1,19 +1,20 @@
 """
 Modèle User pour la gestion multi-utilisateurs
 """
-from datetime import datetime, timezone
 
-def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum as SQLEnum
-from sqlalchemy.orm import relationship
 import enum
 
+from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Enum as SQLEnum
+from sqlalchemy.orm import relationship
+
+from src.core.utils import _utcnow
 from src.db.database import Base
 
 
 class UserRole(str, enum.Enum):
     """Rôles utilisateur"""
+
     ADMIN = "admin"
     USER = "user"
     READONLY = "readonly"
@@ -21,6 +22,7 @@ class UserRole(str, enum.Enum):
 
 class User(Base):
     """Modèle utilisateur"""
+
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -40,8 +42,13 @@ class User(Base):
 
     # Relations
     predictions = relationship("Prediction", back_populates="user", cascade="all, delete-orphan")
-    created_models = relationship("ModelMetadata", back_populates="creator", foreign_keys="[ModelMetadata.user_id_creator]")
-    observed_results = relationship("ObservedResult", back_populates="user", cascade="all, delete-orphan")
+    created_models = relationship(
+        "ModelMetadata", back_populates="creator", foreign_keys="[ModelMetadata.user_id_creator]"
+    )
+    observed_results = relationship(
+        "ObservedResult", back_populates="user", cascade="all, delete-orphan"
+    )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """Représentation lisible de l'utilisateur."""
         return f"<User(id={self.id}, username='{self.username}', role='{self.role}')>"

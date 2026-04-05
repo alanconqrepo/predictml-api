@@ -1,6 +1,7 @@
 """
 Configuration OpenTelemetry — traces, métriques, logs.
 """
+
 import logging
 
 from opentelemetry import metrics, trace
@@ -11,24 +12,25 @@ from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExport
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
-from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.sdk._logs import LoggingHandler
 
 
 def setup_telemetry(app, engine=None):
     """Configure OpenTelemetry : traces, métriques, logs."""
     from src.core.config import settings
 
-    resource = Resource.create({
-        "service.name": settings.OTEL_SERVICE_NAME,
-        "service.version": settings.API_VERSION,
-    })
+    resource = Resource.create(
+        {
+            "service.name": settings.OTEL_SERVICE_NAME,
+            "service.version": settings.API_VERSION,
+        }
+    )
     endpoint = settings.OTEL_EXPORTER_OTLP_ENDPOINT
 
     # --- Traces ---

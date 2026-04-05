@@ -1,24 +1,27 @@
 """
 Schémas Pydantic pour les résultats observés
 """
+
 from datetime import datetime
 from typing import Any, List, Optional, Union
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class ObservedResultInput(BaseModel):
     """Un résultat observé à soumettre"""
+
     id_obs: str = Field(..., description="Identifiant de l'observation")
     model_name: str = Field(..., description="Nom du modèle concerné")
     date_time: datetime = Field(..., description="Horodatage de l'observation (ISO 8601)")
     observed_result: Union[float, int, str] = Field(
-        ...,
-        description="Résultat réellement observé (même type que prediction_result)"
+        ..., description="Résultat réellement observé (même type que prediction_result)"
     )
 
 
 class ObservedResultsUpsertRequest(BaseModel):
     """Corps de la requête POST /observed-results"""
+
     data: List[ObservedResultInput] = Field(
         ...,
         description="Liste des résultats observés à insérer ou écraser",
@@ -33,14 +36,14 @@ class ObservedResultsUpsertRequest(BaseModel):
                         "id_obs": "obs-001",
                         "model_name": "iris_model",
                         "date_time": "2024-06-01T12:00:00",
-                        "observed_result": 0
+                        "observed_result": 0,
                     },
                     {
                         "id_obs": "obs-002",
                         "model_name": "iris_model",
                         "date_time": "2024-06-01T12:05:00",
-                        "observed_result": 2
-                    }
+                        "observed_result": 2,
+                    },
                 ]
             }
         }
@@ -49,6 +52,7 @@ class ObservedResultsUpsertRequest(BaseModel):
 
 class ObservedResultResponse(BaseModel):
     """Un résultat observé retourné par l'API"""
+
     id: int
     id_obs: str
     model_name: str
@@ -61,11 +65,13 @@ class ObservedResultResponse(BaseModel):
 
 class ObservedResultsUpsertResponse(BaseModel):
     """Réponse après upsert"""
+
     upserted: int = Field(..., description="Nombre de lignes insérées ou mises à jour")
 
 
 class ObservedResultsListResponse(BaseModel):
     """Résultat paginé de la liste des résultats observés"""
+
     total: int
     limit: int
     offset: int

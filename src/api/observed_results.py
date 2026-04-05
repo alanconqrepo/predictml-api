@@ -1,6 +1,7 @@
 """
 Endpoints pour les résultats observés
 """
+
 from datetime import datetime
 from typing import Optional
 
@@ -11,10 +12,10 @@ from src.core.security import verify_token
 from src.db.database import get_db
 from src.db.models import User
 from src.schemas.observed_result import (
+    ObservedResultResponse,
+    ObservedResultsListResponse,
     ObservedResultsUpsertRequest,
     ObservedResultsUpsertResponse,
-    ObservedResultsListResponse,
-    ObservedResultResponse,
 )
 from src.services.db_service import DBService
 

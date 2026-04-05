@@ -1,13 +1,16 @@
 """
 Schémas Pydantic pour la gestion des utilisateurs
 """
+
 from datetime import datetime
 from typing import Optional
+
 from pydantic import BaseModel, EmailStr, Field
 
 
 class UserUpdateInput(BaseModel):
     """Données pour mettre à jour un utilisateur existant"""
+
     is_active: Optional[bool] = None
     role: Optional[str] = Field(None, pattern="^(admin|user|readonly)$")
     rate_limit: Optional[int] = Field(None, ge=1, le=100000)
@@ -16,6 +19,7 @@ class UserUpdateInput(BaseModel):
 
 class UserCreateInput(BaseModel):
     """Données pour créer un nouvel utilisateur"""
+
     username: str = Field(..., min_length=3, max_length=50)
     email: EmailStr
     role: str = Field("user", pattern="^(admin|user|readonly)$")
@@ -24,6 +28,7 @@ class UserCreateInput(BaseModel):
 
 class UserResponse(BaseModel):
     """Réponse utilisateur (inclut le token — à transmettre de façon sécurisée)"""
+
     id: int
     username: str
     email: str

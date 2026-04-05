@@ -1,8 +1,9 @@
 """
 Configuration de l'application
 """
+
 import os
-from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Charger les variables d'environnement
@@ -24,8 +25,7 @@ class Settings:
 
     # Database
     DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql+asyncpg://postgres:postgres@localhost:5432/sklearn_api"
+        "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/sklearn_api"
     )
 
     # MinIO Object Storage
@@ -38,7 +38,9 @@ class Settings:
     # OpenTelemetry
     ENABLE_OTEL: bool = os.getenv("ENABLE_OTEL", "false").lower() == "true"
     OTEL_SERVICE_NAME: str = os.getenv("OTEL_SERVICE_NAME", "predictml-api")
-    OTEL_EXPORTER_OTLP_ENDPOINT: str = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = os.getenv(
+        "OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"
+    )
 
 
 settings = Settings()

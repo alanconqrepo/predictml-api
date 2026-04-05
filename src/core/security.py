@@ -1,9 +1,9 @@
 """
 Gestion de la sécurité et de l'authentification
 """
-from datetime import datetime
+
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.database import get_db
@@ -15,7 +15,7 @@ security = HTTPBearer()
 
 async def verify_token(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ) -> User:
     """
     Vérifie le token d'authentification Bearer dans la base de données
@@ -52,7 +52,7 @@ async def verify_token(
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Rate limit dépassé ({user.rate_limit_per_day} requêtes/jour). "
-                   f"Vous avez effectué {today_count} prédictions aujourd'hui.",
+            f"Vous avez effectué {today_count} prédictions aujourd'hui.",
         )
 
     # Mettre à jour la dernière connexion (async, non bloquant)

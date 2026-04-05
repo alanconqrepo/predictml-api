@@ -1,8 +1,10 @@
 """
 Schémas Pydantic pour les prédictions
 """
+
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -20,9 +22,9 @@ class PredictionInput(BaseModel):
                             "sepal_length": 5.1,
                             "sepal_width": 3.5,
                             "petal_length": 1.4,
-                            "petal_width": 0.2
-                        }
-                    }
+                            "petal_width": 0.2,
+                        },
+                    },
                 },
                 {
                     "summary": "Format dict avec id_obs",
@@ -33,10 +35,10 @@ class PredictionInput(BaseModel):
                             "sepal_length": 5.1,
                             "sepal_width": 3.5,
                             "petal_length": 1.4,
-                            "petal_width": 0.2
-                        }
-                    }
-                }
+                            "petal_width": 0.2,
+                        },
+                    },
+                },
             ]
         }
     )
@@ -44,7 +46,7 @@ class PredictionInput(BaseModel):
     model_name: str = Field(
         ...,
         description="Nom du modèle à utiliser (sans extension .pkl)",
-        json_schema_extra={"example": "iris_model"}
+        json_schema_extra={"example": "iris_model"},
     )
     model_version: Optional[str] = Field(
         None,
@@ -53,20 +55,20 @@ class PredictionInput(BaseModel):
             "Si absent, utilise la version is_production=True ; "
             "à défaut, la version la plus récente."
         ),
-        json_schema_extra={"example": "1.0.0"}
+        json_schema_extra={"example": "1.0.0"},
     )
     id_obs: Optional[str] = Field(
         None,
         description="Identifiant de l'observation (stocké dans la table predictions)",
-        json_schema_extra={"example": "obs-001"}
+        json_schema_extra={"example": "obs-001"},
     )
     features: Dict[str, Union[float, int, str]] = Field(
         ...,
         description=(
             "Features pour la prédiction sous forme de dict nommé "
-            "{\"feature1\": valeur, \"feature2\": valeur, ...}. "
+            '{"feature1": valeur, "feature2": valeur, ...}. '
             "Le modèle doit exposer feature_names_in_ (entraîné avec un DataFrame pandas)."
-        )
+        ),
     )
 
 
@@ -78,13 +80,13 @@ class PredictionOutput(BaseModel):
     id_obs: Optional[str] = Field(None, description="Identifiant de l'observation (si fourni)")
     prediction: float | int | str = Field(..., description="Prédiction du modèle")
     probability: Optional[List[float]] = Field(
-        None,
-        description="Probabilités par classe (si disponible)"
+        None, description="Probabilités par classe (si disponible)"
     )
 
 
 class PredictionResponse(BaseModel):
     """Une prédiction loggée"""
+
     id: int
     model_name: str
     model_version: Optional[str]
@@ -103,6 +105,7 @@ class PredictionResponse(BaseModel):
 
 class PredictionsListResponse(BaseModel):
     """Résultat paginé de la liste des prédictions"""
+
     total: int
     limit: int
     offset: int
