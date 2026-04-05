@@ -10,7 +10,8 @@ from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.models import User, Prediction, ModelMetadata
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from src.db.models import User, Prediction, ModelMetadata, ObservedResult
 
 
 class DBService:
@@ -100,7 +101,7 @@ class DBService:
         user_id: int,
         model_name: str,
         model_version: Optional[str],
-        input_features: list,
+        input_features: dict,
         prediction_result: any,
         probabilities: Optional[list],
         response_time_ms: float,
@@ -243,6 +244,82 @@ class DBService:
             await db.commit()
             return True
         return False
+
+
+    # === Observed Results ===
+
+    @staticmethod
+    async def upsert_observed_results(
+        db: AsyncSession,
+        records: list[dict],
+    ) -> int:
+        """
+        Insère ou écrase des résultats observés.
+
+        La clé d'unicité est (id_obs, model_name) — si la paire existe déjà,
+        observed_result, date_time et user_id sont mis à jour.
+
+        Args:
+            records: liste de dicts avec les clés id_obs, model_name,
+                     observed_result, date_time, user_id
+
+        Returns:
+            Nombre de lignes affectées
+        """
+        stmt = pg_insert(ObservedResult).values(records)
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_observed_result_obs_model",
+            set_={
+                "observed_result": stmt.excluded.observed_result,
+                "date_time": stmt.excluded.date_time,
+                "user_id": stmt.excluded.user_id,
+            },
+        )
+        result = await db.execute(stmt)
+        await db.commit()
+        return result.rowcount
+
+    @staticmethod
+    async def get_observed_results(
+        db: AsyncSession,
+        model_name: Optional[str] = None,
+        id_obs: Optional[str] = None,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list, int]:
+        """
+        Récupère les résultats observés avec filtres optionnels.
+
+        Returns:
+            Tuple (liste d'ObservedResult avec relation user chargée, total sans pagination)
+        """
+        filters = []
+        if model_name:
+            filters.append(ObservedResult.model_name == model_name)
+        if id_obs:
+            filters.append(ObservedResult.id_obs == id_obs)
+        if start:
+            filters.append(ObservedResult.date_time >= start)
+        if end:
+            filters.append(ObservedResult.date_time <= end)
+
+        base_query = (
+            select(ObservedResult)
+            .options(selectinload(ObservedResult.user))
+            .where(and_(*filters) if filters else True)
+        )
+
+        total_result = await db.execute(
+            select(func.count()).select_from(base_query.subquery())
+        )
+        total = total_result.scalar() or 0
+
+        result = await db.execute(
+            base_query.order_by(ObservedResult.date_time.desc()).limit(limit).offset(offset)
+        )
+        return result.scalars().all(), total
 
 
 # Instance globale (optionnel)

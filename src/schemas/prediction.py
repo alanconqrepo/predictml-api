@@ -13,14 +13,19 @@ class PredictionInput(BaseModel):
         json_schema_extra={
             "examples": [
                 {
-                    "summary": "Format liste (ancien)",
+                    "summary": "Format dict",
                     "value": {
                         "model_name": "iris_model",
-                        "features": [5.1, 3.5, 1.4, 0.2]
+                        "features": {
+                            "sepal_length": 5.1,
+                            "sepal_width": 3.5,
+                            "petal_length": 1.4,
+                            "petal_width": 0.2
+                        }
                     }
                 },
                 {
-                    "summary": "Format dict avec id_obs (nouveau)",
+                    "summary": "Format dict avec id_obs",
                     "value": {
                         "model_name": "iris_model",
                         "id_obs": "obs-001",
@@ -55,16 +60,12 @@ class PredictionInput(BaseModel):
         description="Identifiant de l'observation (stocké dans la table predictions)",
         json_schema_extra={"example": "obs-001"}
     )
-    features: Union[
-        List[Union[float, int, str]],
-        Dict[str, Union[float, int, str]]
-    ] = Field(
+    features: Dict[str, Union[float, int, str]] = Field(
         ...,
         description=(
-            "Features pour la prédiction. "
-            "Deux formats acceptés : "
-            "(1) liste ordonnée [5.1, 3.5, 1.4, 0.2] — l'ordre doit correspondre au modèle ; "
-            "(2) dict nommé {\"sepal_length\": 5.1, ...} — le modèle doit exposer feature_names_in_."
+            "Features pour la prédiction sous forme de dict nommé "
+            "{\"feature1\": valeur, \"feature2\": valeur, ...}. "
+            "Le modèle doit exposer feature_names_in_ (entraîné avec un DataFrame pandas)."
         )
     )
 
