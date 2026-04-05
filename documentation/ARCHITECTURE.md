@@ -111,6 +111,94 @@ Le dashboard Streamlit ne parle **jamais directement** à la DB ou à MinIO — 
 | `response_time_ms` | Float | Temps d'inférence en millisecondes |
 | `status` | VARCHAR(20) | `success` ou `error` |
 
+## Stockage des données d'entraînement
+
+### Stratégie : MinIO (stockage) + MLflow (traçabilité)
+
+Les données d'entraînement ne sont **pas** stockées comme artifacts MLflow (évite la duplication à chaque run). Elles vivent dans un bucket MinIO dédié, et MLflow en garde uniquement la **référence**.
+
+```
+MinIO bucket: datasets/
+└── loan_model/
+    └── v1/
+        ├── train.parquet    ← données d'entraînement
+        └── test.parquet     ← données de test
+
+MLflow Run:
+  params:  dataset_uri = "s3://datasets/loan_model/v1"
+  inputs:  mlflow.log_input(dataset, context="training")  ← référence, pas de copie
+```
+
+**Avantages :**
+- Pas de duplication : 10 runs → 1 seul exemplaire du dataset
+- Fichiers volumineux gérés nativement par MinIO (multipart, streaming)
+- Traçabilité complète via MLflow (quel run a utilisé quelle version de données)
+- Le champ `training_dataset` de `model_metadata` stocke l'URI pour consultation rapide
+
+### Workflow complet
+
+```python
+import os
+import mlflow
+import mlflow.sklearn
+import pandas as pd
+from minio import Minio
+from io import BytesIO
+
+# ── 1. Uploader le dataset dans MinIO ────────────────────────────────────────
+minio = Minio("localhost:9000", access_key="minioadmin", secret_key="minioadmin", secure=False)
+
+if not minio.bucket_exists("datasets"):
+    minio.make_bucket("datasets")
+
+# Sérialiser en parquet et uploader
+parquet_bytes = df_train.to_parquet(index=False)
+minio.put_object(
+    "datasets", "loan_model/v1/train.parquet",
+    BytesIO(parquet_bytes), length=len(parquet_bytes),
+    content_type="application/octet-stream"
+)
+
+DATASET_URI = "s3://datasets/loan_model/v1"
+
+# ── 2. Référencer dans MLflow (sans copie) ───────────────────────────────────
+os.environ["MLFLOW_S3_ENDPOINT_URL"] = "http://localhost:9000"
+os.environ["AWS_ACCESS_KEY_ID"]      = "minioadmin"
+os.environ["AWS_SECRET_ACCESS_KEY"]  = "minioadmin"
+
+mlflow.set_tracking_uri("http://localhost:5000")
+
+with mlflow.start_run() as run:
+    # Référence au dataset — MLflow ne copie pas les données
+    dataset = mlflow.data.from_numpy(
+        X_train.to_numpy(),
+        source=f"{DATASET_URI}/train.parquet",
+        name="loan_model_v1_train",
+    )
+    mlflow.log_input(dataset, context="training")
+
+    # URI également en paramètre pour consultation rapide dans l'UI
+    mlflow.log_param("dataset_uri", DATASET_URI)
+    mlflow.log_param("dataset_version", "v1")
+
+    # ... entraînement ...
+    mlflow.sklearn.log_model(pipeline, "model")
+    RUN_ID = run.info.run_id
+
+# ── 3. Enregistrer le modèle via l'API (training_dataset = URI MinIO) ────────
+requests.post("http://localhost:8000/models", headers=HEADERS, data={
+    "name":             "loan_model",
+    "version":          "1.0.0",
+    "mlflow_run_id":    RUN_ID,
+    "training_dataset": DATASET_URI,   # stocké dans model_metadata.training_dataset
+    # ...
+})
+```
+
+> **Note :** MLflow utilise déjà MinIO comme backend S3 (`s3://mlflow/`). Le bucket `datasets/` est séparé pour distinguer les artifacts de run des données sources pérennes.
+
+---
+
 ## Authentification
 
 - **Mécanisme** : HTTP Bearer token (`Authorization: Bearer <token>`)
