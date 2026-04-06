@@ -320,6 +320,59 @@ class DBService:
             for day, items in sorted(daily.items())
         ]
 
+    @staticmethod
+    async def get_feature_production_stats(
+        db: AsyncSession,
+        model_name: str,
+        model_version: Optional[str],
+        days: int = 7,
+    ) -> dict:
+        """
+        Calcule les statistiques des features de production sur une fenêtre glissante.
+
+        Retourne un dict {feature: {mean, std, min, max, count, values}} où
+        `values` contient les valeurs brutes numériques (pour le calcul PSI).
+        Seules les features numériques (int/float) sont incluses.
+        """
+        import numpy as np
+        from datetime import timedelta
+
+        cutoff = _utcnow() - timedelta(days=days)
+
+        filters = [
+            Prediction.model_name == model_name,
+            Prediction.status == "success",
+            Prediction.timestamp >= cutoff,
+        ]
+        if model_version:
+            filters.append(Prediction.model_version == model_version)
+
+        stmt = select(Prediction.input_features).where(and_(*filters))
+        result = await db.execute(stmt)
+        rows = result.scalars().all()
+
+        feature_values: dict[str, list] = {}
+        for input_features in rows:
+            if not isinstance(input_features, dict):
+                continue
+            for feature, value in input_features.items():
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    feature_values.setdefault(feature, []).append(float(value))
+
+        stats: dict = {}
+        for feature, values in feature_values.items():
+            arr = np.array(values, dtype=float)
+            stats[feature] = {
+                "mean": float(np.mean(arr)),
+                "std": float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0,
+                "min": float(np.min(arr)),
+                "max": float(np.max(arr)),
+                "count": len(arr),
+                "values": values,
+            }
+
+        return stats
+
     # === Model Metadata ===
 
     @staticmethod

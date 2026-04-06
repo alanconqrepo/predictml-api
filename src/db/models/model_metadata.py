@@ -56,6 +56,7 @@ class ModelMetadata(Base):
     training_date = Column(DateTime, nullable=True)
     training_dataset = Column(String(255), nullable=True)
     training_params = Column(JSON, nullable=True)
+    feature_baseline = Column(JSON, nullable=True)  # {feature: {mean, std, min, max}}
 
     # Status
     is_active = Column(Boolean, default=True, nullable=False, index=True)

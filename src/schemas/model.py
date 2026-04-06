@@ -17,6 +17,15 @@ class ModelDeleteResponse(BaseModel):
     minio_objects_deleted: List[str]
 
 
+class FeatureStats(BaseModel):
+    """Statistiques d'une feature issues des données d'entraînement"""
+
+    mean: float
+    std: float
+    min: float
+    max: float
+
+
 class ModelUpdateInput(BaseModel):
     """Champs modifiables d'un modèle (tous optionnels)"""
 
@@ -26,6 +35,7 @@ class ModelUpdateInput(BaseModel):
     features_count: Optional[int] = None
     classes: Optional[List[Any]] = None
     confidence_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
+    feature_baseline: Optional[Dict[str, FeatureStats]] = None
 
     model_config = {"from_attributes": True}
 
@@ -48,6 +58,7 @@ class ModelCreateResponse(BaseModel):
     classes: Optional[List[Any]]
     training_params: Optional[Dict[str, Any]]
     confidence_threshold: Optional[float] = None
+    feature_baseline: Optional[Dict[str, Any]] = None
     is_active: bool
     is_production: bool
     created_at: datetime
@@ -82,6 +93,9 @@ class ModelGetResponse(BaseModel):
     precision: Optional[float]
     recall: Optional[float]
     confidence_threshold: Optional[float] = None
+
+    # Baseline features
+    feature_baseline: Optional[Dict[str, Any]] = None
 
     # Stockage
     mlflow_run_id: Optional[str]
@@ -152,3 +166,30 @@ class ModelPerformanceResponse(BaseModel):
 
     # Agrégation temporelle
     by_period: Optional[List[PeriodPerformance]] = None
+
+
+class FeatureDriftResult(BaseModel):
+    """Résultat du drift pour une feature individuelle"""
+
+    baseline_mean: Optional[float] = None
+    baseline_std: Optional[float] = None
+    baseline_min: Optional[float] = None
+    baseline_max: Optional[float] = None
+    production_mean: Optional[float] = None
+    production_std: Optional[float] = None
+    production_count: int = 0
+    z_score: Optional[float] = None
+    psi: Optional[float] = None
+    drift_status: str  # "ok" | "warning" | "critical" | "insufficient_data" | "no_baseline"
+
+
+class DriftReportResponse(BaseModel):
+    """Rapport de drift complet pour un modèle"""
+
+    model_name: str
+    model_version: Optional[str]
+    period_days: int
+    predictions_analyzed: int
+    baseline_available: bool
+    drift_summary: str  # "ok" | "warning" | "critical" | "no_baseline" | "insufficient_data"
+    features: Dict[str, FeatureDriftResult]

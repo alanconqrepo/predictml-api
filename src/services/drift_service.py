@@ -1,0 +1,200 @@
+"""
+Service de détection de data drift.
+
+Calcule deux métriques par feature numérique :
+- Z-score : écart normalisé entre la moyenne de production et la baseline
+- PSI (Population Stability Index) : divergence de distribution via bins normaux
+
+Seuils de statut :
+  Z-score : ok < 2 | warning 2–3 | critical ≥ 3
+  PSI     : ok < 0.1 | warning 0.1–0.2 | critical ≥ 0.2
+
+Statut final = pire des deux statuts.
+"""
+
+import math
+from typing import Dict, Optional
+
+import numpy as np
+from scipy import stats
+
+from src.schemas.model import FeatureDriftResult
+
+_N_BINS = 10
+_EPS = 1e-6  # évite log(0)
+
+
+def _status_from_z(z: float) -> str:
+    if z < 2.0:
+        return "ok"
+    if z < 3.0:
+        return "warning"
+    return "critical"
+
+
+def _status_from_psi(psi: float) -> str:
+    if psi < 0.1:
+        return "ok"
+    if psi < 0.2:
+        return "warning"
+    return "critical"
+
+
+def _worst_status(*statuses: str) -> str:
+    order = {"ok": 0, "warning": 1, "critical": 2}
+    return max(statuses, key=lambda s: order.get(s, -1))
+
+
+def _compute_psi(
+    prod_values: np.ndarray,
+    baseline_mean: float,
+    baseline_std: float,
+    baseline_min: float,
+    baseline_max: float,
+) -> float:
+    """
+    Calcule le PSI en comparant la distribution de production à la distribution
+    N(baseline_mean, baseline_std) découpée en _N_BINS bins égaux.
+    """
+    if baseline_std <= 0:
+        return 0.0
+
+    # Bornes des bins : légèrement élargies au-delà de [min, max]
+    margin = 0.5 * baseline_std
+    low = baseline_min - margin
+    high = baseline_max + margin
+    if high <= low:
+        return 0.0
+
+    bin_edges = np.linspace(low, high, _N_BINS + 1)
+
+    # Proportions attendues (distribution normale baseline)
+    expected = np.diff(stats.norm.cdf(bin_edges, loc=baseline_mean, scale=baseline_std))
+    expected = np.clip(expected, _EPS, None)
+    expected /= expected.sum()
+
+    # Proportions observées en production
+    counts, _ = np.histogram(prod_values, bins=bin_edges)
+    total = counts.sum()
+    if total == 0:
+        return 0.0
+    actual = counts / total
+    actual = np.clip(actual, _EPS, None)
+
+    psi = float(np.sum((actual - expected) * np.log(actual / expected)))
+    return round(psi, 6)
+
+
+def compute_feature_drift(
+    baseline: Dict[str, dict],
+    production_stats: Dict[str, dict],
+    min_count: int = 30,
+) -> Dict[str, FeatureDriftResult]:
+    """
+    Compare les stats de production au baseline par feature.
+
+    Args:
+        baseline: {feature: {mean, std, min, max}} — issu de model_metadata.feature_baseline
+        production_stats: {feature: {mean, std, min, max, count, values}} — calculé depuis les prédictions
+        min_count: nombre minimum de prédictions pour calculer le drift
+
+    Returns:
+        Dict[feature, FeatureDriftResult]
+    """
+    results: Dict[str, FeatureDriftResult] = {}
+
+    all_features = set(baseline.keys()) | set(production_stats.keys())
+
+    for feature in sorted(all_features):
+        bl = baseline.get(feature)
+        ps = production_stats.get(feature, {})
+
+        prod_count = int(ps.get("count", 0))
+        prod_mean: Optional[float] = ps.get("mean")
+        prod_std: Optional[float] = ps.get("std")
+
+        # Pas de baseline pour cette feature
+        if bl is None:
+            results[feature] = FeatureDriftResult(
+                production_mean=round(prod_mean, 6) if prod_mean is not None else None,
+                production_std=round(prod_std, 6) if prod_std is not None else None,
+                production_count=prod_count,
+                drift_status="no_baseline",
+            )
+            continue
+
+        bl_mean = float(bl.get("mean", 0))
+        bl_std = float(bl.get("std", 0))
+        bl_min = float(bl.get("min", 0))
+        bl_max = float(bl.get("max", 0))
+
+        # Données de production insuffisantes
+        if prod_count < min_count or prod_mean is None:
+            results[feature] = FeatureDriftResult(
+                baseline_mean=round(bl_mean, 6),
+                baseline_std=round(bl_std, 6),
+                baseline_min=round(bl_min, 6),
+                baseline_max=round(bl_max, 6),
+                production_mean=round(prod_mean, 6) if prod_mean is not None else None,
+                production_std=round(prod_std, 6) if prod_std is not None else None,
+                production_count=prod_count,
+                drift_status="insufficient_data",
+            )
+            continue
+
+        # Z-score
+        z_score: Optional[float] = None
+        z_status = "ok"
+        if bl_std > 0:
+            z_score = abs(prod_mean - bl_mean) / bl_std
+            z_score = round(z_score, 4)
+            z_status = _status_from_z(z_score)
+
+        # PSI (nécessite les valeurs brutes)
+        psi: Optional[float] = None
+        psi_status = "ok"
+        raw_values = ps.get("values")
+        if raw_values is not None and len(raw_values) >= min_count:
+            arr = np.array(raw_values, dtype=float)
+            psi = _compute_psi(arr, bl_mean, bl_std, bl_min, bl_max)
+            psi_status = _status_from_psi(psi)
+
+        results[feature] = FeatureDriftResult(
+            baseline_mean=round(bl_mean, 6),
+            baseline_std=round(bl_std, 6),
+            baseline_min=round(bl_min, 6),
+            baseline_max=round(bl_max, 6),
+            production_mean=round(prod_mean, 6),
+            production_std=round(prod_std, 6) if prod_std is not None else None,
+            production_count=prod_count,
+            z_score=z_score,
+            psi=round(psi, 6) if psi is not None else None,
+            drift_status=_worst_status(z_status, psi_status),
+        )
+
+    return results
+
+
+def summarize_drift(features: Dict[str, FeatureDriftResult], baseline_available: bool) -> str:
+    """Retourne le statut global le plus défavorable parmi toutes les features."""
+    if not baseline_available:
+        return "no_baseline"
+
+    statuses = [f.drift_status for f in features.values() if f.drift_status not in ("no_baseline",)]
+    if not statuses:
+        return "insufficient_data"
+
+    if all(s == "insufficient_data" for s in statuses):
+        return "insufficient_data"
+
+    ranked = [s for s in statuses if s in ("ok", "warning", "critical")]
+    if not ranked:
+        return "insufficient_data"
+
+    order = {"ok": 0, "warning": 1, "critical": 2}
+    return max(ranked, key=lambda s: order[s])
+
+
+def is_nan_safe(value: float) -> bool:
+    """Vérifie si une valeur float est NaN ou infinie."""
+    return math.isnan(value) or math.isinf(value)
