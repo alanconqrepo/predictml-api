@@ -184,6 +184,77 @@ class DBService:
         )
         return result.scalars().all(), total
 
+    @staticmethod
+    async def count_predictions(
+        db: AsyncSession,
+        model_name: str,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        model_version: Optional[str] = None,
+    ) -> int:
+        """Compte les prédictions réussies pour un modèle sur une période."""
+        filters = [
+            Prediction.model_name == model_name,
+            Prediction.status == "success",
+        ]
+        if start:
+            filters.append(Prediction.timestamp >= start)
+        if end:
+            filters.append(Prediction.timestamp <= end)
+        if model_version:
+            filters.append(Prediction.model_version == model_version)
+
+        result = await db.execute(
+            select(func.count(Prediction.id)).where(and_(*filters))
+        )
+        return result.scalar() or 0
+
+    @staticmethod
+    async def get_performance_pairs(
+        db: AsyncSession,
+        model_name: str,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        model_version: Optional[str] = None,
+    ) -> list:
+        """
+        Retourne les paires (prediction_result, observed_result, probabilities, timestamp)
+        pour les prédictions ayant un observed_result associé.
+        JOIN sur (id_obs, model_name), uniquement les prédictions status='success'.
+        """
+        filters = [
+            Prediction.model_name == model_name,
+            Prediction.status == "success",
+            Prediction.id_obs.isnot(None),
+        ]
+        if start:
+            filters.append(Prediction.timestamp >= start)
+        if end:
+            filters.append(Prediction.timestamp <= end)
+        if model_version:
+            filters.append(Prediction.model_version == model_version)
+
+        stmt = (
+            select(
+                Prediction.prediction_result,
+                ObservedResult.observed_result,
+                Prediction.probabilities,
+                Prediction.timestamp,
+            )
+            .join(
+                ObservedResult,
+                and_(
+                    Prediction.id_obs == ObservedResult.id_obs,
+                    Prediction.model_name == ObservedResult.model_name,
+                ),
+            )
+            .where(and_(*filters))
+            .order_by(Prediction.timestamp)
+        )
+
+        result = await db.execute(stmt)
+        return result.all()
+
     # === Model Metadata ===
 
     @staticmethod

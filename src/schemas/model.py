@@ -105,3 +105,47 @@ class ModelGetResponse(BaseModel):
     load_instructions: Optional[Dict[str, Any]]
 
     model_config = {"from_attributes": True}
+
+
+class PerClassMetrics(BaseModel):
+    precision: float
+    recall: float
+    f1_score: float
+    support: int
+
+
+class PeriodPerformance(BaseModel):
+    period: str
+    matched_count: int
+    accuracy: Optional[float] = None
+    f1_weighted: Optional[float] = None
+    mae: Optional[float] = None
+    rmse: Optional[float] = None
+
+
+class ModelPerformanceResponse(BaseModel):
+    model_name: str
+    model_version: Optional[str]
+    period_start: Optional[datetime]
+    period_end: Optional[datetime]
+    total_predictions: int
+    matched_predictions: int
+    model_type: str  # "classification" ou "regression"
+
+    # Classification
+    accuracy: Optional[float] = None
+    precision_weighted: Optional[float] = None
+    recall_weighted: Optional[float] = None
+    f1_weighted: Optional[float] = None
+    confusion_matrix: Optional[List[List[int]]] = None
+    classes: Optional[List[Any]] = None
+    per_class_metrics: Optional[Dict[str, PerClassMetrics]] = None
+
+    # Régression
+    mae: Optional[float] = None
+    mse: Optional[float] = None
+    rmse: Optional[float] = None
+    r2: Optional[float] = None
+
+    # Agrégation temporelle
+    by_period: Optional[List[PeriodPerformance]] = None
