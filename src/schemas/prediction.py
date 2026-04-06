@@ -82,6 +82,13 @@ class PredictionOutput(BaseModel):
     probability: Optional[List[float]] = Field(
         None, description="Probabilités par classe (si disponible)"
     )
+    low_confidence: Optional[bool] = Field(
+        None,
+        description=(
+            "True si la probabilité max est en dessous du seuil de confiance du modèle. "
+            "None si le modèle n'a pas de seuil configuré ou ne supporte pas predict_proba."
+        ),
+    )
 
 
 class PredictionResponse(BaseModel):
@@ -140,6 +147,13 @@ class BatchPredictionResultItem(BaseModel):
     prediction: Union[float, int, str] = Field(..., description="Prédiction du modèle")
     probability: Optional[List[float]] = Field(
         None, description="Probabilités par classe (si disponible)"
+    )
+    low_confidence: Optional[bool] = Field(
+        None,
+        description=(
+            "True si la probabilité max est en dessous du seuil de confiance du modèle. "
+            "None si le modèle n'a pas de seuil configuré ou ne supporte pas predict_proba."
+        ),
     )
 
 

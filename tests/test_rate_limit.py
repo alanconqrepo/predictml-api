@@ -38,7 +38,7 @@ def _inject_cache(model_name: str, version: str, model) -> str:
     key = f"{model_name}:{version}"
     model_service.models_cache[key] = {
         "model": model,
-        "metadata": SimpleNamespace(name=model_name, version=version),
+        "metadata": SimpleNamespace(name=model_name, version=version, confidence_threshold=None),
     }
     return key
 

@@ -5,7 +5,7 @@ Schémas Pydantic pour la création et la réponse de modèles
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ModelDeleteResponse(BaseModel):
@@ -25,6 +25,7 @@ class ModelUpdateInput(BaseModel):
     accuracy: Optional[float] = None
     features_count: Optional[int] = None
     classes: Optional[List[Any]] = None
+    confidence_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
 
     model_config = {"from_attributes": True}
 
@@ -46,6 +47,7 @@ class ModelCreateResponse(BaseModel):
     features_count: Optional[int]
     classes: Optional[List[Any]]
     training_params: Optional[Dict[str, Any]]
+    confidence_threshold: Optional[float] = None
     is_active: bool
     is_production: bool
     created_at: datetime
@@ -79,6 +81,7 @@ class ModelGetResponse(BaseModel):
     f1_score: Optional[float]
     precision: Optional[float]
     recall: Optional[float]
+    confidence_threshold: Optional[float] = None
 
     # Stockage
     mlflow_run_id: Optional[str]

@@ -163,6 +163,11 @@ async def predict(
         if hasattr(model, "predict_proba"):
             probability = model.predict_proba(x)[0].tolist()
 
+        # Calculer low_confidence si un seuil est configuré sur le modèle
+        low_confidence = None
+        if probability is not None and metadata.confidence_threshold is not None:
+            low_confidence = max(probability) < metadata.confidence_threshold
+
         response_time_ms = (time.time() - start_time) * 1000
 
         # Logger la prédiction réussie dans la DB
@@ -187,6 +192,7 @@ async def predict(
             id_obs=input_data.id_obs,
             prediction=prediction_result,
             probability=probability,
+            low_confidence=low_confidence,
         )
 
     except HTTPException:
@@ -278,6 +284,7 @@ async def predict_batch(
             )
 
         has_proba = hasattr(model, "predict_proba")
+        confidence_threshold = metadata.confidence_threshold
         orm_objects: List[Prediction] = []
         results: List[BatchPredictionResultItem] = []
 
@@ -300,6 +307,12 @@ async def predict_batch(
             raw = model.predict(x)[0]
             prediction_result = raw.item() if hasattr(raw, "item") else raw
             probability = model.predict_proba(x)[0].tolist() if has_proba else None
+
+            # Calculer low_confidence si un seuil est configuré sur le modèle
+            low_confidence = None
+            if probability is not None and confidence_threshold is not None:
+                low_confidence = max(probability) < confidence_threshold
+
             response_time_ms = (time.time() - item_start) * 1000
 
             orm_objects.append(
@@ -322,6 +335,7 @@ async def predict_batch(
                     id_obs=item.id_obs,
                     prediction=prediction_result,
                     probability=probability,
+                    low_confidence=low_confidence,
                 )
             )
 

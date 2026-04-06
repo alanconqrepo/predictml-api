@@ -41,6 +41,9 @@ class ModelMetadata(Base):
     f1_score = Column(Float, nullable=True)
     training_metrics = Column(JSON, nullable=True)  # Métriques supplémentaires
 
+    # Seuil de confiance
+    confidence_threshold = Column(Float, nullable=True)  # Si proba max < seuil → low_confidence=True
+
     # MLflow
     mlflow_run_id = Column(String(255), nullable=True, index=True)
 
