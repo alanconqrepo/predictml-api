@@ -40,6 +40,7 @@ async def get_predictions(
     end: datetime = Query(..., description="Fin de la période (ISO 8601, ex: 2024-12-31T23:59:59)"),
     version: Optional[str] = Query(None, description="Version du modèle (optionnel)"),
     user: Optional[str] = Query(None, description="Nom d'utilisateur (optionnel)"),
+    id_obs: Optional[str] = Query(None, description="Identifiant de l'observation (optionnel)"),
     limit: int = Query(100, ge=1, le=1000, description="Nombre max de résultats"),
     offset: int = Query(0, ge=0, description="Décalage pour la pagination"),
     _auth: User = Depends(verify_token),
@@ -52,6 +53,7 @@ async def get_predictions(
     - **start** / **end** : plage datetime — obligatoire
     - **version** : version du modèle — optionnel
     - **user** : nom d'utilisateur — optionnel
+    - **id_obs** : identifiant de l'observation — optionnel
     - **limit** / **offset** : pagination (défaut : 100 résultats, max 1000)
 
     Nécessite un token Bearer valide.
@@ -69,6 +71,7 @@ async def get_predictions(
         end=end,
         model_version=version,
         username=user,
+        id_obs=id_obs,
         limit=limit,
         offset=offset,
     )
