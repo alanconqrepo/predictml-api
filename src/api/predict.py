@@ -18,6 +18,8 @@ from src.schemas.prediction import (
     BatchPredictionInput,
     BatchPredictionOutput,
     BatchPredictionResultItem,
+    ExplainInput,
+    ExplainOutput,
     PredictionInput,
     PredictionOutput,
     PredictionResponse,
@@ -25,6 +27,7 @@ from src.schemas.prediction import (
 )
 from src.services.db_service import DBService
 from src.services.model_service import model_service
+from src.services.shap_service import compute_shap_explanation
 
 logger = logging.getLogger(__name__)
 
@@ -385,3 +388,71 @@ async def predict_batch(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erreur lors du batch avec '{input_data.model_name}': {error_message}",
         )
+
+
+@router.post("/explain", response_model=ExplainOutput)
+async def explain(
+    input_data: ExplainInput,
+    user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retourne les importances SHAP locales pour une observation.
+
+    - **model_name** / **model_version** : même sélection que `/predict`
+    - **features** : même format que `/predict`
+
+    Ne consomme pas de quota rate-limit et ne logue pas en base de données.
+
+    **Modèles supportés** :
+    - Arbres : RandomForest, GradientBoosting, DecisionTree, ExtraTrees, HistGradientBoosting
+    - Linéaires : LogisticRegression, LinearRegression, Ridge, Lasso, ElasticNet, SGD
+
+    Retourne un dict `{feature: shap_value}` indiquant la contribution de chaque feature
+    à la prédiction, ainsi que la valeur de base `E[f(X)]` du modèle.
+    """
+    model_data = await model_service.load_model(db, input_data.model_name, input_data.model_version)
+    model = model_data["model"]
+    metadata = model_data["metadata"]
+
+    if not hasattr(model, "feature_names_in_"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"Le modèle '{input_data.model_name}' ne possède pas l'attribut "
+                "'feature_names_in_'. Le modèle doit avoir été entraîné avec un DataFrame pandas."
+            ),
+        )
+
+    feature_names = list(model.feature_names_in_)
+    missing = set(feature_names) - set(input_data.features.keys())
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"Features manquantes dans la requête : {sorted(missing)}. "
+                f"Features attendues : {feature_names}"
+            ),
+        )
+
+    x = np.array([[input_data.features[f] for f in feature_names]], dtype=float)
+
+    raw = model.predict(x)[0]
+    prediction_result = raw.item() if hasattr(raw, "item") else raw
+
+    explanation = compute_shap_explanation(
+        model=model,
+        feature_names=feature_names,
+        x=x,
+        prediction_result=prediction_result,
+        feature_baseline=metadata.feature_baseline,
+    )
+
+    return ExplainOutput(
+        model_name=metadata.name,
+        model_version=metadata.version,
+        prediction=prediction_result,
+        shap_values=explanation["shap_values"],
+        base_value=explanation["base_value"],
+        model_type=explanation["model_type"],
+    )

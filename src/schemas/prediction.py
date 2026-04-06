@@ -183,6 +183,47 @@ class HealthResponse(BaseModel):
     models_cached: int = Field(..., description="Nombre de modèles en cache")
 
 
+class ExplainInput(BaseModel):
+    """Données d'entrée pour une explication SHAP"""
+
+    model_name: str = Field(
+        ...,
+        description="Nom du modèle à utiliser (sans extension .pkl)",
+        json_schema_extra={"example": "iris_model"},
+    )
+    model_version: Optional[str] = Field(
+        None,
+        description="Version du modèle (ex: '1.0.0'). Si absent, utilise is_production=True.",
+        json_schema_extra={"example": "1.0.0"},
+    )
+    features: Dict[str, Union[float, int, str]] = Field(
+        ...,
+        description="Features pour l'explication sous forme de dict nommé.",
+    )
+
+
+class ExplainOutput(BaseModel):
+    """Résultat d'une explication SHAP locale"""
+
+    model_name: str = Field(..., description="Nom du modèle utilisé")
+    model_version: str = Field(..., description="Version du modèle utilisée")
+    prediction: Union[float, int, str] = Field(
+        ..., description="Prédiction du modèle pour ces features"
+    )
+    shap_values: Dict[str, float] = Field(
+        ...,
+        description=(
+            "Valeurs SHAP par feature — contribution de chaque feature à la prédiction. "
+            "Valeur positive = pousse vers la classe prédite, négative = pousse à l'opposé."
+        ),
+    )
+    base_value: float = Field(
+        ...,
+        description="Valeur de base du modèle E[f(X)] — prédiction moyenne sur les données d'entraînement.",
+    )
+    model_type: str = Field(..., description="Type d'explainer SHAP utilisé : 'tree' ou 'linear'.")
+
+
 class RootResponse(BaseModel):
     """Réponse de l'endpoint racine"""
 
