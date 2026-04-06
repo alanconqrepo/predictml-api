@@ -37,8 +37,8 @@ from src.schemas.model import (
     PerClassMetrics,
     PeriodPerformance,
 )
-from src.services.db_service import DBService
 from src.services import drift_service
+from src.services.db_service import DBService
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
 
@@ -88,9 +88,7 @@ def _detect_model_type(metadata: Optional[ModelMetadata], pairs: list) -> str:
     return "regression"
 
 
-def _compute_classification_metrics(
-    y_true: list, y_pred: list, classes: Optional[list]
-) -> tuple:
+def _compute_classification_metrics(y_true: list, y_pred: list, classes: Optional[list]) -> tuple:
     labels = (
         sorted(set(str(c) for c in classes))
         if classes
@@ -105,9 +103,7 @@ def _compute_classification_metrics(
     f1 = f1_score(y_true_s, y_pred_s, average="weighted", zero_division=0, labels=labels)
     cm = confusion_matrix(y_true_s, y_pred_s, labels=labels).tolist()
 
-    prec_per = precision_score(
-        y_true_s, y_pred_s, average=None, zero_division=0, labels=labels
-    )
+    prec_per = precision_score(y_true_s, y_pred_s, average=None, zero_division=0, labels=labels)
     rec_per = recall_score(y_true_s, y_pred_s, average=None, zero_division=0, labels=labels)
     f1_per = f1_score(y_true_s, y_pred_s, average=None, zero_division=0, labels=labels)
     support_per = [y_true_s.count(lbl) for lbl in labels]
@@ -258,9 +254,13 @@ async def get_model_performance(
 @router.get("/models/{name}/drift", response_model=DriftReportResponse)
 async def get_model_drift(
     name: str,
-    version: Optional[str] = Query(None, description="Version du modèle (défaut : production/dernière)"),
+    version: Optional[str] = Query(
+        None, description="Version du modèle (défaut : production/dernière)"
+    ),
     days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours"),
-    min_predictions: int = Query(30, ge=5, description="Nombre minimum de prédictions pour calculer le drift"),
+    min_predictions: int = Query(
+        30, ge=5, description="Nombre minimum de prédictions pour calculer le drift"
+    ),
     user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):

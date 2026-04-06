@@ -207,9 +207,7 @@ class DBService:
         if model_version:
             filters.append(Prediction.model_version == model_version)
 
-        result = await db.execute(
-            select(func.count(Prediction.id)).where(and_(*filters))
-        )
+        result = await db.execute(select(func.count(Prediction.id)).where(and_(*filters)))
         return result.scalar() or 0
 
     @staticmethod
@@ -305,17 +303,13 @@ class DBService:
         daily: dict[str, list] = {}
         for row in rows:
             day = str(row.day)
-            daily.setdefault(day, []).append(
-                (str(row.prediction_result), str(row.observed_result))
-            )
+            daily.setdefault(day, []).append((str(row.prediction_result), str(row.observed_result)))
 
         return [
             {
                 "date": day,
                 "matched_count": len(items),
-                "accuracy": round(
-                    sum(p == o for p, o in items) / len(items), 4
-                ),
+                "accuracy": round(sum(p == o for p, o in items) / len(items), 4),
             }
             for day, items in sorted(daily.items())
         ]
@@ -334,8 +328,9 @@ class DBService:
         `values` contient les valeurs brutes numériques (pour le calcul PSI).
         Seules les features numériques (int/float) sont incluses.
         """
-        import numpy as np
         from datetime import timedelta
+
+        import numpy as np
 
         cutoff = _utcnow() - timedelta(days=days)
 
