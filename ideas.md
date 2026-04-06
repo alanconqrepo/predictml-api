@@ -29,7 +29,7 @@
 | 8 | **Détection data drift** — Comparaison KS/PSI distribution features prod vs baseline | Forte | Moyenne | `models.py`, `model_service.py`, `db/models.py` | [x] | [ ] |
 | 9 | **Explainability SHAP `POST /explain`** — Feature importances locales (RGPD Art. 22) | Forte | Moyenne | `predict.py`, `model_service.py` | [x] | [ ] |
 | 10 | **Migrations Alembic** — Remplacer `create_all()` par des migrations versionnées | Forte | Moyenne | `alembic/`, `main.py`, `src/db/` | [ ] | [ ] |
-| 11 | **CI/CD GitHub Actions** — `ruff` + `black` + `pytest` sur chaque push/PR | Forte | Moyenne | `.github/workflows/ci.yml` | [ ] | [x] |
+| 11 | **CI/CD GitHub Actions** — `ruff` + `black` + `pytest` sur chaque push/PR | Forte | Moyenne | `.github/workflows/ci.yml` | [x] | [ ] |
 | 12 | **Logging structuré JSON** — Remplacer `print()` par `structlog`/`loguru` | Forte | Moyenne | `config.py`, `src/api/`, `src/services/` | [ ] | [ ] |
 | 13 | **A/B testing canary** — Split trafic entre versions, comparaison métriques auto | Forte | Complexe | `model_metadata`, `model_service.py` | [ ] | [ ] |
 | 14 | **Alertes automatiques** — Webhook/email si accuracy < seuil ou drift détecté | Forte | Complexe | Background tasks, APScheduler | [ ] | [x] |
