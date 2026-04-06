@@ -4,9 +4,21 @@ Endpoints pour la gestion des modèles
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+import math
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    f1_score,
+    mean_absolute_error,
+    mean_squared_error,
+    precision_score,
+    r2_score,
+    recall_score,
+)
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -18,8 +30,12 @@ from src.schemas.model import (
     ModelCreateResponse,
     ModelDeleteResponse,
     ModelGetResponse,
+    ModelPerformanceResponse,
     ModelUpdateInput,
+    PerClassMetrics,
+    PeriodPerformance,
 )
+from src.services.db_service import DBService
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
 
@@ -50,6 +66,190 @@ async def list_cached_models():
     """
     cached = model_service.get_cached_models()
     return {"cached_models": cached, "count": len(cached)}
+
+
+# ---------------------------------------------------------------------------
+# Helpers pour GET /models/{name}/performance
+# ---------------------------------------------------------------------------
+
+
+def _detect_model_type(metadata: Optional[ModelMetadata], pairs: list) -> str:
+    """Détecte si le modèle est de classification ou de régression."""
+    if metadata and metadata.classes:
+        return "classification"
+    if any(row.probabilities for row in pairs):
+        return "classification"
+    pred_vals = [row.prediction_result for row in pairs if row.prediction_result is not None]
+    if pred_vals and all(isinstance(v, (int, str, bool)) for v in pred_vals):
+        return "classification"
+    return "regression"
+
+
+def _compute_classification_metrics(
+    y_true: list, y_pred: list, classes: Optional[list]
+) -> tuple:
+    labels = (
+        sorted(set(str(c) for c in classes))
+        if classes
+        else sorted(set(str(v) for v in y_true + y_pred))
+    )
+    y_true_s = [str(v) for v in y_true]
+    y_pred_s = [str(v) for v in y_pred]
+
+    acc = accuracy_score(y_true_s, y_pred_s)
+    prec = precision_score(y_true_s, y_pred_s, average="weighted", zero_division=0, labels=labels)
+    rec = recall_score(y_true_s, y_pred_s, average="weighted", zero_division=0, labels=labels)
+    f1 = f1_score(y_true_s, y_pred_s, average="weighted", zero_division=0, labels=labels)
+    cm = confusion_matrix(y_true_s, y_pred_s, labels=labels).tolist()
+
+    prec_per = precision_score(
+        y_true_s, y_pred_s, average=None, zero_division=0, labels=labels
+    )
+    rec_per = recall_score(y_true_s, y_pred_s, average=None, zero_division=0, labels=labels)
+    f1_per = f1_score(y_true_s, y_pred_s, average=None, zero_division=0, labels=labels)
+    support_per = [y_true_s.count(lbl) for lbl in labels]
+
+    per_class = {
+        lbl: PerClassMetrics(
+            precision=float(prec_per[i]),
+            recall=float(rec_per[i]),
+            f1_score=float(f1_per[i]),
+            support=support_per[i],
+        )
+        for i, lbl in enumerate(labels)
+    }
+    return acc, prec, rec, f1, cm, labels, per_class
+
+
+def _compute_regression_metrics(y_true: list, y_pred: list) -> tuple:
+    mae = mean_absolute_error(y_true, y_pred)
+    mse = mean_squared_error(y_true, y_pred)
+    rmse = math.sqrt(mse)
+    r2 = r2_score(y_true, y_pred)
+    return mae, mse, rmse, r2
+
+
+def _bucket_key(ts: datetime, granularity: str) -> str:
+    if granularity == "day":
+        return ts.strftime("%Y-%m-%d")
+    if granularity == "week":
+        return ts.strftime("%Y-W%W")
+    if granularity == "month":
+        return ts.strftime("%Y-%m")
+    return ""
+
+
+@router.get("/models/{name}/performance", response_model=ModelPerformanceResponse)
+async def get_model_performance(
+    name: str,
+    start: Optional[datetime] = Query(None, description="Début de période (ISO 8601)"),
+    end: Optional[datetime] = Query(None, description="Fin de période (ISO 8601)"),
+    version: Optional[str] = Query(None, description="Version du modèle (optionnel)"),
+    granularity: Optional[Literal["day", "week", "month"]] = Query(
+        None, description="Agrégation temporelle (day, week, month)"
+    ),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Calcule les métriques de performance réelle en production pour un modèle.
+
+    Joint les prédictions et les résultats observés via `id_obs` pour calculer :
+    - **Classification** : accuracy, precision/recall/f1 weighted, confusion matrix, métriques par classe
+    - **Régression** : MAE, MSE, RMSE, R²
+
+    Paramètres optionnels :
+    - **start** / **end** : plage temporelle
+    - **version** : version spécifique du modèle
+    - **granularity** : décomposer les métriques par jour, semaine ou mois
+
+    Nécessite un token Bearer valide.
+    """
+    metadata = await DBService.get_model_metadata(db, name, version)
+    if not metadata:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' introuvable.",
+        )
+
+    total = await DBService.count_predictions(db, name, start, end, version)
+    pairs = await DBService.get_performance_pairs(db, name, start, end, version)
+
+    matched = len(pairs)
+    model_type = _detect_model_type(metadata, pairs)
+
+    if matched == 0:
+        return ModelPerformanceResponse(
+            model_name=name,
+            model_version=metadata.version,
+            period_start=start,
+            period_end=end,
+            total_predictions=total,
+            matched_predictions=0,
+            model_type=model_type,
+        )
+
+    y_true = [row.observed_result for row in pairs]
+    y_pred = [row.prediction_result for row in pairs]
+
+    response = ModelPerformanceResponse(
+        model_name=name,
+        model_version=metadata.version,
+        period_start=start,
+        period_end=end,
+        total_predictions=total,
+        matched_predictions=matched,
+        model_type=model_type,
+    )
+
+    if model_type == "classification":
+        acc, prec, rec, f1, cm, classes, per_class = _compute_classification_metrics(
+            y_true, y_pred, metadata.classes
+        )
+        response.accuracy = round(acc, 4)
+        response.precision_weighted = round(float(prec), 4)
+        response.recall_weighted = round(float(rec), 4)
+        response.f1_weighted = round(float(f1), 4)
+        response.confusion_matrix = cm
+        response.classes = classes
+        response.per_class_metrics = per_class
+    else:
+        y_true_f = [float(v) for v in y_true]
+        y_pred_f = [float(v) for v in y_pred]
+        mae, mse, rmse, r2 = _compute_regression_metrics(y_true_f, y_pred_f)
+        response.mae = round(mae, 4)
+        response.mse = round(mse, 4)
+        response.rmse = round(rmse, 4)
+        response.r2 = round(r2, 4)
+
+    if granularity:
+        buckets: Dict[str, List[int]] = {}
+        for i, row in enumerate(pairs):
+            key = _bucket_key(row.timestamp, granularity)
+            buckets.setdefault(key, []).append(i)
+
+        by_period = []
+        for period_key in sorted(buckets):
+            idxs = buckets[period_key]
+            bt = [y_true[i] for i in idxs]
+            bp = [y_pred[i] for i in idxs]
+            pp = PeriodPerformance(period=period_key, matched_count=len(idxs))
+            if model_type == "classification":
+                bt_s = [str(v) for v in bt]
+                bp_s = [str(v) for v in bp]
+                pp.accuracy = round(accuracy_score(bt_s, bp_s), 4)
+                pp.f1_weighted = round(
+                    float(f1_score(bt_s, bp_s, average="weighted", zero_division=0)), 4
+                )
+            else:
+                bt_f = [float(v) for v in bt]
+                bp_f = [float(v) for v in bp]
+                pp.mae = round(mean_absolute_error(bt_f, bp_f), 4)
+                pp.rmse = round(math.sqrt(mean_squared_error(bt_f, bp_f)), 4)
+            by_period.append(pp)
+        response.by_period = by_period
+
+    return response
 
 
 @router.get("/models/{name}/{version}", response_model=ModelGetResponse)
