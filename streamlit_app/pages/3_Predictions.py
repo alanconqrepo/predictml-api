@@ -92,6 +92,13 @@ else:
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
 
+    st.download_button(
+        label="⬇️ Télécharger en CSV",
+        data=df.to_csv(index=False),
+        file_name="predictions.csv",
+        mime="text/csv",
+    )
+
     # Détail features
     with st.expander("🔍 Voir les features d'une prédiction"):
         pred_ids = {str(p["id"]): p for p in predictions}

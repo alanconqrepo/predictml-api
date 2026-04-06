@@ -153,6 +153,7 @@ class DBService:
         end: datetime,
         model_version: Optional[str] = None,
         username: Optional[str] = None,
+        id_obs: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[List[Prediction], int]:
@@ -171,6 +172,8 @@ class DBService:
             filters.append(Prediction.model_version == model_version)
         if username:
             filters.append(User.username == username)
+        if id_obs:
+            filters.append(Prediction.id_obs == id_obs)
 
         base_query = (
             select(Prediction).join(User, Prediction.user_id == User.id).where(and_(*filters))
