@@ -27,6 +27,8 @@ from src.core.security import verify_token
 from src.db.database import get_db
 from src.db.models import ModelMetadata, User
 from src.schemas.model import (
+    DriftReportResponse,
+    FeatureDriftResult,
     ModelCreateResponse,
     ModelDeleteResponse,
     ModelGetResponse,
@@ -36,6 +38,7 @@ from src.schemas.model import (
     PeriodPerformance,
 )
 from src.services.db_service import DBService
+from src.services import drift_service
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
 
@@ -252,6 +255,77 @@ async def get_model_performance(
     return response
 
 
+@router.get("/models/{name}/drift", response_model=DriftReportResponse)
+async def get_model_drift(
+    name: str,
+    version: Optional[str] = Query(None, description="Version du modèle (défaut : production/dernière)"),
+    days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours"),
+    min_predictions: int = Query(30, ge=5, description="Nombre minimum de prédictions pour calculer le drift"),
+    user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Rapport de data drift pour un modèle.
+
+    Compare la distribution des features reçues en production (sur `days` jours)
+    au profil baseline stocké lors de l'upload du modèle.
+
+    - **Z-score** : `|prod_mean - baseline_mean| / baseline_std`
+      - ok < 2 | warning 2–3 | critical ≥ 3
+    - **PSI** : divergence de distribution via bins normaux
+      - ok < 0.1 | warning 0.1–0.2 | critical ≥ 0.2
+
+    Retourne `drift_summary = "no_baseline"` si le profil baseline n'a pas été enregistré.
+    """
+    metadata = await DBService.get_model_metadata(db, name, version)
+    if not metadata:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' introuvable.",
+        )
+
+    production_stats = await DBService.get_feature_production_stats(
+        db, name, metadata.version, days
+    )
+
+    total_predictions = sum(v.get("count", 0) for v in production_stats.values())
+
+    baseline = metadata.feature_baseline
+    baseline_available = bool(baseline)
+
+    if not baseline_available:
+        return DriftReportResponse(
+            model_name=name,
+            model_version=metadata.version,
+            period_days=days,
+            predictions_analyzed=total_predictions,
+            baseline_available=False,
+            drift_summary="no_baseline",
+            features={
+                feat: FeatureDriftResult(
+                    production_mean=round(stats["mean"], 6),
+                    production_std=round(stats["std"], 6),
+                    production_count=stats["count"],
+                    drift_status="no_baseline",
+                )
+                for feat, stats in production_stats.items()
+            },
+        )
+
+    features = drift_service.compute_feature_drift(baseline, production_stats, min_predictions)
+    summary = drift_service.summarize_drift(features, baseline_available=True)
+
+    return DriftReportResponse(
+        model_name=name,
+        model_version=metadata.version,
+        period_days=days,
+        predictions_analyzed=total_predictions,
+        baseline_available=True,
+        drift_summary=summary,
+        features=features,
+    )
+
+
 @router.get("/models/{name}/{version}", response_model=ModelGetResponse)
 async def get_model(
     name: str,
@@ -369,6 +443,10 @@ async def create_model(
     classes: Optional[str] = Form(None, description="JSON array ex: [0, 1, 2]"),
     training_params: Optional[str] = Form(None, description="JSON object"),
     training_dataset: Optional[str] = Form(None),
+    feature_baseline: Optional[str] = Form(
+        None,
+        description='JSON: {"feature": {"mean": float, "std": float, "min": float, "max": float}}',
+    ),
     user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -420,6 +498,7 @@ async def create_model(
     # Désérialiser les champs JSON optionnels
     classes_parsed = json.loads(classes) if classes else None
     training_params_parsed = json.loads(training_params) if training_params else None
+    feature_baseline_parsed = json.loads(feature_baseline) if feature_baseline else None
 
     # Créer l'entrée en base
     metadata = ModelMetadata(
@@ -437,6 +516,7 @@ async def create_model(
         classes=classes_parsed,
         training_params=training_params_parsed,
         training_dataset=training_dataset,
+        feature_baseline=feature_baseline_parsed,
         trained_by=user.username,
         user_id_creator=user.id,
         is_active=True,

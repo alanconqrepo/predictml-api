@@ -26,7 +26,7 @@
 | 5 | **Filtre `?id_obs=` sur `GET /predictions`** — Traçabilité complète depuis l'identifiant métier | Forte | Facile | `predict.py`, `db_service.py` | [x] | [ ] |
 | 6 | **Export CSV (dashboard)** — Bouton téléchargement sur la page Prédictions | Forte | Facile | `3_Predictions.py` | [x] | [ ] |
 | 7 | **Suivi accuracy dans le temps** — Courbe rolling 7j/30j, alerte si dégradation | Forte | Moyenne | `db_service.py`, `4_Stats.py` | [x] | [ ] |
-| 8 | **Détection data drift** — Comparaison KS/PSI distribution features prod vs baseline | Forte | Moyenne | `models.py`, `model_service.py`, `db/models.py` | [ ] | [ ] |
+| 8 | **Détection data drift** — Comparaison KS/PSI distribution features prod vs baseline | Forte | Moyenne | `models.py`, `model_service.py`, `db/models.py` | [x] | [ ] |
 | 9 | **Explainability SHAP `POST /explain`** — Feature importances locales (RGPD Art. 22) | Forte | Moyenne | `predict.py`, `model_service.py` | [ ] | [ ] |
 | 10 | **Migrations Alembic** — Remplacer `create_all()` par des migrations versionnées | Forte | Moyenne | `alembic/`, `main.py`, `src/db/` | [ ] | [ ] |
 | 11 | **CI/CD GitHub Actions** — `ruff` + `black` + `pytest` sur chaque push/PR | Forte | Moyenne | `.github/workflows/ci.yml` | [ ] | [x] |
@@ -40,7 +40,7 @@
 | 19 | **Tags sur les modèles** — Champ JSONB `tags`, filtre `?tag=` sur `GET /models` | Moyenne | Facile | `db/models.py`, `schemas/`, `api/models.py` | [ ] | [ ] |
 | 20 | **Validation taille à l'upload** — `413` si `.pkl` dépasse `MAX_MODEL_SIZE_MB` | Moyenne | Facile | `api/models.py`, `config.py` | [ ] | [ ] |
 | 21 | **Marquage manuel prédiction** — Champ `is_correct`, `PATCH /predictions/{id}` | Moyenne | Facile | `db/models.py`, `predict.py`, `schemas/` | [ ] | [ ] |
-| 22 | **Profil features baseline** — Stocker `{feature: {mean, std, min, max}}`, warning en prod | Moyenne | Moyenne | `db/models.py`, `model_service.py` | [ ] | [x] |
+| 22 | **Profil features baseline** — Stocker `{feature: {mean, std, min, max}}`, warning en prod | Moyenne | Moyenne | `db/models.py`, `model_service.py` | [x] | [ ] |
 | 23 | **Webhook sortant post-prédiction** — `POST` async vers URL callback par modèle | Moyenne | Moyenne | `db/models.py`, `predict.py` | [ ] | [ ] |
 | 24 | **Cache Redis** — Remplacer le dict Python par Redis (multi-instance, Kubernetes) | Moyenne | Moyenne | `model_service.py`, `docker-compose.yml` | [ ] | [ ] |
 | 25 | **Copie token en un clic** — Bouton "Copier" dans la page Users | Faible | Facile | `1_Users.py` | [ ] | [ ] |
