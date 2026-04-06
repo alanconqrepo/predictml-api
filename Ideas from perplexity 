@@ -1,24 +1,24 @@
- PredictML API â€” idÃ©es Ã  implÃ©menter
+# PredictML API — idées à implémenter
 
-| Ordre | IdÃ©e | DÃ©tail bref | ComplexitÃ© estimÃ©e (jours) | Fait |
+| Ordre | Idée | Détail bref | Complexité estimée (jours) | Fait |
 |---:|---|---|---:|---|
-| 1 | DÃ©finir le cycle de vie des modÃ¨les | Statuts simples: draft, staging, production, archived, avec promotion et rollback. | 2 | [ ] |
-| 2 | Upload et enregistrement dâ€™un modÃ¨le | Permettre dâ€™uploader un .pkl, valider le format, stocker lâ€™artefact et crÃ©er une version. | 2 | [ ] |
-| 3 | Authentification et rÃ´les | GÃ©rer tokens Bearer, rÃ´les admin/user/readonly, et accÃ¨s par endpoint. | 3 | [ ] |
-| 4 | Quotas journaliers | Limiter le nombre de requÃªtes par utilisateur ou token avec suivi clair dans lâ€™API et le dashboard. | 2 | [ ] |
-| 5 | Journal des prÃ©dictions | Enregistrer chaque prÃ©diction avec features, modÃ¨le utilisÃ©, utilisateur, latence et statut. | 3 | [ ] |
-| 6 | Dashboard santÃ© minimal | Afficher volume, erreurs, latence, version active et un indicateur simple de dÃ©rive. | 2 | [ ] |
-| 7 | Tracking MLflow | Tracer expÃ©riences, mÃ©triques, paramÃ¨tres et artefacts pour comparer les versions de modÃ¨les. | 2 | [ ] |
-| 8 | Historique des versions | Lister les modÃ¨les, leurs versions, promotions, dÃ©prÃ©ciations et rollbacks dans une vue lisible. | 2 | [ ] |
-| 9 | Rapport automatique | GÃ©nÃ©rer un rapport quotidien ou hebdomadaire avec mÃ©triques clÃ©s et alertes Ã©ventuelles. | 2 | [ ] |
-| 10 | DÃ©rive basique | Calculer un indicateur simple de dÃ©rive des features et dÃ©clencher une alerte si seuil dÃ©passÃ©. | 3 | [ ] |
-| 11 | MÃ©tadonnÃ©es et tags | Ajouter titre, description, tags mÃ©tier, propriÃ©taire et date pour chaque modÃ¨le. | 1 | [ ] |
-| 12 | Statut unique par modÃ¨le | Afficher un Ã©tat synthÃ©tique du type ok, warning ou critical pour rester lisible. | 1 | [ ] |
-| 13 | Logs structurÃ©s | Standardiser les logs API pour faciliter le debug, lâ€™audit et la supervision. | 1 | [ ] |
-| 14 | Validation dâ€™entrÃ©e | VÃ©rifier le schÃ©ma des features, les valeurs manquantes et les types avant prÃ©diction. | 2 | [ ] |
-| 15 | Healthchecks | Ajouter des endpoints de santÃ© pour lâ€™API, la base, MinIO et MLflow. | 1 | [ ] |
-| 16 | Tests dâ€™intÃ©gration | Tester le flux complet upload -> enregistrement -> prÃ©diction -> log -> rÃ©cupÃ©ration historique. | 3 | [ ] |
-| 17 | Export CSV | Permettre dâ€™exporter lâ€™historique des prÃ©dictions et des modÃ¨les pour analyse externe. | 1 | [ ] |
-| 18 | Rollback rapide | Rendre le retour Ã  une version prÃ©cÃ©dente possible en un clic ou une seule requÃªte API. | 1 | [ ] |
-| 19 | Page historique | Afficher les Ã©vÃ©nements importants: crÃ©ation, promotion, Ã©chec, dÃ©prÃ©ciation, rollback. | 2 | [ ] |
-| 20 | Alerte simple | Envoyer une alerte uniquement en cas de dÃ©rive forte, erreur critique ou hausse de latence. | 2 | [ ] |
+| 1 | Définir le cycle de vie des modèles | Statuts simples: draft, staging, production, archived, avec promotion et rollback. | 2 | [ ] |
+| 2 | Upload et enregistrement d’un modèle | Permettre d’uploader un .pkl, valider le format, stocker l’artefact et créer une version. | 2 | [ ] |
+| 3 | Authentification et rôles | Gérer tokens Bearer, rôles admin/user/readonly, et accès par endpoint. | 3 | [ ] |
+| 4 | Quotas journaliers | Limiter le nombre de requêtes par utilisateur ou token avec suivi clair dans l’API et le dashboard. | 2 | [ ] |
+| 5 | Journal des prédictions | Enregistrer chaque prédiction avec features, modèle utilisé, utilisateur, latence et statut. | 3 | [ ] |
+| 6 | Dashboard santé minimal | Afficher volume, erreurs, latence, version active et un indicateur simple de dérive. | 2 | [ ] |
+| 7 | Tracking MLflow | Tracer expériences, métriques, paramètres et artefacts pour comparer les versions de modèles. | 2 | [ ] |
+| 8 | Historique des versions | Lister les modèles, leurs versions, promotions, dépréciations et rollbacks dans une vue lisible. | 2 | [ ] |
+| 9 | Rapport automatique | Générer un rapport quotidien ou hebdomadaire avec métriques clés et alertes éventuelles. | 2 | [ ] |
+| 10 | Dérive basique | Calculer un indicateur simple de dérive des features et déclencher une alerte si seuil dépassé. | 3 | [ ] |
+| 11 | Métadonnées et tags | Ajouter titre, description, tags métier, propriétaire et date pour chaque modèle. | 1 | [ ] |
+| 12 | Statut unique par modèle | Afficher un état synthétique du type ok, warning ou critical pour rester lisible. | 1 | [ ] |
+| 13 | Logs structurés | Standardiser les logs API pour faciliter le debug, l’audit et la supervision. | 1 | [ ] |
+| 14 | Validation d’entrée | Vérifier le schéma des features, les valeurs manquantes et les types avant prédiction. | 2 | [ ] |
+| 15 | Healthchecks | Ajouter des endpoints de santé pour l’API, la base, MinIO et MLflow. | 1 | [ ] |
+| 16 | Tests d’intégration | Tester le flux complet upload -> enregistrement -> prédiction -> log -> récupération historique. | 3 | [ ] |
+| 17 | Export CSV | Permettre d’exporter l’historique des prédictions et des modèles pour analyse externe. | 1 | [ ] |
+| 18 | Rollback rapide | Rendre le retour à une version précédente possible en un clic ou une seule requête API. | 1 | [ ] |
+| 19 | Page historique | Afficher les événements importants: création, promotion, échec, dépréciation, rollback. | 2 | [ ] |
+| 20 | Alerte simple | Envoyer une alerte uniquement en cas de dérive forte, erreur critique ou hausse de latence. | 2 | [ ] |
