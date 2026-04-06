@@ -258,6 +258,68 @@ class DBService:
         result = await db.execute(stmt)
         return result.all()
 
+    @staticmethod
+    async def get_accuracy_drift(
+        db: AsyncSession,
+        model_name: str,
+        start: datetime,
+        end: datetime,
+        model_version: Optional[str] = None,
+    ) -> List[dict]:
+        """
+        Retourne l'accuracy journalière pour le suivi de drift de performance.
+        Requête SQL avec fenêtre temporelle, agrégat par jour.
+        Plus légère que get_performance_pairs() : ne sélectionne pas les probabilities.
+        Retourne une liste de dicts {"date": "YYYY-MM-DD", "matched_count": int, "accuracy": float}.
+        """
+        filters = [
+            Prediction.model_name == model_name,
+            Prediction.status == "success",
+            Prediction.id_obs.isnot(None),
+            Prediction.timestamp >= start,
+            Prediction.timestamp <= end,
+        ]
+        if model_version:
+            filters.append(Prediction.model_version == model_version)
+
+        stmt = (
+            select(
+                func.date(Prediction.timestamp).label("day"),
+                Prediction.prediction_result,
+                ObservedResult.observed_result,
+            )
+            .join(
+                ObservedResult,
+                and_(
+                    Prediction.id_obs == ObservedResult.id_obs,
+                    Prediction.model_name == ObservedResult.model_name,
+                ),
+            )
+            .where(and_(*filters))
+            .order_by(func.date(Prediction.timestamp))
+        )
+
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        daily: dict[str, list] = {}
+        for row in rows:
+            day = str(row.day)
+            daily.setdefault(day, []).append(
+                (str(row.prediction_result), str(row.observed_result))
+            )
+
+        return [
+            {
+                "date": day,
+                "matched_count": len(items),
+                "accuracy": round(
+                    sum(p == o for p, o in items) / len(items), 4
+                ),
+            }
+            for day, items in sorted(daily.items())
+        ]
+
     # === Model Metadata ===
 
     @staticmethod

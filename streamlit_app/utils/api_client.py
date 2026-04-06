@@ -137,6 +137,22 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    # --- Performance ---
+
+    def get_model_performance(
+        self,
+        model_name: str,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        granularity: Optional[str] = "day",
+    ) -> dict:
+        r = self._get(
+            f"/models/{model_name}/performance",
+            params={"start": start, "end": end, "granularity": granularity},
+        )
+        r.raise_for_status()
+        return r.json()
+
     # --- Observed Results ---
 
     def get_observed_results(

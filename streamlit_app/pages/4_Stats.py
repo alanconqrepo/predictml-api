@@ -150,3 +150,127 @@ if "response_time_ms" in df.columns and df["response_time_ms"].notna().any():
     )
     fig.update_layout(showlegend=False, margin=dict(t=20))
     st.plotly_chart(fig, use_container_width=True)
+
+# --- Drift de performance (accuracy rolling) ---
+st.divider()
+st.subheader("Drift de performance — accuracy rolling (30j)")
+
+drift_col_model, drift_col_threshold = st.columns([2, 2])
+drift_model = drift_col_model.selectbox(
+    "Modèle (drift)",
+    model_names,
+    key="drift_model",
+)
+alert_enabled = drift_col_threshold.checkbox("Activer alerte seuil", value=True)
+threshold = drift_col_threshold.slider(
+    "Seuil d'alerte accuracy",
+    min_value=0.0,
+    max_value=1.0,
+    value=0.7,
+    step=0.05,
+    disabled=not alert_enabled,
+)
+
+drift_end = datetime.utcnow()
+drift_start = drift_end - timedelta(days=30)
+
+try:
+    perf_data = client.get_model_performance(
+        model_name=drift_model,
+        start=drift_start.isoformat(),
+        end=drift_end.isoformat(),
+        granularity="day",
+    )
+    by_period = perf_data.get("by_period") or []
+    model_type = perf_data.get("model_type", "classification")
+except Exception as e:
+    st.warning(f"Impossible de charger les métriques de performance : {e}")
+    by_period = []
+    model_type = "classification"
+
+if not by_period:
+    st.info(
+        "Pas assez de données observées pour ce modèle sur les 30 derniers jours. "
+        "Soumettez des résultats via POST /observed-results pour activer le suivi."
+    )
+else:
+    metric_col = "accuracy" if model_type == "classification" else "mae"
+    metric_label = "Accuracy" if model_type == "classification" else "MAE"
+
+    drift_df = pd.DataFrame(by_period)
+    drift_df["date"] = pd.to_datetime(drift_df["period"])
+    drift_df = drift_df.sort_values("date").reset_index(drop=True)
+
+    if metric_col in drift_df.columns and drift_df[metric_col].notna().any():
+        drift_df["rolling_7d"] = (
+            drift_df[metric_col].rolling(7, min_periods=1).mean().round(4)
+        )
+        drift_df["rolling_30d"] = (
+            drift_df[metric_col].rolling(30, min_periods=1).mean().round(4)
+        )
+
+        # Métriques résumé
+        last_val = drift_df[metric_col].iloc[-1]
+        prev_7d_val = drift_df[metric_col].iloc[-8] if len(drift_df) >= 8 else drift_df[metric_col].iloc[0]
+        delta = round(last_val - prev_7d_val, 4)
+        matched_total = int(drift_df["matched_count"].sum())
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric(f"{metric_label} (dernier jour)", f"{last_val:.1%}" if model_type == "classification" else f"{last_val:.4f}", delta=f"{delta:+.1%}" if model_type == "classification" else f"{delta:+.4f}")
+        m2.metric("Moyenne mobile 7j", f"{drift_df['rolling_7d'].iloc[-1]:.1%}" if model_type == "classification" else f"{drift_df['rolling_7d'].iloc[-1]:.4f}")
+        m3.metric("Prédictions avec résultat observé (30j)", f"{matched_total:,}")
+
+        # Alerte drift
+        if alert_enabled and model_type == "classification":
+            last_rolling_7d = drift_df["rolling_7d"].iloc[-1]
+            if last_rolling_7d < threshold:
+                st.warning(
+                    f"Drift détecté : la moyenne mobile 7j de l'accuracy ({last_rolling_7d:.1%}) "
+                    f"est en dessous du seuil configuré ({threshold:.0%})."
+                )
+
+        # Graphique Plotly
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=drift_df["date"],
+            y=drift_df[metric_col],
+            mode="lines+markers",
+            name=f"{metric_label} journalier",
+            line=dict(color="#AAAAAA", width=1, dash="dot"),
+            marker=dict(size=5),
+            opacity=0.6,
+        ))
+        fig.add_trace(go.Scatter(
+            x=drift_df["date"],
+            y=drift_df["rolling_7d"],
+            mode="lines",
+            name="Moyenne mobile 7j",
+            line=dict(color="#636EFA", width=2),
+        ))
+        fig.add_trace(go.Scatter(
+            x=drift_df["date"],
+            y=drift_df["rolling_30d"],
+            mode="lines",
+            name="Moyenne mobile 30j",
+            line=dict(color="#FF7F0E", width=2, dash="dash"),
+        ))
+        if alert_enabled and model_type == "classification":
+            fig.add_hline(
+                y=threshold,
+                line_dash="dot",
+                line_color="red",
+                annotation_text=f"Seuil {threshold:.0%}",
+                annotation_position="bottom right",
+            )
+        fig.update_layout(
+            xaxis_title="Date",
+            yaxis_title=metric_label,
+            yaxis_tickformat=".0%" if model_type == "classification" else None,
+            yaxis_range=[0, 1.05] if model_type == "classification" else None,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(t=40),
+            hovermode="x unified",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info(f"Métrique '{metric_col}' non disponible pour ce modèle (type : {model_type}).")
