@@ -19,7 +19,7 @@
 
 | # | Fonctionnalité | Valeur | Difficulté | Fichiers clés | Fait | Refusé |
 |---|---|---|---|---|:---:|:---:|
-| 1 | **Enforcement rate limiting** — Vérifier `rate_limit_per_day` dans l'API, lever `429` si dépassé | Forte | Facile | `predict.py`, `security.py` | [ ] | [ ] |
+| 1 | **Enforcement rate limiting** — Vérifier `rate_limit_per_day` dans l'API, lever `429` si dépassé | Forte | Facile | `predict.py`, `security.py` | [x] | [ ] |
 | 2 | **Batch prediction `POST /predict-batch`** — Accepter une liste d'inputs, persister en transaction batch | Forte | Facile | `predict.py`, `schemas/` | [ ] | [ ] |
 | 3 | **Performance réelle `GET /models/{name}/performance`** — Joindre `predictions` et `observed_results` pour accuracy live | Forte | Facile | `models.py`, `db_service.py` | [ ] | [ ] |
 | 4 | **Seuil de confiance par modèle** — Champ `confidence_threshold`, flag `low_confidence` dans la réponse | Forte | Facile | `db/models.py`, `schemas/`, `model_service.py` | [ ] | [ ] |
