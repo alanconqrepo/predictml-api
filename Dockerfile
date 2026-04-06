@@ -18,6 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copier le code source de l'application
 COPY src/ ./src/
 COPY init_data/ ./init_data/
+COPY alembic/ ./alembic/
+COPY alembic.ini ./alembic.ini
 COPY entrypoint.sh ./entrypoint.sh
 
 # Créer le dossier Models et rendre l'entrypoint exécutable
