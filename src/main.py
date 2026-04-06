@@ -2,9 +2,12 @@
 Point d'entrée principal de l'application FastAPI
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+from alembic import command as alembic_command
+from alembic.config import Config as AlembicConfig
 from fastapi import Depends, FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +20,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+async def run_migrations() -> None:
+    """Applique les migrations Alembic en attente (alembic upgrade head)."""
+
+    def _run() -> None:
+        cfg = AlembicConfig("alembic.ini")
+        alembic_command.upgrade(cfg, "head")
+
+    await asyncio.get_event_loop().run_in_executor(None, _run)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestion du cycle de vie de l'application"""
@@ -26,8 +39,14 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
 
     try:
+        await run_migrations()
+        logger.info("Migrations Alembic appliquées")
+    except Exception as e:
+        logger.warning("Avertissement migrations: %s", e)
+
+    try:
         await init_db()
-        logger.info("Base de données initialisée")
+        logger.info("Base de données connectée")
     except Exception as e:
         logger.warning("Avertissement DB: %s", e)
 

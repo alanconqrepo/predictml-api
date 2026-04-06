@@ -2,6 +2,7 @@
 Configuration de la base de données
 """
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
@@ -43,9 +44,12 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
-    """Initialise la base de données (crée les tables)"""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """Vérifie la connexion à la base de données.
+
+    La création et l'évolution du schéma sont gérées par Alembic (alembic upgrade head).
+    """
+    async with engine.connect() as conn:
+        await conn.execute(text("SELECT 1"))
 
 
 async def close_db():

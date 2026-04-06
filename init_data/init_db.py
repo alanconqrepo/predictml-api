@@ -10,7 +10,7 @@ import pickle
 
 from sqlalchemy import select
 
-from src.db.database import init_db, AsyncSessionLocal
+from src.db.database import AsyncSessionLocal
 from src.db.models import User, ModelMetadata
 from src.services.minio_service import minio_service
 from src.core.config import settings
@@ -116,10 +116,16 @@ async def main():
     print("Initialisation de la Base de Donnees et MinIO")
     print("=" * 60)
 
-    # 1. Créer les tables
-    print("\n1. Creation des tables PostgreSQL...")
-    await init_db()
-    print("   Tables creees")
+    # 1. Appliquer les migrations Alembic (crée ou met à jour le schéma)
+    print("\n1. Application des migrations Alembic...")
+    import os
+    from alembic import command as alembic_command
+    from alembic.config import Config as AlembicConfig
+
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    alembic_cfg = AlembicConfig(os.path.join(_root, "alembic.ini"))
+    alembic_command.upgrade(alembic_cfg, "head")
+    print("   Migrations appliquees")
 
     # 2. Créer l'utilisateur admin
     print("\n2. Creation de l'utilisateur admin...")
