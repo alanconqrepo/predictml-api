@@ -2,12 +2,12 @@
 Endpoints pour les prédictions
 """
 
-import logging
 import time
 from datetime import datetime
 from typing import List, Optional
 
 import numpy as np
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +29,7 @@ from src.services.db_service import DBService
 from src.services.model_service import model_service
 from src.services.shap_service import compute_shap_explanation
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["predictions"])
 
@@ -227,7 +227,7 @@ async def predict(
                 id_obs=input_data.id_obs,
             )
         except Exception as log_error:
-            logger.error("Erreur lors du logging de la prédiction: %s", log_error)
+            logger.error("Erreur lors du logging de la prédiction", error=str(log_error))
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -382,7 +382,7 @@ async def predict_batch(
             db.add_all(error_objects)
             await db.commit()
         except Exception as log_error:
-            logger.error("Erreur lors du logging du batch en erreur: %s", log_error)
+            logger.error("Erreur lors du logging du batch en erreur", error=str(log_error))
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

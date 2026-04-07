@@ -55,19 +55,33 @@ ruff check src/ --fix && black src/
 
 ---
 
-## 4. Logging
+## 4. Logging structuré (JSON)
 
 - **Jamais de `print()` en code de production**
+- **Jamais de `import logging` / `logging.getLogger()`** — utiliser exclusivement `structlog`
 - Déclarer un logger en haut de chaque module :
   ```python
-  import logging
-  logger = logging.getLogger(__name__)
+  import structlog
+  logger = structlog.get_logger(__name__)
+  ```
+- Appels avec **kwargs structurés** (jamais de `%s` formatting) :
+  ```python
+  # Correct — exploitable par ELK/Datadog/CloudWatch
+  logger.info("Modèle chargé", model_name=name, version=str(v))
+  logger.error("Erreur upload MinIO", object_name=key, error=str(e))
+
+  # Incorrect
+  logger.info("Modèle '%s' v%s chargé", name, v)
   ```
 - Niveaux à respecter :
   - `logger.debug(...)` — informations de débogage
   - `logger.info(...)` — informations de flux normal
   - `logger.warning(...)` — situations anormales non-bloquantes
   - `logger.error(...)` — erreurs gérées
+- La configuration globale est dans **`src/core/logging.py`** (`setup_logging(debug: bool)`).
+  Elle est appelée une seule fois dans `src/main.py` au démarrage.
+  - `DEBUG=False` (production) → sortie **JSON** sur stdout (compatible ELK/Datadog/CloudWatch)
+  - `DEBUG=True` (développement) → sortie colorée lisible dans le terminal
 
 ---
 

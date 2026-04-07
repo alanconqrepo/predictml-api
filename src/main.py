@@ -3,9 +3,9 @@ Point d'entrée principal de l'application FastAPI
 """
 
 import asyncio
-import logging
 from contextlib import asynccontextmanager
 
+import structlog
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import Depends, FastAPI
@@ -13,11 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api import models, observed_results, predict, users
 from src.core.config import settings
+from src.core.logging import setup_logging
 from src.db.database import close_db, engine, get_db, init_db
 from src.services.model_service import model_service
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+setup_logging(debug=settings.DEBUG)
+logger = structlog.get_logger(__name__)
 
 
 async def run_migrations() -> None:
@@ -34,41 +35,43 @@ async def run_migrations() -> None:
 async def lifespan(app: FastAPI):
     """Gestion du cycle de vie de l'application"""
     # Startup
-    logger.info("=" * 60)
-    logger.info("%s v%s", settings.API_TITLE, settings.API_VERSION)
-    logger.info("=" * 60)
+    logger.info(
+        "Démarrage de l'application",
+        title=settings.API_TITLE,
+        version=settings.API_VERSION,
+    )
 
     try:
         await run_migrations()
         logger.info("Migrations Alembic appliquées")
     except Exception as e:
-        logger.warning("Avertissement migrations: %s", e)
+        logger.warning("Avertissement migrations", error=str(e))
 
     try:
         await init_db()
         logger.info("Base de données connectée")
     except Exception as e:
-        logger.warning("Avertissement DB: %s", e)
+        logger.warning("Avertissement DB", error=str(e))
 
     logger.info(
-        "PostgreSQL: %s",
-        settings.DATABASE_URL.split("@")[1] if "@" in settings.DATABASE_URL else "configured",
+        "Application prête",
+        postgresql=(
+            settings.DATABASE_URL.split("@")[1] if "@" in settings.DATABASE_URL else "configured"
+        ),
+        minio_endpoint=settings.MINIO_ENDPOINT,
+        minio_bucket=settings.MINIO_BUCKET,
     )
-    logger.info("MinIO: %s / Bucket: %s", settings.MINIO_ENDPOINT, settings.MINIO_BUCKET)
-    logger.info("=" * 60)
-    logger.info("Application prête!")
-    logger.info("=" * 60)
 
     yield
 
     # Shutdown
-    logger.info("Fermeture de l'application...")
+    logger.info("Fermeture de l'application")
     try:
         await close_db()
         logger.info("Connexions DB fermées")
     except Exception as e:
-        logger.warning("Erreur lors de la fermeture DB: %s", e)
-    logger.info("Au revoir!")
+        logger.warning("Erreur fermeture DB", error=str(e))
+    logger.info("Application arrêtée")
 
 
 # Créer l'application FastAPI

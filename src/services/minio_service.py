@@ -3,16 +3,16 @@ Service de gestion du stockage MinIO
 """
 
 import io
-import logging
 import pickle
 from typing import Any, List, Optional
 
+import structlog
 from minio import Minio
 from minio.error import S3Error
 
 from src.core.config import settings
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class MinIOService:
@@ -35,12 +35,12 @@ class MinIOService:
         try:
             if not self.client.bucket_exists(self.bucket):
                 self.client.make_bucket(self.bucket)
-                logger.info("Bucket MinIO '%s' créé", self.bucket)
+                logger.info("Bucket MinIO créé", bucket=self.bucket)
             else:
-                logger.info("Bucket MinIO '%s' existe déjà", self.bucket)
+                logger.info("Bucket MinIO existant", bucket=self.bucket)
             self._bucket_ready = True
         except S3Error as e:
-            logger.error("Erreur MinIO lors de la création du bucket: %s", e)
+            logger.error("Erreur MinIO lors de la création du bucket", error=str(e))
 
     def upload_model(self, model: Any, object_name: str, metadata: Optional[dict] = None) -> dict:
         """
@@ -68,7 +68,7 @@ class MinIOService:
                 metadata=metadata,
             )
 
-            logger.info("Modèle uploadé: %s (%d bytes)", object_name, file_size)
+            logger.info("Modèle uploadé", object_name=object_name, size_bytes=file_size)
 
             return {
                 "bucket": self.bucket,
@@ -79,7 +79,7 @@ class MinIOService:
             }
 
         except S3Error as e:
-            logger.error("Erreur lors de l'upload: %s", e)
+            logger.error("Erreur lors de l'upload", error=str(e))
             raise
 
     def upload_model_bytes(self, model_bytes: bytes, object_name: str) -> dict:
@@ -102,7 +102,7 @@ class MinIOService:
                 model_stream,
                 length=len(model_bytes),
             )
-            logger.info("Modèle uploadé: %s (%d bytes)", object_name, len(model_bytes))
+            logger.info("Modèle uploadé", object_name=object_name, size_bytes=len(model_bytes))
             return {
                 "bucket": self.bucket,
                 "object_name": object_name,
@@ -110,7 +110,7 @@ class MinIOService:
                 "etag": result.etag,
             }
         except S3Error as e:
-            logger.error("Erreur lors de l'upload: %s", e)
+            logger.error("Erreur lors de l'upload", error=str(e))
             raise
 
     def download_model(self, object_name: str) -> Any:
@@ -132,11 +132,11 @@ class MinIOService:
 
             model = pickle.loads(model_bytes)
 
-            logger.info("Modèle téléchargé: %s", object_name)
+            logger.info("Modèle téléchargé", object_name=object_name)
             return model
 
         except S3Error as e:
-            logger.error("Erreur lors du téléchargement: %s", e)
+            logger.error("Erreur lors du téléchargement", error=str(e))
             raise
 
     def list_models(self, prefix: str = "") -> List[str]:
@@ -154,7 +154,7 @@ class MinIOService:
             objects = self.client.list_objects(self.bucket, prefix=prefix)
             return [obj.object_name for obj in objects]
         except S3Error as e:
-            logger.error("Erreur lors du listing: %s", e)
+            logger.error("Erreur lors du listing", error=str(e))
             return []
 
     def delete_model(self, object_name: str) -> bool:
@@ -169,10 +169,10 @@ class MinIOService:
         """
         try:
             self.client.remove_object(self.bucket, object_name)
-            logger.info("Modèle supprimé: %s", object_name)
+            logger.info("Modèle supprimé", object_name=object_name)
             return True
         except S3Error as e:
-            logger.error("Erreur lors de la suppression: %s", e)
+            logger.error("Erreur lors de la suppression", error=str(e))
             return False
 
     def get_object_info(self, object_name: str) -> Optional[dict]:
@@ -195,7 +195,7 @@ class MinIOService:
                 "metadata": stat.metadata,
             }
         except S3Error as e:
-            logger.error("Erreur lors de la récupération des infos: %s", e)
+            logger.error("Erreur lors de la récupération des infos", error=str(e))
             return None
 
 

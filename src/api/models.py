@@ -3,11 +3,11 @@ Endpoints pour la gestion des modèles
 """
 
 import json
-import logging
 import math
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
+import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sklearn.metrics import (
     accuracy_score,
@@ -42,7 +42,7 @@ from src.services.db_service import DBService
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["models"])
 
@@ -605,7 +605,7 @@ def _delete_mlflow_run(run_id: str) -> bool:
         MlflowClient().delete_run(run_id)
         return True
     except Exception as e:
-        logger.warning("MLflow suppression impossible pour run %s: %s", run_id, e)
+        logger.warning("MLflow suppression impossible", run_id=run_id, error=str(e))
         return False
 
 
@@ -614,7 +614,7 @@ def _delete_minio_object(object_key: str) -> bool:
     try:
         return minio_service.delete_model(object_key)
     except Exception as e:
-        logger.warning("MinIO suppression impossible pour %s: %s", object_key, e)
+        logger.warning("MinIO suppression impossible", object_key=object_key, error=str(e))
         return False
 
 
