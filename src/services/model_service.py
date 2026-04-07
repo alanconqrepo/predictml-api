@@ -32,6 +32,7 @@ class ModelService:
             Liste des modèles actifs avec leurs métadonnées
         """
         models = await DBService.get_all_active_models(db)
+        last_seen_map = await DBService.get_models_last_seen(db)
         return [
             {
                 "name": m.name,
@@ -43,6 +44,7 @@ class ModelService:
                 "classes": m.classes,
                 "user_id_creator": m.user_id_creator,
                 "creator_username": m.creator.username if m.creator else None,
+                "last_seen": last_seen_map.get(m.name),
             }
             for m in models
         ]

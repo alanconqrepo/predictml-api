@@ -29,6 +29,10 @@ def test_get_available_models():
         "src.services.db_service.DBService.get_all_active_models",
         new_callable=AsyncMock,
         return_value=[],
+    ), patch(
+        "src.services.db_service.DBService.get_models_last_seen",
+        new_callable=AsyncMock,
+        return_value={},
     ):
         models = asyncio.run(service.get_available_models(db_mock))
 
@@ -167,6 +171,10 @@ def test_load_model_not_found():
         "src.services.db_service.DBService.get_all_active_models",
         new_callable=AsyncMock,
         return_value=[],
+    ), patch(
+        "src.services.db_service.DBService.get_models_last_seen",
+        new_callable=AsyncMock,
+        return_value={},
     ):
         with pytest.raises(HTTPException) as exc_info:
             asyncio.run(service.load_model(AsyncMock(), "inexistant"))
