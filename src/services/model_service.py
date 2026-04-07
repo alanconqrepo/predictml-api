@@ -2,16 +2,16 @@
 Service de gestion des modèles ML (v2 - avec MinIO + DB)
 """
 
-import logging
 from typing import Any, Dict, List, Optional
 
+import structlog
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.services.db_service import DBService
 from src.services.minio_service import minio_service
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class ModelService:
@@ -82,26 +82,30 @@ class ModelService:
         # 2. Vérifier le cache
         cache_key = f"{model_name}:{metadata.version}"
         if cache_key in self.models_cache:
-            logger.info("Modèle '%s' v%s chargé depuis le cache", model_name, metadata.version)
+            logger.info(
+                "Modèle chargé depuis le cache",
+                model_name=model_name,
+                version=str(metadata.version),
+            )
             return self.models_cache[cache_key]
 
         # 3. Charger le modèle
         try:
             if metadata.mlflow_run_id:
                 logger.info(
-                    "Chargement du modèle '%s' v%s depuis MLflow (run=%s)...",
-                    model_name,
-                    metadata.version,
-                    metadata.mlflow_run_id,
+                    "Chargement du modèle depuis MLflow",
+                    model_name=model_name,
+                    version=str(metadata.version),
+                    mlflow_run_id=metadata.mlflow_run_id,
                 )
                 import mlflow.sklearn
 
                 model = mlflow.sklearn.load_model(f"runs:/{metadata.mlflow_run_id}/model")
             else:
                 logger.info(
-                    "Téléchargement du modèle '%s' v%s depuis MinIO...",
-                    model_name,
-                    metadata.version,
+                    "Téléchargement du modèle depuis MinIO",
+                    model_name=model_name,
+                    version=str(metadata.version),
                 )
                 model = minio_service.download_model(metadata.minio_object_key)
 
@@ -109,7 +113,11 @@ class ModelService:
             cached_data = {"model": model, "metadata": metadata}
             self.models_cache[cache_key] = cached_data
 
-            logger.info("Modèle '%s' v%s chargé et mis en cache", model_name, metadata.version)
+            logger.info(
+                "Modèle chargé et mis en cache",
+                model_name=model_name,
+                version=str(metadata.version),
+            )
             return cached_data
 
         except Exception as e:
@@ -136,7 +144,7 @@ class ModelService:
         """
         if cache_key:
             self.models_cache.pop(cache_key, None)
-            logger.info("Cache vidé pour: %s", cache_key)
+            logger.info("Cache vidé", cache_key=cache_key)
         else:
             self.models_cache.clear()
             logger.info("Cache complet vidé")

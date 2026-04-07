@@ -22,6 +22,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.48b0",
     "opentelemetry-instrumentation-sqlalchemy>=0.48b0",
     "opentelemetry-instrumentation-logging>=0.48b0",
+    "structlog>=24.0.0",
 ]
 
 [project.optional-dependencies]
