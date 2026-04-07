@@ -111,11 +111,11 @@ class PredictionResponse(BaseModel):
 
 
 class PredictionsListResponse(BaseModel):
-    """Résultat paginé de la liste des prédictions"""
+    """Résultat paginé de la liste des prédictions (curseur basé sur l'id)"""
 
     total: int
     limit: int
-    offset: int
+    next_cursor: Optional[int]
     predictions: List[PredictionResponse]
 
 
