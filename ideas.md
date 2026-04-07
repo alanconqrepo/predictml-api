@@ -298,3 +298,18 @@ auto train avec un xgboost depuis streamlite
 
 bouton retrain depuis streamlite choix des dates apprentissage test
 
+historisation des changements d'état des modèles, nouvelles versions, utilisateurs...
+
+tdb simple de supervision sur l'état des modèles 
+
+smtp pour un rapport hebdo 
+
+smtp pour alerte en cas de drift performance ou drift des features, pouvoir définir les seuils depuis streamlite et api
+
+mcp ou skills pour interagir avec
+
+prefect pour rapport hebdo automatique, retrain automatique, pour que l'utilisateur puisse facilement créer son script de prédiction feedback
+
+
+
+
