@@ -169,7 +169,7 @@
 
 ### Complexe / Long terme
 
-#### 13. A/B testing et déploiement canary
+#### 13. A/B testing et déploiement canary + déploiement shadow en background 
 **Quoi** : Configurer un split de trafic entre deux versions d'un modèle (ex : 90% v1 / 10% v2) et comparer leurs métriques automatiquement.  
 **Comment** : Nouveau champ `traffic_weight` dans `model_metadata`. Logique de routage dans `model_service.py`. Agrégation des métriques par version dans les stats.  
 **Impact** : Valider une nouvelle version en production sans risque, avec données réelles.
@@ -292,3 +292,9 @@
 **Comment** : `WHERE id < :cursor ORDER BY id DESC LIMIT :limit`, retourner le cursor dans la réponse.  
 **Fichiers** : `src/api/predict.py`, `src/services/db_service.py`  
 **Impact** : Évite les doublons et sauts de pages quand de nouvelles prédictions arrivent pendant la navigation.
+
+
+auto train avec un xgboost depuis streamlite
+
+bouton retrain depuis streamlite choix des dates apprentissage test
+
