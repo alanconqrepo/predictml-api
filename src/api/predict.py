@@ -45,19 +45,22 @@ async def get_predictions(
     user: Optional[str] = Query(None, description="Nom d'utilisateur (optionnel)"),
     id_obs: Optional[str] = Query(None, description="Identifiant de l'observation (optionnel)"),
     limit: int = Query(100, ge=1, le=1000, description="Nombre max de résultats"),
-    offset: int = Query(0, ge=0, description="Décalage pour la pagination"),
+    cursor: Optional[int] = Query(
+        None, ge=1, description="Curseur de pagination (id de la dernière prédiction vue)"
+    ),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Retourne l'historique des prédictions avec filtres.
+    Retourne l'historique des prédictions avec filtres (pagination par curseur).
 
     - **name** : nom du modèle — obligatoire
     - **start** / **end** : plage datetime — obligatoire
     - **version** : version du modèle — optionnel
     - **user** : nom d'utilisateur — optionnel
     - **id_obs** : identifiant de l'observation — optionnel
-    - **limit** / **offset** : pagination (défaut : 100 résultats, max 1000)
+    - **limit** : nombre max de résultats (défaut : 100, max : 1000)
+    - **cursor** : id de la dernière prédiction vue (pour la page suivante, utiliser `next_cursor` de la réponse précédente)
 
     Nécessite un token Bearer valide.
     """
@@ -67,7 +70,7 @@ async def get_predictions(
             detail="'start' doit être antérieur à 'end'.",
         )
 
-    predictions, total = await DBService.get_predictions(
+    rows, total = await DBService.get_predictions(
         db=db,
         model_name=name,
         start=start,
@@ -76,13 +79,17 @@ async def get_predictions(
         username=user,
         id_obs=id_obs,
         limit=limit,
-        offset=offset,
+        cursor=cursor,
     )
+
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    next_cursor = page[-1].id if has_more and page else None
 
     return PredictionsListResponse(
         total=total,
         limit=limit,
-        offset=offset,
+        next_cursor=next_cursor,
         predictions=[
             PredictionResponse(
                 id=p.id,
@@ -98,7 +105,7 @@ async def get_predictions(
                 error_message=p.error_message,
                 username=p.user.username if p.user else None,
             )
-            for p in predictions
+            for p in page
         ],
     )
 

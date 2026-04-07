@@ -155,13 +155,16 @@ class DBService:
         username: Optional[str] = None,
         id_obs: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0,
+        cursor: Optional[int] = None,
     ) -> tuple[List[Prediction], int]:
         """
-        Récupère l'historique des prédictions avec filtres.
+        Récupère l'historique des prédictions avec filtres (pagination par curseur).
+
+        Le curseur est l'id de la dernière prédiction vue. La prochaine page retourne
+        les prédictions avec un id strictement inférieur au curseur.
 
         Returns:
-            Tuple (liste de prédictions, total sans pagination)
+            Tuple (liste de prédictions — limit+1 pour détecter la page suivante, total)
         """
         filters = [
             Prediction.model_name == model_name,
@@ -174,6 +177,8 @@ class DBService:
             filters.append(User.username == username)
         if id_obs:
             filters.append(Prediction.id_obs == id_obs)
+        if cursor is not None:
+            filters.append(Prediction.id < cursor)
 
         base_query = (
             select(Prediction).join(User, Prediction.user_id == User.id).where(and_(*filters))
@@ -182,9 +187,7 @@ class DBService:
         total_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
         total = total_result.scalar() or 0
 
-        result = await db.execute(
-            base_query.order_by(Prediction.timestamp.desc()).limit(limit).offset(offset)
-        )
+        result = await db.execute(base_query.order_by(Prediction.id.desc()).limit(limit + 1))
         return result.scalars().all(), total
 
     @staticmethod
