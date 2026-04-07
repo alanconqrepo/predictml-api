@@ -3,7 +3,25 @@ Gestion des utilisateurs — admin only
 """
 import streamlit as st
 import pandas as pd
+import streamlit.components.v1 as components
 from utils.auth import require_admin, get_client
+
+def show_token_with_copy(token: str) -> None:
+    """Display a token with a one-click copy button."""
+    st.code(token, language=None)
+    components.html(
+        f"""
+        <button onclick="navigator.clipboard.writeText('{token}').then(() => {{
+            this.innerText = '✅ Copié !';
+            setTimeout(() => this.innerText = '📋 Copier le token', 2000);
+        }})" style="
+            background:#4CAF50; color:white; border:none; padding:6px 14px;
+            border-radius:4px; cursor:pointer; font-size:14px;
+        ">📋 Copier le token</button>
+        """,
+        height=42,
+    )
+
 
 st.set_page_config(page_title="Users — PredictML", page_icon="👥", layout="wide")
 require_admin()
@@ -48,7 +66,7 @@ with st.expander("➕ Créer un nouvel utilisateur", expanded=False):
                 })
                 st.success(f"Utilisateur **{result['username']}** créé avec succès.")
                 st.info("Conservez ce token — il ne sera plus affiché !")
-                st.code(result["api_token"], language=None)
+                show_token_with_copy(result["api_token"])
                 reload()
             except Exception as e:
                 st.error(f"Erreur : {e}")
@@ -98,7 +116,7 @@ if col_b.button("🔄 Renouveler token", use_container_width=True):
     try:
         result = client.update_user(selected["id"], {"regenerate_token": True})
         st.success("Nouveau token généré. Conservez-le !")
-        st.code(result["api_token"], language=None)
+        show_token_with_copy(result["api_token"])
         reload()
     except Exception as e:
         st.error(f"Erreur : {e}")
