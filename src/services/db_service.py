@@ -426,6 +426,16 @@ class DBService:
         return result.scalars().all()
 
     @staticmethod
+    async def get_models_last_seen(db: AsyncSession) -> dict[str, datetime]:
+        """Retourne la date de dernière prédiction réussie par nom de modèle."""
+        result = await db.execute(
+            select(Prediction.model_name, func.max(Prediction.timestamp).label("last_seen"))
+            .where(Prediction.status == "success")
+            .group_by(Prediction.model_name)
+        )
+        return {row.model_name: row.last_seen for row in result.all()}
+
+    @staticmethod
     async def deactivate_model(db: AsyncSession, name: str, version: str) -> bool:
         """Désactive un modèle"""
         metadata = await DBService.get_model_metadata(db, name, version)
