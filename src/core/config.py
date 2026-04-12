@@ -35,6 +35,10 @@ class Settings:
     MINIO_BUCKET: str = os.getenv("MINIO_BUCKET", "models")
     MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "false").lower() == "true"
 
+    # Redis Cache
+    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    REDIS_CACHE_TTL: int = int(os.getenv("REDIS_CACHE_TTL", "3600"))
+
     # OpenTelemetry
     ENABLE_OTEL: bool = os.getenv("ENABLE_OTEL", "false").lower() == "true"
     OTEL_SERVICE_NAME: str = os.getenv("OTEL_SERVICE_NAME", "predictml-api")

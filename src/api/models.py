@@ -67,7 +67,7 @@ async def list_cached_models():
     Returns:
         Liste des object keys MinIO en cache
     """
-    cached = model_service.get_cached_models()
+    cached = await model_service.get_cached_models()
     return {"cached_models": cached, "count": len(cached)}
 
 

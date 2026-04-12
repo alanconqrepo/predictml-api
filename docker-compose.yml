@@ -52,6 +52,19 @@ services:
       - grafana_data:/data
     restart: unless-stopped
 
+  # Cache Redis — partagé entre les instances API (multi-pod)
+  redis:
+    image: redis:7-alpine
+    container_name: predictml-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   # API FastAPI
   api:
     build: .
@@ -70,10 +83,14 @@ services:
       - ENABLE_OTEL=${ENABLE_OTEL:-false}
       - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-predictml-api}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://grafana:4317}
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_CACHE_TTL=${REDIS_CACHE_TTL:-3600}
     depends_on:
       postgres:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:

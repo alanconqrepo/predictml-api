@@ -1,7 +1,8 @@
 """
 Tests pour les endpoints de l'API
 """
-from unittest.mock import MagicMock
+import asyncio
+import pickle
 from types import SimpleNamespace
 
 import pytest
@@ -131,19 +132,20 @@ def test_cached_models_endpoint_returns_structure():
 
 
 def test_cached_models_count_reflects_injected_model():
-    """Après injection d'un modèle dans le cache, GET /models/cached le reflète."""
+    """Après injection d'un modèle dans le cache Redis, GET /models/cached le reflète."""
     from src.services.model_service import model_service
 
     key = "cached_test_model:9.9.9"
-    model_service.models_cache[key] = {
-        "model": MagicMock(),
+    data = {
+        "model": SimpleNamespace(),  # MagicMock n'est pas picklable
         "metadata": SimpleNamespace(name="cached_test_model", version="9.9.9"),
     }
+    asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
     try:
         response = client.get("/models/cached")
         assert response.status_code == 200
-        data = response.json()
-        assert key in data["cached_models"]
-        assert data["count"] >= 1
+        resp_data = response.json()
+        assert key in resp_data["cached_models"]
+        assert resp_data["count"] >= 1
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))

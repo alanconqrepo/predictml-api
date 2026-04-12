@@ -12,6 +12,7 @@ if sys.platform == "win32":
 
 # Forcer les endpoints locaux pour les tests
 os.environ.setdefault("MINIO_ENDPOINT", "localhost:9002")
+os.environ.setdefault("REDIS_URL", "redis://localhost:6399/0")  # port fantaisiste — jamais contacté
 
 # Mock MinIO globalement — les tests ne nécessitent pas de vrai serveur MinIO
 _minio_mock = MagicMock()
@@ -26,6 +27,13 @@ _minio_mock.download_model.side_effect = Exception("MinIO non disponible en test
 
 import src.api.models  # noqa: E402 — doit être importé avant le patch
 patch("src.api.models.minio_service", _minio_mock).start()
+
+# Remplacer le client Redis du singleton par un FakeRedis en mémoire
+# (aucun serveur Redis requis pour les tests)
+import fakeredis.aioredis  # noqa: E402
+from src.services.model_service import model_service  # noqa: E402
+
+model_service._redis = fakeredis.aioredis.FakeRedis()
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.pool import StaticPool

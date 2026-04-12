@@ -3,11 +3,19 @@ Tests pour le service de gestion des modèles
 """
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
+import fakeredis.aioredis
 import pytest
 
 from src.services.model_service import ModelService
+
+
+def _make_service() -> ModelService:
+    """Crée un ModelService avec un FakeRedis en mémoire (pas de serveur Redis requis)."""
+    service = ModelService()
+    service._redis = fakeredis.aioredis.FakeRedis()
+    return service
 
 
 def _fake_metadata(mlflow_run_id=None, minio_object_key="model/v1.0.0.pkl"):
@@ -22,7 +30,7 @@ def _fake_metadata(mlflow_run_id=None, minio_object_key="model/v1.0.0.pkl"):
 
 def test_get_available_models():
     """Test de récupération des modèles disponibles - retourne une liste"""
-    service = ModelService()
+    service = _make_service()
     db_mock = AsyncMock()
 
     with patch(
@@ -40,19 +48,20 @@ def test_get_available_models():
 
 
 def test_get_cached_models():
-    """Test de récupération des modèles en cache"""
-    service = ModelService()
-    cached = service.get_cached_models()
+    """Test de récupération des modèles en cache — Redis vide au départ"""
+    service = _make_service()
+    cached = asyncio.run(service.get_cached_models())
 
     assert isinstance(cached, list)
+    assert cached == []
 
 
 def test_clear_cache():
-    """Test du vidage du cache"""
-    service = ModelService()
-    service.clear_cache()
+    """Test du vidage du cache — Redis vide après clear"""
+    service = _make_service()
+    asyncio.run(service.clear_cache())
 
-    assert len(service.get_cached_models()) == 0
+    assert asyncio.run(service.get_cached_models()) == []
 
 
 # ---------------------------------------------------------------------------
@@ -61,8 +70,9 @@ def test_clear_cache():
 
 def test_load_model_via_minio():
     """load_model sans mlflow_run_id → charge depuis MinIO"""
-    service = ModelService()
-    fake_model = MagicMock()
+    service = _make_service()
+    # Pickle/unpickle via Redis crée de nouveaux objets (pas identity) — on vérifie via attribut
+    fake_model = SimpleNamespace(marker="fake_minio_model")
     metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl")
 
     with patch(
@@ -73,15 +83,16 @@ def test_load_model_via_minio():
         minio_mock.download_model.return_value = fake_model
         result = asyncio.run(service.load_model(AsyncMock(), "test_model"))
 
-    assert result["model"] is fake_model
-    assert result["metadata"] is metadata
+    assert result["model"].marker == "fake_minio_model"
+    assert result["metadata"].name == "test_model"
+    assert result["metadata"].minio_object_key == "iris/v1.0.0.pkl"
     minio_mock.download_model.assert_called_once_with("iris/v1.0.0.pkl")
 
 
 def test_load_model_via_mlflow():
     """load_model avec mlflow_run_id → charge depuis MLflow, MinIO non appelé"""
-    service = ModelService()
-    fake_model = MagicMock()
+    service = _make_service()
+    fake_model = SimpleNamespace(marker="fake_mlflow_model")
     run_id = "abc123def456abc123def456abc123de"
     metadata = _fake_metadata(mlflow_run_id=run_id, minio_object_key=None)
 
@@ -93,15 +104,15 @@ def test_load_model_via_mlflow():
        patch("src.services.model_service.minio_service") as minio_mock:
         result = asyncio.run(service.load_model(AsyncMock(), "test_model"))
 
-    assert result["model"] is fake_model
+    assert result["model"].marker == "fake_mlflow_model"
     mlflow_mock.assert_called_once_with(f"runs:/{run_id}/model")
     minio_mock.download_model.assert_not_called()
 
 
 def test_load_model_cache_hit():
-    """load_model appelle le stockage une seule fois : le second appel vient du cache"""
-    service = ModelService()
-    fake_model = MagicMock()
+    """load_model appelle le stockage une seule fois : le second appel vient du cache Redis"""
+    service = _make_service()
+    fake_model = SimpleNamespace(marker="cache_hit_model")
     metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl")
 
     with patch(
@@ -119,8 +130,8 @@ def test_load_model_cache_hit():
 
 def test_load_model_forwards_explicit_version():
     """load_model avec version explicite → get_model_metadata appelé avec cette version"""
-    service = ModelService()
-    fake_model = MagicMock()
+    service = _make_service()
+    fake_model = SimpleNamespace(marker="fake_model")
     metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v2.0.0.pkl")
     metadata.version = "2.0.0"
 
@@ -140,8 +151,8 @@ def test_load_model_forwards_explicit_version():
 
 def test_load_model_no_version_passes_none():
     """load_model sans version → get_model_metadata appelé avec version=None (production en priorité)"""
-    service = ModelService()
-    fake_model = MagicMock()
+    service = _make_service()
+    fake_model = SimpleNamespace(marker="fake_model")
     metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl")
 
     with patch(
@@ -161,7 +172,7 @@ def test_load_model_not_found():
     """load_model avec un modèle inexistant → HTTPException 404"""
     from fastapi import HTTPException
 
-    service = ModelService()
+    service = _make_service()
 
     with patch(
         "src.services.db_service.DBService.get_model_metadata",
