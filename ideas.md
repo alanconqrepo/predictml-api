@@ -28,9 +28,9 @@
 | 7 | **Suivi accuracy dans le temps** — Courbe rolling 7j/30j, alerte si dégradation | Forte | Moyenne | `db_service.py`, `4_Stats.py` | [x] | [ ] |
 | 8 | **Détection data drift** — Comparaison KS/PSI distribution features prod vs baseline | Forte | Moyenne | `models.py`, `model_service.py`, `db/models.py` | [x] | [ ] |
 | 9 | **Explainability SHAP `POST /explain`** — Feature importances locales (RGPD Art. 22) | Forte | Moyenne | `predict.py`, `model_service.py` | [x] | [ ] |
-| 10 | **Migrations Alembic** — Remplacer `create_all()` par des migrations versionnées | Forte | Moyenne | `alembic/`, `main.py`, `src/db/` | [ ] | [ ] |
+| 10 | **Migrations Alembic** — Remplacer `create_all()` par des migrations versionnées | Forte | Moyenne | `alembic/`, `main.py`, `src/db/` | [x] | [ ] |
 | 11 | **CI/CD GitHub Actions** — `ruff` + `black` + `pytest` sur chaque push/PR | Forte | Moyenne | `.github/workflows/ci.yml` | [x] | [ ] |
-| 12 | **Logging structuré JSON** — Remplacer `print()` par `structlog`/`loguru` | Forte | Moyenne | `config.py`, `src/api/`, `src/services/` | [ ] | [ ] |
+| 12 | **Logging structuré JSON** — Remplacer `print()` par `structlog`/`loguru` | Forte | Moyenne | `config.py`, `src/api/`, `src/services/` | [x] | [ ] |
 | 13 | **A/B testing canary** — Split trafic entre versions, comparaison métriques auto | Forte | Complexe | `model_metadata`, `model_service.py` | [ ] | [ ] |
 | 14 | **Alertes automatiques** — Webhook/email si accuracy < seuil ou drift détecté | Forte | Complexe | Background tasks, APScheduler | [ ] | [x] |
 | 15 | **Pipeline retraining automatique** — Retraining déclenché sur dégradation ou volume | Forte | Complexe | Prefect/APScheduler, MLflow, API | [ ] | [x] |
@@ -42,10 +42,10 @@
 | 21 | **Marquage manuel prédiction** — Champ `is_correct`, `PATCH /predictions/{id}` | Moyenne | Facile | `db/models.py`, `predict.py`, `schemas/` | [ ] | [ ] |
 | 22 | **Profil features baseline** — Stocker `{feature: {mean, std, min, max}}`, warning en prod | Moyenne | Moyenne | `db/models.py`, `model_service.py` | [x] | [ ] |
 | 23 | **Webhook sortant post-prédiction** — `POST` async vers URL callback par modèle | Moyenne | Moyenne | `db/models.py`, `predict.py` | [ ] | [ ] |
-| 24 | **Cache Redis** — Remplacer le dict Python par Redis (multi-instance, Kubernetes) | Moyenne | Moyenne | `model_service.py`, `docker-compose.yml` | [ ] | [ ] |
+| 24 | **Cache Redis** — Remplacer le dict Python par Redis (multi-instance, Kubernetes) | Moyenne | Moyenne | `model_service.py`, `docker-compose.yml` | [x] | [ ] |
 | 25 | **Copie token en un clic** — Bouton "Copier" dans la page Users | Faible | Facile | `1_Users.py` | [x] | [ ] |
 | 26 | **Indication "last seen" sur les modèles** — `MAX(timestamp)` par modèle dans le listing | Faible | Facile | `db_service.py`, `api/models.py` | [x] | [ ] |
-| 27 | **Pagination cursor-based** — Remplacer `offset` par curseur sur `/predictions` | Faible | Facile | `predict.py`, `db_service.py` | [ ] | [ ] |
+| 27 | **Pagination cursor-based** — Remplacer `offset` par curseur sur `/predictions` | Faible | Facile | `predict.py`, `db_service.py` | [x] | [ ] |
 
 ---
 
