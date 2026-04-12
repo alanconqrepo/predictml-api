@@ -2,13 +2,14 @@
 Tests pour l'endpoint POST /explain — explication SHAP locale.
 
 Stratégie de mock :
-  - Injecter le modèle directement dans model_service.models_cache (clé "name:version")
+  - Injecter le modèle directement dans le cache Redis via model_service._redis (clé "model:name:version")
   - Créer les entrées ModelMetadata en DB dans _setup()
   - try/finally pour nettoyer le cache après chaque test
   - Pas de Docker requis (SQLite in-memory + modèles créés à la volée)
 """
 
 import asyncio
+import pickle
 from types import SimpleNamespace
 
 import numpy as np
@@ -77,7 +78,7 @@ def _make_model_no_feature_names() -> LogisticRegression:
 
 def _inject_cache(model_name: str, version: str, model, feature_baseline=None) -> str:
     key = f"{model_name}:{version}"
-    model_service.models_cache[key] = {
+    data = {
         "model": model,
         "metadata": SimpleNamespace(
             name=model_name,
@@ -86,6 +87,7 @@ def _inject_cache(model_name: str, version: str, model, feature_baseline=None) -
             feature_baseline=feature_baseline,
         ),
     }
+    asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
     return key
 
 
@@ -164,7 +166,7 @@ def test_explain_tree_model_success():
         assert isinstance(data["shap_values"], dict)
         assert isinstance(data["base_value"], float)
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +188,7 @@ def test_explain_linear_model_success():
         assert data["model_type"] == "linear"
         assert isinstance(data["shap_values"], dict)
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +216,7 @@ def test_explain_response_structure():
         assert data["model_name"] == EX_RF_MODEL
         assert data["model_version"] == MODEL_VERSION
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 def test_explain_shap_values_have_all_features():
@@ -233,7 +235,7 @@ def test_explain_shap_values_have_all_features():
         for v in shap_values.values():
             assert isinstance(v, float)
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +257,7 @@ def test_explain_regressor():
         assert data["model_type"] == "tree"
         assert set(data["shap_values"].keys()) == {"f1", "f2"}
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +278,7 @@ def test_explain_linear_with_feature_baseline():
         assert response.status_code == 200
         assert response.json()["model_type"] == "linear"
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +298,7 @@ def test_explain_missing_features_returns_422():
         assert response.status_code == 422
         assert "manquantes" in response.json()["detail"].lower()
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 def test_explain_model_not_found_returns_404():
@@ -322,7 +324,7 @@ def test_explain_unsupported_model_type_returns_422():
         assert response.status_code == 422
         assert "SVC" in response.json()["detail"]
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 def test_explain_model_without_feature_names_in_returns_422():
@@ -338,7 +340,7 @@ def test_explain_model_without_feature_names_in_returns_422():
         assert response.status_code == 422
         assert "feature_names_in_" in response.json()["detail"]
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 # ---------------------------------------------------------------------------
@@ -379,4 +381,4 @@ def test_explain_does_not_save_to_db():
         )
         assert after.json()["total"] == count_before
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))

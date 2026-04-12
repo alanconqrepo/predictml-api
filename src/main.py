@@ -71,6 +71,10 @@ async def lifespan(app: FastAPI):
         logger.info("Connexions DB fermées")
     except Exception as e:
         logger.warning("Erreur fermeture DB", error=str(e))
+    try:
+        await model_service.close()
+    except Exception as e:
+        logger.warning("Erreur fermeture Redis", error=str(e))
     logger.info("Application arrêtée")
 
 
@@ -104,7 +108,7 @@ async def root(db: AsyncSession = Depends(get_db)):
     """
     try:
         available = await model_service.get_available_models(db)
-        cached = model_service.get_cached_models()
+        cached = await model_service.get_cached_models()
 
         return {
             "message": "API de prédiction sklearn - Multi Models v2.0",
@@ -131,7 +135,7 @@ async def health(db: AsyncSession = Depends(get_db)):
     """
     try:
         available = await model_service.get_available_models(db)
-        cached = model_service.get_cached_models()
+        cached = await model_service.get_cached_models()
 
         return {
             "status": "healthy",

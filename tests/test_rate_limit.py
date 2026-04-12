@@ -8,6 +8,7 @@ Stratégie :
   - Vérifier que les autres endpoints (GET /models) restent accessibles après quota atteint
 """
 import asyncio
+import pickle
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -36,10 +37,11 @@ def _make_model() -> LogisticRegression:
 
 def _inject_cache(model_name: str, version: str, model) -> str:
     key = f"{model_name}:{version}"
-    model_service.models_cache[key] = {
+    data = {
         "model": model,
         "metadata": SimpleNamespace(name=model_name, version=version, confidence_threshold=None),
     }
+    asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
     return key
 
 
@@ -115,7 +117,7 @@ def test_rate_limit_not_exceeded_returns_200():
         )
         assert response.status_code == 200
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
         asyncio.run(_delete_predictions())
 
 
@@ -136,7 +138,7 @@ def test_rate_limit_exceeded_returns_429():
         assert "Rate limit dépassé" in detail
         assert "2" in detail
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
         asyncio.run(_delete_predictions())
 
 
@@ -157,7 +159,7 @@ def test_rate_limit_error_message_contains_quota_and_count():
         assert "2 requêtes/jour" in detail
         assert "2 prédictions" in detail
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
         asyncio.run(_delete_predictions())
 
 

@@ -1,25 +1,36 @@
 """
-Service de gestion des modèles ML (v2 - avec MinIO + DB)
+Service de gestion des modèles ML (v3 - cache Redis distribué)
 """
 
+import pickle
 from typing import Any, Dict, List, Optional
 
+import redis.asyncio as aioredis
 import structlog
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.config import settings
 from src.services.db_service import DBService
 from src.services.minio_service import minio_service
 
 logger = structlog.get_logger(__name__)
 
+_CACHE_PREFIX = "model:"
+
 
 class ModelService:
-    """Service pour charger et gérer les modèles ML depuis MinIO"""
+    """Service pour charger et gérer les modèles ML depuis MinIO/MLflow, avec cache Redis."""
 
     def __init__(self):
-        # Cache: {"name:version": {"model": model, "metadata": ModelMetadata}}
-        self.models_cache: Dict[str, Dict[str, Any]] = {}
+        # Connexion Redis initialisée paresseusement au premier accès
+        self._redis: Optional[aioredis.Redis] = None
+
+    async def _get_redis(self) -> aioredis.Redis:
+        """Retourne le client Redis, en le créant si nécessaire."""
+        if self._redis is None:
+            self._redis = aioredis.Redis.from_url(settings.REDIS_URL, decode_responses=False)
+        return self._redis
 
     async def get_available_models(self, db: AsyncSession) -> List[Dict[str, Any]]:
         """
@@ -56,7 +67,9 @@ class ModelService:
         version: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Charge un modèle depuis MinIO (via cache ou download)
+        Charge un modèle depuis le cache Redis ou depuis MinIO/MLflow en cas de cache miss.
+
+        Clé Redis : ``model:{name}:{version}`` — TTL configurable via REDIS_CACHE_TTL.
 
         Args:
             db: Session de base de données
@@ -81,17 +94,20 @@ class ModelService:
                 f"Modèles disponibles: {available_names}",
             )
 
-        # 2. Vérifier le cache
-        cache_key = f"{model_name}:{metadata.version}"
-        if cache_key in self.models_cache:
+        # 2. Vérifier le cache Redis
+        cache_key = f"{_CACHE_PREFIX}{model_name}:{metadata.version}"
+        redis = await self._get_redis()
+
+        cached_bytes = await redis.get(cache_key)
+        if cached_bytes:
             logger.info(
-                "Modèle chargé depuis le cache",
+                "Modèle chargé depuis le cache Redis",
                 model_name=model_name,
                 version=str(metadata.version),
             )
-            return self.models_cache[cache_key]
+            return pickle.loads(cached_bytes)  # noqa: S301
 
-        # 3. Charger le modèle
+        # 3. Charger le modèle depuis la source
         try:
             if metadata.mlflow_run_id:
                 logger.info(
@@ -111,45 +127,61 @@ class ModelService:
                 )
                 model = minio_service.download_model(metadata.minio_object_key)
 
-            # 4. Mettre en cache
+            # 4. Stocker en cache Redis avec TTL
             cached_data = {"model": model, "metadata": metadata}
-            self.models_cache[cache_key] = cached_data
+            await redis.setex(cache_key, settings.REDIS_CACHE_TTL, pickle.dumps(cached_data))
 
             logger.info(
-                "Modèle chargé et mis en cache",
+                "Modèle chargé et mis en cache Redis",
                 model_name=model_name,
                 version=str(metadata.version),
+                ttl=settings.REDIS_CACHE_TTL,
             )
             return cached_data
 
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Erreur lors du chargement du modèle '{model_name}': {str(e)}",
             )
 
-    def get_cached_models(self) -> List[str]:
+    async def get_cached_models(self) -> List[str]:
         """
-        Retourne la liste des modèles actuellement en cache
+        Retourne la liste des modèles actuellement en cache Redis.
 
         Returns:
-            Liste des object keys MinIO en cache
+            Liste de clés au format ``name:version``
         """
-        return list(self.models_cache.keys())
+        redis = await self._get_redis()
+        keys = await redis.keys(f"{_CACHE_PREFIX}*")
+        return [k.decode().removeprefix(_CACHE_PREFIX) for k in keys]
 
-    def clear_cache(self, cache_key: Optional[str] = None):
+    async def clear_cache(self, cache_key: Optional[str] = None):
         """
-        Vide le cache des modèles
+        Invalide le cache Redis.
 
         Args:
-            cache_key: Si fourni ("name:version"), vide uniquement ce modèle du cache
+            cache_key: Si fourni (``name:version``), invalide uniquement cette entrée.
+                       Si None, invalide toutes les entrées ``model:*``.
         """
+        redis = await self._get_redis()
         if cache_key:
-            self.models_cache.pop(cache_key, None)
-            logger.info("Cache vidé", cache_key=cache_key)
+            await redis.delete(f"{_CACHE_PREFIX}{cache_key}")
+            logger.info("Cache Redis invalidé", cache_key=cache_key)
         else:
-            self.models_cache.clear()
-            logger.info("Cache complet vidé")
+            keys = await redis.keys(f"{_CACHE_PREFIX}*")
+            if keys:
+                await redis.delete(*keys)
+            logger.info("Cache Redis complet invalidé")
+
+    async def close(self):
+        """Ferme proprement la connexion Redis (à appeler au shutdown de l'app)."""
+        if self._redis:
+            await self._redis.aclose()
+            self._redis = None
+            logger.info("Connexion Redis fermée")
 
 
 # Instance globale du service

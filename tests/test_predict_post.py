@@ -2,12 +2,13 @@
 Tests pour l'endpoint POST /predict — exécution réelle avec modèles sklearn en cache.
 
 Stratégie de mock :
-  - Injecter le modèle directement dans model_service.models_cache (clé "name:version")
+  - Injecter le modèle directement dans le cache Redis via model_service._redis (clé "model:name:version")
   - Créer les entrées ModelMetadata en DB dans _setup()
   - Chaque test nettoie le cache avec try/finally pour éviter les interférences
   - Pas de Docker requis (SQLite in-memory + modèles créés à la volée)
 """
 import asyncio
+import pickle
 from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 
@@ -61,12 +62,13 @@ def _make_model_no_feature_names() -> LogisticRegression:
 
 
 def _inject_cache(model_name: str, version: str, model) -> str:
-    """Injecte un modèle dans le cache ; retourne la clé pour le nettoyage."""
+    """Injecte un modèle dans le cache Redis ; retourne la clé pour le nettoyage."""
     key = f"{model_name}:{version}"
-    model_service.models_cache[key] = {
+    data = {
         "model": model,
         "metadata": SimpleNamespace(name=model_name, version=version, confidence_threshold=None),
     }
+    asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
     return key
 
 
@@ -156,7 +158,7 @@ def test_predict_success_happy_path():
         assert data["prediction"] is not None
         assert data["id_obs"] is None
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 def test_predict_response_structure():
@@ -177,7 +179,7 @@ def test_predict_response_structure():
         assert "probability" in data
         assert "id_obs" in data
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 def test_predict_with_id_obs():
@@ -197,7 +199,7 @@ def test_predict_with_id_obs():
         assert response.status_code == 200
         assert response.json()["id_obs"] == "patient-42"
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 def test_predict_with_explicit_version():
@@ -217,7 +219,7 @@ def test_predict_with_explicit_version():
         assert response.status_code == 200
         assert response.json()["model_version"] == MODEL_VERSION_V2
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 def test_predict_saves_to_db():
@@ -237,7 +239,7 @@ def test_predict_saves_to_db():
         )
         assert response.status_code == 200
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
     # Vérifier la persistance en DB via GET /predictions
     # Utiliser params= pour encoder correctement les caractères spéciaux (+, :) dans les datetimes
@@ -275,7 +277,7 @@ def test_predict_with_predict_proba():
         assert len(probability) > 0
         assert all(isinstance(p, float) for p in probability)
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 def test_predict_without_predict_proba():
@@ -291,7 +293,7 @@ def test_predict_without_predict_proba():
         assert response.status_code == 200
         assert response.json()["probability"] is None
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +314,7 @@ def test_predict_missing_features_returns_422():
         assert response.status_code == 422
         assert "manquantes" in response.json()["detail"].lower() or "missing" in response.json()["detail"].lower()
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 def test_predict_model_without_feature_names_in_returns_422():
@@ -328,7 +330,7 @@ def test_predict_model_without_feature_names_in_returns_422():
         assert response.status_code == 422
         assert "feature_names_in_" in response.json()["detail"]
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 def test_predict_model_not_found_returns_404():
@@ -370,7 +372,7 @@ def test_predict_batch_success_happy_path():
             assert "prediction" in pred
             assert "probability" in pred
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 def test_predict_batch_with_id_obs():
@@ -394,7 +396,7 @@ def test_predict_batch_with_id_obs():
         assert preds[0]["id_obs"] == "obs-a"
         assert preds[1]["id_obs"] == "obs-b"
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 def test_predict_batch_without_auth():
@@ -426,7 +428,7 @@ def test_predict_batch_missing_features_returns_422():
         )
         assert response.status_code == 422
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 def test_predict_batch_model_not_found_returns_404():
@@ -462,7 +464,7 @@ def test_predict_batch_without_predict_proba():
         for pred in response.json()["predictions"]:
             assert pred["probability"] is None
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
 
 def test_predict_batch_saves_to_db():
@@ -485,7 +487,7 @@ def test_predict_batch_saves_to_db():
         )
         assert response.status_code == 200
     finally:
-        model_service.models_cache.pop(key, None)
+        asyncio.run(model_service.clear_cache(key))
 
     start = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     end = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()

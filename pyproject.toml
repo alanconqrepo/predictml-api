@@ -23,6 +23,7 @@ dependencies = [
     "opentelemetry-instrumentation-sqlalchemy>=0.48b0",
     "opentelemetry-instrumentation-logging>=0.48b0",
     "structlog>=24.0.0",
+    "redis>=5.0.0",
 ]
 
 [project.optional-dependencies]
@@ -35,6 +36,7 @@ dev = [
     "black>=24.0.0",
     "ruff>=0.8.0",
     "requests>=2.32.0",
+    "fakeredis>=2.0.0",
 ]
 
 [build-system]

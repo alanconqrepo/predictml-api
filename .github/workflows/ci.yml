@@ -64,7 +64,7 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest pytest-cov httpx anyio pytest-asyncio email-validator
+        run: pip install -r requirements.txt pytest pytest-cov httpx anyio pytest-asyncio email-validator fakeredis
 
       - name: Run tests
         run: python -m pytest tests/ -v
