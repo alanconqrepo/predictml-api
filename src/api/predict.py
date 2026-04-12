@@ -8,7 +8,7 @@ from typing import List, Optional
 
 import numpy as np
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import check_prediction_rate_limit, verify_token
@@ -24,14 +24,42 @@ from src.schemas.prediction import (
     PredictionOutput,
     PredictionResponse,
     PredictionsListResponse,
+    PredictionStatsItem,
+    PredictionStatsResponse,
 )
 from src.services.db_service import DBService
 from src.services.model_service import model_service
 from src.services.shap_service import compute_shap_explanation
+from src.services.webhook_service import send_webhook
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["predictions"])
+
+
+@router.get("/predictions/stats", response_model=PredictionStatsResponse)
+async def get_prediction_stats(
+    model_name: Optional[str] = Query(None, description="Filtrer par nom de modèle (optionnel)"),
+    days: int = Query(30, ge=1, le=365, description="Fenêtre en jours (défaut : 30, max : 365)"),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Statistiques agrégées des prédictions par modèle sur une fenêtre glissante.
+
+    - **model_name** : filtrer sur un seul modèle (optionnel)
+    - **days** : fenêtre temporelle en jours (défaut 30, max 365)
+
+    Retourne pour chaque modèle : total, erreurs, taux d'erreur, temps de réponse moyen / p50 / p95.
+
+    Nécessite un token Bearer valide.
+    """
+    raw = await DBService.get_prediction_stats(db, days=days, model_name=model_name)
+    return PredictionStatsResponse(
+        days=days,
+        model_name=model_name,
+        stats=[PredictionStatsItem(**s) for s in raw],
+    )
 
 
 @router.get("/predictions", response_model=PredictionsListResponse)
@@ -114,6 +142,7 @@ async def get_predictions(
 async def predict(
     input_data: PredictionInput,
     request: Request,
+    background_tasks: BackgroundTasks,
     user: User = Depends(check_prediction_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
@@ -198,6 +227,21 @@ async def predict(
             status="success",
             id_obs=input_data.id_obs,
         )
+
+        # Déclencher le webhook si configuré sur le modèle
+        if metadata.webhook_url:
+            background_tasks.add_task(
+                send_webhook,
+                metadata.webhook_url,
+                {
+                    "model_name": metadata.name,
+                    "model_version": metadata.version,
+                    "id_obs": input_data.id_obs,
+                    "prediction": prediction_result,
+                    "probability": probability,
+                    "low_confidence": low_confidence,
+                },
+            )
 
         return PredictionOutput(
             model_name=metadata.name,

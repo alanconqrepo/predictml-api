@@ -58,6 +58,29 @@ with st.spinner("Chargement des statistiques..."):
         except Exception:
             pass
 
+# --- Statistiques agrégées par modèle (endpoint /predictions/stats) ---
+st.divider()
+st.subheader("📊 Statistiques agrégées par modèle")
+try:
+    raw_stats = client.get_prediction_stats(days=days, model_name=selected_model)
+    if raw_stats:
+        df_stats = pd.DataFrame(raw_stats)
+        df_stats = df_stats.rename(columns={
+            "model_name": "Modèle",
+            "total_predictions": "Total",
+            "error_count": "Erreurs",
+            "error_rate": "Taux d'erreur",
+            "avg_response_time_ms": "Moy. RT (ms)",
+            "p50_response_time_ms": "p50 RT (ms)",
+            "p95_response_time_ms": "p95 RT (ms)",
+        })
+        df_stats["Taux d'erreur"] = (df_stats["Taux d'erreur"] * 100).round(2).astype(str) + " %"
+        st.dataframe(df_stats, use_container_width=True, hide_index=True)
+    else:
+        st.info("Aucune donnée pour cette période.")
+except Exception as e:
+    st.warning(f"Impossible de charger les statistiques agrégées : {e}")
+
 if not all_preds:
     st.info("Aucune prédiction dans la période sélectionnée.")
     st.stop()

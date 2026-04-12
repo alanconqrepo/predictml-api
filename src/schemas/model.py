@@ -37,6 +37,9 @@ class ModelUpdateInput(BaseModel):
     confidence_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
     feature_baseline: Optional[Dict[str, FeatureStats]] = None
 
+    tags: Optional[List[str]] = None
+    webhook_url: Optional[str] = None
+
     model_config = {"from_attributes": True}
 
 
@@ -59,6 +62,8 @@ class ModelCreateResponse(BaseModel):
     training_params: Optional[Dict[str, Any]]
     confidence_threshold: Optional[float] = None
     feature_baseline: Optional[Dict[str, Any]] = None
+    tags: Optional[List[str]] = None
+    webhook_url: Optional[str] = None
     is_active: bool
     is_production: bool
     created_at: datetime
@@ -96,6 +101,10 @@ class ModelGetResponse(BaseModel):
 
     # Baseline features
     feature_baseline: Optional[Dict[str, Any]] = None
+
+    # Tags et webhook
+    tags: Optional[List[str]] = None
+    webhook_url: Optional[str] = None
 
     # Stockage
     mlflow_run_id: Optional[str]

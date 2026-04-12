@@ -47,12 +47,20 @@ col3.metric("Avec MLflow", sum(1 for m in models if m.get("mlflow_run_id")))
 
 st.divider()
 
+# Filtre par tag
+all_tags = sorted({t for m in models for t in (m.get("tags") or [])})
+if all_tags:
+    tag_filter = st.selectbox("Filtrer par tag", ["(tous)"] + all_tags, key="tag_filter")
+    if tag_filter != "(tous)":
+        models = [m for m in models if tag_filter in (m.get("tags") or [])]
+
 # Tableau de synthèse
 rows = []
 for m in models:
     rows.append({
         "Nom": m.get("name", ""),
         "Version": m.get("version", ""),
+        "Tags": ", ".join(m.get("tags") or []) or "—",
         "Algorithme": m.get("algorithm") or "—",
         "Accuracy": f"{m['accuracy']:.3f}" if m.get("accuracy") is not None else "—",
         "F1": f"{m['f1_score']:.3f}" if m.get("f1_score") is not None else "—",
@@ -81,6 +89,10 @@ with st.expander("📋 Détails complets", expanded=True):
         st.markdown(f"**Algorithme :** {selected.get('algorithm') or '—'}")
         st.markdown(f"**Dataset d'entraînement :** {selected.get('training_dataset') or '—'}")
         st.markdown(f"**Entraîné par :** {selected.get('trained_by') or '—'}")
+        tags = selected.get("tags")
+        st.markdown(f"**Tags :** {', '.join(tags) if tags else '—'}")
+        webhook = selected.get("webhook_url")
+        st.markdown(f"**Webhook URL :** `{webhook}`" if webhook else "**Webhook URL :** —")
     with col_r:
         st.markdown(f"**Accuracy :** {selected.get('accuracy') or '—'}")
         st.markdown(f"**F1 Score :** {selected.get('f1_score') or '—'}")
@@ -146,3 +158,33 @@ if is_admin:
         if c2.button("Annuler"):
             st.session_state.pop("confirm_delete_model", None)
             st.rerun()
+
+    # Modifier tags et webhook
+    with st.expander("✏️ Modifier les métadonnées"):
+        new_webhook = st.text_input(
+            "Webhook URL",
+            value=selected.get("webhook_url") or "",
+            placeholder="https://example.com/webhook",
+        )
+        new_tags_raw = st.text_input(
+            "Tags (séparés par des virgules)",
+            value=", ".join(selected.get("tags") or []),
+            placeholder="production, finance, v2",
+        )
+        if st.button("💾 Enregistrer", key="save_meta"):
+            patch = {}
+            current_webhook = selected.get("webhook_url") or ""
+            if new_webhook != current_webhook:
+                patch["webhook_url"] = new_webhook if new_webhook else None
+            new_tags = [t.strip() for t in new_tags_raw.split(",") if t.strip()]
+            if new_tags != (selected.get("tags") or []):
+                patch["tags"] = new_tags if new_tags else None
+            if patch:
+                try:
+                    client.update_model(selected["name"], selected["version"], patch)
+                    st.success("Métadonnées mises à jour.")
+                    reload()
+                except Exception as e:
+                    st.error(f"Erreur : {e}")
+            else:
+                st.info("Aucun changement détecté.")

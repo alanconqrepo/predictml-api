@@ -53,6 +53,8 @@ class ModelService:
                 "accuracy": m.accuracy,
                 "features_count": m.features_count,
                 "classes": m.classes,
+                "tags": m.tags,
+                "webhook_url": m.webhook_url,
                 "user_id_creator": m.user_id_creator,
                 "creator_username": m.creator.username if m.creator else None,
                 "last_seen": last_seen_map.get(m.name),
