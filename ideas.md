@@ -43,8 +43,8 @@
 | 22 | **Profil features baseline** — Stocker `{feature: {mean, std, min, max}}`, warning en prod | Moyenne | Moyenne | `db/models.py`, `model_service.py` | [x] | [ ] |
 | 23 | **Webhook sortant post-prédiction** — `POST` async vers URL callback par modèle | Moyenne | Moyenne | `db/models.py`, `predict.py` | [ ] | [ ] |
 | 24 | **Cache Redis** — Remplacer le dict Python par Redis (multi-instance, Kubernetes) | Moyenne | Moyenne | `model_service.py`, `docker-compose.yml` | [ ] | [ ] |
-| 25 | **Copie token en un clic** — Bouton "Copier" dans la page Users | Faible | Facile | `1_Users.py` | [ ] | [ ] |
-| 26 | **Indication "last seen" sur les modèles** — `MAX(timestamp)` par modèle dans le listing | Faible | Facile | `db_service.py`, `api/models.py` | [ ] | [ ] |
+| 25 | **Copie token en un clic** — Bouton "Copier" dans la page Users | Faible | Facile | `1_Users.py` | [x] | [ ] |
+| 26 | **Indication "last seen" sur les modèles** — `MAX(timestamp)` par modèle dans le listing | Faible | Facile | `db_service.py`, `api/models.py` | [x] | [ ] |
 | 27 | **Pagination cursor-based** — Remplacer `offset` par curseur sur `/predictions` | Faible | Facile | `predict.py`, `db_service.py` | [ ] | [ ] |
 
 ---
