@@ -59,6 +59,7 @@ for m in models:
         "Statut": "🟢 Production" if m.get("is_production") else ("✅ Actif" if m.get("is_active") else "⚫ Inactif"),
         "Créateur": m.get("creator_username") or "—",
         "Créé le": pd.to_datetime(m.get("created_at")).strftime("%Y-%m-%d") if m.get("created_at") else "—",
+        "Dernière préd.": pd.to_datetime(m.get("last_seen")).strftime("%Y-%m-%d %H:%M") if m.get("last_seen") else "—",
     })
 
 st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
@@ -86,6 +87,8 @@ with st.expander("📋 Détails complets", expanded=True):
         st.markdown(f"**Precision :** {selected.get('precision') or '—'}")
         st.markdown(f"**Recall :** {selected.get('recall') or '—'}")
         st.markdown(f"**Nb features :** {selected.get('features_count') or '—'}")
+        last_seen = selected.get("last_seen")
+        st.markdown(f"**Dernière prédiction :** {pd.to_datetime(last_seen).strftime('%Y-%m-%d %H:%M') if last_seen else '—'}")
         classes = selected.get("classes")
         st.markdown(f"**Classes :** {classes if classes else '—'}")
 
