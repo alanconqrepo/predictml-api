@@ -23,6 +23,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.core.config import settings
 from src.core.security import verify_token
 from src.db.database import get_db
 from src.db.models import ModelMetadata, User
@@ -48,14 +49,21 @@ router = APIRouter(tags=["models"])
 
 
 @router.get("/models", response_model=List[Dict[str, Any]])
-async def list_models(db: AsyncSession = Depends(get_db)):
+async def list_models(
+    tag: Optional[str] = Query(None, description="Filtrer par tag (ex: production, finance)"),
+    db: AsyncSession = Depends(get_db),
+):
     """
-    Liste tous les modèles disponibles depuis la base de données
+    Liste tous les modèles disponibles depuis la base de données.
+
+    - **tag** : filtrer par tag (optionnel)
 
     Returns:
         Liste des modèles actifs avec leurs métadonnées
     """
     models = await model_service.get_available_models(db)
+    if tag:
+        models = [m for m in models if m.get("tags") and tag in m["tags"]]
     return models
 
 
@@ -447,6 +455,12 @@ async def create_model(
         None,
         description='JSON: {"feature": {"mean": float, "std": float, "min": float, "max": float}}',
     ),
+    tags: Optional[str] = Form(
+        None, description='JSON array de tags ex: ["production", "finance"]'
+    ),
+    webhook_url: Optional[str] = Form(
+        None, description="URL de callback POST après chaque prédiction"
+    ),
     user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -479,6 +493,16 @@ async def create_model(
     if file is not None:
         # Lire et uploader le fichier vers MinIO
         model_bytes = await file.read()
+        max_bytes = settings.MAX_MODEL_SIZE_MB * 1024 * 1024
+        if len(model_bytes) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Le fichier dépasse la taille maximale autorisée "
+                    f"({settings.MAX_MODEL_SIZE_MB} MB). "
+                    f"Taille reçue : {len(model_bytes) / 1024 / 1024:.1f} MB."
+                ),
+            )
         if not model_bytes:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -499,6 +523,7 @@ async def create_model(
     classes_parsed = json.loads(classes) if classes else None
     training_params_parsed = json.loads(training_params) if training_params else None
     feature_baseline_parsed = json.loads(feature_baseline) if feature_baseline else None
+    tags_parsed = json.loads(tags) if tags else None
 
     # Créer l'entrée en base
     metadata = ModelMetadata(
@@ -517,6 +542,8 @@ async def create_model(
         training_params=training_params_parsed,
         training_dataset=training_dataset,
         feature_baseline=feature_baseline_parsed,
+        tags=tags_parsed,
+        webhook_url=webhook_url,
         trained_by=user.username,
         user_id_creator=user.id,
         is_active=True,

@@ -36,12 +36,12 @@
 | 15 | **Pipeline retraining automatique** — Retraining déclenché sur dégradation ou volume | Forte | Complexe | Prefect/APScheduler, MLflow, API | [ ] | [x] |
 | 16 | **Upload modèle dans Streamlit** — Formulaire `st.file_uploader()` + métadonnées | Moyenne | Facile | `2_Models.py`, `api_client.py` | [ ] | [x] |
 | 17 | **Comparaison côte-à-côte de versions** — Tableau multi-version avec highlighting | Moyenne | Facile | `2_Models.py` | [ ] | [x] |
-| 18 | **Stats agrégées `GET /predictions/stats`** — COUNT, error_rate, p50/p95 par modèle | Moyenne | Facile | `predict.py`, `db_service.py` | [ ] | [ ] |
-| 19 | **Tags sur les modèles** — Champ JSONB `tags`, filtre `?tag=` sur `GET /models` | Moyenne | Facile | `db/models.py`, `schemas/`, `api/models.py` | [ ] | [ ] |
-| 20 | **Validation taille à l'upload** — `413` si `.pkl` dépasse `MAX_MODEL_SIZE_MB` | Moyenne | Facile | `api/models.py`, `config.py` | [ ] | [ ] |
+| 18 | **Stats agrégées `GET /predictions/stats`** — COUNT, error_rate, p50/p95 par modèle | Moyenne | Facile | `predict.py`, `db_service.py` | [x] | [ ] |
+| 19 | **Tags sur les modèles** — Champ JSONB `tags`, filtre `?tag=` sur `GET /models` | Moyenne | Facile | `db/models.py`, `schemas/`, `api/models.py` | [x] | [ ] |
+| 20 | **Validation taille à l'upload** — `413` si `.pkl` dépasse `MAX_MODEL_SIZE_MB` | Moyenne | Facile | `api/models.py`, `config.py` | [x] | [ ] |
 | 21 | **Marquage manuel prédiction** — Champ `is_correct`, `PATCH /predictions/{id}` | Moyenne | Facile | `db/models.py`, `predict.py`, `schemas/` | [ ] | [ ] |
 | 22 | **Profil features baseline** — Stocker `{feature: {mean, std, min, max}}`, warning en prod | Moyenne | Moyenne | `db/models.py`, `model_service.py` | [x] | [ ] |
-| 23 | **Webhook sortant post-prédiction** — `POST` async vers URL callback par modèle | Moyenne | Moyenne | `db/models.py`, `predict.py` | [ ] | [ ] |
+| 23 | **Webhook sortant post-prédiction** — `POST` async vers URL callback par modèle | Moyenne | Moyenne | `db/models.py`, `predict.py` | [x] | [ ] |
 | 24 | **Cache Redis** — Remplacer le dict Python par Redis (multi-instance, Kubernetes) | Moyenne | Moyenne | `model_service.py`, `docker-compose.yml` | [x] | [ ] |
 | 25 | **Copie token en un clic** — Bouton "Copier" dans la page Users | Faible | Facile | `1_Users.py` | [x] | [ ] |
 | 26 | **Indication "last seen" sur les modèles** — `MAX(timestamp)` par modèle dans le listing | Faible | Facile | `db_service.py`, `api/models.py` | [x] | [ ] |

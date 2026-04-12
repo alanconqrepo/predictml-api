@@ -137,6 +137,18 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def get_prediction_stats(
+        self,
+        days: int = 30,
+        model_name: Optional[str] = None,
+    ) -> list:
+        r = self._get(
+            "/predictions/stats",
+            params={"days": days, "model_name": model_name},
+        )
+        r.raise_for_status()
+        return r.json().get("stats", [])
+
     # --- Performance ---
 
     def get_model_performance(

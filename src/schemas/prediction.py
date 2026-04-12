@@ -232,3 +232,23 @@ class RootResponse(BaseModel):
     models_available: List[str]
     models_count: int
     models_cached: List[str]
+
+
+class PredictionStatsItem(BaseModel):
+    """Statistiques agrégées des prédictions pour un modèle"""
+
+    model_name: str
+    total_predictions: int
+    error_count: int
+    error_rate: float
+    avg_response_time_ms: Optional[float] = None
+    p50_response_time_ms: Optional[float] = None
+    p95_response_time_ms: Optional[float] = None
+
+
+class PredictionStatsResponse(BaseModel):
+    """Réponse de GET /predictions/stats"""
+
+    days: int
+    model_name: Optional[str] = None
+    stats: List[PredictionStatsItem]

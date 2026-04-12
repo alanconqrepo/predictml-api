@@ -39,7 +39,7 @@ def _inject_cache(model_name: str, version: str, model) -> str:
     key = f"{model_name}:{version}"
     data = {
         "model": model,
-        "metadata": SimpleNamespace(name=model_name, version=version, confidence_threshold=None),
+        "metadata": SimpleNamespace(name=model_name, version=version, confidence_threshold=None, webhook_url=None),
     }
     asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
     return key

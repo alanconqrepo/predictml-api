@@ -60,6 +60,10 @@ class ModelMetadata(Base):
     training_params = Column(JSON, nullable=True)
     feature_baseline = Column(JSON, nullable=True)  # {feature: {mean, std, min, max}}
 
+    # Tags et webhook
+    tags = Column(JSON, nullable=True)  # Liste de tags ex: ["production", "finance"]
+    webhook_url = Column(String(500), nullable=True)  # URL callback post-prédiction
+
     # Status
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     is_production = Column(Boolean, default=False, nullable=False)

@@ -3,7 +3,8 @@ Service pour les opérations de base de données
 """
 
 import secrets
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, timedelta
 from typing import Any, List, Optional
 
 from sqlalchemy import and_, func, select
@@ -369,6 +370,66 @@ class DBService:
                 "values": values,
             }
 
+        return stats
+
+    @staticmethod
+    async def get_prediction_stats(
+        db: AsyncSession,
+        days: int = 30,
+        model_name: Optional[str] = None,
+    ) -> List[dict]:
+        """Retourne les statistiques agrégées des prédictions par modèle sur une fenêtre glissante.
+
+        Calcul Python-side (compatible SQLite + PostgreSQL) :
+        - total, erreurs, taux d'erreur
+        - temps de réponse moyen, p50, p95 (uniquement pour les prédictions réussies)
+        """
+        cutoff = _utcnow() - timedelta(days=days)
+        filters = [Prediction.timestamp >= cutoff]
+        if model_name:
+            filters.append(Prediction.model_name == model_name)
+
+        stmt = select(
+            Prediction.model_name,
+            Prediction.status,
+            Prediction.response_time_ms,
+        ).where(and_(*filters))
+
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        grouped: dict = defaultdict(lambda: {"times": [], "errors": 0, "total": 0})
+        for row in rows:
+            g = grouped[row.model_name]
+            g["total"] += 1
+            if row.status != "success":
+                g["errors"] += 1
+            elif row.response_time_ms is not None:
+                g["times"].append(row.response_time_ms)
+
+        def _percentile(data: list, p: float) -> Optional[float]:
+            if not data:
+                return None
+            idx = max(0, int(len(data) * p / 100) - 1)
+            return round(data[idx], 2)
+
+        stats = []
+        for name, g in sorted(grouped.items()):
+            total = g["total"]
+            errors = g["errors"]
+            times = sorted(g["times"])
+            n = len(times)
+            stats.append(
+                {
+                    "model_name": name,
+                    "total_predictions": total,
+                    "error_count": errors,
+                    "error_rate": round(errors / total, 4) if total > 0 else 0.0,
+                    "avg_response_time_ms": round(sum(times) / n, 2) if n > 0 else None,
+                    "p50_response_time_ms": _percentile(times, 50),
+                    "p95_response_time_ms": _percentile(times, 95),
+                }
+            )
         return stats
 
     # === Model Metadata ===
