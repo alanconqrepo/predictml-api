@@ -86,6 +86,7 @@ else:
             "Résultat": str(p.get("prediction_result", "")),
             "Temps (ms)": f"{p['response_time_ms']:.1f}" if p.get("response_time_ms") is not None else "—",
             "Statut": "✅" if p.get("status") == "success" else "❌",
+            "Shadow": "🔮" if p.get("is_shadow") else "—",
             "Utilisateur": p.get("username") or "—",
         })
 

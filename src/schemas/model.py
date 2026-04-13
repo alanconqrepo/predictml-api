@@ -40,6 +40,10 @@ class ModelUpdateInput(BaseModel):
     tags: Optional[List[str]] = None
     webhook_url: Optional[str] = None
 
+    # A/B Testing & Shadow Deployment
+    traffic_weight: Optional[float] = Field(None, ge=0.0, le=1.0)
+    deployment_mode: Optional[str] = None
+
     model_config = {"from_attributes": True}
 
 
@@ -66,6 +70,8 @@ class ModelCreateResponse(BaseModel):
     webhook_url: Optional[str] = None
     is_active: bool
     is_production: bool
+    traffic_weight: Optional[float] = None
+    deployment_mode: Optional[str] = None
     created_at: datetime
     user_id_creator: Optional[int]
     creator_username: Optional[str] = None
@@ -120,6 +126,8 @@ class ModelGetResponse(BaseModel):
     # Status
     is_active: bool
     is_production: bool
+    traffic_weight: Optional[float] = None
+    deployment_mode: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime]
     deprecated_at: Optional[datetime]
@@ -243,3 +251,31 @@ class RollbackResponse(BaseModel):
     new_history_id: int
     restored_fields: List[str]
     snapshot: Dict[str, Any]
+
+
+# ---------------------------------------------------------------------------
+# A/B Testing & Shadow Deployment
+# ---------------------------------------------------------------------------
+
+
+class ABVersionStats(BaseModel):
+    """Statistiques par version pour un rapport de comparaison A/B"""
+
+    version: str
+    deployment_mode: Optional[str] = None
+    traffic_weight: Optional[float] = None
+    total_predictions: int
+    shadow_predictions: int
+    error_rate: float
+    avg_response_time_ms: Optional[float] = None
+    p95_response_time_ms: Optional[float] = None
+    prediction_distribution: Dict[str, int]
+    agreement_rate: Optional[float] = None  # taux de concordance shadow vs prod (via id_obs)
+
+
+class ABCompareResponse(BaseModel):
+    """Réponse de GET /models/{name}/ab-compare"""
+
+    model_name: str
+    period_days: int
+    versions: List[ABVersionStats]

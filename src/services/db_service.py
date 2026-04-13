@@ -132,6 +132,7 @@ class DBService:
         status: str = "success",
         error_message: Optional[str] = None,
         id_obs: Optional[str] = None,
+        is_shadow: bool = False,
     ) -> Prediction:
         """Enregistre une prédiction"""
         prediction = Prediction(
@@ -147,6 +148,7 @@ class DBService:
             user_agent=user_agent,
             status=status,
             error_message=error_message,
+            is_shadow=is_shadow,
         )
         db.add(prediction)
         await db.commit()
@@ -474,14 +476,16 @@ class DBService:
 
         if version:
             query = query.where(ModelMetadata.version == version)
+            result = await db.execute(query)
+            return result.scalar_one_or_none()
         else:
             # Sans version explicite : priorité à is_production=True, sinon la plus récente
+            # Utiliser first() car plusieurs versions peuvent exister
             query = query.order_by(
                 ModelMetadata.is_production.desc(), ModelMetadata.created_at.desc()
             )
-
-        result = await db.execute(query)
-        return result.scalar_one_or_none()
+            result = await db.execute(query)
+            return result.scalars().first()
 
     @staticmethod
     async def get_all_active_models(db: AsyncSession) -> List[ModelMetadata]:
@@ -648,6 +652,145 @@ class DBService:
         result = await db.execute(select(ModelHistory).where(ModelHistory.id == history_id))
         return result.scalar_one_or_none()
 
+    # === A/B Testing & Shadow Deployment ===
+
+    @staticmethod
+    async def get_ab_comparison_stats(
+        db: AsyncSession,
+        model_name: str,
+        days: int = 30,
+    ) -> list[dict]:
+        """
+        Retourne les statistiques par version pour une comparaison A/B.
+
+        Group by (model_version, is_shadow) — agrégation Python-side pour compatibilité SQLite.
+        Retourne une liste de dicts, un par version active dans la fenêtre.
+        """
+        cutoff = _utcnow() - timedelta(days=days)
+
+        stmt = select(
+            Prediction.model_version,
+            Prediction.is_shadow,
+            Prediction.status,
+            Prediction.response_time_ms,
+            Prediction.prediction_result,
+        ).where(
+            and_(
+                Prediction.model_name == model_name,
+                Prediction.timestamp >= cutoff,
+            )
+        )
+
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        # group: version -> {shadow: bool -> {times, errors, total, dist}}
+        grouped: dict = defaultdict(
+            lambda: {
+                True: {"times": [], "errors": 0, "total": 0, "dist": defaultdict(int)},
+                False: {"times": [], "errors": 0, "total": 0, "dist": defaultdict(int)},
+            }
+        )
+
+        for row in rows:
+            ver = row.model_version or "unknown"
+            shadow = bool(row.is_shadow)
+            g = grouped[ver][shadow]
+            g["total"] += 1
+            if row.status != "success":
+                g["errors"] += 1
+            else:
+                if row.response_time_ms is not None:
+                    g["times"].append(row.response_time_ms)
+                if not shadow and row.prediction_result is not None:
+                    g["dist"][str(row.prediction_result)] += 1
+
+        def _p95(data: list) -> Optional[float]:
+            if not data:
+                return None
+            s = sorted(data)
+            idx = max(0, int(len(s) * 0.95) - 1)
+            return round(s[idx], 2)
+
+        stats = []
+        for ver, shadow_map in sorted(grouped.items()):
+            prod = shadow_map[False]
+            shad = shadow_map[True]
+            total_prod = prod["total"]
+            times = prod["times"]
+            n = len(times)
+            stats.append(
+                {
+                    "version": ver,
+                    "total_predictions": total_prod,
+                    "shadow_predictions": shad["total"],
+                    "error_rate": round(prod["errors"] / total_prod, 4) if total_prod > 0 else 0.0,
+                    "avg_response_time_ms": round(sum(times) / n, 2) if n > 0 else None,
+                    "p95_response_time_ms": _p95(times),
+                    "prediction_distribution": dict(prod["dist"]),
+                }
+            )
+        return stats
+
+    @staticmethod
+    async def get_shadow_agreement_rate(
+        db: AsyncSession,
+        model_name: str,
+        days: int = 30,
+    ) -> dict[str, float]:
+        """
+        Pour chaque version shadow, calcule le taux de concordance des prédictions
+        shadow vs production sur les mêmes id_obs.
+
+        Retourne {shadow_version: agreement_rate} — dict vide si aucun id_obs renseigné.
+        """
+        from sqlalchemy.orm import aliased
+
+        cutoff = _utcnow() - timedelta(days=days)
+
+        prod_p = aliased(Prediction)
+        shadow_p = aliased(Prediction)
+
+        stmt = (
+            select(
+                shadow_p.model_version.label("shadow_version"),
+                shadow_p.prediction_result.label("shadow_pred"),
+                prod_p.prediction_result.label("prod_pred"),
+            )
+            .join(
+                prod_p,
+                and_(
+                    shadow_p.id_obs == prod_p.id_obs,
+                    shadow_p.model_name == prod_p.model_name,
+                    prod_p.is_shadow.is_(False),
+                    prod_p.status == "success",
+                ),
+            )
+            .where(
+                and_(
+                    shadow_p.model_name == model_name,
+                    shadow_p.is_shadow.is_(True),
+                    shadow_p.status == "success",
+                    shadow_p.timestamp >= cutoff,
+                    shadow_p.id_obs.isnot(None),
+                )
+            )
+        )
+
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        per_version: dict[str, list] = defaultdict(list)
+        for row in rows:
+            match = str(row.shadow_pred) == str(row.prod_pred)
+            per_version[row.shadow_version].append(match)
+
+        return {
+            ver: round(sum(matches) / len(matches), 4)
+            for ver, matches in per_version.items()
+            if matches
+        }
+
 
 # ===========================================================================
 # Helpers snapshot (module-level, utilisables aussi depuis api/models.py)
@@ -674,6 +817,8 @@ _SNAPSHOT_FIELDS = [
     "is_production",
     "is_active",
     "deprecated_at",
+    "traffic_weight",
+    "deployment_mode",
 ]
 
 # Champs restaurables lors d'un rollback (is_active et deprecated_at exclus :
@@ -697,6 +842,8 @@ _ROLLBACK_FIELDS = [
     "tags",
     "webhook_url",
     "is_production",
+    "traffic_weight",
+    "deployment_mode",
 ]
 
 

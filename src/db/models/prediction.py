@@ -2,7 +2,7 @@
 Modèle Prediction pour logger toutes les prédictions
 """
 
-from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from src.core.utils import _utcnow
@@ -42,6 +42,9 @@ class Prediction(Base):
     # Status
     status = Column(String(20), default="success", nullable=False)  # success, error
     error_message = Column(Text, nullable=True)
+
+    # Shadow deployment : True si prédiction effectuée par un modèle shadow (non retournée au client)
+    is_shadow = Column(Boolean, default=False, nullable=False)
 
     # Relations
     user = relationship("User", back_populates="predictions")

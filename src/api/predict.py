@@ -12,7 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import check_prediction_rate_limit, verify_token
-from src.db.database import get_db
+from src.db.database import AsyncSessionLocal, get_db
 from src.db.models import Prediction, User
 from src.schemas.prediction import (
     BatchPredictionInput,
@@ -35,6 +35,75 @@ from src.services.webhook_service import send_webhook
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["predictions"])
+
+
+async def _run_shadow_prediction(
+    model_name: str,
+    shadow_version: str,
+    features: dict,
+    id_obs: Optional[str],
+    user_id: int,
+    client_ip: Optional[str],
+    user_agent: Optional[str],
+) -> None:
+    """
+    Exécute la prédiction du modèle shadow en background et la persiste avec is_shadow=True.
+    Toutes les exceptions sont catchées et loggées — ne propage jamais rien au client.
+    """
+    import time as _time
+
+    start = _time.time()
+    try:
+        async with AsyncSessionLocal() as db:
+            shadow_data = await model_service.load_model(db, model_name, shadow_version)
+            shadow_model = shadow_data["model"]
+            shadow_meta = shadow_data["metadata"]
+
+            if not hasattr(shadow_model, "feature_names_in_"):
+                raise ValueError(
+                    f"Shadow model '{model_name}:{shadow_version}' n'a pas feature_names_in_"
+                )
+
+            x = np.array([[features[n] for n in shadow_model.feature_names_in_]], dtype=object)
+            raw = shadow_model.predict(x)[0]
+            result = raw.item() if hasattr(raw, "item") else raw
+            proba = (
+                shadow_model.predict_proba(x)[0].tolist()
+                if hasattr(shadow_model, "predict_proba")
+                else None
+            )
+            rt_ms = (_time.time() - start) * 1000
+
+            await DBService.create_prediction(
+                db=db,
+                user_id=user_id,
+                model_name=shadow_meta.name,
+                model_version=shadow_meta.version,
+                input_features=features,
+                prediction_result=result,
+                probabilities=proba,
+                response_time_ms=rt_ms,
+                client_ip=client_ip,
+                user_agent=user_agent,
+                status="success",
+                id_obs=id_obs,
+                is_shadow=True,
+            )
+
+            logger.info(
+                "Shadow prediction enregistrée",
+                model_name=model_name,
+                version=shadow_version,
+                result=result,
+            )
+
+    except Exception as e:
+        logger.warning(
+            "Échec de la prédiction shadow (non-bloquant)",
+            model_name=model_name,
+            version=shadow_version,
+            error=str(e),
+        )
 
 
 @router.get("/predictions/stats", response_model=PredictionStatsResponse)
@@ -132,6 +201,7 @@ async def get_predictions(
                 status=p.status,
                 error_message=p.error_message,
                 username=p.user.username if p.user else None,
+                is_shadow=p.is_shadow,
             )
             for p in page
         ],
@@ -164,12 +234,30 @@ async def predict(
     prediction_result = None
     probability = None
     error_message = None
+    shadow_meta = None
 
     try:
-        # Charger le modèle demandé — version explicite, sinon production, sinon plus récente
-        model_data = await model_service.load_model(
-            db, input_data.model_name, input_data.model_version
-        )
+        # --- Routage : version explicite OU routage A/B/shadow ---
+        if input_data.model_version is not None:
+            # Chemin explicite → pas de routage A/B, pas de shadow
+            model_data = await model_service.load_model(
+                db, input_data.model_name, input_data.model_version
+            )
+            shadow_meta = None
+        else:
+            # Routage intelligent : A/B test ou shadow si configuré
+            primary_meta, shadow_meta = await model_service.select_routing_versions(
+                db, input_data.model_name
+            )
+            if primary_meta is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Aucune version active trouvée pour le modèle '{input_data.model_name}'.",
+                )
+            model_data = await model_service.load_model(
+                db, input_data.model_name, primary_meta.version
+            )
+
         model = model_data["model"]
         metadata = model_data["metadata"]
 
@@ -228,6 +316,19 @@ async def predict(
             id_obs=input_data.id_obs,
         )
 
+        # --- Dispatch shadow en background (si une version shadow est active) ---
+        if shadow_meta is not None:
+            background_tasks.add_task(
+                _run_shadow_prediction,
+                model_name=metadata.name,
+                shadow_version=shadow_meta.version,
+                features=input_data.features,
+                id_obs=input_data.id_obs,
+                user_id=user.id,
+                client_ip=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+
         # Déclencher le webhook si configuré sur le modèle
         if metadata.webhook_url:
             background_tasks.add_task(
@@ -243,6 +344,9 @@ async def predict(
                 },
             )
 
+        # selected_version est renseigné uniquement si le routage A/B a été utilisé
+        selected_version = metadata.version if input_data.model_version is None else None
+
         return PredictionOutput(
             model_name=metadata.name,
             model_version=metadata.version,
@@ -250,6 +354,7 @@ async def predict(
             prediction=prediction_result,
             probability=probability,
             low_confidence=low_confidence,
+            selected_version=selected_version,
         )
 
     except HTTPException:

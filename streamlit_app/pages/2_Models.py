@@ -70,9 +70,29 @@ if all_tags:
     if tag_filter != "(tous)":
         models = [m for m in models if tag_filter in (m.get("tags") or [])]
 
+_DEPLOY_BADGE = {
+    "ab_test": "🟠 A/B",
+    "shadow": "🟣 Shadow",
+    "production": "🟢 Prod",
+}
+
+
 # Tableau de synthèse
 rows = []
 for m in models:
+    mode = m.get("deployment_mode")
+    weight = m.get("traffic_weight")
+    if mode == "ab_test":
+        statut = f"🟠 A/B ({weight:.0%})" if weight is not None else "🟠 A/B"
+    elif mode == "shadow":
+        statut = "🟣 Shadow"
+    elif m.get("is_production"):
+        statut = "🟢 Production"
+    elif m.get("is_active"):
+        statut = "✅ Actif"
+    else:
+        statut = "⚫ Inactif"
+
     rows.append({
         "Nom": m.get("name", ""),
         "Version": m.get("version", ""),
@@ -80,7 +100,7 @@ for m in models:
         "Algorithme": m.get("algorithm") or "—",
         "Accuracy": f"{m['accuracy']:.3f}" if m.get("accuracy") is not None else "—",
         "F1": f"{m['f1_score']:.3f}" if m.get("f1_score") is not None else "—",
-        "Statut": "🟢 Production" if m.get("is_production") else ("✅ Actif" if m.get("is_active") else "⚫ Inactif"),
+        "Statut": statut,
         "Créateur": m.get("creator_username") or "—",
         "Créé le": pd.to_datetime(m.get("created_at")).strftime("%Y-%m-%d") if m.get("created_at") else "—",
         "Dernière préd.": pd.to_datetime(m.get("last_seen")).strftime("%Y-%m-%d %H:%M") if m.get("last_seen") else "—",
@@ -175,7 +195,7 @@ if is_admin:
             st.session_state.pop("confirm_delete_model", None)
             st.rerun()
 
-    # Modifier tags et webhook
+    # Modifier tags, webhook et déploiement
     with st.expander("✏️ Modifier les métadonnées"):
         new_webhook = st.text_input(
             "Webhook URL",
@@ -187,6 +207,27 @@ if is_admin:
             value=", ".join(selected.get("tags") or []),
             placeholder="production, finance, v2",
         )
+
+        st.markdown("**Déploiement A/B / Shadow**")
+        deploy_options = ["(inchangé)", "ab_test", "shadow", "production"]
+        new_deploy_mode = st.selectbox(
+            "Mode de déploiement",
+            deploy_options,
+            key="deploy_mode_select",
+            help="ab_test = routage pondéré, shadow = exécution silencieuse en background",
+        )
+        new_traffic_weight = None
+        if new_deploy_mode == "ab_test":
+            new_traffic_weight = st.number_input(
+                "Poids du trafic (0.0 – 1.0)",
+                min_value=0.0,
+                max_value=1.0,
+                step=0.05,
+                value=float(selected.get("traffic_weight") or 0.5),
+                key="traffic_weight_input",
+                help="Fraction du trafic routé vers cette version (ex: 0.3 = 30%)",
+            )
+
         if st.button("💾 Enregistrer", key="save_meta"):
             patch = {}
             current_webhook = selected.get("webhook_url") or ""
@@ -195,6 +236,10 @@ if is_admin:
             new_tags = [t.strip() for t in new_tags_raw.split(",") if t.strip()]
             if new_tags != (selected.get("tags") or []):
                 patch["tags"] = new_tags if new_tags else None
+            if new_deploy_mode != "(inchangé)":
+                patch["deployment_mode"] = new_deploy_mode
+                if new_deploy_mode == "ab_test" and new_traffic_weight is not None:
+                    patch["traffic_weight"] = new_traffic_weight
             if patch:
                 try:
                     client.update_model(selected["name"], selected["version"], patch)
