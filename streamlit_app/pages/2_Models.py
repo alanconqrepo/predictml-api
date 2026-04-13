@@ -7,6 +7,22 @@ import streamlit as st
 import pandas as pd
 from utils.auth import require_auth, get_client
 
+# --- Helpers historique ---
+
+_ACTION_ICONS = {
+    "created": "🟦",
+    "updated": "🟨",
+    "set_production": "🟩",
+    "deprecated": "🟫",
+    "deleted": "🟥",
+    "rollback": "🔁",
+}
+
+
+def _action_badge(action: str) -> str:
+    icon = _ACTION_ICONS.get(action, "⬜")
+    return f"{icon} `{action}`"
+
 st.set_page_config(page_title="Models — PredictML", page_icon="🤖", layout="wide")
 require_auth()
 
@@ -188,3 +204,83 @@ if is_admin:
                     st.error(f"Erreur : {e}")
             else:
                 st.info("Aucun changement détecté.")
+
+    # Historique des modifications
+    with st.expander("📜 Historique des modifications"):
+        try:
+            history_data = client.get_model_history(
+                selected["name"], selected["version"], limit=20
+            )
+            entries = history_data.get("entries", [])
+            total_hist = history_data.get("total", 0)
+        except Exception as e:
+            st.error(f"Impossible de charger l'historique : {e}")
+            entries = []
+            total_hist = 0
+
+        if not entries:
+            st.info("Aucun historique disponible pour cette version.")
+        else:
+            st.caption(f"{total_hist} entrée(s) au total — affichage des 20 dernières")
+            for entry in entries:
+                ts = pd.to_datetime(entry["timestamp"]).strftime("%Y-%m-%d %H:%M:%S UTC")
+                badge = _action_badge(entry["action"])
+                changed = ", ".join(entry.get("changed_fields") or []) or "—"
+                who = entry.get("changed_by_username") or "inconnu"
+
+                col_info, col_btn = st.columns([5, 1])
+                with col_info:
+                    st.markdown(
+                        f"**{ts}** — {badge} — par **{who}**  \n"
+                        f"Champs modifiés : `{changed}`"
+                    )
+                with col_btn:
+                    if is_admin:
+                        if st.button(
+                            "↩ Rollback",
+                            key=f"rollback_btn_{entry['id']}",
+                            type="secondary",
+                            help=f"Restaurer l'état de l'entrée #{entry['id']}",
+                        ):
+                            st.session_state["confirm_rollback_id"] = entry["id"]
+                            st.session_state["confirm_rollback_model"] = selected["name"]
+                            st.session_state["confirm_rollback_version"] = selected["version"]
+
+                with st.expander(f"Snapshot #{entry['id']}", expanded=False):
+                    st.json(entry["snapshot"])
+
+                st.divider()
+
+            # Dialog de confirmation du rollback
+            confirm_id = st.session_state.get("confirm_rollback_id")
+            confirm_model = st.session_state.get("confirm_rollback_model")
+            confirm_version = st.session_state.get("confirm_rollback_version")
+            if (
+                confirm_id is not None
+                and confirm_model == selected["name"]
+                and confirm_version == selected["version"]
+            ):
+                st.warning(
+                    f"Restaurer les métadonnées de **{confirm_model} v{confirm_version}** "
+                    f"à l'état capturé dans l'entrée **#{confirm_id}** ?  \n"
+                    "Cette action est irréversible (mais loguée dans l'historique)."
+                )
+                c1, c2 = st.columns(2)
+                if c1.button("✅ Oui, restaurer", type="primary", key="confirm_rollback_yes"):
+                    try:
+                        result = client.rollback_model(confirm_model, confirm_version, confirm_id)
+                        st.success(
+                            f"Rollback effectué. Nouvelle entrée d'historique "
+                            f"**#{result['new_history_id']}** créée."
+                        )
+                        st.session_state.pop("confirm_rollback_id", None)
+                        st.session_state.pop("confirm_rollback_model", None)
+                        st.session_state.pop("confirm_rollback_version", None)
+                        reload()
+                    except Exception as e:
+                        st.error(f"Erreur lors du rollback : {e}")
+                if c2.button("❌ Annuler", key="confirm_rollback_no"):
+                    st.session_state.pop("confirm_rollback_id", None)
+                    st.session_state.pop("confirm_rollback_model", None)
+                    st.session_state.pop("confirm_rollback_version", None)
+                    st.rerun()

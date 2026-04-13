@@ -202,3 +202,44 @@ class DriftReportResponse(BaseModel):
     baseline_available: bool
     drift_summary: str  # "ok" | "warning" | "critical" | "no_baseline" | "insufficient_data"
     features: Dict[str, FeatureDriftResult]
+
+
+# ---------------------------------------------------------------------------
+# Historique et rollback
+# ---------------------------------------------------------------------------
+
+
+class ModelHistoryEntry(BaseModel):
+    """Une entrée d'historique pour un changement d'état de modèle"""
+
+    id: int
+    model_name: str
+    model_version: str
+    changed_by_user_id: Optional[int] = None
+    changed_by_username: Optional[str] = None
+    action: str
+    snapshot: Dict[str, Any]
+    changed_fields: Optional[List[str]] = None
+    timestamp: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ModelHistoryResponse(BaseModel):
+    """Réponse pour GET /models/{name}/history et GET /models/{name}/{version}/history"""
+
+    model_name: str
+    version: Optional[str] = None  # None = toutes les versions
+    entries: List[ModelHistoryEntry]
+    total: int
+
+
+class RollbackResponse(BaseModel):
+    """Réponse pour POST /models/{name}/{version}/rollback/{history_id}"""
+
+    model_name: str
+    version: str
+    rolled_back_to_history_id: int
+    new_history_id: int
+    restored_fields: List[str]
+    snapshot: Dict[str, Any]

@@ -24,22 +24,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.core.config import settings
-from src.core.security import verify_token
+from src.core.security import require_admin, verify_token
 from src.db.database import get_db
-from src.db.models import ModelMetadata, User
+from src.db.models import HistoryActionType, ModelMetadata, User
 from src.schemas.model import (
     DriftReportResponse,
     FeatureDriftResult,
     ModelCreateResponse,
     ModelDeleteResponse,
     ModelGetResponse,
+    ModelHistoryEntry,
+    ModelHistoryResponse,
     ModelPerformanceResponse,
     ModelUpdateInput,
     PerClassMetrics,
     PeriodPerformance,
+    RollbackResponse,
 )
 from src.services import drift_service
-from src.services.db_service import DBService
+from src.services.db_service import _ROLLBACK_FIELDS, DBService, _build_snapshot
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
 
@@ -334,6 +337,162 @@ async def get_model_drift(
     )
 
 
+# ---------------------------------------------------------------------------
+# Historique des changements de modèles
+# IMPORTANT : ces routes doivent être déclarées AVANT /models/{name}/{version}
+# pour éviter que "history" soit interprété comme un paramètre `version`.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/models/{name}/history", response_model=ModelHistoryResponse)
+async def list_model_history(
+    name: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retourne l'historique complet de toutes les versions d'un modèle (tri timestamp DESC).
+
+    Nécessite un token Bearer valide.
+    """
+    entries, total = await DBService.get_model_history(
+        db, name, model_version=None, limit=limit, offset=offset
+    )
+    return ModelHistoryResponse(
+        model_name=name,
+        version=None,
+        entries=[ModelHistoryEntry.model_validate(e) for e in entries],
+        total=total,
+    )
+
+
+@router.get("/models/{name}/{version}/history", response_model=ModelHistoryResponse)
+async def list_model_version_history(
+    name: str,
+    version: str,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retourne l'historique d'une version spécifique d'un modèle (tri timestamp DESC).
+
+    Nécessite un token Bearer valide.
+    """
+    entries, total = await DBService.get_model_history(
+        db, name, model_version=version, limit=limit, offset=offset
+    )
+    return ModelHistoryResponse(
+        model_name=name,
+        version=version,
+        entries=[ModelHistoryEntry.model_validate(e) for e in entries],
+        total=total,
+    )
+
+
+@router.post(
+    "/models/{name}/{version}/rollback/{history_id}",
+    response_model=RollbackResponse,
+)
+async def rollback_model(
+    name: str,
+    version: str,
+    history_id: int,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Restaure les métadonnées d'un modèle à l'état capturé dans une entrée d'historique.
+
+    Seuls les champs de métadonnées sont restaurés (pas les références artifacts MinIO/MLflow).
+    Si le snapshot avait `is_production=True`, les autres versions sont automatiquement rétrogradées.
+
+    Réservé aux administrateurs.
+    """
+    # Charger le modèle cible
+    result = await db.execute(
+        select(ModelMetadata)
+        .options(selectinload(ModelMetadata.creator))
+        .where(and_(ModelMetadata.name == name, ModelMetadata.version == version))
+    )
+    model = result.scalar_one_or_none()
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' version '{version}' introuvable.",
+        )
+
+    # Charger l'entrée d'historique
+    history_entry = await DBService.get_history_entry_by_id(db, history_id)
+    if not history_entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Entrée d'historique {history_id} introuvable.",
+        )
+    if history_entry.model_name != name or history_entry.model_version != version:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="L'entrée d'historique n'appartient pas à ce modèle/version.",
+        )
+
+    snapshot = history_entry.snapshot
+    restored_fields = []
+
+    # Si le snapshot restaure is_production=True → rétrograder les autres versions
+    if snapshot.get("is_production") is True:
+        other_result = await db.execute(
+            select(ModelMetadata).where(
+                and_(
+                    ModelMetadata.name == name,
+                    ModelMetadata.version != version,
+                    ModelMetadata.is_production.is_(True),
+                )
+            )
+        )
+        for other in other_result.scalars().all():
+            other.is_production = False
+            await DBService.log_model_history(
+                db,
+                other,
+                HistoryActionType.SET_PRODUCTION,
+                user.id,
+                user.username,
+                ["is_production"],
+            )
+
+    # Appliquer le snapshot sur les champs restaurables
+    for field in _ROLLBACK_FIELDS:
+        if field in snapshot:
+            value = snapshot[field]
+            # Re-parser training_date si stocké en ISO string
+            if field == "training_date" and isinstance(value, str):
+                value = datetime.fromisoformat(value)
+            setattr(model, field, value)
+            restored_fields.append(field)
+
+    await db.flush()
+
+    # Logger le rollback comme nouvelle entrée d'historique
+    new_entry = await DBService.log_model_history(
+        db, model, HistoryActionType.ROLLBACK, user.id, user.username, restored_fields
+    )
+
+    await db.commit()
+    await db.refresh(model)
+
+    return RollbackResponse(
+        model_name=name,
+        version=version,
+        rolled_back_to_history_id=history_id,
+        new_history_id=new_entry.id,
+        restored_fields=restored_fields,
+        snapshot=history_entry.snapshot,
+    )
+
+
 @router.get("/models/{name}/{version}", response_model=ModelGetResponse)
 async def get_model(
     name: str,
@@ -550,6 +709,10 @@ async def create_model(
         is_production=False,
     )
     db.add(metadata)
+    await db.flush()  # obtenir l'id avant le snapshot
+    await DBService.log_model_history(
+        db, metadata, HistoryActionType.CREATED, user.id, user.username
+    )
     await db.commit()
     await db.refresh(metadata)
 
@@ -591,6 +754,10 @@ async def update_model(
             detail=f"Modèle '{name}' version '{version}' introuvable.",
         )
 
+    # Snapshot avant modification (pour détecter les champs réellement modifiés)
+    pre_snapshot = _build_snapshot(model)
+    demoted_versions = []
+
     # Si is_production passe à True → retirer is_production des autres versions
     if payload.is_production is True:
         other_versions = await db.execute(
@@ -604,11 +771,29 @@ async def update_model(
         )
         for other in other_versions.scalars().all():
             other.is_production = False
+            demoted_versions.append(other)
 
     # Appliquer uniquement les champs fournis (non-None)
     update_data = payload.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(model, field, value)
+
+    await db.flush()
+
+    # Déterminer les champs réellement modifiés
+    post_snapshot = _build_snapshot(model)
+    changed_fields = [k for k in update_data if pre_snapshot.get(k) != post_snapshot.get(k)]
+    action = (
+        HistoryActionType.SET_PRODUCTION
+        if payload.is_production is True
+        else HistoryActionType.UPDATED
+    )
+
+    await DBService.log_model_history(db, model, action, user.id, user.username, changed_fields)
+    for demoted in demoted_versions:
+        await DBService.log_model_history(
+            db, demoted, HistoryActionType.SET_PRODUCTION, user.id, user.username, ["is_production"]
+        )
 
     await db.commit()
     await db.refresh(model)
@@ -685,6 +870,8 @@ async def delete_model_version(
     if model.minio_object_key:
         _delete_minio_object(model.minio_object_key)
 
+    # Logger la suppression avant de supprimer l'objet ORM
+    await DBService.log_model_history(db, model, HistoryActionType.DELETED, user.id, user.username)
     await db.delete(model)
     await db.commit()
 
@@ -726,6 +913,9 @@ async def delete_model_all_versions(
         if model.minio_object_key and _delete_minio_object(model.minio_object_key):
             minio_objects_deleted.append(model.minio_object_key)
 
+        await DBService.log_model_history(
+            db, model, HistoryActionType.DELETED, user.id, user.username
+        )
         await db.delete(model)
 
     await db.commit()
