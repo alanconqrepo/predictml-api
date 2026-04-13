@@ -310,10 +310,16 @@ mcp ou skills pour interagir avec
 
 prefect pour rapport hebdo automatique, retrain automatique, pour que l'utilisateur puisse facilement créer son script de prédiction feedback
 
-tests d'intégration 
+en sachant que dans les artifacts de mlflow, l utilisateur peut stocker un fichier train.py qui permet de relancer l'apprentissage entre deux dates, crée une route qui va permettre de relancer l'apprentissage entre deux dates définis par l'utilisateur, ce qui va générer une nouvelle version. ajouter un bouton retrain dans streamlite qui va ouvrir une modal pour sélectionner date début et date fin, plus une checkbox qui indique si l'utilisateur souhaite mettre la nouvelle version en production.
 
-tests end to end e2e
+ajouter les tests d'intégration nécessaire pour valider le bon fonctionnement global du produit
 
-rollback facile depuis streamlite suite mise en production modele
+ajouter les tests end to end e2e pour valider le 
+bon fonctionnement globale du produit
+
+a partir de l'historique des git mettre à jour là documentation présents dans les .md y compris le readme.md pour intégrer les nouvelles fonctionnalités.
+
+créer un skills.md pour expliquer à une IA comment interagir avec l outil
+
 
 
