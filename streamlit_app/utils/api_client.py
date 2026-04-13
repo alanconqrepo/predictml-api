@@ -112,6 +112,28 @@ class APIClient:
         r = self._delete(f"/models/{name}/{version}")
         return r.status_code == 204
 
+    def get_model_history(
+        self,
+        name: str,
+        version: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """Retourne l'historique d'un modèle (toutes versions ou version spécifique)."""
+        if version:
+            path = f"/models/{name}/{version}/history"
+        else:
+            path = f"/models/{name}/history"
+        r = self._get(path, params={"limit": limit, "offset": offset})
+        r.raise_for_status()
+        return r.json()
+
+    def rollback_model(self, name: str, version: str, history_id: int) -> dict:
+        """Restaure les métadonnées d'un modèle à un état antérieur (admin requis)."""
+        r = self._post(f"/models/{name}/{version}/rollback/{history_id}")
+        r.raise_for_status()
+        return r.json()
+
     # --- Predictions ---
 
     def get_predictions(

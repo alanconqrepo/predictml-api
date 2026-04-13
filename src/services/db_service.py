@@ -13,7 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.core.utils import _utcnow
-from src.db.models import ModelMetadata, ObservedResult, Prediction, User
+from src.db.models import (
+    HistoryActionType,
+    ModelHistory,
+    ModelMetadata,
+    ObservedResult,
+    Prediction,
+    User,
+)
 
 
 class DBService:
@@ -579,6 +586,129 @@ class DBService:
             base_query.order_by(ObservedResult.date_time.desc()).limit(limit).offset(offset)
         )
         return result.scalars().all(), total
+
+    # === Model History ===
+
+    @staticmethod
+    async def log_model_history(
+        db: AsyncSession,
+        model: ModelMetadata,
+        action: HistoryActionType,
+        user_id: Optional[int],
+        username: Optional[str],
+        changed_fields: Optional[List[str]] = None,
+    ) -> ModelHistory:
+        """Crée une entrée d'historique avec un snapshot complet de l'état actuel du modèle.
+        L'appelant est responsable du commit."""
+        entry = ModelHistory(
+            model_name=model.name,
+            model_version=model.version,
+            changed_by_user_id=user_id,
+            changed_by_username=username,
+            action=action,
+            snapshot=_build_snapshot(model),
+            changed_fields=changed_fields,
+        )
+        db.add(entry)
+        return entry
+
+    @staticmethod
+    async def get_model_history(
+        db: AsyncSession,
+        model_name: str,
+        model_version: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple:
+        """Récupère l'historique d'un modèle (toutes versions ou une version spécifique).
+
+        Returns:
+            Tuple (liste d'entrées triées par timestamp DESC, total sans pagination)
+        """
+        filters = [ModelHistory.model_name == model_name]
+        if model_version:
+            filters.append(ModelHistory.model_version == model_version)
+
+        base_query = select(ModelHistory).where(and_(*filters))
+
+        total_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
+        total = total_result.scalar() or 0
+
+        result = await db.execute(
+            base_query.order_by(ModelHistory.timestamp.desc()).limit(limit).offset(offset)
+        )
+        return list(result.scalars().all()), total
+
+    @staticmethod
+    async def get_history_entry_by_id(
+        db: AsyncSession,
+        history_id: int,
+    ) -> Optional[ModelHistory]:
+        """Récupère une entrée d'historique par son id."""
+        result = await db.execute(select(ModelHistory).where(ModelHistory.id == history_id))
+        return result.scalar_one_or_none()
+
+
+# ===========================================================================
+# Helpers snapshot (module-level, utilisables aussi depuis api/models.py)
+# ===========================================================================
+
+_SNAPSHOT_FIELDS = [
+    "description",
+    "algorithm",
+    "features_count",
+    "classes",
+    "accuracy",
+    "precision",
+    "recall",
+    "f1_score",
+    "training_metrics",
+    "confidence_threshold",
+    "trained_by",
+    "training_date",
+    "training_dataset",
+    "training_params",
+    "feature_baseline",
+    "tags",
+    "webhook_url",
+    "is_production",
+    "is_active",
+    "deprecated_at",
+]
+
+# Champs restaurables lors d'un rollback (is_active et deprecated_at exclus :
+# gérés explicitement par les opérations métier)
+_ROLLBACK_FIELDS = [
+    "description",
+    "algorithm",
+    "features_count",
+    "classes",
+    "accuracy",
+    "precision",
+    "recall",
+    "f1_score",
+    "training_metrics",
+    "confidence_threshold",
+    "trained_by",
+    "training_date",
+    "training_dataset",
+    "training_params",
+    "feature_baseline",
+    "tags",
+    "webhook_url",
+    "is_production",
+]
+
+
+def _build_snapshot(model: ModelMetadata) -> dict:
+    """Construit un dict JSON-sérialisable des champs mutables d'un modèle."""
+    result: dict = {}
+    for field in _SNAPSHOT_FIELDS:
+        value = getattr(model, field, None)
+        if isinstance(value, datetime):
+            value = value.isoformat()
+        result[field] = value
+    return result
 
 
 # Instance globale (optionnel)
