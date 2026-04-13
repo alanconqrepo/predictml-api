@@ -87,6 +87,7 @@ def show_home():
 | **3 - Predictions** | Historique des prédictions avec filtres |
 | **4 - Stats** | Statistiques et graphiques d'utilisation |
 | **5 - Code Example** | Exemple de code MLflow + API |
+| **6 - A/B Testing** | Configurer les tests A/B, déploiement shadow, comparer les métriques par version |
 """)
 
     st.divider()

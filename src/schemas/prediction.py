@@ -89,6 +89,13 @@ class PredictionOutput(BaseModel):
             "None si le modèle n'a pas de seuil configuré ou ne supporte pas predict_proba."
         ),
     )
+    selected_version: Optional[str] = Field(
+        None,
+        description=(
+            "Version sélectionnée par le routage A/B (uniquement si model_version n'était pas "
+            "spécifié dans la requête et qu'un test A/B est actif)."
+        ),
+    )
 
 
 class PredictionResponse(BaseModel):
@@ -106,6 +113,7 @@ class PredictionResponse(BaseModel):
     status: str
     error_message: Optional[str]
     username: Optional[str]  # depuis la relation User
+    is_shadow: bool = False  # True si prédiction shadow (non retournée au client)
 
     model_config = ConfigDict(from_attributes=True)
 

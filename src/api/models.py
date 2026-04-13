@@ -27,7 +27,10 @@ from src.core.config import settings
 from src.core.security import require_admin, verify_token
 from src.db.database import get_db
 from src.db.models import HistoryActionType, ModelMetadata, User
+from src.db.models.model_metadata import DeploymentMode
 from src.schemas.model import (
+    ABCompareResponse,
+    ABVersionStats,
     DriftReportResponse,
     FeatureDriftResult,
     ModelCreateResponse,
@@ -493,6 +496,65 @@ async def rollback_model(
     )
 
 
+@router.get("/models/{name}/ab-compare", response_model=ABCompareResponse)
+async def get_ab_comparison(
+    name: str,
+    days: int = Query(30, ge=1, le=90, description="Fenêtre d'analyse en jours (max 90)"),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Comparaison côte-à-côte des versions A/B et shadow d'un modèle sur une fenêtre glissante.
+
+    Pour chaque version ayant généré des prédictions : total, prédictions shadow, taux d'erreur,
+    latence (avg / p95), distribution des labels, et taux de concordance shadow/production (si id_obs).
+
+    Nécessite un token Bearer valide.
+    """
+    # Vérifier que le modèle existe
+    all_metas_result = await db.execute(
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.is_active.is_(True))
+        )
+    )
+    all_metas = all_metas_result.scalars().all()
+    if not all_metas:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' introuvable ou inactif.",
+        )
+
+    meta_by_version = {m.version: m for m in all_metas}
+
+    raw_stats = await DBService.get_ab_comparison_stats(db, name, days=days)
+    agreement_by_version = await DBService.get_shadow_agreement_rate(db, name, days=days)
+
+    versions_out = []
+    for s in raw_stats:
+        ver = s["version"]
+        m = meta_by_version.get(ver)
+        versions_out.append(
+            ABVersionStats(
+                version=ver,
+                deployment_mode=m.deployment_mode if m else None,
+                traffic_weight=m.traffic_weight if m else None,
+                total_predictions=s["total_predictions"],
+                shadow_predictions=s["shadow_predictions"],
+                error_rate=s["error_rate"],
+                avg_response_time_ms=s["avg_response_time_ms"],
+                p95_response_time_ms=s["p95_response_time_ms"],
+                prediction_distribution=s["prediction_distribution"],
+                agreement_rate=agreement_by_version.get(ver),
+            )
+        )
+
+    return ABCompareResponse(
+        model_name=name,
+        period_days=days,
+        versions=versions_out,
+    )
+
+
 @router.get("/models/{name}/{version}", response_model=ModelGetResponse)
 async def get_model(
     name: str,
@@ -779,6 +841,30 @@ async def update_model(
         setattr(model, field, value)
 
     await db.flush()
+
+    # Validation : la somme des traffic_weight pour les versions ab_test du modèle doit rester ≤ 1.0
+    if "deployment_mode" in update_data or "traffic_weight" in update_data:
+        ab_result = await db.execute(
+            select(ModelMetadata).where(
+                and_(
+                    ModelMetadata.name == name,
+                    ModelMetadata.deployment_mode == DeploymentMode.AB_TEST,
+                    ModelMetadata.is_active.is_(True),
+                )
+            )
+        )
+        ab_versions = ab_result.scalars().all()
+        total_weight = sum((m.traffic_weight or 0.0) for m in ab_versions)
+        if total_weight > 1.0 + 1e-9:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"La somme des traffic_weight pour les versions A/B de '{name}' "
+                    f"dépasse 1.0 (somme actuelle = {total_weight:.3f}). "
+                    "Réduisez le poids de certaines versions avant d'en augmenter d'autres."
+                ),
+            )
 
     # Déterminer les champs réellement modifiés
     post_snapshot = _build_snapshot(model)

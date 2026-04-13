@@ -3,14 +3,17 @@ Service de gestion des modèles ML (v3 - cache Redis distribué)
 """
 
 import pickle
-from typing import Any, Dict, List, Optional
+import random
+from typing import Any, Dict, List, Optional, Tuple
 
 import redis.asyncio as aioredis
 import structlog
 from fastapi import HTTPException, status
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
+from src.db.models.model_metadata import DeploymentMode, ModelMetadata
 from src.services.db_service import DBService
 from src.services.minio_service import minio_service
 
@@ -177,6 +180,63 @@ class ModelService:
             if keys:
                 await redis.delete(*keys)
             logger.info("Cache Redis complet invalidé")
+
+    async def select_routing_versions(
+        self,
+        db: AsyncSession,
+        model_name: str,
+    ) -> Tuple[Optional[ModelMetadata], Optional[ModelMetadata]]:
+        """
+        Détermine quelle(s) version(s) utiliser pour un appel sans version explicite.
+
+        Règles de sélection :
+        1. Les versions avec deployment_mode="shadow" deviennent le candidat shadow.
+        2. Les versions avec deployment_mode="ab_test" et traffic_weight > 0 participent
+           au routage pondéré (random.choices) → version primaire.
+        3. Si aucune version A/B : fallback sur get_model_metadata() (comportement legacy :
+           is_production=True ou la plus récente).
+        4. Le shadow n'est activé que s'il existe exactement une version shadow.
+
+        Retourne:
+            (primary_metadata, shadow_metadata)
+            shadow_metadata est None si aucune version shadow unique n'existe.
+        """
+        result = await db.execute(
+            select(ModelMetadata).where(
+                and_(
+                    ModelMetadata.name == model_name,
+                    ModelMetadata.is_active.is_(True),
+                )
+            )
+        )
+        all_versions = result.scalars().all()
+
+        shadow_candidates = [m for m in all_versions if m.deployment_mode == DeploymentMode.SHADOW]
+        ab_candidates = [
+            m
+            for m in all_versions
+            if m.deployment_mode == DeploymentMode.AB_TEST
+            and m.traffic_weight is not None
+            and m.traffic_weight > 0.0
+        ]
+
+        # Un seul shadow autorisé (ambiguïté sinon → désactivé)
+        shadow_metadata = shadow_candidates[0] if len(shadow_candidates) == 1 else None
+
+        if ab_candidates:
+            weights = [m.traffic_weight for m in ab_candidates]
+            primary_metadata = random.choices(ab_candidates, weights=weights, k=1)[0]
+            logger.info(
+                "Routage A/B",
+                model_name=model_name,
+                selected_version=primary_metadata.version,
+                candidates=[m.version for m in ab_candidates],
+            )
+        else:
+            # Fallback legacy : is_production=True ou plus récent
+            primary_metadata = await DBService.get_model_metadata(db, model_name, version=None)
+
+        return primary_metadata, shadow_metadata
 
     async def close(self):
         """Ferme proprement la connexion Redis (à appeler au shutdown de l'app)."""

@@ -187,6 +187,27 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    # --- A/B Testing & Shadow Deployment ---
+
+    def update_model_deployment(
+        self,
+        name: str,
+        version: str,
+        deployment_mode: str,
+        traffic_weight: Optional[float] = None,
+    ) -> dict:
+        """Configure le deployment_mode et le traffic_weight d'une version de modèle."""
+        payload: dict = {"deployment_mode": deployment_mode}
+        if traffic_weight is not None:
+            payload["traffic_weight"] = traffic_weight
+        return self.update_model(name, version, payload)
+
+    def get_ab_comparison(self, model_name: str, days: int = 30) -> dict:
+        """Retourne les statistiques de comparaison A/B / shadow pour un modèle."""
+        r = self._get(f"/models/{model_name}/ab-compare", params={"days": days})
+        r.raise_for_status()
+        return r.json()
+
     # --- Observed Results ---
 
     def get_observed_results(

@@ -34,6 +34,7 @@ build/
 # Système
 .DS_Store
 Thumbs.db
+mlflow.db
 
 # Logs
 *.log

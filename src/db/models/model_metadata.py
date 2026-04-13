@@ -9,6 +9,14 @@ from src.core.utils import _utcnow
 from src.db.database import Base
 
 
+class DeploymentMode:
+    """Constantes pour le mode de déploiement d'une version de modèle."""
+
+    PRODUCTION = "production"
+    AB_TEST = "ab_test"
+    SHADOW = "shadow"
+
+
 class ModelMetadata(Base):
     """Métadonnées et versioning des modèles ML"""
 
@@ -67,6 +75,12 @@ class ModelMetadata(Base):
     # Status
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     is_production = Column(Boolean, default=False, nullable=False)
+
+    # A/B Testing & Shadow Deployment
+    # traffic_weight : fraction de trafic (0.0–1.0) pour le routage A/B ; None = non géré
+    traffic_weight = Column(Float, nullable=True)
+    # deployment_mode : "production" | "ab_test" | "shadow" | None (comportement legacy)
+    deployment_mode = Column(String(20), nullable=True)
 
     # Timestamps
     created_at = Column(DateTime, default=_utcnow, nullable=False)
