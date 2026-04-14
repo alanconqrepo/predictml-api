@@ -46,6 +46,12 @@ logs/
 .mypy_cache/
 .ruff_cache/
 
+# Coverage
+.coverage
+coverage.json
+coverage.xml
+htmlcov/
+
 # Claude
 .claude/
 =2.20.0
