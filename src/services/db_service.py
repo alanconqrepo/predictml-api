@@ -791,6 +791,264 @@ class DBService:
             if matches
         }
 
+    # === Monitoring / Supervision Dashboard ===
+
+    @staticmethod
+    async def get_global_monitoring_stats(
+        db: AsyncSession,
+        start: datetime,
+        end: datetime,
+    ) -> list[dict]:
+        """
+        Retourne les statistiques agrégées par model_name sur une plage calendaire.
+
+        Aggrégation Python-side (compatible SQLite + PostgreSQL, percentiles inclus).
+        Retourne une liste de dicts, un par model_name distinct dans la période.
+        """
+        stmt = select(
+            Prediction.model_name,
+            Prediction.model_version,
+            Prediction.is_shadow,
+            Prediction.status,
+            Prediction.response_time_ms,
+            Prediction.timestamp,
+        ).where(
+            and_(
+                Prediction.timestamp >= start,
+                Prediction.timestamp <= end,
+            )
+        )
+
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        # groupe: model_name -> {rows}
+        grouped: dict[str, dict] = defaultdict(
+            lambda: {
+                "versions": set(),
+                "total": 0,
+                "shadow": 0,
+                "errors": 0,
+                "times": [],
+                "last_ts": None,
+            }
+        )
+
+        for row in rows:
+            g = grouped[row.model_name]
+            if row.model_version:
+                g["versions"].add(row.model_version)
+            if row.is_shadow:
+                g["shadow"] += 1
+            else:
+                g["total"] += 1
+                if row.status != "success":
+                    g["errors"] += 1
+                elif row.response_time_ms is not None:
+                    g["times"].append(row.response_time_ms)
+            if g["last_ts"] is None or row.timestamp > g["last_ts"]:
+                g["last_ts"] = row.timestamp
+
+        def _percentile(data: list, p: float) -> Optional[float]:
+            if not data:
+                return None
+            s = sorted(data)
+            idx = max(0, int(len(s) * p) - 1)
+            return round(s[idx], 2)
+
+        stats = []
+        for model_name, g in sorted(grouped.items()):
+            total = g["total"]
+            times = g["times"]
+            n = len(times)
+            stats.append(
+                {
+                    "model_name": model_name,
+                    "versions": sorted(g["versions"]),
+                    "total_predictions": total,
+                    "shadow_predictions": g["shadow"],
+                    "error_count": g["errors"],
+                    "error_rate": round(g["errors"] / total, 4) if total > 0 else 0.0,
+                    "avg_latency_ms": round(sum(times) / n, 2) if n > 0 else None,
+                    "p50_latency_ms": _percentile(times, 0.50),
+                    "p95_latency_ms": _percentile(times, 0.95),
+                    "last_prediction": g["last_ts"],
+                }
+            )
+        return stats
+
+    @staticmethod
+    async def get_model_predictions_timeseries(
+        db: AsyncSession,
+        model_name: str,
+        start: datetime,
+        end: datetime,
+    ) -> list[dict]:
+        """
+        Retourne l'évolution quotidienne des prédictions (non-shadow) pour un modèle.
+
+        Retourne une liste de dicts triée par date asc :
+        [{date, total_predictions, error_count, error_rate, avg/p50/p95_latency_ms}]
+        """
+        stmt = select(
+            Prediction.status,
+            Prediction.response_time_ms,
+            Prediction.timestamp,
+        ).where(
+            and_(
+                Prediction.model_name == model_name,
+                Prediction.is_shadow.is_(False),
+                Prediction.timestamp >= start,
+                Prediction.timestamp <= end,
+            )
+        )
+
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        # group by date string "YYYY-MM-DD"
+        daily: dict[str, dict] = defaultdict(lambda: {"total": 0, "errors": 0, "times": []})
+        for row in rows:
+            day = row.timestamp.strftime("%Y-%m-%d")
+            g = daily[day]
+            g["total"] += 1
+            if row.status != "success":
+                g["errors"] += 1
+            elif row.response_time_ms is not None:
+                g["times"].append(row.response_time_ms)
+
+        def _percentile(data: list, p: float) -> Optional[float]:
+            if not data:
+                return None
+            s = sorted(data)
+            idx = max(0, int(len(s) * p) - 1)
+            return round(s[idx], 2)
+
+        return [
+            {
+                "date": day,
+                "total_predictions": g["total"],
+                "error_count": g["errors"],
+                "error_rate": round(g["errors"] / g["total"], 4) if g["total"] > 0 else 0.0,
+                "avg_latency_ms": (
+                    round(sum(g["times"]) / len(g["times"]), 2) if g["times"] else None
+                ),
+                "p50_latency_ms": _percentile(g["times"], 0.50),
+                "p95_latency_ms": _percentile(g["times"], 0.95),
+            }
+            for day, g in sorted(daily.items())
+        ]
+
+    @staticmethod
+    async def get_model_version_stats_range(
+        db: AsyncSession,
+        model_name: str,
+        start: datetime,
+        end: datetime,
+    ) -> list[dict]:
+        """
+        Retourne les statistiques par version (et shadow/non-shadow) sur une plage calendaire.
+
+        Retourne une liste de dicts : un par version (non-shadow + shadow séparément).
+        """
+        stmt = select(
+            Prediction.model_version,
+            Prediction.is_shadow,
+            Prediction.status,
+            Prediction.response_time_ms,
+        ).where(
+            and_(
+                Prediction.model_name == model_name,
+                Prediction.timestamp >= start,
+                Prediction.timestamp <= end,
+            )
+        )
+
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        # group: version -> {shadow: {total, errors, times}}
+        grouped: dict[str, dict] = defaultdict(
+            lambda: {
+                False: {"total": 0, "errors": 0, "times": []},
+                True: {"total": 0, "errors": 0, "times": []},
+            }
+        )
+
+        for row in rows:
+            ver = row.model_version or "unknown"
+            shadow = bool(row.is_shadow)
+            g = grouped[ver][shadow]
+            g["total"] += 1
+            if row.status != "success":
+                g["errors"] += 1
+            elif row.response_time_ms is not None:
+                g["times"].append(row.response_time_ms)
+
+        def _percentile(data: list, p: float) -> Optional[float]:
+            if not data:
+                return None
+            s = sorted(data)
+            idx = max(0, int(len(s) * p) - 1)
+            return round(s[idx], 2)
+
+        stats = []
+        for ver, shadow_map in sorted(grouped.items()):
+            prod = shadow_map[False]
+            shad = shadow_map[True]
+            total = prod["total"]
+            times = prod["times"]
+            n = len(times)
+            stats.append(
+                {
+                    "version": ver,
+                    "total_predictions": total,
+                    "shadow_predictions": shad["total"],
+                    "error_count": prod["errors"],
+                    "error_rate": round(prod["errors"] / total, 4) if total > 0 else 0.0,
+                    "avg_latency_ms": round(sum(times) / n, 2) if n > 0 else None,
+                    "p50_latency_ms": _percentile(times, 0.50),
+                    "p95_latency_ms": _percentile(times, 0.95),
+                }
+            )
+        return stats
+
+    @staticmethod
+    async def get_model_recent_errors(
+        db: AsyncSession,
+        model_name: str,
+        start: datetime,
+        end: datetime,
+        limit: int = 5,
+    ) -> list[str]:
+        """
+        Retourne les derniers messages d'erreur distincts pour un modèle sur la période.
+        """
+        stmt = (
+            select(Prediction.error_message)
+            .where(
+                and_(
+                    Prediction.model_name == model_name,
+                    Prediction.status == "error",
+                    Prediction.error_message.isnot(None),
+                    Prediction.timestamp >= start,
+                    Prediction.timestamp <= end,
+                )
+            )
+            .order_by(Prediction.timestamp.desc())
+            .limit(50)
+        )
+        result = await db.execute(stmt)
+        rows = result.scalars().all()
+        # déduplique en conservant l'ordre
+        seen: list[str] = []
+        for msg in rows:
+            if msg not in seen:
+                seen.append(msg)
+            if len(seen) >= limit:
+                break
+        return seen
+
 
 # ===========================================================================
 # Helpers snapshot (module-level, utilisables aussi depuis api/models.py)

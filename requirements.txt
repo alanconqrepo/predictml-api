@@ -33,6 +33,9 @@ boto3>=1.35.0
 # Cache distribué
 redis>=5.0.0
 
+# Scheduler pour rapports e-mail et alertes automatiques
+apscheduler>=3.10.0
+
 # Webhooks sortants
 httpx>=0.27.0
 

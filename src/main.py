@@ -11,7 +11,7 @@ from alembic.config import Config as AlembicConfig
 from fastapi import Depends, FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api import models, observed_results, predict, users
+from src.api import models, monitoring, observed_results, predict, users
 from src.core.config import settings
 from src.core.logging import setup_logging
 from src.db.database import close_db, engine, get_db, init_db
@@ -62,10 +62,27 @@ async def lifespan(app: FastAPI):
         minio_bucket=settings.MINIO_BUCKET,
     )
 
+    # Démarrer le scheduler d'alertes e-mail si activé
+    if settings.ENABLE_EMAIL_ALERTS or settings.WEEKLY_REPORT_ENABLED:
+        try:
+            from src.tasks.supervision_reporter import start_scheduler
+
+            start_scheduler()
+            logger.info("Scheduler de supervision démarré")
+        except Exception as e:
+            logger.warning("Impossible de démarrer le scheduler", error=str(e))
+
     yield
 
     # Shutdown
     logger.info("Fermeture de l'application")
+    if settings.ENABLE_EMAIL_ALERTS or settings.WEEKLY_REPORT_ENABLED:
+        try:
+            from src.tasks.supervision_reporter import stop_scheduler
+
+            stop_scheduler()
+        except Exception:
+            pass
     try:
         await close_db()
         logger.info("Connexions DB fermées")
@@ -97,6 +114,7 @@ app.include_router(predict.router)
 app.include_router(models.router)
 app.include_router(users.router)
 app.include_router(observed_results.router)
+app.include_router(monitoring.router)
 
 
 @app.get("/")
