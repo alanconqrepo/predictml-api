@@ -317,6 +317,9 @@ ajouter les tests d'intégration nécessaire pour valider le bon fonctionnement 
 ajouter les tests end to end e2e pour valider le 
 bon fonctionnement globale du produit
 
+couvrir les chemins critiques et les cas limites.
+éviter les tests purement cosmétiques.
+
 a partir de l'historique des git mettre à jour là documentation présents dans les .md y compris le readme.md pour intégrer les nouvelles fonctionnalités.
 
 créer un skills.md pour expliquer à une IA comment interagir avec l outil en tant qu utilisateur, doit contenir comment utiliser les différentes routes, comment est structuré le projet python, l objectif du projet, comment créer un nouveau modèle, une nouvelle version, comment effectuer un retrain en cas de drift, etc.
