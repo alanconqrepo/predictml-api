@@ -1,6 +1,7 @@
 """
 Gestion des modèles ML
 """
+
 import os
 import json
 import streamlit as st
@@ -22,6 +23,7 @@ _ACTION_ICONS = {
 def _action_badge(action: str) -> str:
     icon = _ACTION_ICONS.get(action, "⬜")
     return f"{icon} `{action}`"
+
 
 st.set_page_config(page_title="Models — PredictML", page_icon="🤖", layout="wide")
 require_auth()
@@ -93,18 +95,28 @@ for m in models:
     else:
         statut = "⚫ Inactif"
 
-    rows.append({
-        "Nom": m.get("name", ""),
-        "Version": m.get("version", ""),
-        "Tags": ", ".join(m.get("tags") or []) or "—",
-        "Algorithme": m.get("algorithm") or "—",
-        "Accuracy": f"{m['accuracy']:.3f}" if m.get("accuracy") is not None else "—",
-        "F1": f"{m['f1_score']:.3f}" if m.get("f1_score") is not None else "—",
-        "Statut": statut,
-        "Créateur": m.get("creator_username") or "—",
-        "Créé le": pd.to_datetime(m.get("created_at")).strftime("%Y-%m-%d") if m.get("created_at") else "—",
-        "Dernière préd.": pd.to_datetime(m.get("last_seen")).strftime("%Y-%m-%d %H:%M") if m.get("last_seen") else "—",
-    })
+    rows.append(
+        {
+            "Nom": m.get("name", ""),
+            "Version": m.get("version", ""),
+            "Tags": ", ".join(m.get("tags") or []) or "—",
+            "Algorithme": m.get("algorithm") or "—",
+            "Accuracy": f"{m['accuracy']:.3f}" if m.get("accuracy") is not None else "—",
+            "F1": f"{m['f1_score']:.3f}" if m.get("f1_score") is not None else "—",
+            "Statut": statut,
+            "Créateur": m.get("creator_username") or "—",
+            "Créé le": (
+                pd.to_datetime(m.get("created_at")).strftime("%Y-%m-%d")
+                if m.get("created_at")
+                else "—"
+            ),
+            "Dernière préd.": (
+                pd.to_datetime(m.get("last_seen")).strftime("%Y-%m-%d %H:%M")
+                if m.get("last_seen")
+                else "—"
+            ),
+        }
+    )
 
 st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
@@ -136,7 +148,9 @@ with st.expander("📋 Détails complets", expanded=True):
         st.markdown(f"**Recall :** {selected.get('recall') or '—'}")
         st.markdown(f"**Nb features :** {selected.get('features_count') or '—'}")
         last_seen = selected.get("last_seen")
-        st.markdown(f"**Dernière prédiction :** {pd.to_datetime(last_seen).strftime('%Y-%m-%d %H:%M') if last_seen else '—'}")
+        st.markdown(
+            f"**Dernière prédiction :** {pd.to_datetime(last_seen).strftime('%Y-%m-%d %H:%M') if last_seen else '—'}"
+        )
         classes = selected.get("classes")
         st.markdown(f"**Classes :** {classes if classes else '—'}")
 
@@ -168,7 +182,9 @@ if is_admin:
         if col_p.button("🚀 Passer en production", use_container_width=True, type="primary"):
             try:
                 client.update_model(selected["name"], selected["version"], {"is_production": True})
-                st.success(f"**{selected['name']} v{selected['version']}** est maintenant en production.")
+                st.success(
+                    f"**{selected['name']} v{selected['version']}** est maintenant en production."
+                )
                 reload()
             except Exception as e:
                 st.error(f"Erreur : {e}")
@@ -181,7 +197,9 @@ if is_admin:
 
     key = f"{selected['name']}:{selected['version']}"
     if st.session_state.get("confirm_delete_model") == key:
-        st.warning(f"Supprimer **{selected['name']} v{selected['version']}** ? (fichier MinIO + run MLflow)")
+        st.warning(
+            f"Supprimer **{selected['name']} v{selected['version']}** ? (fichier MinIO + run MLflow)"
+        )
         c1, c2 = st.columns(2)
         if c1.button("Oui, supprimer", type="primary"):
             try:
@@ -250,12 +268,77 @@ if is_admin:
             else:
                 st.info("Aucun changement détecté.")
 
+    # Ré-entraînement
+    if selected.get("train_script_object_key"):
+        st.divider()
+        if st.button("🔄 Ré-entraîner", use_container_width=True, key="retrain_btn"):
+            current = st.session_state.get("show_retrain_form")
+            toggle_key = f"{selected['name']}:{selected['version']}"
+            if current == toggle_key:
+                st.session_state.pop("show_retrain_form", None)
+            else:
+                st.session_state["show_retrain_form"] = toggle_key
+
+        retrain_key = f"{selected['name']}:{selected['version']}"
+        if st.session_state.get("show_retrain_form") == retrain_key:
+            with st.form("retrain_form"):
+                st.markdown(f"**Ré-entraîner** `{selected['name']}` v`{selected['version']}`")
+                col_s, col_e = st.columns(2)
+                with col_s:
+                    start_date = st.date_input("Date de début", key="retrain_start")
+                with col_e:
+                    end_date = st.date_input("Date de fin", key="retrain_end")
+                new_version_input = st.text_input(
+                    "Nouvelle version (laisser vide = auto-généré)",
+                    value="",
+                    placeholder=f"{selected['version']}-retrain-YYYYMMDDHHMMSS",
+                    key="retrain_new_version",
+                )
+                set_prod = st.checkbox(
+                    "Mettre en production après entraînement",
+                    value=False,
+                    key="retrain_set_prod",
+                )
+                submitted = st.form_submit_button("🚀 Lancer le ré-entraînement", type="primary")
+
+            if submitted:
+                if start_date > end_date:
+                    st.error("La date de début doit être antérieure à la date de fin.")
+                else:
+                    with st.spinner("Ré-entraînement en cours… (peut prendre jusqu'à 10 minutes)"):
+                        try:
+                            result = client.retrain_model(
+                                name=selected["name"],
+                                version=selected["version"],
+                                start_date=str(start_date),
+                                end_date=str(end_date),
+                                new_version=new_version_input.strip() or None,
+                                set_production=set_prod,
+                            )
+                            st.session_state.pop("show_retrain_form", None)
+                            if result.get("success"):
+                                st.success(
+                                    f"Ré-entraînement réussi ! "
+                                    f"Nouvelle version : **{result['new_version']}**"
+                                )
+                            else:
+                                st.error(
+                                    f"Échec du ré-entraînement : "
+                                    f"{result.get('error', 'Erreur inconnue')}"
+                                )
+                            with st.expander("📋 Logs stdout", expanded=not result.get("success")):
+                                st.code(result.get("stdout", "(vide)"), language="text")
+                            with st.expander("⚠️ Logs stderr", expanded=not result.get("success")):
+                                st.code(result.get("stderr", "(vide)"), language="text")
+                            if result.get("success"):
+                                reload()
+                        except Exception as e:
+                            st.error(f"Erreur lors du ré-entraînement : {e}")
+
     # Historique des modifications
     with st.expander("📜 Historique des modifications"):
         try:
-            history_data = client.get_model_history(
-                selected["name"], selected["version"], limit=20
-            )
+            history_data = client.get_model_history(selected["name"], selected["version"], limit=20)
             entries = history_data.get("entries", [])
             total_hist = history_data.get("total", 0)
         except Exception as e:
@@ -276,8 +359,7 @@ if is_admin:
                 col_info, col_btn = st.columns([5, 1])
                 with col_info:
                     st.markdown(
-                        f"**{ts}** — {badge} — par **{who}**  \n"
-                        f"Champs modifiés : `{changed}`"
+                        f"**{ts}** — {badge} — par **{who}**  \n" f"Champs modifiés : `{changed}`"
                     )
                 with col_btn:
                     if is_admin:

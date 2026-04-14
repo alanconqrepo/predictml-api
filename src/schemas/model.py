@@ -72,6 +72,7 @@ class ModelCreateResponse(BaseModel):
     is_production: bool
     traffic_weight: Optional[float] = None
     deployment_mode: Optional[str] = None
+    train_script_object_key: Optional[str] = None
     created_at: datetime
     user_id_creator: Optional[int]
     creator_username: Optional[str] = None
@@ -279,3 +280,30 @@ class ABCompareResponse(BaseModel):
     model_name: str
     period_days: int
     versions: List[ABVersionStats]
+
+
+# ---------------------------------------------------------------------------
+# Ré-entraînement
+# ---------------------------------------------------------------------------
+
+
+class RetrainRequest(BaseModel):
+    """Requête pour POST /models/{name}/{version}/retrain"""
+
+    start_date: str  # YYYY-MM-DD — date de début des données d'entraînement
+    end_date: str  # YYYY-MM-DD — date de fin des données d'entraînement
+    new_version: Optional[str] = None  # auto-généré si absent
+    set_production: bool = False  # passer la nouvelle version en production
+
+
+class RetrainResponse(BaseModel):
+    """Réponse de POST /models/{name}/{version}/retrain"""
+
+    model_name: str
+    source_version: str
+    new_version: str
+    success: bool
+    stdout: str
+    stderr: str
+    error: Optional[str] = None
+    new_model_metadata: Optional[ModelCreateResponse] = None

@@ -175,6 +175,57 @@ class MinIOService:
             logger.error("Erreur lors de la suppression", error=str(e))
             return False
 
+    def upload_file_bytes(
+        self, content: bytes, object_name: str, content_type: str = "text/plain"
+    ) -> dict:
+        """
+        Upload des bytes bruts (ex: script Python, JSON, CSV) dans MinIO.
+
+        Args:
+            content: Contenu brut à uploader
+            object_name: Nom de l'objet dans MinIO
+            content_type: Type MIME de l'objet
+
+        Returns:
+            dict avec les informations de l'upload
+        """
+        self._ensure_bucket_exists()
+        try:
+            self.client.put_object(
+                self.bucket,
+                object_name,
+                io.BytesIO(content),
+                length=len(content),
+                content_type=content_type,
+            )
+            logger.info("Fichier uploadé", object_name=object_name, size_bytes=len(content))
+            return {"bucket": self.bucket, "object_name": object_name, "size": len(content)}
+        except S3Error as e:
+            logger.error("Erreur lors de l'upload du fichier", error=str(e))
+            raise
+
+    def download_file_bytes(self, object_name: str) -> bytes:
+        """
+        Télécharge et retourne le contenu brut d'un objet MinIO (sans désérialisation).
+
+        Args:
+            object_name: Nom de l'objet dans MinIO
+
+        Returns:
+            Contenu brut en bytes
+        """
+        self._ensure_bucket_exists()
+        try:
+            response = self.client.get_object(self.bucket, object_name)
+            content = response.read()
+            response.close()
+            response.release_conn()
+            logger.info("Fichier téléchargé", object_name=object_name, size_bytes=len(content))
+            return content
+        except S3Error as e:
+            logger.error("Erreur lors du téléchargement du fichier", error=str(e))
+            raise
+
     def get_object_info(self, object_name: str) -> Optional[dict]:
         """
         Récupère les informations d'un objet

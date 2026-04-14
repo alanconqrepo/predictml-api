@@ -1,6 +1,7 @@
 """
 Client HTTP pour l'API predictml
 """
+
 import requests
 from typing import Optional, Tuple
 
@@ -131,6 +132,37 @@ class APIClient:
     def rollback_model(self, name: str, version: str, history_id: int) -> dict:
         """Restaure les métadonnées d'un modèle à un état antérieur (admin requis)."""
         r = self._post(f"/models/{name}/{version}/rollback/{history_id}")
+        r.raise_for_status()
+        return r.json()
+
+    def retrain_model(
+        self,
+        name: str,
+        version: str,
+        start_date: str,
+        end_date: str,
+        new_version: Optional[str] = None,
+        set_production: bool = False,
+    ) -> dict:
+        """
+        Lance le ré-entraînement d'un modèle via son script train.py stocké dans MinIO.
+
+        Timeout de 660s pour accommoder les entraînements longs (jusqu'à 10 min).
+        Requiert un token admin.
+        """
+        payload: dict = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "set_production": set_production,
+        }
+        if new_version:
+            payload["new_version"] = new_version
+        r = requests.post(
+            f"{self.base_url}/models/{name}/{version}/retrain",
+            headers=self._headers(),
+            json=payload,
+            timeout=660,
+        )
         r.raise_for_status()
         return r.json()
 
