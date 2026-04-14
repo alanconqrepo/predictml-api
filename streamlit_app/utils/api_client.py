@@ -210,6 +210,22 @@ class APIClient:
 
     # --- Observed Results ---
 
+    # --- Monitoring / Supervision Dashboard ---
+
+    def get_monitoring_overview(self, start: str, end: str) -> dict:
+        """Vue d'ensemble de la santé de tous les modèles sur une plage calendaire."""
+        r = self._get("/monitoring/overview", params={"start": start, "end": end})
+        r.raise_for_status()
+        return r.json()
+
+    def get_monitoring_model(self, name: str, start: str, end: str) -> dict:
+        """Détail complet de supervision pour un modèle."""
+        r = self._get(f"/monitoring/model/{name}", params={"start": start, "end": end})
+        r.raise_for_status()
+        return r.json()
+
+    # --- Observed Results ---
+
     def get_observed_results(
         self,
         model_name: Optional[str] = None,

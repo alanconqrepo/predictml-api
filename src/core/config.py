@@ -49,5 +49,27 @@ class Settings:
         "OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"
     )
 
+    # SMTP / Alertes e-mail (désactivées par défaut — configurer via variables d'env)
+    SMTP_HOST: str = os.getenv("SMTP_HOST", "")
+    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_USER: str = os.getenv("SMTP_USER", "")
+    SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
+    SMTP_FROM: str = os.getenv("SMTP_FROM", "")
+    SMTP_STARTTLS: bool = os.getenv("SMTP_STARTTLS", "true").lower() == "true"
+    ALERT_EMAIL_TO: list = [
+        e.strip() for e in os.getenv("ALERT_EMAIL_TO", "").split(",") if e.strip()
+    ]
+    STREAMLIT_URL: str = os.getenv("STREAMLIT_URL", "http://localhost:8501")
+    ENABLE_EMAIL_ALERTS: bool = os.getenv("ENABLE_EMAIL_ALERTS", "false").lower() == "true"
+    WEEKLY_REPORT_ENABLED: bool = os.getenv("WEEKLY_REPORT_ENABLED", "false").lower() == "true"
+    WEEKLY_REPORT_DAY: str = os.getenv("WEEKLY_REPORT_DAY", "monday")
+    WEEKLY_REPORT_HOUR: int = int(os.getenv("WEEKLY_REPORT_HOUR", "8"))
+    # Seuil de baisse d'accuracy (ex: 0.10 = chute de 10 pts → alerte)
+    PERFORMANCE_DRIFT_ALERT_THRESHOLD: float = float(
+        os.getenv("PERFORMANCE_DRIFT_ALERT_THRESHOLD", "0.10")
+    )
+    # Taux d'erreur déclenchant une alerte (ex: 0.10 = 10 %)
+    ERROR_RATE_ALERT_THRESHOLD: float = float(os.getenv("ERROR_RATE_ALERT_THRESHOLD", "0.10"))
+
 
 settings = Settings()

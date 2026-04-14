@@ -85,6 +85,21 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://grafana:4317}
       - REDIS_URL=redis://redis:6379/0
       - REDIS_CACHE_TTL=${REDIS_CACHE_TTL:-3600}
+      # --- Alertes e-mail (optionnel — décommentez et configurez pour activer) ---
+      # - ENABLE_EMAIL_ALERTS=false
+      # - WEEKLY_REPORT_ENABLED=false
+      # - SMTP_HOST=smtp.gmail.com
+      # - SMTP_PORT=587
+      # - SMTP_STARTTLS=true
+      # - SMTP_USER=alerts@company.com
+      # - SMTP_PASSWORD=secret
+      # - SMTP_FROM=alerts@predictml.io
+      # - ALERT_EMAIL_TO=admin@company.com
+      # - STREAMLIT_URL=http://localhost:8501
+      # - WEEKLY_REPORT_DAY=monday
+      # - WEEKLY_REPORT_HOUR=8
+      # - PERFORMANCE_DRIFT_ALERT_THRESHOLD=0.10
+      # - ERROR_RATE_ALERT_THRESHOLD=0.10
     depends_on:
       postgres:
         condition: service_healthy
