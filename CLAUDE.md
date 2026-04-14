@@ -108,3 +108,79 @@ Les smoke tests dans `smoke-tests/` nécessitent Docker et frappent l'API live.
 - `GET/POST/PATCH/DELETE /users` — Gestion utilisateurs (admin)
 - `POST/GET /observed-results` — Résultats observés
 - `PATCH /users/{id}` avec `{"regenerate_token": true}` — Renouveler un token (admin)
+- `POST /models/{name}/{version}/retrain` — Ré-entraîner un modèle (admin)
+
+## Fonctionnalité Retrain (ré-entraînement)
+
+### Comment ça fonctionne
+
+1. À l'upload d'un modèle (`POST /models`), fournir optionnellement un script `train_file`
+   (fichier Python `train.py`).
+2. Si fourni, le script est **validé statiquement** puis stocké dans MinIO
+   (`{name}/v{version}_train.py`).
+3. L'admin peut déclencher un ré-entraînement via `POST /models/{name}/{version}/retrain`
+   en précisant une plage de dates.
+4. Le script s'exécute dans un **sous-processus isolé** (timeout 600 s) avec les variables
+   d'environnement injectées automatiquement.
+5. Le `.pkl` produit est uploadé dans MinIO et enregistré comme **nouvelle version** du modèle.
+6. Si `set_production: true`, la nouvelle version est automatiquement mise en production.
+7. L'intégralité des logs `stdout`/`stderr` est retournée dans la réponse et affichée dans
+   le dashboard Streamlit.
+
+### Contraintes du script `train.py` (vérifiées à l'upload)
+
+Le script doit impérativement :
+
+| Contrainte | Détail |
+|---|---|
+| Syntaxe Python valide | Vérifié via `ast.parse()` |
+| Référencer `TRAIN_START_DATE` | Lire `os.environ["TRAIN_START_DATE"]` |
+| Référencer `TRAIN_END_DATE` | Lire `os.environ["TRAIN_END_DATE"]` |
+| Référencer `OUTPUT_MODEL_PATH` | Chemin où sauvegarder le `.pkl` |
+| Sauvegarder le modèle | Appel à `pickle.dump`, `joblib.dump` ou `save_model` |
+
+### Variables d'environnement injectées par l'API
+
+| Variable | Description |
+|---|---|
+| `TRAIN_START_DATE` | Date début (YYYY-MM-DD) |
+| `TRAIN_END_DATE` | Date fin (YYYY-MM-DD) |
+| `OUTPUT_MODEL_PATH` | Chemin absolu pour le `.pkl` produit |
+| `MLFLOW_TRACKING_URI` | URI MLflow (optionnel) |
+| `MODEL_NAME` | Nom du modèle source (optionnel) |
+
+### Retour des métriques
+
+Pour que l'API mette à jour `accuracy` et `f1_score` de la nouvelle version,
+imprimer sur **stdout** un JSON sur la **dernière ligne JSON** de la sortie :
+
+```json
+{"accuracy": 0.95, "f1_score": 0.94}
+```
+
+### Upload avec train.py
+
+```bash
+curl -X POST http://localhost:8000/models \
+  -H "Authorization: Bearer <token>" \
+  -F "name=mon_modele" -F "version=1.0.0" \
+  -F "file=@mon_modele.pkl" \
+  -F "train_file=@init_data/example_train.py"
+```
+
+### Lancer un ré-entraînement
+
+```bash
+curl -X POST http://localhost:8000/models/mon_modele/1.0.0/retrain \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "start_date": "2025-01-01",
+    "end_date":   "2025-12-31",
+    "new_version": "1.1.0",
+    "set_production": false
+  }'
+```
+
+Un exemple complet de `train.py` respectant le contrat est disponible dans
+`init_data/example_train.py`.
