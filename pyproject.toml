@@ -71,3 +71,20 @@ ignore = ["E501"]
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
 known-third-party = ["alembic"]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+omit = [
+    "src/core/telemetry.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 73
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
