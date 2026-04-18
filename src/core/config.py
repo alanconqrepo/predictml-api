@@ -42,6 +42,9 @@ class Settings:
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     REDIS_CACHE_TTL: int = int(os.getenv("REDIS_CACHE_TTL", "3600"))
 
+    # Prometheus metrics — token optionnel pour protéger /metrics (vide = public)
+    METRICS_TOKEN: str = os.getenv("METRICS_TOKEN", "")
+
     # OpenTelemetry
     ENABLE_OTEL: bool = os.getenv("ENABLE_OTEL", "false").lower() == "true"
     OTEL_SERVICE_NAME: str = os.getenv("OTEL_SERVICE_NAME", "predictml-api")
