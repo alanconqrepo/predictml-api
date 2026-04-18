@@ -65,6 +65,57 @@ docker-compose up -d --build
 docker exec predictml-api python init_data/init_db.py
 ```
 
+## Métriques Prometheus
+
+L'API expose un endpoint de scrape standard sur `GET /metrics` (format `text/plain 0.0.4`).
+
+### Métriques exposées
+
+| Métrique | Type | Labels |
+|---|---|---|
+| `http_requests_total` | Counter | `method`, `handler`, `status_code` |
+| `http_request_duration_seconds` | Histogram | `method`, `handler`, `status_code` |
+| Métriques process Python | Gauge | — |
+
+### Vérifier l'endpoint
+
+```bash
+curl http://localhost:8000/metrics
+```
+
+### Sécuriser l'endpoint (optionnel)
+
+Par défaut `/metrics` est public, accessible depuis le réseau interne Docker. Pour le protéger :
+
+```bash
+# Dans .env
+METRICS_TOKEN=mon-token-secret
+```
+
+Prometheus doit alors envoyer le token dans ses requêtes de scrape — décommenter la section `authorization` dans `monitoring/prometheus.yml` :
+
+```yaml
+- job_name: predictml-api
+  static_configs:
+    - targets: ['api:8000']
+  authorization:
+    credentials: "mon-token-secret"
+```
+
+### Scrape Prometheus (Grafana LGTM)
+
+Le fichier `monitoring/prometheus.yml` est monté automatiquement dans le conteneur `grafana`. Prometheus scrape `api:8000/metrics` toutes les 15 secondes sans configuration supplémentaire.
+
+Pour visualiser dans Grafana (http://localhost:3000) :
+1. Aller dans **Explore → Prometheus**
+2. Requêtes utiles :
+   - `rate(http_requests_total[1m])` — débit par endpoint
+   - `histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))` — latence p95
+
+### Mode multi-workers
+
+Si l'API est démarrée avec plusieurs workers (ex. `--workers 4`), `prometheus_client` agrège automatiquement les compteurs via `PROMETHEUS_MULTIPROC_DIR`. Le répertoire est créé au démarrage par `entrypoint.sh`.
+
 ## Dépannage
 
 ```bash
@@ -103,6 +154,8 @@ docker exec predictml-api python -c "import redis; r = redis.from_url('redis://r
 | `REDIS_CACHE_TTL` | `3600` | Durée de cache des modèles en secondes |
 | `ENABLE_OTEL` | `false` | Activer OpenTelemetry vers Grafana |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://grafana:4317` | Endpoint OTLP Grafana |
+| `METRICS_TOKEN` | `` | Token Bearer pour protéger `GET /metrics` (vide = public) |
+| `PROMETHEUS_MULTIPROC_DIR` | `/tmp/prometheus_multiproc` | Répertoire de partage des métriques entre workers (multi-process) |
 | `ENABLE_EMAIL_ALERTS` | `false` | Activer les alertes email |
 | `SMTP_HOST` | `` | Serveur SMTP (ex: `smtp.gmail.com`) |
 | `SMTP_PORT` | `587` | Port SMTP |
