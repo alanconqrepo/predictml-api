@@ -17,8 +17,13 @@ PredictML API résout ce problème :
 
 - **Déploiement en une commande** — uploader un `.pkl`, l'API est prête
 - **Multi-modèles et multi-versions** — chaque modèle a son cycle de vie (actif, production, déprécié)
-- **Traçabilité complète** — chaque prédiction est loguée avec ses features, son résultat, son latence et l'utilisateur
+- **Traçabilité complète** — chaque prédiction est loguée avec ses features, son résultat, sa latence et l'utilisateur
 - **Évaluation continue** — les résultats observés peuvent être rapportés pour mesurer la précision réelle des modèles
+- **A/B testing & shadow deployment** — router le trafic entre versions et comparer silencieusement
+- **Drift detection** — détecter la dérive des features en production (Z-score + PSI)
+- **Explicabilité SHAP** — comprendre pourquoi le modèle a fait une prédiction
+- **Ré-entraînement automatique** — déclencher un retrain depuis l'API avec un script `train.py`
+- **Supervision & alertes** — monitoring global, alertes email, rapports hebdomadaires
 - **Gestion multi-utilisateurs** — tokens Bearer, rôles (admin/user/readonly), quotas journaliers
 - **Dashboard admin** — interface Streamlit pour piloter tout ça sans code
 
@@ -30,7 +35,7 @@ PredictML API résout ce problème :
 |---|---|
 | Data Scientist | Déployer un modèle `.pkl` sans écrire de code serveur |
 | Développeur back-end | Consommer l'API dans une application |
-| MLOps | Versionner, monitorer et comparer des modèles en production |
+| MLOps | Versionner, monitorer, comparer, ré-entraîner des modèles en production |
 | Administrateur | Gérer les utilisateurs, quotas et accès via le dashboard |
 
 ---
@@ -44,6 +49,18 @@ PredictML API résout ce problème :
 | Base de données | PostgreSQL 16 | 5433 |
 | Stockage modèles | MinIO (compatible S3) | 9000 / console 9001 |
 | Experiment tracking | MLflow | 5000 |
+| Cache distribué | Redis 7 | 6379 |
+| Observabilité | Grafana LGTM (Loki + Tempo + Prometheus) | 3000 |
+
+---
+
+## Prérequis & Installation
+
+```bash
+# Prérequis : Git, Docker Desktop (avec Docker Compose v2)
+git clone https://github.com/alanconqrepo/predictml-api.git
+cd predictml-api
+```
 
 ---
 
@@ -53,7 +70,7 @@ PredictML API résout ce problème :
 # 1. Lancer tous les services
 docker-compose up -d --build
 
-# 2. Initialiser la base de données et l'utilisateur admin (premier déploiement)
+# 2. Initialiser la base de données et l'utilisateur admin (premier déploiement uniquement)
 docker exec predictml-api python init_data/init_db.py
 
 # 3. Accéder au dashboard admin
@@ -71,6 +88,7 @@ curl http://localhost:8000/health
 | PostgreSQL | `postgres / postgres` |
 | MinIO | `minioadmin / minioadmin` |
 | MLflow UI | http://localhost:5000 |
+| Grafana | http://localhost:3000 (admin / admin) |
 
 ---
 
@@ -81,22 +99,62 @@ curl http://localhost:8000/health
 - Versionnage (`name` + `version`)
 - Flag `is_production` pour router automatiquement les prédictions
 - Métadonnées riches : algorithme, accuracy, f1_score, features, classes, dataset
+- Tags personnalisés et webhooks de notification
+- Seuil de confiance configurable (`confidence_threshold`)
+- Baseline de features pour la détection de dérive
 
 ### Prédictions
-- Endpoint unique `POST /predict` pour tous les modèles
-- Sélection automatique de la version de production si `model_version` non fourni
+- `POST /predict` — prédiction unitaire avec routage intelligent (A/B, shadow)
+- `POST /predict-batch` — prédictions en lot (modèle chargé une seule fois)
 - Sortie des probabilités de classe si disponibles (`predict_proba`)
-- Identifiant `id_obs` pour lier une prédiction à un résultat observé ultérieur
+- Flag `low_confidence` si la probabilité max est sous le seuil configuré
+- Identifiant `id_obs` pour lier une prédiction à un résultat observé
+- Cache Redis distribué pour les instances de modèles
 
-### Traçabilité et évaluation
-- Toutes les prédictions sont stockées en base avec features, résultat, latence, IP, user-agent
-- Les résultats réels peuvent être soumis via `POST /observed-results`
-- Jointure possible via `id_obs` pour calculer les métriques réelles
+### A/B Testing & Shadow Deployment
+- `deployment_mode` : `"production"`, `"ab_test"`, ou `"shadow"`
+- `traffic_weight` : fraction du trafic routée vers une version (0.0 – 1.0)
+- Mode shadow : prédictions exécutées en arrière-plan sans impact client
+- `GET /models/{name}/ab-compare` : rapport de comparaison côte à côte
+
+### Explicabilité SHAP
+- `POST /explain` : valeurs SHAP locales pour une observation
+- Support des modèles arborescents (TreeExplainer) et linéaires (LinearExplainer)
+- Interprétation : contribution de chaque feature à la prédiction
+
+### Dérive des données
+- `GET /models/{name}/drift` : rapport de dérive par feature (Z-score + PSI)
+- Statuts : `ok`, `warning`, `critical`, `no_baseline`, `insufficient_data`
+- Basé sur la `feature_baseline` enregistrée à l'upload du modèle
+
+### Performance réelle
+- `GET /models/{name}/performance` : métriques calculées via les résultats observés
+- Classification : accuracy, précision, rappel, F1, matrice de confusion, métriques par classe
+- Régression : MAE, MSE, RMSE, R²
+- Agrégation temporelle configurable
+
+### Ré-entraînement automatique
+- Upload d'un `train.py` à l'enregistrement du modèle
+- `POST /models/{name}/{version}/retrain` : déclenche l'entraînement sur une plage de dates
+- Logs complets stdout/stderr retournés dans la réponse
+- Nouvelle version enregistrée automatiquement dans MinIO
+
+### Historique & Rollback
+- `GET /models/{name}/history` : journal de tous les changements
+- `POST /models/{name}/{version}/rollback/{history_id}` : restaurer un état précédent
+
+### Supervision & Alertes
+- `GET /monitoring/overview` : tableau de bord global (toutes les erreurs, dérives, performances)
+- `GET /monitoring/model/{name}` : détail par modèle (timeseries, A/B, drift, erreurs récentes)
+- `GET /predictions/stats` : statistiques agrégées (volume, taux d'erreur, temps de réponse p50/p95)
+- Alertes email configurables (dérive, taux d'erreur)
+- Rapports hebdomadaires automatiques
+- Traces OpenTelemetry vers Grafana LGTM (optionnel)
 
 ### Gestion des utilisateurs
 - Création par un admin avec rôle et quota journalier
 - Token Bearer unique par utilisateur
-- Renouvellement de token via `PATCH /users/{id}` avec `regenerate_token: true`
+- Renouvellement de token via `PATCH /users/{id}` avec `{"regenerate_token": true}`
 - Rate limiting automatique (HTTP 429 si quota dépassé)
 
 ---
@@ -106,23 +164,40 @@ curl http://localhost:8000/health
 | Méthode | Route | Auth | Description |
 |---|---|---|---|
 | GET | `/` | Non | Statut de l'API et modèles disponibles |
-| GET | `/health` | Non | Health check (DB + cache modèles) |
-| GET | `/models` | Non | Liste des modèles actifs |
+| GET | `/health` | Non | Health check (DB + cache Redis) |
+| **Modèles** | | | |
+| GET | `/models` | Non | Liste des modèles actifs (filtre par tag) |
 | GET | `/models/cached` | Non | Modèles chargés en mémoire |
 | GET | `/models/{name}/{version}` | Non | Détail complet d'un modèle |
-| POST | `/models` | Oui | Uploader un modèle |
-| PATCH | `/models/{name}/{version}` | Oui | Mettre à jour (production, métriques…) |
+| POST | `/models` | Oui | Uploader un modèle (.pkl ou MLflow) |
+| PATCH | `/models/{name}/{version}` | Oui | Mettre à jour (production, A/B, tags, webhook…) |
 | DELETE | `/models/{name}/{version}` | Oui | Supprimer une version |
 | DELETE | `/models/{name}` | Oui | Supprimer toutes les versions |
-| POST | `/predict` | Oui | Faire une prédiction |
-| GET | `/predictions` | Oui | Historique des prédictions avec filtres |
+| GET | `/models/{name}/performance` | Oui | Métriques réelles via résultats observés |
+| GET | `/models/{name}/drift` | Oui | Rapport de dérive des features |
+| GET | `/models/{name}/history` | Oui | Historique complet des changements |
+| GET | `/models/{name}/{version}/history` | Oui | Historique d'une version spécifique |
+| POST | `/models/{name}/{version}/rollback/{history_id}` | Admin | Rollback vers un état précédent |
+| POST | `/models/{name}/{version}/retrain` | Admin | Ré-entraîner avec train.py |
+| GET | `/models/{name}/ab-compare` | Oui | Rapport de comparaison A/B |
+| **Prédictions** | | | |
+| POST | `/predict` | Oui | Prédiction unitaire |
+| POST | `/predict-batch` | Oui | Prédictions en lot |
+| POST | `/explain` | Oui | Explicabilité SHAP locale |
+| GET | `/predictions` | Oui | Historique des prédictions (pagination curseur) |
+| GET | `/predictions/stats` | Oui | Statistiques agrégées par modèle |
+| **Résultats observés** | | | |
+| POST | `/observed-results` | Oui | Enregistrer des résultats réels |
+| GET | `/observed-results` | Oui | Consulter les résultats observés |
+| **Utilisateurs** | | | |
 | POST | `/users` | Admin | Créer un utilisateur |
 | GET | `/users` | Admin | Lister tous les utilisateurs |
 | GET | `/users/{id}` | Oui | Détail d'un utilisateur |
 | PATCH | `/users/{id}` | Admin | Modifier rôle, statut, quota, token |
 | DELETE | `/users/{id}` | Admin | Supprimer un utilisateur |
-| POST | `/observed-results` | Oui | Enregistrer des résultats observés |
-| GET | `/observed-results` | Oui | Consulter les résultats observés |
+| **Monitoring** | | | |
+| GET | `/monitoring/overview` | Oui | Tableau de bord global |
+| GET | `/monitoring/model/{name}` | Oui | Détail monitoring d'un modèle |
 
 ---
 
@@ -135,7 +210,7 @@ BASE_URL = "http://localhost:8000"
 TOKEN = "ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 
-# Faire une prédiction
+# Prédiction unitaire
 response = requests.post(
     f"{BASE_URL}/predict",
     headers=HEADERS,
@@ -151,7 +226,21 @@ response = requests.post(
     }
 )
 print(response.json())
-# {"model_name": "iris_model", "model_version": "1.0", "prediction": 0, "probability": [0.97, 0.02, 0.01]}
+# {"model_name": "iris_model", "model_version": "1.0", "prediction": 0,
+#  "probability": [0.97, 0.02, 0.01], "low_confidence": false}
+
+# Explicabilité SHAP
+explain = requests.post(
+    f"{BASE_URL}/explain",
+    headers=HEADERS,
+    json={
+        "model_name": "iris_model",
+        "features": {"sepal length (cm)": 5.1, "sepal width (cm)": 3.5,
+                     "petal length (cm)": 1.4, "petal width (cm)": 0.2}
+    }
+)
+print(explain.json()["shap_values"])
+# {"petal length (cm)": -1.32, "petal width (cm)": -0.87, ...}
 ```
 
 ---
@@ -175,11 +264,12 @@ python smoke-tests/test_multimodel_api.py
 
 | Document | Contenu |
 |---|---|
+| [documentation/BEGINNER_GUIDE.md](documentation/BEGINNER_GUIDE.md) | Guide complet pour débutant — tutoriel pas-à-pas avec Python |
+| [documentation/QUICKSTART.md](documentation/QUICKSTART.md) | Guide de démarrage et workflow complet |
 | [documentation/API_REFERENCE.md](documentation/API_REFERENCE.md) | Référence complète de tous les endpoints, schémas, exemples Python |
+| [documentation/ARCHITECTURE.md](documentation/ARCHITECTURE.md) | Structure du projet, services et flux de données |
+| [documentation/DOCKER.md](documentation/DOCKER.md) | Commandes Docker, services, variables d'environnement |
 | [documentation/DATABASE.md](documentation/DATABASE.md) | Schéma SQL, requêtes utiles, connexion Python |
-| [documentation/QUICKSTART.md](documentation/QUICKSTART.md) | Guide de démarrage et cas d'usage courants |
-| [documentation/ARCHITECTURE.md](documentation/ARCHITECTURE.md) | Structure du projet et flux de données |
-| [documentation/DOCKER.md](documentation/DOCKER.md) | Commandes Docker et dépannage |
 
 ---
 
@@ -188,22 +278,27 @@ python smoke-tests/test_multimodel_api.py
 ```
 src/
 ├── api/                    # Endpoints FastAPI
-│   ├── models.py           # CRUD modèles
-│   ├── predict.py          # Prédictions
+│   ├── models.py           # CRUD modèles + drift + history + retrain + A/B
+│   ├── predict.py          # Prédictions unitaires, batch, SHAP, stats
 │   ├── users.py            # Gestion utilisateurs
-│   └── observed_results.py # Résultats observés
+│   ├── observed_results.py # Résultats observés
+│   └── monitoring.py       # Tableau de bord global et par modèle
 ├── core/                   # Config, auth, télémétrie
 │   ├── config.py
 │   ├── security.py
 │   └── telemetry.py
 ├── db/                     # ORM SQLAlchemy
 │   ├── database.py
-│   └── models/
+│   └── models/             # User, Prediction, ModelMetadata, ObservedResult, ModelHistory
 ├── services/               # Logique métier
-│   ├── db_service.py
-│   ├── model_service.py
-│   └── minio_service.py
-├── schemas/                # Schémas Pydantic
+│   ├── db_service.py       # Toutes les requêtes DB
+│   ├── model_service.py    # Chargement, cache Redis, routage A/B/shadow
+│   ├── minio_service.py    # Upload/download MinIO
+│   ├── drift_service.py    # Calcul dérive Z-score + PSI
+│   ├── shap_service.py     # Explications SHAP locales
+│   ├── email_service.py    # Alertes email & rapports hebdomadaires
+│   └── webhook_service.py  # Webhooks HTTP post-prédiction
+├── schemas/                # Schémas Pydantic (validation I/O)
 └── main.py
 
 streamlit_app/              # Dashboard admin multipage

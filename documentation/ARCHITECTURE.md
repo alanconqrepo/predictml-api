@@ -1,4 +1,4 @@
-# Architecture
+# Architecture — PredictML API
 
 ## Stack
 
@@ -9,52 +9,74 @@
 | Base de données | PostgreSQL 16 | 5433 |
 | Stockage modèles | MinIO (S3-compatible) | 9000 / console 9001 |
 | Experiment tracking | MLflow | 5000 |
-| Observabilité | Grafana LGTM (Loki + Tempo + Prometheus) | 3000 |
+| Cache distribué | Redis 7 | 6379 |
+| Observabilité | Grafana LGTM (Loki + Tempo + Prometheus + OTLP) | 3000 |
+
+---
 
 ## Structure du projet
 
 ```
 predictml-api/
 ├── src/
-│   ├── api/                  # Endpoints HTTP
-│   │   ├── models.py         # CRUD /models
-│   │   ├── predict.py        # POST /predict, GET /predictions
-│   │   ├── users.py          # CRUD /users
-│   │   └── observed_results.py  # /observed-results
+│   ├── api/                        # Endpoints HTTP
+│   │   ├── models.py               # CRUD + drift + history + retrain + A/B
+│   │   ├── predict.py              # POST /predict, /predict-batch, /explain, GET /predictions, /stats
+│   │   ├── users.py                # CRUD /users
+│   │   ├── observed_results.py     # /observed-results
+│   │   └── monitoring.py           # /monitoring/overview, /monitoring/model/{name}
 │   ├── core/
-│   │   ├── config.py         # Settings (variables d'env)
-│   │   └── security.py       # Auth Bearer token + rate limiting
+│   │   ├── config.py               # Settings (variables d'env via dotenv)
+│   │   ├── security.py             # Auth Bearer token + rate limiting
+│   │   └── telemetry.py            # OpenTelemetry → Grafana LGTM
 │   ├── db/
-│   │   ├── models/           # SQLAlchemy ORM (User, Prediction, ModelMetadata, ObservedResult)
-│   │   └── database.py       # Session async
+│   │   ├── models/                 # ORM SQLAlchemy
+│   │   │   ├── user.py             # Table users
+│   │   │   ├── prediction.py       # Table predictions
+│   │   │   ├── model_metadata.py   # Table model_metadata
+│   │   │   ├── observed_result.py  # Table observed_results
+│   │   │   └── model_history.py    # Table model_history
+│   │   └── database.py             # Session async (asyncpg)
 │   ├── services/
-│   │   ├── db_service.py     # Toutes les requêtes DB
-│   │   ├── model_service.py  # Chargement & cache des modèles
-│   │   └── minio_service.py  # Upload/download MinIO
-│   ├── schemas/              # Pydantic (validation I/O)
-│   └── main.py
-├── streamlit_app/            # Dashboard admin Streamlit
+│   │   ├── db_service.py           # Toutes les requêtes DB (~37KB)
+│   │   ├── model_service.py        # Chargement, cache Redis, routage A/B/shadow
+│   │   ├── minio_service.py        # Upload/download MinIO
+│   │   ├── drift_service.py        # Calcul dérive Z-score + PSI
+│   │   ├── shap_service.py         # Explications SHAP locales (tree + linear)
+│   │   ├── email_service.py        # Alertes email & rapports hebdomadaires
+│   │   └── webhook_service.py      # Webhooks HTTP post-prédiction
+│   ├── schemas/                    # Schémas Pydantic (validation I/O)
+│   │   ├── model.py
+│   │   ├── prediction.py
+│   │   ├── user.py
+│   │   ├── observed_result.py
+│   │   └── monitoring.py
+│   └── main.py                     # App FastAPI + lifecycle hooks
+├── streamlit_app/
 │   ├── Dockerfile
 │   ├── requirements.txt
-│   ├── app.py                # Page login + accueil
+│   ├── app.py                      # Page login + accueil
 │   ├── utils/
-│   │   ├── api_client.py     # Client HTTP vers l'API
-│   │   └── auth.py           # Helpers session_state
+│   │   ├── api_client.py           # Client HTTP vers l'API
+│   │   └── auth.py                 # Helpers session_state
 │   └── pages/
-│       ├── 1_Users.py        # Gestion utilisateurs (admin)
-│       ├── 2_Models.py       # Gestion modèles
-│       ├── 3_Predictions.py  # Historique prédictions
-│       ├── 4_Stats.py        # Statistiques & graphiques
-│       └── 5_Code_Example.py # Exemple MLflow + API
-├── tests/                    # Tests pytest (automatisés)
-├── smoke-tests/              # Tests manuels (Docker live)
-├── init_data/                # Scripts d'initialisation (one-shot)
-├── Models/                   # Fichiers .pkl locaux
-├── notebooks/                # Jupyter notebooks
-├── alembic/                  # Migrations DB
+│       ├── 1_Users.py
+│       ├── 2_Models.py
+│       ├── 3_Predictions.py
+│       ├── 4_Stats.py
+│       └── 5_Code_Example.py
+├── tests/                          # Tests pytest (automatisés, sans Docker)
+├── smoke-tests/                    # Tests manuels (Docker live)
+├── init_data/                      # Scripts one-shot (init_db, create_multiple_models)
+│   └── example_train.py            # Exemple de script train.py compatible retrain
+├── Models/                         # Fichiers .pkl locaux
+├── notebooks/                      # Jupyter notebooks
+├── alembic/                        # Migrations DB
 ├── docker-compose.yml
 └── .env
 ```
+
+---
 
 ## Flux de données — Prédiction
 
@@ -62,18 +84,38 @@ predictml-api/
 Client
   │  POST /predict + Bearer Token
   ▼
-security.py          → vérifie le token en DB + rate limit
+security.py
+  → vérifie le token en DB
+  → contrôle le rate limit (quota journalier)
   ▼
-predict.py           → valide la requête (Pydantic)
+predict.py
+  → valide la requête (Pydantic)
   ▼
-model_service.py     → charge le modèle (cache mémoire ou MinIO/MLflow)
+model_service.py
+  → select_routing_versions() : A/B test / shadow / production
+  → charge le modèle (cache Redis → MinIO → MLflow)
   ▼
-model.predict(X)     → sklearn
+model.predict(X)  ← sklearn
   ▼
-db_service.py        → log la prédiction en PostgreSQL
+[si shadow] background_task → prédiction shadow loguée séparément
   ▼
-Client ← JSON
+db_service.py
+  → log la prédiction en PostgreSQL (features, résultat, latence, user)
+  ▼
+[si webhook_url configuré] webhook_service.send_webhook()
+  ▼
+Client ← JSON { prediction, probability, low_confidence, selected_version }
 ```
+
+### Routage A/B / Shadow
+
+- `deployment_mode="production"` : version principale, reçoit tout le trafic
+- `deployment_mode="ab_test"` : reçoit `traffic_weight` fraction du trafic (ex: 0.2 = 20%)
+- `deployment_mode="shadow"` : exécutée en arrière-plan sur chaque requête production, résultat non retourné au client
+
+Le service `model_service.select_routing_versions()` détermine quelle version répond à la requête et quelles versions shadow tourner en parallèle.
+
+---
 
 ## Flux de données — Dashboard Streamlit
 
@@ -86,19 +128,22 @@ streamlit_app/utils/api_client.py
   ▼
 API FastAPI (http://api:8000)
   ▼
-PostgreSQL / MinIO / MLflow
+PostgreSQL / MinIO / Redis / MLflow
 ```
 
 Le dashboard Streamlit ne parle **jamais directement** à la DB ou à MinIO — l'API FastAPI est le seul backend.
+
+---
 
 ## Base de données
 
 | Table | Rôle |
 |---|---|
-| `users` | Auth, rôles (ADMIN/USER/READONLY), rate limiting |
-| `model_metadata` | Registre des modèles (versioning, localisation MinIO/MLflow) |
-| `predictions` | Log complet de chaque appel API (features, résultat, temps de réponse) |
+| `users` | Auth, rôles (admin/user/readonly), rate limiting, token Bearer |
+| `model_metadata` | Registre des modèles (versioning, localisation MinIO/MLflow, tags, A/B config) |
+| `predictions` | Log complet de chaque appel API (features, résultat, temps de réponse, shadow flag) |
 | `observed_results` | Résultats réels observés (pour comparer aux prédictions) |
+| `model_history` | Journal des changements d'état des modèles (pour rollback) |
 
 ### Table `predictions` — colonnes notables
 
@@ -110,6 +155,30 @@ Le dashboard Streamlit ne parle **jamais directement** à la DB ou à MinIO — 
 | `probabilities` | JSON, nullable | Probabilités par classe |
 | `response_time_ms` | Float | Temps d'inférence en millisecondes |
 | `status` | VARCHAR(20) | `success` ou `error` |
+| `is_shadow` | Boolean | `true` si prédiction shadow (non retournée au client) |
+
+### Table `model_history` — colonnes notables
+
+| Colonne | Type | Description |
+|---|---|---|
+| `action` | str | Type de changement (`set_production`, `update_metadata`, `rollback`…) |
+| `snapshot` | JSON | État complet des métadonnées au moment du changement |
+| `changed_fields` | JSON | Liste des champs modifiés |
+| `changed_by_user_id` | int | Auteur du changement |
+
+### Table `model_metadata` — colonnes A/B
+
+| Colonne | Type | Description |
+|---|---|---|
+| `deployment_mode` | str | `production`, `ab_test`, `shadow` |
+| `traffic_weight` | float | Part du trafic (0.0–1.0) |
+| `confidence_threshold` | float | Seuil de confiance min |
+| `feature_baseline` | JSON | Stats par feature pour drift detection |
+| `tags` | JSON | Liste de tags libres |
+| `webhook_url` | str | URL de callback post-prédiction |
+| `train_script_object_key` | str | Clé MinIO du script train.py |
+
+---
 
 ## Stockage des données d'entraînement
 
@@ -122,7 +191,7 @@ MinIO bucket: datasets/
 └── loan_model/
     └── v1/
         ├── train.parquet    ← données d'entraînement
-        └── test.parquet     ← données de test
+        └── test.parquet
 
 MLflow Run:
   params:  dataset_uri = "s3://datasets/loan_model/v1"
@@ -132,97 +201,76 @@ MLflow Run:
 **Avantages :**
 - Pas de duplication : 10 runs → 1 seul exemplaire du dataset
 - Fichiers volumineux gérés nativement par MinIO (multipart, streaming)
-- Traçabilité complète via MLflow (quel run a utilisé quelle version de données)
-- Le champ `training_dataset` de `model_metadata` stocke l'URI pour consultation rapide
+- Traçabilité complète via MLflow
 
 ### Workflow complet
 
 ```python
-import os
-import mlflow
-import mlflow.sklearn
-import pandas as pd
+import os, mlflow, mlflow.sklearn, pandas as pd
 from minio import Minio
 from io import BytesIO
 
-# ── 1. Uploader le dataset dans MinIO ────────────────────────────────────────
 minio = Minio("localhost:9000", access_key="minioadmin", secret_key="minioadmin", secure=False)
 
 if not minio.bucket_exists("datasets"):
     minio.make_bucket("datasets")
 
-# Sérialiser en parquet et uploader
 parquet_bytes = df_train.to_parquet(index=False)
-minio.put_object(
-    "datasets", "loan_model/v1/train.parquet",
-    BytesIO(parquet_bytes), length=len(parquet_bytes),
-    content_type="application/octet-stream"
-)
+minio.put_object("datasets", "loan_model/v1/train.parquet",
+                 BytesIO(parquet_bytes), length=len(parquet_bytes))
 
 DATASET_URI = "s3://datasets/loan_model/v1"
 
-# ── 2. Référencer dans MLflow (sans copie) ───────────────────────────────────
 os.environ["MLFLOW_S3_ENDPOINT_URL"] = "http://localhost:9000"
 os.environ["AWS_ACCESS_KEY_ID"]      = "minioadmin"
 os.environ["AWS_SECRET_ACCESS_KEY"]  = "minioadmin"
-
 mlflow.set_tracking_uri("http://localhost:5000")
 
 with mlflow.start_run() as run:
-    # Référence au dataset — MLflow ne copie pas les données
-    dataset = mlflow.data.from_numpy(
-        X_train.to_numpy(),
-        source=f"{DATASET_URI}/train.parquet",
-        name="loan_model_v1_train",
-    )
+    dataset = mlflow.data.from_numpy(X_train.to_numpy(),
+                                     source=f"{DATASET_URI}/train.parquet")
     mlflow.log_input(dataset, context="training")
-
-    # URI également en paramètre pour consultation rapide dans l'UI
     mlflow.log_param("dataset_uri", DATASET_URI)
-    mlflow.log_param("dataset_version", "v1")
-
-    # ... entraînement ...
     mlflow.sklearn.log_model(pipeline, "model")
     RUN_ID = run.info.run_id
 
-# ── 3. Enregistrer le modèle via l'API (training_dataset = URI MinIO) ────────
 requests.post("http://localhost:8000/models", headers=HEADERS, data={
-    "name":             "loan_model",
-    "version":          "1.0.0",
-    "mlflow_run_id":    RUN_ID,
-    "training_dataset": DATASET_URI,   # stocké dans model_metadata.training_dataset
-    # ...
+    "name": "loan_model", "version": "1.0.0",
+    "mlflow_run_id": RUN_ID, "training_dataset": DATASET_URI,
 })
 ```
-
-> **Note :** MLflow utilise déjà MinIO comme backend S3 (`s3://mlflow/`). Le bucket `datasets/` est séparé pour distinguer les artifacts de run des données sources pérennes.
 
 ---
 
 ## Authentification
 
 - **Mécanisme** : HTTP Bearer token (`Authorization: Bearer <token>`)
-- **Token** : `secrets.token_urlsafe(32)` stocké en clair dans `users.api_token`
+- **Token** : `secrets.token_urlsafe(32)` stocké dans `users.api_token`
 - **Rôles** : `admin` (accès total), `user` (prédictions + lecture), `readonly`
 - **Rate limiting** : quota journalier par utilisateur (`rate_limit_per_day`)
-- **Renouvellement token** : `PATCH /users/{id}` avec `{"regenerate_token": true}` (admin)
+- **Renouvellement** : `PATCH /users/{id}` avec `{"regenerate_token": true}` (admin)
 
-## Format de requête `/predict`
+---
 
-Seul le format dict (features nommées) est accepté depuis la v2 :
+## Observabilité
 
-```json
-{
-  "model_name": "iris_model",
-  "model_version": "1.0.0",
-  "id_obs": "obs-42",
-  "features": {
-    "sepal length (cm)": 5.1,
-    "sepal width (cm)": 3.5,
-    "petal length (cm)": 1.4,
-    "petal width (cm)": 0.2
-  }
-}
-```
+### Logging structuré
 
-`model_version` est optionnel — sans lui, la version `is_production=True` est utilisée (ou la plus récente).
+L'API utilise `structlog` pour produire des logs JSON structurés. Chaque requête loguée contient : `model_name`, `model_version`, `response_time_ms`, `status`, `user_id`.
+
+### OpenTelemetry → Grafana LGTM
+
+Quand `ENABLE_OTEL=true`, les traces et métriques sont envoyées au collecteur OTLP (Grafana LGTM sur le port 4317).
+
+Grafana LGTM regroupe :
+- **Loki** — agrégation des logs
+- **Tempo** — traces distribuées
+- **Prometheus** — métriques
+- **Grafana** — visualisation unifiée (http://localhost:3000)
+
+### Alertes email
+
+Déclenchées automatiquement par `email_service.py` (scheduler APScheduler) quand :
+- La dérive d'accuracy dépasse `PERFORMANCE_DRIFT_ALERT_THRESHOLD` (défaut: 10%)
+- Le taux d'erreur dépasse `ERROR_RATE_ALERT_THRESHOLD` (défaut: 10%)
+- Rapport hebdomadaire si `WEEKLY_REPORT_ENABLED=true`
