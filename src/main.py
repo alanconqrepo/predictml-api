@@ -103,6 +103,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Exposer /metrics pour Prometheus
+from prometheus_fastapi_instrumentator import Instrumentator
+
+Instrumentator().instrument(app).expose(app)
+
 # Activer OpenTelemetry si demandé
 if settings.ENABLE_OTEL:
     from src.core.telemetry import setup_telemetry
