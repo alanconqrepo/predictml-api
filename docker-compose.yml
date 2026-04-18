@@ -50,6 +50,7 @@ services:
       - "4318:4318"   # OTLP HTTP receiver
     volumes:
       - grafana_data:/data
+      - ./monitoring/prometheus.yml:/otel-lgtm/prometheus.yaml:ro
     restart: unless-stopped
 
   # Cache Redis — partagé entre les instances API (multi-pod)
@@ -85,6 +86,8 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://grafana:4317}
       - REDIS_URL=redis://redis:6379/0
       - REDIS_CACHE_TTL=${REDIS_CACHE_TTL:-3600}
+      - METRICS_TOKEN=${METRICS_TOKEN:-}
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
       # --- Alertes e-mail (optionnel — décommentez et configurez pour activer) ---
       # - ENABLE_EMAIL_ALERTS=false
       # - WEEKLY_REPORT_ENABLED=false

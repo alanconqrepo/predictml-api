@@ -258,6 +258,19 @@ requests.post("http://localhost:8000/models", headers=HEADERS, data={
 
 L'API utilise `structlog` pour produire des logs JSON structurés. Chaque requête loguée contient : `model_name`, `model_version`, `response_time_ms`, `status`, `user_id`.
 
+### Endpoint Prometheus `/metrics`
+
+L'API expose `GET /metrics` au format Prometheus text 0.0.4 via `prometheus-fastapi-instrumentator`.
+
+Métriques collectées automatiquement :
+- `http_requests_total` (counter) — labels `method`, `handler`, `status_code`
+- `http_request_duration_seconds` (histogramme) — latence par endpoint et code de retour
+- Métriques process Python standard (mémoire, CPU, file descriptors)
+
+Le fichier `monitoring/prometheus.yml` configure un job de scrape `predictml-api` ciblant `api:8000/metrics`. Il est monté dans le conteneur `grafana/otel-lgtm` au démarrage.
+
+Sécurisation optionnelle via `METRICS_TOKEN` (Bearer token). Le mode multi-workers est supporté via `PROMETHEUS_MULTIPROC_DIR` — les compteurs sont agrégés par worker dans un répertoire partagé.
+
 ### OpenTelemetry → Grafana LGTM
 
 Quand `ENABLE_OTEL=true`, les traces et métriques sont envoyées au collecteur OTLP (Grafana LGTM sur le port 4317).
@@ -265,7 +278,7 @@ Quand `ENABLE_OTEL=true`, les traces et métriques sont envoyées au collecteur 
 Grafana LGTM regroupe :
 - **Loki** — agrégation des logs
 - **Tempo** — traces distribuées
-- **Prometheus** — métriques
+- **Prometheus** — métriques (dont le scrape de `/metrics`)
 - **Grafana** — visualisation unifiée (http://localhost:3000)
 
 ### Alertes email

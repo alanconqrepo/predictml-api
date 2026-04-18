@@ -3,12 +3,17 @@ Point d'entrée principal de l'application FastAPI
 """
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 import structlog
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.responses import Response
+from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, generate_latest
+from prometheus_client import multiprocess as prom_multiprocess
+from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api import models, monitoring, observed_results, predict, users
@@ -103,6 +108,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Instrumenter l'app sans exposer — l'endpoint /metrics est défini plus bas
+Instrumentator().instrument(app)
+
 # Activer OpenTelemetry si demandé
 if settings.ENABLE_OTEL:
     from src.core.telemetry import setup_telemetry
@@ -115,6 +123,21 @@ app.include_router(models.router)
 app.include_router(users.router)
 app.include_router(observed_results.router)
 app.include_router(monitoring.router)
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics(request: Request) -> Response:
+    if settings.METRICS_TOKEN:
+        auth = request.headers.get("Authorization", "")
+        if auth != f"Bearer {settings.METRICS_TOKEN}":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    if "PROMETHEUS_MULTIPROC_DIR" in os.environ:
+        registry = CollectorRegistry()
+        prom_multiprocess.MultiProcessCollector(registry)
+        data = generate_latest(registry)
+    else:
+        data = generate_latest()
+    return Response(content=data, media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/")

@@ -149,6 +149,7 @@ curl http://localhost:8000/health
 - `GET /predictions/stats` : statistiques agrégées (volume, taux d'erreur, temps de réponse p50/p95)
 - Alertes email configurables (dérive, taux d'erreur)
 - Rapports hebdomadaires automatiques
+- `GET /metrics` — endpoint Prometheus (scraping automatique par Grafana LGTM, auth optionnelle via `METRICS_TOKEN`)
 - Traces OpenTelemetry vers Grafana LGTM (optionnel)
 
 ### Gestion des utilisateurs
