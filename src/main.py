@@ -9,6 +9,7 @@ import structlog
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import Depends, FastAPI
+from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api import models, monitoring, observed_results, predict, users
@@ -104,8 +105,6 @@ app = FastAPI(
 )
 
 # Exposer /metrics pour Prometheus
-from prometheus_fastapi_instrumentator import Instrumentator
-
 Instrumentator().instrument(app).expose(app)
 
 # Activer OpenTelemetry si demandé
