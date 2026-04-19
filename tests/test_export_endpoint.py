@@ -1,6 +1,7 @@
 """
 Tests pour l'endpoint GET /predictions/export
 """
+
 import asyncio
 import csv
 import io
@@ -131,9 +132,19 @@ def test_export_csv_columns():
     )
     reader = csv.DictReader(io.StringIO(r.text))
     expected = {
-        "id", "timestamp", "model_name", "model_version", "username",
-        "id_obs", "prediction_result", "probabilities", "response_time_ms",
-        "status", "error_message", "is_shadow", "input_features",
+        "id",
+        "timestamp",
+        "model_name",
+        "model_version",
+        "username",
+        "id_obs",
+        "prediction_result",
+        "probabilities",
+        "response_time_ms",
+        "status",
+        "error_message",
+        "is_shadow",
+        "input_features",
     }
     assert expected == set(reader.fieldnames)
 
@@ -191,9 +202,19 @@ def test_export_jsonl_fields():
     lines = [ln for ln in r.text.strip().split("\n") if ln]
     record = json.loads(lines[0])
     expected = {
-        "id", "timestamp", "model_name", "model_version", "username",
-        "id_obs", "prediction_result", "probabilities", "response_time_ms",
-        "status", "error_message", "is_shadow", "input_features",
+        "id",
+        "timestamp",
+        "model_name",
+        "model_version",
+        "username",
+        "id_obs",
+        "prediction_result",
+        "probabilities",
+        "response_time_ms",
+        "status",
+        "error_message",
+        "is_shadow",
+        "input_features",
     }
     assert expected == set(record.keys())
 

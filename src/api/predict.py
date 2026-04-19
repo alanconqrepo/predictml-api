@@ -264,9 +264,18 @@ async def export_predictions(
 
     fmt = export_format
     csv_cols = [
-        "id", "timestamp", "model_name", "model_version", "username",
-        "id_obs", "prediction_result", "probabilities", "response_time_ms",
-        "status", "error_message", "is_shadow",
+        "id",
+        "timestamp",
+        "model_name",
+        "model_version",
+        "username",
+        "id_obs",
+        "prediction_result",
+        "probabilities",
+        "response_time_ms",
+        "status",
+        "error_message",
+        "is_shadow",
     ]
     if include_features:
         csv_cols.append("input_features")
