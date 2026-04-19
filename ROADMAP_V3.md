@@ -142,6 +142,8 @@ GET /models/{name}/feature-importance
 **Effort :** ~1 jour  
 **Impact :** ⭐⭐⭐⭐⭐ — évite les promotions basées sur du bruit statistique
 
+memo: penses à la fin à ajouter les tests, check quality code,  mettre à jour la documentation, 
+
 ---
 
 ### 2.2 `PATCH /models/{name}/policy` — Politique d'auto-promotion post-retrain
@@ -175,6 +177,7 @@ Body:
 **Effort :** ~2 jours  
 **Impact :** ⭐⭐⭐⭐ — élimine la promotion manuelle pour les workflows de retrain régulier
 
+memo: penses à la fin à ajouter les tests, check quality code,  mettre à jour la documentation, 
 ---
 
 ### 2.3 `DELETE /predictions/purge` — Rétention des données / RGPD
@@ -211,6 +214,8 @@ DELETE /predictions/purge
 
 **Effort :** ~4h  
 **Impact :** ⭐⭐⭐⭐ — hygiène données et conformité sur le long terme
+
+memo: penses à la fin à ajouter les tests, check quality code,  mettre à jour la documentation, 
 
 ---
 
@@ -256,6 +261,8 @@ Nouveau champ `retrain_schedule` (JSON) sur `ModelMetadata` :
 **Effort :** ~5 jours  
 **Impact :** ⭐⭐⭐⭐ — indispensable pour les équipes avec des modèles à fraîcheur contrainte
 
+memo: penses à la fin à ajouter les tests, check quality code,  mettre à jour la documentation, 
+
 ---
 
 ### 3.2 `POST /models/{name}/{version}/validate-input` — Validation du schéma d'entrée
@@ -294,6 +301,8 @@ Ajouter `?strict_validation=true` à `/predict` pour rejeter avec 422 si les fea
 
 **Effort :** ~2 jours  
 **Impact :** ⭐⭐⭐ — surtout utile lors des migrations ou refactorisations de pipelines de données
+
+memo: penses à la fin à ajouter les tests, check quality code,  mettre à jour la documentation, 
 
 ---
 
