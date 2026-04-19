@@ -58,10 +58,10 @@ docker-compose up -d
 # Initialiser (premier déploiement uniquement)
 docker exec predictml-api python init_data/init_db.py
 
-# Tests automatisés
+# Tests automatisés (voir section Tests pour les prérequis)
 pytest tests/ -v
 
-# Smoke tests
+# Smoke tests (Docker requis)
 python smoke-tests/test_multimodel_api.py
 
 # Logs
@@ -93,10 +93,71 @@ Pour le dashboard Streamlit, les dépendances sont dans `streamlit_app/requireme
 Les tests dans `tests/` utilisent `TestClient` de FastAPI — aucun Docker requis.
 Ils couvrent : auth, endpoints publics, logique du `ModelService`.
 
+### Prérequis
+
+`pytest` est installé via **uv tool** (pas dans le venv du projet) :
+
 ```bash
-pytest tests/ -v           # tous les tests
-pytest tests/test_api.py   # endpoints uniquement
+# Installation initiale (une seule fois)
+WITH_ARGS=$(cat requirements.txt | grep -v '^#' | grep -v '^$' | sed 's/^/--with /' | tr '\n' ' ')
+uv tool install pytest --with fakeredis --with aiosqlite --with asyncpg $WITH_ARGS
 ```
+
+> Le `pytest` système (`/root/.local/bin/pytest`) est distinct du Python du projet.
+> Ne pas utiliser `python -m pytest` — le module n'est pas installé dans ce Python.
+
+### Lancer les tests
+
+```bash
+pytest tests/ -v                              # tous les tests
+pytest tests/test_api.py                      # endpoints de base uniquement
+pytest tests/test_predictions_purge.py -v     # purge RGPD uniquement
+pytest tests/test_ab_significance.py -v       # significativité A/B
+pytest tests/test_auto_promotion_policy.py -v # auto-promotion post-retrain
+
+# Filtrer par mot-clé
+pytest tests/ -k "purge" -v
+pytest tests/ -k "admin" -v
+
+# Arrêter au premier échec
+pytest tests/ -x -v
+
+# Sans les warnings
+pytest tests/ -v -p no:warnings
+```
+
+### Fichiers de tests par fonctionnalité
+
+| Fichier | Fonctionnalité |
+|---|---|
+| `test_api.py` | Endpoints de base, auth, health |
+| `test_predict_post.py` | POST /predict |
+| `test_predictions_get.py` | GET /predictions |
+| `test_predictions_purge.py` | DELETE /predictions/purge |
+| `test_export_endpoint.py` | GET /predictions/export |
+| `test_prediction_stats.py` | GET /predictions/stats |
+| `test_models_create.py` | POST /models |
+| `test_models_get.py` | GET /models |
+| `test_models_update.py` | PATCH /models |
+| `test_models_delete.py` | DELETE /models |
+| `test_retrain.py` | POST /models/{name}/{version}/retrain |
+| `test_auto_promotion_policy.py` | PATCH /models/{name}/policy |
+| `test_ab_shadow.py` | Routage A/B et shadow |
+| `test_ab_significance.py` | GET /models/{name}/ab-compare |
+| `test_feature_importance.py` | GET /models/{name}/feature-importance |
+| `test_observed_results.py` | POST/GET /observed-results |
+| `test_users.py` | Gestion utilisateurs |
+| `test_security.py` | Auth et tokens |
+| `test_rate_limit.py` | Rate limiting |
+| `test_drift.py` | Détection de drift |
+| `test_db_service_crud.py` | DBService (CRUD) |
+| `test_monitoring_api.py` | Endpoints monitoring |
+
+### Notes
+
+- La DB de test est SQLite en mémoire — les tables sont recréées à chaque session pytest.
+- MinIO et Redis sont mockés (pas de serveurs requis).
+- Certains tests `async def` nécessitent `pytest-asyncio` (non installé par défaut) — ils échouent avec "async def functions are not natively supported" ; ce sont des échecs pré-existants sans impact sur les fonctionnalités.
 
 Les smoke tests dans `smoke-tests/` nécessitent Docker et frappent l'API live.
 
