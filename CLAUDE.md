@@ -109,6 +109,7 @@ Les smoke tests dans `smoke-tests/` nécessitent Docker et frappent l'API live.
 - `POST/GET /observed-results` — Résultats observés
 - `PATCH /users/{id}` avec `{"regenerate_token": true}` — Renouveler un token (admin)
 - `POST /models/{name}/{version}/retrain` — Ré-entraîner un modèle (admin)
+- `GET /models/{name}/feature-importance` — Importance globale des features (SHAP agrégé, Bearer auth)
 
 ## Fonctionnalité Retrain (ré-entraînement)
 

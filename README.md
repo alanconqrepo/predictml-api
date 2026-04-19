@@ -21,7 +21,7 @@ PredictML API résout ce problème :
 - **Évaluation continue** — les résultats observés peuvent être rapportés pour mesurer la précision réelle des modèles
 - **A/B testing & shadow deployment** — router le trafic entre versions et comparer silencieusement
 - **Drift detection** — détecter la dérive des features en production (Z-score + PSI)
-- **Explicabilité SHAP** — comprendre pourquoi le modèle a fait une prédiction
+- **Explicabilité SHAP** — comprendre pourquoi le modèle a fait une prédiction, et mesurer l'importance globale des features sur les prédictions récentes
 - **Ré-entraînement automatique** — déclencher un retrain depuis l'API avec un script `train.py`
 - **Supervision & alertes** — monitoring global, alertes email, rapports hebdomadaires
 - **Gestion multi-utilisateurs** — tokens Bearer, rôles (admin/user/readonly), quotas journaliers
@@ -119,6 +119,9 @@ curl http://localhost:8000/health
 
 ### Explicabilité SHAP
 - `POST /explain` : valeurs SHAP locales pour une observation
+- `GET /models/{name}/feature-importance` : importance globale agrégée sur les N dernières prédictions
+  - Paramètres : `version`, `last_n` (défaut 100, max 500), `days` (défaut 7)
+  - Retourne `mean(|SHAP|)` par feature + classement — idéal pour détecter des dérives comportementales
 - Support des modèles arborescents (TreeExplainer) et linéaires (LinearExplainer)
 - Interprétation : contribution de chaque feature à la prédiction
 
@@ -176,6 +179,7 @@ curl http://localhost:8000/health
 | DELETE | `/models/{name}` | Oui | Supprimer toutes les versions |
 | GET | `/models/{name}/performance` | Oui | Métriques réelles via résultats observés |
 | GET | `/models/{name}/drift` | Oui | Rapport de dérive des features |
+| GET | `/models/{name}/feature-importance` | Oui | Importance globale SHAP agrégée |
 | GET | `/models/{name}/history` | Oui | Historique complet des changements |
 | GET | `/models/{name}/{version}/history` | Oui | Historique d'une version spécifique |
 | POST | `/models/{name}/{version}/rollback/{history_id}` | Admin | Rollback vers un état précédent |
