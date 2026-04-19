@@ -260,3 +260,24 @@ class PredictionStatsResponse(BaseModel):
     days: int
     model_name: Optional[str] = None
     stats: List[PredictionStatsItem]
+
+
+class PurgeResponse(BaseModel):
+    """Résultat d'une purge de prédictions (rétention RGPD)"""
+
+    dry_run: bool = Field(..., description="True si simulation sans suppression réelle")
+    deleted_count: int = Field(
+        ..., description="Nombre de prédictions supprimées (ou à supprimer en dry_run)"
+    )
+    oldest_remaining: Optional[datetime] = Field(
+        None,
+        description="Timestamp de la prédiction la plus ancienne restante après la purge",
+    )
+    models_affected: List[str] = Field(..., description="Liste des modèles concernés par la purge")
+    linked_observed_results_count: int = Field(
+        ...,
+        description=(
+            "Nombre de prédictions supprimées liées à des observed_results. "
+            "Avertissement si > 0 : des données de performance historiques seront perdues."
+        ),
+    )

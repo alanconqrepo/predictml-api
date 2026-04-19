@@ -15,7 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.security import check_prediction_rate_limit, verify_token
+from src.core.security import check_prediction_rate_limit, require_admin, verify_token
 from src.db.database import AsyncSessionLocal, get_db
 from src.db.models import Prediction, User
 from src.schemas.prediction import (
@@ -30,6 +30,7 @@ from src.schemas.prediction import (
     PredictionsListResponse,
     PredictionStatsItem,
     PredictionStatsResponse,
+    PurgeResponse,
 )
 from src.services.db_service import DBService
 from src.services.model_service import model_service
@@ -359,6 +360,45 @@ async def export_predictions(
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.delete("/predictions/purge", response_model=PurgeResponse)
+async def purge_predictions(
+    older_than_days: int = Query(
+        ...,
+        ge=1,
+        description="Supprimer les prédictions plus anciennes que N jours (ex: 90)",
+    ),
+    model_name: Optional[str] = Query(
+        None,
+        description="Restreindre la purge à un modèle spécifique (optionnel)",
+    ),
+    dry_run: bool = Query(
+        True,
+        description="Simuler sans supprimer (défaut : true — passer dry_run=false pour supprimer réellement)",
+    ),
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Purge les prédictions plus anciennes que N jours (rétention RGPD).
+
+    - **older_than_days** : seuil de rétention en jours — obligatoire (ex: 90)
+    - **model_name** : restreindre la purge à un seul modèle (optionnel)
+    - **dry_run** : `true` par défaut — simulation sans suppression. Passer `dry_run=false` pour supprimer réellement.
+
+    La réponse inclut un avertissement (`linked_observed_results_count > 0`) si des prédictions
+    supprimées sont liées à des observed_results (perte de données de performance).
+
+    Accès réservé aux administrateurs.
+    """
+    result = await DBService.purge_predictions(
+        db=db,
+        older_than_days=older_than_days,
+        model_name=model_name,
+        dry_run=dry_run,
+    )
+    return PurgeResponse(**result)
 
 
 @router.post("/predict", response_model=PredictionOutput)

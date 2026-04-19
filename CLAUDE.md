@@ -112,6 +112,7 @@ Les smoke tests dans `smoke-tests/` nécessitent Docker et frappent l'API live.
 - `PATCH /models/{name}/policy` — Définir la politique d'auto-promotion post-retrain (admin)
 - `GET /models/{name}/feature-importance` — Importance globale des features (SHAP agrégé, Bearer auth)
 - `GET /models/{name}/ab-compare` — Comparaison A/B avec test de significativité statistique (Bearer auth)
+- `DELETE /predictions/purge` — Purge RGPD des prédictions anciennes (admin)
 
 ## Fonctionnalité A/B Significativité statistique
 
@@ -280,3 +281,60 @@ curl -X PATCH http://localhost:8000/models/mon_modele/policy \
 - Champ DB : `promotion_policy` (JSON) dans `src/db/models/model_metadata.py`
 - Migration : `alembic/versions/20260419_5ab8c1f0_add_promotion_policy.py`
 - Tests : `tests/test_auto_promotion_policy.py` (25 tests)
+
+## Fonctionnalité Purge RGPD (rétention des données)
+
+### Pourquoi
+
+La table `predictions` grossit indéfiniment. Sur un déploiement actif (1 000 prédictions/jour),
+elle atteint 365 000 lignes/an. Sans politique de rétention, les performances des requêtes
+analytiques se dégradent et la conformité RGPD devient un problème.
+
+### Signature
+
+```
+DELETE /predictions/purge
+  ?older_than_days=90    # supprimer les prédictions > 90 jours
+  &model_name=iris       # optionnel : purger un seul modèle
+  &dry_run=true          # simuler sans supprimer (défaut : true)
+```
+
+### Réponse
+
+```json
+{
+  "dry_run": false,
+  "deleted_count": 12450,
+  "oldest_remaining": "2026-01-15T08:32:00",
+  "models_affected": ["iris", "wine"],
+  "linked_observed_results_count": 3
+}
+```
+
+- `linked_observed_results_count > 0` → avertissement : des prédictions supprimées sont liées à des
+  `observed_results` (perte de données de performance historiques).
+
+### Comportement
+
+- `dry_run=true` par défaut — aucune suppression sans confirmation explicite (`dry_run=false`).
+- Filtre SQL : `WHERE timestamp < now() - interval 'N days'` + filtre optionnel `model_name`.
+- Admin uniquement.
+
+### Implémentation
+
+- Endpoint : `DELETE /predictions/purge` dans `src/api/predict.py`
+- Service DB : `DBService.purge_predictions()` dans `src/services/db_service.py`
+- Schéma réponse : `PurgeResponse` dans `src/schemas/prediction.py`
+- Tests : `tests/test_predictions_purge.py` (16 tests)
+
+### Exemple
+
+```bash
+# Simuler une purge (dry_run par défaut)
+curl -X DELETE "http://localhost:8000/predictions/purge?older_than_days=90" \
+  -H "Authorization: Bearer <admin_token>"
+
+# Purger réellement les prédictions iris > 90 jours
+curl -X DELETE "http://localhost:8000/predictions/purge?older_than_days=90&model_name=iris&dry_run=false" \
+  -H "Authorization: Bearer <admin_token>"
+```
