@@ -110,6 +110,45 @@ Les smoke tests dans `smoke-tests/` nécessitent Docker et frappent l'API live.
 - `PATCH /users/{id}` avec `{"regenerate_token": true}` — Renouveler un token (admin)
 - `POST /models/{name}/{version}/retrain` — Ré-entraîner un modèle (admin)
 - `GET /models/{name}/feature-importance` — Importance globale des features (SHAP agrégé, Bearer auth)
+- `GET /models/{name}/ab-compare` — Comparaison A/B avec test de significativité statistique (Bearer auth)
+
+## Fonctionnalité A/B Significativité statistique
+
+L'endpoint `GET /models/{name}/ab-compare` enrichit sa réponse avec un bloc `ab_significance` :
+
+```json
+{
+  "ab_significance": {
+    "metric": "error_rate",
+    "test": "chi2",
+    "p_value": 0.023,
+    "significant": true,
+    "confidence_level": 0.95,
+    "winner": "v2.0.0",
+    "min_samples_needed": 200,
+    "current_samples": { "v1.0.0": 450, "v2.0.0": 380 }
+  }
+}
+```
+
+### Logique de sélection du test
+
+| Condition | Test utilisé | Métrique |
+|---|---|---|
+| ≥ 1 erreur observée dans l'un des groupes | Chi-² sur tableau de contingence | `error_rate` |
+| 0 erreur + temps de réponse disponibles | Mann-Whitney U | `response_time_ms` |
+| Données insuffisantes (< 2 versions actives) | — | `ab_significance: null` |
+
+### Calcul de `min_samples_needed`
+
+- **Chi-²** : formule de puissance basée sur l'effet de taille de Cohen h (comparaison de proportions)
+- **Mann-Whitney U** : formule basée sur Cohen d (distributions continues)
+- Puissance cible : 80 % — seuil : `confidence_level` (défaut 95 %)
+
+### Implémentation
+
+- Service : `src/services/ab_significance_service.py`
+- Tests unitaires : `tests/test_ab_significance.py` (20 tests)
 
 ## Fonctionnalité Retrain (ré-entraînement)
 

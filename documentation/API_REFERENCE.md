@@ -643,11 +643,18 @@ print(data["stdout"])   # logs d'entraînement
 
 ---
 
-### `GET /models/{name}/ab-compare` — Rapport A/B
+### `GET /models/{name}/ab-compare` — Rapport A/B avec significativité statistique
 
-Comparaison côte à côte des versions en A/B test ou shadow sur une période.
+Comparaison côte à côte des versions en A/B test ou shadow sur une période, enrichie d'un test
+de significativité statistique automatique entre les deux versions les plus actives.
 
 **Auth requise**
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `days` | int | 30 | Fenêtre d'analyse en jours (1–90) |
 
 ```python
 response = requests.get(
@@ -656,10 +663,22 @@ response = requests.get(
     params={"days": 7}
 )
 data = response.json()
+
+# Métriques brutes par version
 for v in data["versions"]:
     print(f"{v['version']} ({v['deployment_mode']}): "
           f"{v['total_predictions']} preds, error_rate={v['error_rate']:.2%}, "
           f"agreement={v['agreement_rate']}")
+
+# Significativité statistique
+sig = data.get("ab_significance")
+if sig:
+    status = "✅ significative" if sig["significant"] else "⚠️  non significative"
+    print(f"\nDifférence {status} (p={sig['p_value']:.4f}, test={sig['test']})")
+    if sig["winner"]:
+        print(f"Meilleure version : {sig['winner']}")
+    if sig["current_samples"][sig["winner"] or list(sig["current_samples"])[0]] < sig["min_samples_needed"]:
+        print(f"⚠️  Données insuffisantes — {sig['min_samples_needed']} observations/version recommandées")
 ```
 
 **Schéma `ABCompareResponse`**
@@ -671,11 +690,11 @@ for v in data["versions"]:
   "versions": [
     {
       "version": "1.0.0",
-      "deployment_mode": "production",
+      "deployment_mode": "ab_test",
       "traffic_weight": 0.8,
       "total_predictions": 800,
       "shadow_predictions": 0,
-      "error_rate": 0.01,
+      "error_rate": 0.05,
       "avg_response_time_ms": 12.5,
       "p95_response_time_ms": 45.0,
       "prediction_distribution": {"0": 450, "1": 200, "2": 150},
@@ -683,18 +702,47 @@ for v in data["versions"]:
     },
     {
       "version": "2.0.0",
-      "deployment_mode": "shadow",
-      "traffic_weight": 0.0,
-      "total_predictions": 0,
-      "shadow_predictions": 800,
-      "error_rate": 0.005,
+      "deployment_mode": "ab_test",
+      "traffic_weight": 0.2,
+      "total_predictions": 200,
+      "shadow_predictions": 0,
+      "error_rate": 0.01,
       "avg_response_time_ms": 9.8,
       "p95_response_time_ms": 38.0,
-      "prediction_distribution": {"0": 460, "1": 195, "2": 145},
-      "agreement_rate": 0.96
+      "prediction_distribution": {"0": 115, "1": 50, "2": 35},
+      "agreement_rate": null
     }
-  ]
+  ],
+  "ab_significance": {
+    "metric": "error_rate",
+    "test": "chi2",
+    "p_value": 0.008,
+    "significant": true,
+    "confidence_level": 0.95,
+    "winner": "2.0.0",
+    "min_samples_needed": 120,
+    "current_samples": {"1.0.0": 800, "2.0.0": 200}
+  }
 }
+```
+
+**Champs `ab_significance`**
+
+| Champ | Type | Description |
+|---|---|---|
+| `metric` | str | Métrique testée : `"error_rate"` ou `"response_time_ms"` |
+| `test` | str | Test utilisé : `"chi2"` (erreur) ou `"mann_whitney_u"` (latence) |
+| `p_value` | float | Valeur p du test statistique |
+| `significant` | bool | `true` si `p_value < 1 - confidence_level` |
+| `confidence_level` | float | Seuil de confiance (défaut `0.95`) |
+| `winner` | str \| null | Version avec la meilleure métrique, `null` si égalité exacte |
+| `min_samples_needed` | int | Observations/version recommandées pour détecter cet effet (puissance 80 %) |
+| `current_samples` | dict | Nombre d'observations disponibles par version |
+
+> **Logique de sélection du test :**  
+> Chi-² si au moins une erreur est observée dans l'un des groupes (tableau de contingence succès/erreur).  
+> Fallback Mann-Whitney U sur les temps de réponse si aucune erreur n'est présente.  
+> `ab_significance: null` si moins de 2 versions actives ou données insuffisantes.
 ```
 
 ---

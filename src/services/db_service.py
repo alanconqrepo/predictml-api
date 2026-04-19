@@ -764,6 +764,8 @@ class DBService:
                     "avg_response_time_ms": round(sum(times) / n, 2) if n > 0 else None,
                     "p95_response_time_ms": _p95(times),
                     "prediction_distribution": dict(prod["dist"]),
+                    "response_times": times,
+                    "error_count": prod["errors"],
                 }
             )
         return stats

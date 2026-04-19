@@ -35,6 +35,7 @@ from src.db.models import HistoryActionType, ModelMetadata, User
 from src.db.models.model_metadata import DeploymentMode
 from src.schemas.model import (
     ABCompareResponse,
+    ABSignificance,
     ABVersionStats,
     DriftReportResponse,
     FeatureDriftResult,
@@ -54,6 +55,7 @@ from src.schemas.model import (
     RollbackResponse,
 )
 from src.services import drift_service
+from src.services.ab_significance_service import compute_ab_significance
 from src.services.db_service import _ROLLBACK_FIELDS, DBService, _build_snapshot
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
@@ -1015,10 +1017,14 @@ async def get_ab_comparison(
             )
         )
 
+    significance_data = compute_ab_significance(raw_stats)
+    ab_significance = ABSignificance(**significance_data) if significance_data else None
+
     return ABCompareResponse(
         model_name=name,
         period_days=days,
         versions=versions_out,
+        ab_significance=ab_significance,
     )
 
 
