@@ -60,6 +60,9 @@ class ModelMetadata(Base):
     # Script de ré-entraînement
     train_script_object_key = Column(String(255), nullable=True)  # Chemin MinIO vers train.py
 
+    # Politique d'auto-promotion post-retrain
+    promotion_policy = Column(JSON, nullable=True)
+
     # Créateur
     user_id_creator = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     creator = relationship("User", foreign_keys=[user_id_creator], back_populates="created_models")

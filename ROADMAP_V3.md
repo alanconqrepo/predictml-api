@@ -314,7 +314,7 @@ memo: penses à la fin à ajouter les tests, check quality code,  mettre à jour
 | 2 | Export bulk prédictions | `GET /predictions/export` | 4h | ⭐⭐⭐⭐ | Facile |
 | 3 | Feature importance globale (SHAP) | `GET /models/{name}/feature-importance` | 6h | ⭐⭐⭐⭐⭐ | Facile |
 | 4 | ✅ Significativité statistique A/B | Enrichir `GET /models/{name}/ab-compare` | 1j | ⭐⭐⭐⭐⭐ | Moyen |
-| 5 | Auto-promotion policy post-retrain | `PATCH /models/{name}/policy` | 2j | ⭐⭐⭐⭐ | Moyen |
+| 5 | ✅ Auto-promotion policy post-retrain | `PATCH /models/{name}/policy` | 2j | ⭐⭐⭐⭐ | Moyen |
 | 6 | Purge / rétention RGPD | `DELETE /predictions/purge` | 4h | ⭐⭐⭐⭐ | Facile |
 | 7 | Retraining planifié (cron) | `PATCH /models/{name}/{version}/schedule` | 5j | ⭐⭐⭐⭐ | Difficile |
 | 8 | Validation schéma d'entrée | `POST /models/{name}/{version}/validate-input` | 2j | ⭐⭐⭐ | Moyen |
