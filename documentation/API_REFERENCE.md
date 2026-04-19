@@ -456,6 +456,64 @@ print(data["drift_summary"])  # "ok" | "warning" | "critical" | "no_baseline"
 
 ---
 
+### `GET /models/{name}/feature-importance` — Importance globale des features (SHAP agrégé)
+
+Calcule la moyenne de `|SHAP|` par feature sur un échantillon de prédictions récentes.
+Permet d'identifier les features les plus influentes du modèle en production et de détecter des dérives comportementales avant même que les métriques de performance ne bougent.
+
+**Auth requise**
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `version` | str | production | Version cible ; sinon `is_production=True`, sinon la plus récente |
+| `last_n` | int | 100 | Nb de prédictions à échantillonner (max 500) |
+| `days` | int | 7 | Fenêtre temporelle en jours (max 90) |
+
+```python
+response = requests.get(
+    f"{BASE_URL}/models/iris_model/feature-importance",
+    headers=headers,
+    params={"version": "1.0.0", "last_n": 200, "days": 14}
+)
+data = response.json()
+
+print(f"Analysé sur {data['sample_size']} prédictions")
+for feat, info in sorted(
+    data["feature_importance"].items(), key=lambda x: x[1]["rank"]
+):
+    print(f"  #{info['rank']} {feat}: mean |SHAP| = {info['mean_abs_shap']:.4f}")
+```
+
+**Schéma `FeatureImportanceResponse`**
+
+```json
+{
+  "model_name": "iris_model",
+  "version": "1.0.0",
+  "sample_size": 98,
+  "feature_importance": {
+    "petal length (cm)": { "mean_abs_shap": 0.42, "rank": 1 },
+    "petal width (cm)":  { "mean_abs_shap": 0.31, "rank": 2 },
+    "sepal length (cm)": { "mean_abs_shap": 0.18, "rank": 3 },
+    "sepal width (cm)":  { "mean_abs_shap": 0.09, "rank": 4 }
+  }
+}
+```
+
+**Cas particuliers**
+
+| Situation | Comportement |
+|---|---|
+| Aucune prédiction dans la fenêtre | `sample_size: 0`, `feature_importance: {}` |
+| Modèle sans `feature_names_in_` | 422 — doit être entraîné avec un DataFrame pandas |
+| Type de modèle non supporté par SHAP | 422 — voir `POST /explain` pour la liste des types |
+
+> **Utilisation typique :** surveiller chaque semaine que les features les plus importantes restent stables. Un changement de classement indique souvent une dérive du comportement du modèle avant que l'accuracy ne baisse.
+
+---
+
 ### `GET /models/{name}/history` — Historique complet
 
 Journal de tous les changements d'état pour toutes les versions d'un modèle.

@@ -44,25 +44,19 @@ AUTH = {"Authorization": f"Bearer {TEST_TOKEN}"}
 
 
 def _make_rf_model() -> RandomForestClassifier:
-    X = pd.DataFrame(
-        {"petal_length": [1.0, 2.0, 3.0, 4.0], "petal_width": [0.3, 0.5, 0.7, 0.9]}
-    )
+    X = pd.DataFrame({"petal_length": [1.0, 2.0, 3.0, 4.0], "petal_width": [0.3, 0.5, 0.7, 0.9]})
     y = [0, 1, 0, 1]
     return RandomForestClassifier(n_estimators=10, random_state=42).fit(X, y)
 
 
 def _make_lr_model() -> LogisticRegression:
-    X = pd.DataFrame(
-        {"petal_length": [1.0, 2.0, 3.0, 4.0], "petal_width": [0.3, 0.5, 0.7, 0.9]}
-    )
+    X = pd.DataFrame({"petal_length": [1.0, 2.0, 3.0, 4.0], "petal_width": [0.3, 0.5, 0.7, 0.9]})
     y = [0, 1, 0, 1]
     return LogisticRegression(max_iter=1000).fit(X, y)
 
 
 def _make_svm_model() -> SVC:
-    X = pd.DataFrame(
-        {"petal_length": [1.0, 2.0, 3.0, 4.0], "petal_width": [0.3, 0.5, 0.7, 0.9]}
-    )
+    X = pd.DataFrame({"petal_length": [1.0, 2.0, 3.0, 4.0], "petal_width": [0.3, 0.5, 0.7, 0.9]})
     y = [0, 1, 0, 1]
     return SVC().fit(X, y)
 
@@ -297,9 +291,10 @@ def test_feature_importance_lr_success():
         assert ranks == list(range(1, len(fi) + 1))
 
         top = min(fi.items(), key=lambda kv: kv[1]["rank"])
-        assert fi[top[0]]["mean_abs_shap"] >= fi[
-            max(fi.items(), key=lambda kv: kv[1]["rank"])[0]
-        ]["mean_abs_shap"]
+        assert (
+            fi[top[0]]["mean_abs_shap"]
+            >= fi[max(fi.items(), key=lambda kv: kv[1]["rank"])[0]]["mean_abs_shap"]
+        )
     finally:
         asyncio.run(model_service.clear_cache(key))
 

@@ -492,8 +492,7 @@ async def get_feature_importance(
 
     processed = max((len(v) for v in shap_accumulator.values()), default=0)
     mean_abs = {
-        feat: sum(vals) / len(vals) if vals else 0.0
-        for feat, vals in shap_accumulator.items()
+        feat: sum(vals) / len(vals) if vals else 0.0 for feat, vals in shap_accumulator.items()
     }
     ranked = sorted(mean_abs.items(), key=lambda kv: kv[1], reverse=True)
     feature_importance = {
