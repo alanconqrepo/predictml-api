@@ -77,6 +77,15 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("Impossible de démarrer le scheduler", error=str(e))
 
+    # Démarrer le scheduler de ré-entraînement automatique
+    try:
+        from src.tasks.retrain_scheduler import start_retrain_scheduler
+
+        await start_retrain_scheduler()
+        logger.info("Scheduler de ré-entraînement démarré")
+    except Exception as e:
+        logger.warning("Impossible de démarrer le scheduler de ré-entraînement", error=str(e))
+
     yield
 
     # Shutdown
@@ -88,6 +97,13 @@ async def lifespan(app: FastAPI):
             stop_scheduler()
         except Exception:
             pass
+
+    try:
+        from src.tasks.retrain_scheduler import stop_retrain_scheduler
+
+        stop_retrain_scheduler()
+    except Exception:
+        pass
     try:
         await close_db()
         logger.info("Connexions DB fermées")
