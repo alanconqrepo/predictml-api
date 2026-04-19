@@ -73,6 +73,7 @@ class ModelCreateResponse(BaseModel):
     traffic_weight: Optional[float] = None
     deployment_mode: Optional[str] = None
     train_script_object_key: Optional[str] = None
+    promotion_policy: Optional[Dict[str, Any]] = None
     created_at: datetime
     user_id_creator: Optional[int]
     creator_username: Optional[str] = None
@@ -129,6 +130,7 @@ class ModelGetResponse(BaseModel):
     is_production: bool
     traffic_weight: Optional[float] = None
     deployment_mode: Optional[str] = None
+    promotion_policy: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: Optional[datetime]
     deprecated_at: Optional[datetime]
@@ -297,6 +299,28 @@ class ABCompareResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Politique d'auto-promotion post-retrain
+# ---------------------------------------------------------------------------
+
+
+class PromotionPolicy(BaseModel):
+    """Politique d'auto-promotion appliquée après un ré-entraînement"""
+
+    min_accuracy: Optional[float] = Field(None, ge=0.0, le=1.0)
+    max_latency_p95_ms: Optional[float] = Field(None, gt=0.0)
+    min_sample_validation: int = Field(10, ge=1)
+    auto_promote: bool = False
+
+
+class PolicyUpdateResponse(BaseModel):
+    """Réponse de PATCH /models/{name}/policy"""
+
+    model_name: str
+    promotion_policy: Optional[PromotionPolicy]
+    updated_versions: int
+
+
+# ---------------------------------------------------------------------------
 # Ré-entraînement
 # ---------------------------------------------------------------------------
 
@@ -338,3 +362,5 @@ class RetrainResponse(BaseModel):
     stderr: str
     error: Optional[str] = None
     new_model_metadata: Optional[ModelCreateResponse] = None
+    auto_promoted: Optional[bool] = None
+    auto_promote_reason: Optional[str] = None

@@ -184,6 +184,7 @@ curl http://localhost:8000/health
 | GET | `/models/{name}/{version}/history` | Oui | Historique d'une version spécifique |
 | POST | `/models/{name}/{version}/rollback/{history_id}` | Admin | Rollback vers un état précédent |
 | POST | `/models/{name}/{version}/retrain` | Admin | Ré-entraîner avec train.py |
+| PATCH | `/models/{name}/policy` | Admin | Définir la politique d'auto-promotion post-retrain |
 | GET | `/models/{name}/ab-compare` | Oui | Rapport de comparaison A/B |
 | **Prédictions** | | | |
 | POST | `/predict` | Oui | Prédiction unitaire |

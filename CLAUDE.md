@@ -109,6 +109,7 @@ Les smoke tests dans `smoke-tests/` nécessitent Docker et frappent l'API live.
 - `POST/GET /observed-results` — Résultats observés
 - `PATCH /users/{id}` avec `{"regenerate_token": true}` — Renouveler un token (admin)
 - `POST /models/{name}/{version}/retrain` — Ré-entraîner un modèle (admin)
+- `PATCH /models/{name}/policy` — Définir la politique d'auto-promotion post-retrain (admin)
 - `GET /models/{name}/feature-importance` — Importance globale des features (SHAP agrégé, Bearer auth)
 - `GET /models/{name}/ab-compare` — Comparaison A/B avec test de significativité statistique (Bearer auth)
 
@@ -224,3 +225,58 @@ curl -X POST http://localhost:8000/models/mon_modele/1.0.0/retrain \
 
 Un exemple complet de `train.py` respectant le contrat est disponible dans
 `init_data/example_train.py`.
+
+## Fonctionnalité Auto-promotion post-retrain
+
+### Comment ça fonctionne
+
+1. L'admin définit une politique via `PATCH /models/{name}/policy`.
+2. La politique est stockée dans `ModelMetadata.promotion_policy` (champ JSON)
+   et propagée à **toutes les versions actives** du modèle.
+3. À la fin de chaque ré-entraînement (`POST /models/{name}/{version}/retrain`),
+   si `auto_promote: true` :
+   - Récupère les paires (prédiction, résultat observé) historiques du modèle.
+   - Si `len(paires) < min_sample_validation` → non promu.
+   - Si `min_accuracy` défini : vérifie l'accuracy sur les N dernières paires.
+   - Si `max_latency_p95_ms` défini : vérifie le P95 de latence des prédictions.
+   - Si tous les critères sont satisfaits → `is_production = true` automatiquement.
+4. La réponse du retrain inclut `auto_promoted: true|false` et `auto_promote_reason`.
+
+### Champs de la politique
+
+| Champ | Type | Défaut | Description |
+|---|---|---|---|
+| `min_accuracy` | float [0–1] | null | Précision minimale requise |
+| `max_latency_p95_ms` | float > 0 | null | Latence P95 maximale en ms |
+| `min_sample_validation` | int ≥ 1 | 10 | Nombre minimal de paires de validation |
+| `auto_promote` | bool | false | Activer l'auto-promotion |
+
+### Sémantique de `auto_promoted` dans la réponse du retrain
+
+| Valeur | Signification |
+|---|---|
+| `null` | Pas de policy configurée, ou `set_production=True` (promotion manuelle) |
+| `false` | Policy évaluée : critères non satisfaits (voir `auto_promote_reason`) |
+| `true` | Policy évaluée : critères satisfaits, version promue en production |
+
+### Définir une politique
+
+```bash
+curl -X PATCH http://localhost:8000/models/mon_modele/policy \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "min_accuracy": 0.90,
+    "max_latency_p95_ms": 200,
+    "min_sample_validation": 50,
+    "auto_promote": true
+  }'
+```
+
+### Implémentation
+
+- Endpoint : `PATCH /models/{name}/policy` dans `src/api/models.py`
+- Service d'évaluation : `src/services/auto_promotion_service.py`
+- Champ DB : `promotion_policy` (JSON) dans `src/db/models/model_metadata.py`
+- Migration : `alembic/versions/20260419_5ab8c1f0_add_promotion_policy.py`
+- Tests : `tests/test_auto_promotion_policy.py` (25 tests)

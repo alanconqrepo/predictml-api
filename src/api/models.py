@@ -50,12 +50,15 @@ from src.schemas.model import (
     ModelUpdateInput,
     PerClassMetrics,
     PeriodPerformance,
+    PolicyUpdateResponse,
+    PromotionPolicy,
     RetrainRequest,
     RetrainResponse,
     RollbackResponse,
 )
 from src.services import drift_service
 from src.services.ab_significance_service import compute_ab_significance
+from src.services.auto_promotion_service import evaluate_auto_promotion
 from src.services.db_service import _ROLLBACK_FIELDS, DBService, _build_snapshot
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
@@ -666,6 +669,61 @@ async def rollback_model(
     )
 
 
+@router.patch("/models/{name}/policy", response_model=PolicyUpdateResponse)
+async def update_model_policy(
+    name: str,
+    payload: PromotionPolicy,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Définit ou met à jour la politique d'auto-promotion post-retrain pour un modèle.
+
+    La politique est persistée sur toutes les versions actives du modèle.
+    À chaque ré-entraînement, si `auto_promote: true`, la nouvelle version sera
+    automatiquement promue en production lorsque les seuils sont atteints :
+
+    - **min_accuracy** : précision minimale calculée sur les `min_sample_validation`
+      paires (prédiction, résultat observé) les plus récentes.
+    - **max_latency_p95_ms** : latence P95 maximale des prédictions en production.
+    - **min_sample_validation** : nombre minimal de paires de validation requises
+      (défaut : 10).
+    - **auto_promote** : activer ou désactiver l'auto-promotion (défaut : false).
+
+    Réservé aux administrateurs.
+    """
+    result = await db.execute(
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.is_active.is_(True))
+        )
+    )
+    models = result.scalars().all()
+    if not models:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' introuvable ou inactif.",
+        )
+
+    policy_dict = payload.model_dump()
+    for model in models:
+        model.promotion_policy = policy_dict
+
+    await db.commit()
+
+    logger.info(
+        "Politique d'auto-promotion mise à jour",
+        model=name,
+        policy=policy_dict,
+        updated_by=user.username,
+    )
+
+    return PolicyUpdateResponse(
+        model_name=name,
+        promotion_policy=payload,
+        updated_versions=len(models),
+    )
+
+
 @router.post(
     "/models/{name}/{version}/retrain",
     response_model=RetrainResponse,
@@ -896,6 +954,7 @@ async def retrain_model(
         confidence_threshold=source_model.confidence_threshold,
         tags=source_model.tags,
         webhook_url=source_model.webhook_url,
+        promotion_policy=source_model.promotion_policy,
         trained_by=user.username,
         training_date=datetime.now(timezone.utc),
         user_id_creator=user.id,
@@ -908,7 +967,10 @@ async def retrain_model(
         db, new_metadata, HistoryActionType.CREATED, user.id, user.username
     )
 
-    # 10. Passer en production si demandé
+    # 10. Passer en production si demandé manuellement
+    auto_promoted = False
+    auto_promote_reason: Optional[str] = None
+
     if payload.set_production:
         other_result = await db.execute(
             select(ModelMetadata).where(
@@ -939,6 +1001,50 @@ async def retrain_model(
             user.username,
             ["is_production"],
         )
+    elif source_model.promotion_policy and source_model.promotion_policy.get("auto_promote"):
+        # 10b. Auto-promotion selon la politique configurée
+        should_promote, reason = await evaluate_auto_promotion(
+            db, name, source_model.promotion_policy
+        )
+        auto_promote_reason = reason
+        if should_promote:
+            other_result = await db.execute(
+                select(ModelMetadata).where(
+                    and_(
+                        ModelMetadata.name == name,
+                        ModelMetadata.version != new_version,
+                        ModelMetadata.is_production.is_(True),
+                    )
+                )
+            )
+            for other in other_result.scalars().all():
+                other.is_production = False
+                await DBService.log_model_history(
+                    db,
+                    other,
+                    HistoryActionType.SET_PRODUCTION,
+                    user.id,
+                    user.username,
+                    ["is_production"],
+                )
+            new_metadata.is_production = True
+            auto_promoted = True
+            await db.flush()
+            await DBService.log_model_history(
+                db,
+                new_metadata,
+                HistoryActionType.SET_PRODUCTION,
+                user.id,
+                user.username,
+                ["is_production"],
+            )
+        logger.info(
+            "Évaluation auto-promotion",
+            model=name,
+            new_version=new_version,
+            auto_promoted=auto_promoted,
+            reason=reason,
+        )
 
     await db.commit()
     await db.refresh(new_metadata)
@@ -949,6 +1055,7 @@ async def retrain_model(
         source_version=version,
         new_version=new_version,
         set_production=payload.set_production,
+        auto_promoted=auto_promoted,
     )
 
     return RetrainResponse(
@@ -962,6 +1069,12 @@ async def retrain_model(
             **{c.name: getattr(new_metadata, c.name) for c in new_metadata.__table__.columns},
             creator_username=user.username,
         ),
+        auto_promoted=(
+            auto_promoted
+            if (source_model.promotion_policy and not payload.set_production)
+            else None
+        ),
+        auto_promote_reason=auto_promote_reason,
     )
 
 
@@ -1119,6 +1232,9 @@ async def get_model(
         creator_username=model_meta.creator.username if model_meta.creator else None,
         is_active=model_meta.is_active,
         is_production=model_meta.is_production,
+        traffic_weight=model_meta.traffic_weight,
+        deployment_mode=model_meta.deployment_mode,
+        promotion_policy=model_meta.promotion_policy,
         created_at=model_meta.created_at,
         updated_at=model_meta.updated_at,
         deprecated_at=model_meta.deprecated_at,
