@@ -643,6 +643,60 @@ print(data["stdout"])   # logs d'entraînement
 
 ---
 
+### `PATCH /models/{name}/{version}/schedule` — Planifier le ré-entraînement automatique
+
+Configure un planning cron pour déclencher automatiquement le ré-entraînement d'une version.
+Le scheduler APScheduler charge tous les plannings actifs au démarrage de l'API.
+
+**Auth requise : admin**
+
+```python
+response = requests.patch(
+    f"{BASE_URL}/models/iris_model/1.0.0/schedule",
+    headers=headers,
+    json={
+        "cron": "0 3 * * 1",    # chaque lundi à 03h00 UTC
+        "lookback_days": 30,     # TRAIN_START_DATE = today - 30j
+        "auto_promote": False,   # évaluer la promotion_policy après retrain
+        "enabled": True
+    }
+)
+data = response.json()
+print(f"Prochain déclenchement : {data['retrain_schedule']['next_run_at']}")
+```
+
+**Schéma `RetrainScheduleInput`**
+
+| Champ | Type | Défaut | Description |
+|---|---|---|---|
+| `cron` | str | null | Expression cron 5 champs (ex : `"0 3 * * 1"`) |
+| `lookback_days` | int ≥ 1 | 30 | Fenêtre d'historique passée au script (jours) |
+| `auto_promote` | bool | false | Évaluer la `promotion_policy` après chaque retrain |
+| `enabled` | bool | true | `false` = pause sans effacer le planning |
+
+**Schéma `ScheduleUpdateResponse`**
+
+```json
+{
+  "model_name": "iris_model",
+  "version": "1.0.0",
+  "retrain_schedule": {
+    "cron": "0 3 * * 1",
+    "lookback_days": 30,
+    "auto_promote": false,
+    "enabled": true,
+    "last_run_at": null,
+    "next_run_at": "2026-04-21T03:00:00"
+  }
+}
+```
+
+> Si `cron` est invalide, l'API retourne HTTP 422 avec le détail de l'erreur.  
+> Si `enabled=True` sans `cron`, HTTP 422 est retourné.  
+> Pour désactiver sans effacer le planning : `{"cron": "0 3 * * 1", "enabled": false}`.
+
+---
+
 ### `GET /models/{name}/ab-compare` — Rapport A/B avec significativité statistique
 
 Comparaison côte à côte des versions en A/B test ou shadow sur une période, enrichie d'un test

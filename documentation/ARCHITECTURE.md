@@ -287,3 +287,15 @@ Déclenchées automatiquement par `email_service.py` (scheduler APScheduler) qua
 - La dérive d'accuracy dépasse `PERFORMANCE_DRIFT_ALERT_THRESHOLD` (défaut: 10%)
 - Le taux d'erreur dépasse `ERROR_RATE_ALERT_THRESHOLD` (défaut: 10%)
 - Rapport hebdomadaire si `WEEKLY_REPORT_ENABLED=true`
+
+### Scheduler de ré-entraînement planifié
+
+`src/tasks/retrain_scheduler.py` — second scheduler APScheduler (AsyncIOScheduler) dédié aux retrains automatiques.
+
+**Lifecycle :**
+1. Au démarrage (`lifespan` dans `main.py`), charge tous les `ModelMetadata` actifs ayant `retrain_schedule.enabled=True`.
+2. Crée un job cron par version (ID : `retrain_schedule:{name}:{version}`).
+3. À chaque déclenchement, acquiert un **verrou Redis** `SET NX EX 700` pour éviter les exécutions concurrentes en multi-réplicas.
+4. Exécute la logique retrain dans un sous-processus (timeout 600 s), crée une nouvelle version, met à jour `last_run_at` / `next_run_at`.
+
+**Modification d'un planning en live :** l'endpoint `PATCH /models/{name}/{version}/schedule` met à jour la DB *et* le scheduler en cours d'exécution (`add_retrain_job` / `remove_retrain_job`).
