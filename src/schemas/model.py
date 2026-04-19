@@ -74,6 +74,7 @@ class ModelCreateResponse(BaseModel):
     deployment_mode: Optional[str] = None
     train_script_object_key: Optional[str] = None
     promotion_policy: Optional[Dict[str, Any]] = None
+    retrain_schedule: Optional[Dict[str, Any]] = None
     created_at: datetime
     user_id_creator: Optional[int]
     creator_username: Optional[str] = None
@@ -364,3 +365,25 @@ class RetrainResponse(BaseModel):
     new_model_metadata: Optional[ModelCreateResponse] = None
     auto_promoted: Optional[bool] = None
     auto_promote_reason: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Planification du ré-entraînement automatique
+# ---------------------------------------------------------------------------
+
+
+class RetrainScheduleInput(BaseModel):
+    """Payload pour PATCH /models/{name}/{version}/schedule"""
+
+    cron: Optional[str] = None
+    lookback_days: int = Field(30, ge=1)
+    auto_promote: bool = False
+    enabled: bool = True
+
+
+class ScheduleUpdateResponse(BaseModel):
+    """Réponse de PATCH /models/{name}/{version}/schedule"""
+
+    model_name: str
+    version: str
+    retrain_schedule: Optional[Dict[str, Any]]

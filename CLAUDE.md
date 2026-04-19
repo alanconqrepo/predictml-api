@@ -141,6 +141,7 @@ pytest tests/ -v -p no:warnings
 | `test_models_update.py` | PATCH /models |
 | `test_models_delete.py` | DELETE /models |
 | `test_retrain.py` | POST /models/{name}/{version}/retrain |
+| `test_scheduled_retraining.py` | PATCH /models/{name}/{version}/schedule |
 | `test_auto_promotion_policy.py` | PATCH /models/{name}/policy |
 | `test_ab_shadow.py` | Routage A/B et shadow |
 | `test_ab_significance.py` | GET /models/{name}/ab-compare |
@@ -170,6 +171,7 @@ Les smoke tests dans `smoke-tests/` nécessitent Docker et frappent l'API live.
 - `POST/GET /observed-results` — Résultats observés
 - `PATCH /users/{id}` avec `{"regenerate_token": true}` — Renouveler un token (admin)
 - `POST /models/{name}/{version}/retrain` — Ré-entraîner un modèle (admin)
+- `PATCH /models/{name}/{version}/schedule` — Configurer le planning cron de ré-entraînement (admin)
 - `PATCH /models/{name}/policy` — Définir la politique d'auto-promotion post-retrain (admin)
 - `GET /models/{name}/feature-importance` — Importance globale des features (SHAP agrégé, Bearer auth)
 - `GET /models/{name}/ab-compare` — Comparaison A/B avec test de significativité statistique (Bearer auth)
@@ -399,3 +401,68 @@ curl -X DELETE "http://localhost:8000/predictions/purge?older_than_days=90" \
 curl -X DELETE "http://localhost:8000/predictions/purge?older_than_days=90&model_name=iris&dry_run=false" \
   -H "Authorization: Bearer <admin_token>"
 ```
+
+## Fonctionnalité Ré-entraînement Planifié
+
+### Comment ça fonctionne
+
+1. L'admin configure un planning cron via `PATCH /models/{name}/{version}/schedule`.
+2. Le planning est stocké dans `ModelMetadata.retrain_schedule` (champ JSON).
+3. Au démarrage de l'API, le scheduler APScheduler charge tous les modèles ayant
+   `retrain_schedule.enabled=True` depuis la DB et crée un job cron par version.
+4. À chaque déclenchement, le job :
+   - Acquiert un **verrou Redis** (`SET NX EX 700`) pour éviter les exécutions simultanées
+     en environnement multi-réplicas.
+   - Calcule `TRAIN_START_DATE = today - lookback_days` et `TRAIN_END_DATE = today`.
+   - Exécute la logique de retrain (identique à l'endpoint manuel) dans un sous-processus
+     (timeout 600 s).
+   - Crée une nouvelle version avec `trained_by="scheduler"`.
+   - Si `auto_promote=True` et que le modèle a une `promotion_policy`, évalue l'auto-promotion.
+   - Met à jour `last_run_at` et `next_run_at` sur la version source.
+5. Pour modifier ou désactiver un planning, rappeler l'endpoint avec `enabled=false`.
+
+### Champs de `retrain_schedule`
+
+| Champ | Type | Défaut | Description |
+|---|---|---|---|
+| `cron` | string | null | Expression cron 5 champs (ex : `"0 3 * * 1"`) |
+| `lookback_days` | int ≥ 1 | 30 | Jours d'historique → `TRAIN_START_DATE` |
+| `auto_promote` | bool | false | Évaluer la `promotion_policy` après chaque retrain |
+| `enabled` | bool | true | `false` = pause sans effacer le schedule |
+| `last_run_at` | datetime | null | Horodatage du dernier déclenchement (UTC, naive) |
+| `next_run_at` | datetime | null | Prochain déclenchement calculé (UTC, naive) |
+
+### Configurer un planning
+
+```bash
+# Chaque lundi à 03h00 UTC, fenêtre de 30 jours
+curl -X PATCH http://localhost:8000/models/mon_modele/1.0.0/schedule \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cron": "0 3 * * 1",
+    "lookback_days": 30,
+    "auto_promote": false,
+    "enabled": true
+  }'
+
+# Désactiver le planning
+curl -X PATCH http://localhost:8000/models/mon_modele/1.0.0/schedule \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"cron": "0 3 * * 1", "enabled": false}'
+```
+
+### Point de vigilance multi-réplicas
+
+Le verrou Redis `retrain_lock:{name}:{version}` (TTL 700 s) garantit qu'un seul replica
+exécute le job à la fois. Si l'API tourne sans Redis (test, dev), le job s'exécutera quand
+même — le lock est pris via le FakeRedis en mémoire.
+
+### Implémentation
+
+- Endpoint : `PATCH /models/{name}/{version}/schedule` dans `src/api/models.py`
+- Scheduler : `src/tasks/retrain_scheduler.py`
+- Champ DB : `retrain_schedule` (JSON) dans `src/db/models/model_metadata.py`
+- Migration : `alembic/versions/20260419_6bc2d3e1_add_retrain_schedule.py`
+- Tests : `tests/test_scheduled_retraining.py` (17 tests)

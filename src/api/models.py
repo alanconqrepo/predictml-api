@@ -54,7 +54,9 @@ from src.schemas.model import (
     PromotionPolicy,
     RetrainRequest,
     RetrainResponse,
+    RetrainScheduleInput,
     RollbackResponse,
+    ScheduleUpdateResponse,
 )
 from src.services import drift_service
 from src.services.ab_significance_service import compute_ab_significance
@@ -1075,6 +1077,104 @@ async def retrain_model(
             else None
         ),
         auto_promote_reason=auto_promote_reason,
+    )
+
+
+@router.patch(
+    "/models/{name}/{version}/schedule",
+    response_model=ScheduleUpdateResponse,
+)
+async def update_retrain_schedule(
+    name: str,
+    version: str,
+    payload: RetrainScheduleInput,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Définit ou met à jour la planification de ré-entraînement automatique pour une version.
+
+    - **cron** : expression cron 5 champs (ex : ``"0 3 * * 1"`` = chaque lundi à 03h00 UTC).
+    - **lookback_days** : jours d'historique transmis via ``TRAIN_START_DATE`` / ``TRAIN_END_DATE``.
+    - **auto_promote** : si ``True``, évalue la ``promotion_policy`` du modèle après chaque retrain.
+    - **enabled** : ``False`` pour suspendre le planning sans l'effacer.
+
+    Réservé aux administrateurs.
+    """
+    from apscheduler.triggers.cron import CronTrigger
+
+    from src.tasks.retrain_scheduler import (
+        _compute_next_run_at,
+        add_retrain_job,
+        remove_retrain_job,
+    )
+
+    # 1. Vérifier que la version existe
+    result = await db.execute(
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.version == version)
+        )
+    )
+    model = result.scalar_one_or_none()
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' version '{version}' introuvable.",
+        )
+
+    # 2. Valider l'expression cron
+    cron = payload.cron
+    next_run_at: Optional[datetime] = None
+    if cron:
+        try:
+            CronTrigger.from_crontab(cron, timezone="UTC")
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Expression cron invalide : {exc}",
+            )
+        next_run_at = _compute_next_run_at(cron)
+    elif payload.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Une expression cron est requise lorsque enabled=True.",
+        )
+
+    # 3. Construire le dict de schedule (en préservant last_run_at existant)
+    existing = model.retrain_schedule or {}
+    schedule_dict = {
+        "cron": cron,
+        "lookback_days": payload.lookback_days,
+        "auto_promote": payload.auto_promote,
+        "enabled": payload.enabled,
+        "last_run_at": existing.get("last_run_at"),
+        "next_run_at": next_run_at.isoformat() if next_run_at else None,
+    }
+
+    # 4. Persister
+    model.retrain_schedule = schedule_dict
+    await db.commit()
+    await db.refresh(model)
+
+    # 5. Mettre à jour le scheduler live
+    if payload.enabled and cron:
+        add_retrain_job(name, version, schedule_dict)
+    else:
+        remove_retrain_job(name, version)
+
+    logger.info(
+        "Planification de ré-entraînement mise à jour",
+        model=name,
+        version=version,
+        cron=cron,
+        enabled=payload.enabled,
+        updated_by=user.username,
+    )
+
+    return ScheduleUpdateResponse(
+        model_name=name,
+        version=version,
+        retrain_schedule=model.retrain_schedule,
     )
 
 

@@ -22,7 +22,7 @@ PredictML API résout ce problème :
 - **A/B testing & shadow deployment** — router le trafic entre versions et comparer silencieusement
 - **Drift detection** — détecter la dérive des features en production (Z-score + PSI)
 - **Explicabilité SHAP** — comprendre pourquoi le modèle a fait une prédiction, et mesurer l'importance globale des features sur les prédictions récentes
-- **Ré-entraînement automatique** — déclencher un retrain depuis l'API avec un script `train.py`
+- **Ré-entraînement automatique** — déclencher un retrain depuis l'API avec un script `train.py`, ou le planifier automatiquement via une expression cron
 - **Supervision & alertes** — monitoring global, alertes email, rapports hebdomadaires
 - **Gestion multi-utilisateurs** — tokens Bearer, rôles (admin/user/readonly), quotas journaliers
 - **Dashboard admin** — interface Streamlit pour piloter tout ça sans code
@@ -139,8 +139,10 @@ curl http://localhost:8000/health
 ### Ré-entraînement automatique
 - Upload d'un `train.py` à l'enregistrement du modèle
 - `POST /models/{name}/{version}/retrain` : déclenche l'entraînement sur une plage de dates
+- `PATCH /models/{name}/{version}/schedule` : planifie un retrain automatique via une expression cron (ex : `"0 3 * * 1"` = chaque lundi à 3h UTC)
 - Logs complets stdout/stderr retournés dans la réponse
 - Nouvelle version enregistrée automatiquement dans MinIO
+- Verrou Redis pour éviter les exécutions simultanées en multi-réplicas
 
 ### Historique & Rollback
 - `GET /models/{name}/history` : journal de tous les changements
@@ -184,6 +186,7 @@ curl http://localhost:8000/health
 | GET | `/models/{name}/{version}/history` | Oui | Historique d'une version spécifique |
 | POST | `/models/{name}/{version}/rollback/{history_id}` | Admin | Rollback vers un état précédent |
 | POST | `/models/{name}/{version}/retrain` | Admin | Ré-entraîner avec train.py |
+| PATCH | `/models/{name}/{version}/schedule` | Admin | Configurer le planning cron de ré-entraînement |
 | PATCH | `/models/{name}/policy` | Admin | Définir la politique d'auto-promotion post-retrain |
 | GET | `/models/{name}/ab-compare` | Oui | Rapport de comparaison A/B |
 | **Prédictions** | | | |
