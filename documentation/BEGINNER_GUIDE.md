@@ -394,8 +394,21 @@ print(f"Version utilisée : {response.json()['selected_version']}")
 # 4. Comparer les résultats après quelques jours
 compare = requests.get(f"{BASE_URL}/models/iris_model/ab-compare",
                        headers=HEADERS, params={"days": 7})
-for v in compare.json()["versions"]:
+data = compare.json()
+
+for v in data["versions"]:
     print(f"  v{v['version']}: {v['total_predictions']} preds, erreur={v['error_rate']:.1%}")
+
+# 5. Interpréter la significativité statistique
+sig = data.get("ab_significance")
+if sig:
+    if sig["significant"]:
+        print(f"\n✅ Différence statistiquement significative (p={sig['p_value']:.4f})")
+        print(f"   Gagnant : {sig['winner']} — basé sur {sig['metric']}")
+    else:
+        print(f"\n⚠️  Différence NON significative (p={sig['p_value']:.4f})")
+        print(f"   Il faut ~{sig['min_samples_needed']} observations/version pour conclure")
+        print("   Ne promotez pas encore — accumulez plus de données")
 ```
 
 ### Shadow Deployment

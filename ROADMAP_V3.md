@@ -112,7 +112,9 @@ GET /models/{name}/feature-importance
 
 ## CHUNK 2 — Priorité 2 : Haute valeur, effort modéré (1–3 jours)
 
-### 2.1 Significativité statistique A/B — enrichir `GET /models/{name}/ab-compare`
+### ✅ 2.1 Significativité statistique A/B — enrichir `GET /models/{name}/ab-compare`
+
+> **Implémenté** — `src/services/ab_significance_service.py` + 20 tests dans `tests/test_ab_significance.py`
 
 **Pourquoi :** L'endpoint `/ab-compare` compare déjà les métriques brutes (taux d'erreur, latence) entre versions. Mais sans test de significativité, impossible de savoir si une différence de 2 % d'accuracy entre v1 et v2 est réelle ou due au hasard — et on risque de promouvoir du bruit.
 
@@ -120,29 +122,27 @@ GET /models/{name}/feature-importance
 ```json
 {
   "ab_significance": {
-    "metric": "accuracy",
-    "test": "mann_whitney_u",
+    "metric": "error_rate",
+    "test": "chi2",
     "p_value": 0.023,
     "significant": true,
     "confidence_level": 0.95,
     "winner": "v2.0.0",
-    "min_samples_needed": 200,
+    "min_samples_needed": 120,
     "current_samples": { "v1.0.0": 450, "v2.0.0": 380 }
   }
 }
 ```
 
-**Implémentation :**
-- `scipy` est déjà présent en dépendance transitoire (scikit-learn)
-- Mann-Whitney U pour distributions continues (latence, probabilité de prédiction)
-- Chi-² pour métriques catégorielles (taux d'erreur, distribution des labels)
-- Calcul `min_samples_needed` via formule de puissance statistique (d de Cohen)
-- Modifier `src/api/models.py` — fonction `get_ab_comparison()`
+**Implémentation réalisée :**
+- Chi-² sur le taux d'erreur (tableau de contingence succès/erreur) — prioritaire
+- Mann-Whitney U sur les temps de réponse (fallback si aucune erreur observée)
+- `min_samples_needed` via Cohen h (proportions) ou Cohen d (continu), puissance 80 %
+- `winner` : version avec la meilleure métrique, `null` si égalité exacte
+- `null` si moins de 2 versions actives ou données insuffisantes
 
 **Effort :** ~1 jour  
 **Impact :** ⭐⭐⭐⭐⭐ — évite les promotions basées sur du bruit statistique
-
-memo: penses à la fin à ajouter les tests, check quality code,  mettre à jour la documentation, 
 
 ---
 
@@ -313,7 +313,7 @@ memo: penses à la fin à ajouter les tests, check quality code,  mettre à jour
 | 1 | Prometheus metrics | `GET /metrics` | 2h | ⭐⭐⭐⭐⭐ | Très facile |
 | 2 | Export bulk prédictions | `GET /predictions/export` | 4h | ⭐⭐⭐⭐ | Facile |
 | 3 | Feature importance globale (SHAP) | `GET /models/{name}/feature-importance` | 6h | ⭐⭐⭐⭐⭐ | Facile |
-| 4 | Significativité statistique A/B | Enrichir `GET /models/{name}/ab-compare` | 1j | ⭐⭐⭐⭐⭐ | Moyen |
+| 4 | ✅ Significativité statistique A/B | Enrichir `GET /models/{name}/ab-compare` | 1j | ⭐⭐⭐⭐⭐ | Moyen |
 | 5 | Auto-promotion policy post-retrain | `PATCH /models/{name}/policy` | 2j | ⭐⭐⭐⭐ | Moyen |
 | 6 | Purge / rétention RGPD | `DELETE /predictions/purge` | 4h | ⭐⭐⭐⭐ | Facile |
 | 7 | Retraining planifié (cron) | `PATCH /models/{name}/{version}/schedule` | 5j | ⭐⭐⭐⭐ | Difficile |

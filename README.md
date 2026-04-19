@@ -115,7 +115,7 @@ curl http://localhost:8000/health
 - `deployment_mode` : `"production"`, `"ab_test"`, ou `"shadow"`
 - `traffic_weight` : fraction du trafic routée vers une version (0.0 – 1.0)
 - Mode shadow : prédictions exécutées en arrière-plan sans impact client
-- `GET /models/{name}/ab-compare` : rapport de comparaison côte à côte
+- `GET /models/{name}/ab-compare` : rapport de comparaison côte à côte avec **test de significativité statistique** automatique (Chi-² sur le taux d'erreur, Mann-Whitney U sur la latence) — inclut `p_value`, `winner`, et `min_samples_needed` pour éviter de promouvoir du bruit
 
 ### Explicabilité SHAP
 - `POST /explain` : valeurs SHAP locales pour une observation
@@ -296,13 +296,14 @@ src/
 │   ├── database.py
 │   └── models/             # User, Prediction, ModelMetadata, ObservedResult, ModelHistory
 ├── services/               # Logique métier
-│   ├── db_service.py       # Toutes les requêtes DB
-│   ├── model_service.py    # Chargement, cache Redis, routage A/B/shadow
-│   ├── minio_service.py    # Upload/download MinIO
-│   ├── drift_service.py    # Calcul dérive Z-score + PSI
-│   ├── shap_service.py     # Explications SHAP locales
-│   ├── email_service.py    # Alertes email & rapports hebdomadaires
-│   └── webhook_service.py  # Webhooks HTTP post-prédiction
+│   ├── db_service.py           # Toutes les requêtes DB
+│   ├── model_service.py        # Chargement, cache Redis, routage A/B/shadow
+│   ├── minio_service.py        # Upload/download MinIO
+│   ├── drift_service.py        # Calcul dérive Z-score + PSI
+│   ├── shap_service.py         # Explications SHAP locales
+│   ├── ab_significance_service.py  # Tests statistiques A/B (Chi-², Mann-Whitney U)
+│   ├── email_service.py        # Alertes email & rapports hebdomadaires
+│   └── webhook_service.py      # Webhooks HTTP post-prédiction
 ├── schemas/                # Schémas Pydantic (validation I/O)
 └── main.py
 
