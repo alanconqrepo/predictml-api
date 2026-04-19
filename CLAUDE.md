@@ -153,6 +153,7 @@ pytest tests/ -v -p no:warnings
 | `test_drift.py` | Détection de drift |
 | `test_db_service_crud.py` | DBService (CRUD) |
 | `test_monitoring_api.py` | Endpoints monitoring |
+| `test_input_validation.py` | Validation schéma d'entrée + mode strict /predict |
 
 ### Notes
 
@@ -164,7 +165,7 @@ Les smoke tests dans `smoke-tests/` nécessitent Docker et frappent l'API live.
 
 ## Endpoints principaux
 
-- `POST /predict` — Prédiction (Bearer auth)
+- `POST /predict` — Prédiction (Bearer auth) ; `?strict_validation=true` pour validation stricte du schéma
 - `GET /predictions` — Historique (Bearer auth)
 - `GET/POST/PATCH/DELETE /models` — Gestion modèles
 - `GET/POST/PATCH/DELETE /users` — Gestion utilisateurs (admin)
@@ -173,9 +174,71 @@ Les smoke tests dans `smoke-tests/` nécessitent Docker et frappent l'API live.
 - `POST /models/{name}/{version}/retrain` — Ré-entraîner un modèle (admin)
 - `PATCH /models/{name}/{version}/schedule` — Configurer le planning cron de ré-entraînement (admin)
 - `PATCH /models/{name}/policy` — Définir la politique d'auto-promotion post-retrain (admin)
+- `POST /models/{name}/{version}/validate-input` — Valider le schéma d'entrée sans prédire (Bearer auth)
 - `GET /models/{name}/feature-importance` — Importance globale des features (SHAP agrégé, Bearer auth)
 - `GET /models/{name}/ab-compare` — Comparaison A/B avec test de significativité statistique (Bearer auth)
 - `DELETE /predictions/purge` — Purge RGPD des prédictions anciennes (admin)
+
+## Fonctionnalité Validation du schéma d'entrée
+
+### Pourquoi
+
+Les pannes silencieuses les plus fréquentes en ML en production proviennent de pipelines envoyant des features manquantes, renommées ou dans le mauvais type. L'endpoint `/predict` acceptait n'importe quel JSON — les incohérences causaient des erreurs 500 non explicites ou, pire, des prédictions silencieusement fausses.
+
+### Signature
+
+```
+POST /models/{name}/{version}/validate-input
+Body: { "petal_length": 5.1, "petal_width": 1.8, "sepal_length": 6.3 }
+```
+
+### Réponse
+
+```json
+{
+  "valid": false,
+  "errors": [
+    { "type": "missing_feature",    "feature": "sepal_width" },
+    { "type": "unexpected_feature", "feature": "petal_width_squared" }
+  ],
+  "warnings": [
+    { "type": "type_coercion", "feature": "petal_length", "from_type": "string", "to_type": "float" }
+  ],
+  "expected_features": ["petal_length", "petal_width", "sepal_length", "sepal_width"]
+}
+```
+
+### Source des features attendues (priorité)
+
+1. `feature_names_in_` du modèle sklearn chargé (entraîné avec un DataFrame pandas)
+2. Clés de `feature_baseline` stockées dans les métadonnées du modèle
+3. Si aucun schéma : `valid=true`, `expected_features=null`
+
+### Mode strict sur /predict
+
+Ajouter `?strict_validation=true` à `/predict` pour rejeter avec 422 si des features **inattendues** sont présentes (en plus des features manquantes déjà vérifiées par défaut).
+
+```bash
+curl -X POST "http://localhost:8000/predict?strict_validation=true" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"model_name": "iris", "features": {"sepal_length": 5.1, "extra_col": 99}}'
+# → 422 avec detail.errors listant les features inattendues
+```
+
+### Implémentation
+
+- Endpoint : `POST /models/{name}/{version}/validate-input` dans `src/api/models.py`
+- Service : `src/services/input_validation_service.py` (`validate_input_features`, `resolve_expected_features`)
+- Schémas : `ValidateInputResponse`, `InputValidationError`, `InputValidationWarning` dans `src/schemas/model.py`
+- Param strict : `?strict_validation=true` sur `POST /predict` dans `src/api/predict.py`
+- Tests : `tests/test_input_validation.py` (23 tests)
+
+### Tableau des fichiers de tests
+
+| Fichier | Fonctionnalité |
+|---|---|
+| `test_input_validation.py` | Validation schéma d'entrée + mode strict /predict |
 
 ## Fonctionnalité A/B Significativité statistique
 

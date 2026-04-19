@@ -103,6 +103,12 @@ curl http://localhost:8000/health
 - Seuil de confiance configurable (`confidence_threshold`)
 - Baseline de features pour la détection de dérive
 
+### Validation du schéma d'entrée
+- `POST /models/{name}/{version}/validate-input` — valider les features avant de prédire (sans consommer de quota)
+- Détecte les **features manquantes**, les **features inattendues**, et les **coercitions de type** (`string` → `float`)
+- Source de vérité : `feature_names_in_` du modèle sklearn (priorité) ou `feature_baseline` enregistrée en DB
+- `POST /predict?strict_validation=true` — mode strict : rejette avec 422 les features inattendues
+
 ### Prédictions
 - `POST /predict` — prédiction unitaire avec routage intelligent (A/B, shadow)
 - `POST /predict-batch` — prédictions en lot (modèle chargé une seule fois)

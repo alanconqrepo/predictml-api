@@ -387,3 +387,33 @@ class ScheduleUpdateResponse(BaseModel):
     model_name: str
     version: str
     retrain_schedule: Optional[Dict[str, Any]]
+
+
+# ---------------------------------------------------------------------------
+# Validation du schéma d'entrée
+# ---------------------------------------------------------------------------
+
+
+class InputValidationError(BaseModel):
+    """Erreur de validation d'une feature d'entrée"""
+
+    type: str  # "missing_feature" | "unexpected_feature"
+    feature: str
+
+
+class InputValidationWarning(BaseModel):
+    """Avertissement lors de la validation d'une feature d'entrée"""
+
+    type: str  # "type_coercion"
+    feature: str
+    from_type: str
+    to_type: str
+
+
+class ValidateInputResponse(BaseModel):
+    """Réponse de POST /models/{name}/{version}/validate-input"""
+
+    valid: bool
+    errors: List[InputValidationError]
+    warnings: List[InputValidationWarning]
+    expected_features: Optional[List[str]]
