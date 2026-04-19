@@ -367,6 +367,15 @@ def test_get_ab_compare_structure():
         assert "shadow_predictions" in vs
         assert "error_rate" in vs
         assert "prediction_distribution" in vs
+    # Le champ ab_significance doit être présent (None ou objet valide)
+    assert "ab_significance" in data
+    sig = data["ab_significance"]
+    if sig is not None:
+        assert "metric" in sig
+        assert "test" in sig
+        assert "p_value" in sig
+        assert "significant" in sig
+        assert "current_samples" in sig
 
 
 # ---------------------------------------------------------------------------

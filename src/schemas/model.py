@@ -274,12 +274,26 @@ class ABVersionStats(BaseModel):
     agreement_rate: Optional[float] = None  # taux de concordance shadow vs prod (via id_obs)
 
 
+class ABSignificance(BaseModel):
+    """Résultat du test de significativité statistique entre les deux versions A/B principales"""
+
+    metric: str
+    test: str
+    p_value: float
+    significant: bool
+    confidence_level: float
+    winner: Optional[str] = None
+    min_samples_needed: int
+    current_samples: Dict[str, int]
+
+
 class ABCompareResponse(BaseModel):
     """Réponse de GET /models/{name}/ab-compare"""
 
     model_name: str
     period_days: int
     versions: List[ABVersionStats]
+    ab_significance: Optional[ABSignificance] = None
 
 
 # ---------------------------------------------------------------------------
