@@ -803,6 +803,56 @@ if sig:
 
 ## Prédictions
 
+### `POST /models/{name}/{version}/validate-input` — Validation du schéma d'entrée
+
+Valide les features d'entrée contre le schéma attendu d'une version de modèle, **sans effectuer de prédiction**.
+
+**Auth requise**
+
+Détecte :
+- **features manquantes** — présentes dans le modèle, absentes dans la requête
+- **features inattendues** — présentes dans la requête, absentes dans le modèle
+- **coercitions de type** — valeurs `string` convertibles en `float` (avertissement non bloquant)
+
+La source de vérité est, par priorité : `feature_names_in_` du modèle sklearn chargé, puis les clés de `feature_baseline` stockées en DB.
+
+```python
+response = requests.post(
+    f"{BASE_URL}/models/iris_model/1.0.0/validate-input",
+    headers=headers,
+    json={
+        "petal_length": 5.1,
+        "petal_width": 1.8,
+        "sepal_length": 6.3
+        # sepal_width manquant
+    }
+)
+print(response.json())
+```
+
+```json
+{
+  "valid": false,
+  "errors": [
+    { "type": "missing_feature",    "feature": "sepal_width" },
+    { "type": "unexpected_feature", "feature": "petal_width_squared" }
+  ],
+  "warnings": [
+    { "type": "type_coercion", "feature": "petal_length", "from_type": "string", "to_type": "float" }
+  ],
+  "expected_features": ["petal_length", "petal_width", "sepal_length", "sepal_width"]
+}
+```
+
+| Champ | Description |
+|---|---|
+| `valid` | `true` seulement si `errors` est vide |
+| `errors` | Liste d'erreurs bloquantes (`missing_feature`, `unexpected_feature`) |
+| `warnings` | Avertissements non bloquants (`type_coercion`) |
+| `expected_features` | Liste triée des features attendues ; `null` si aucun schéma disponible |
+
+---
+
 ### `POST /predict`
 
 Effectue une prédiction avec routage intelligent (A/B test, shadow).
@@ -831,6 +881,23 @@ response = requests.post(
     }
 )
 result = response.json()
+```
+
+**Query parameter `strict_validation`** (optionnel, défaut `false`) :
+
+Ajouter `?strict_validation=true` pour rejeter les requêtes avec des features **inattendues** (en plus des features manquantes déjà vérifiées par défaut). Retourne un `422` structuré si la validation échoue.
+
+```python
+# Rejette si features inattendues présentes
+response = requests.post(
+    f"{BASE_URL}/predict?strict_validation=true",
+    headers=headers,
+    json={
+        "model_name": "iris_model",
+        "features": {"sepal_length": 5.1, "extra_col": 99.0, ...}
+    }
+)
+# → 422 avec detail.errors listant les features inattendues
 ```
 
 **Schéma `PredictionInput`**

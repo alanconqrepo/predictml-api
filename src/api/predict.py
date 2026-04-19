@@ -33,6 +33,7 @@ from src.schemas.prediction import (
     PurgeResponse,
 )
 from src.services.db_service import DBService
+from src.services.input_validation_service import resolve_expected_features, validate_input_features
 from src.services.model_service import model_service
 from src.services.shap_service import compute_shap_explanation
 from src.services.webhook_service import send_webhook
@@ -406,6 +407,13 @@ async def predict(
     input_data: PredictionInput,
     request: Request,
     background_tasks: BackgroundTasks,
+    strict_validation: bool = Query(
+        False,
+        description=(
+            "Si true, rejette la requête avec 422 si les features ne correspondent pas "
+            "exactement au schéma du modèle (features inattendues incluses)."
+        ),
+    ),
     user: User = Depends(check_prediction_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
@@ -419,6 +427,7 @@ async def predict(
     - **features**: Features sous forme de dict nommé `{"feature1": valeur, ...}`.
       Le modèle doit exposer `feature_names_in_` (entraîné avec un DataFrame pandas).
       Les clés manquantes retournent une erreur 422.
+    - **strict_validation**: Si `true`, rejette également les features inattendues avec 422.
 
     Nécessite un token Bearer dans le header Authorization.
     Toutes les prédictions sont loggées dans la base de données.
@@ -474,6 +483,22 @@ async def predict(
                     f"Features attendues : {list(model.feature_names_in_)}"
                 ),
             )
+
+        # Mode strict : rejeter si des features inattendues sont présentes
+        if strict_validation:
+            expected = resolve_expected_features(model, getattr(metadata, "feature_baseline", None))
+            if expected is not None:
+                errors, _ = validate_input_features(input_data.features, expected)
+                if errors:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail={
+                            "message": "Validation stricte échouée : le schéma d'entrée ne correspond pas.",
+                            "valid": False,
+                            "errors": [e.model_dump() for e in errors],
+                            "expected_features": sorted(expected),
+                        },
+                    )
         x = np.array(
             [[input_data.features[name] for name in model.feature_names_in_]], dtype=object
         )

@@ -57,11 +57,13 @@ from src.schemas.model import (
     RetrainScheduleInput,
     RollbackResponse,
     ScheduleUpdateResponse,
+    ValidateInputResponse,
 )
 from src.services import drift_service
 from src.services.ab_significance_service import compute_ab_significance
 from src.services.auto_promotion_service import evaluate_auto_promotion
 from src.services.db_service import _ROLLBACK_FIELDS, DBService, _build_snapshot
+from src.services.input_validation_service import resolve_expected_features, validate_input_features
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
 from src.services.shap_service import compute_shap_explanation
@@ -1691,6 +1693,67 @@ async def delete_model_version(
     await DBService.log_model_history(db, model, HistoryActionType.DELETED, user.id, user.username)
     await db.delete(model)
     await db.commit()
+
+
+@router.post("/models/{name}/{version}/validate-input", response_model=ValidateInputResponse)
+async def validate_model_input(
+    name: str,
+    version: str,
+    features: Dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _auth: User = Depends(verify_token),
+):
+    """
+    Valide les features d'entrée contre le schéma attendu d'une version de modèle.
+
+    - Détecte les **features manquantes** (présentes dans le modèle, absentes dans la requête).
+    - Détecte les **features inattendues** (présentes dans la requête, absentes dans le modèle).
+    - Émet des **avertissements de coercition** pour les valeurs string convertibles en float.
+
+    La source de vérité est, par ordre de priorité :
+    1. `feature_names_in_` du modèle sklearn chargé (entraîné sur un DataFrame pandas).
+    2. Les clés de `feature_baseline` stockées dans les métadonnées du modèle.
+
+    Si aucun schéma n'est disponible, retourne `expected_features: null` avec `valid: true`
+    (impossible de valider sans référence).
+
+    Nécessite un token Bearer valide.
+    """
+    # Récupérer les métadonnées pour accéder au feature_baseline en fallback
+    metadata = await DBService.get_model_metadata(db, name, version)
+    if not metadata:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' version '{version}' introuvable.",
+        )
+
+    # Résoudre les features attendues : modèle chargé en priorité, baseline en fallback
+    loaded_model = None
+    try:
+        model_data = await model_service.load_model(db, name, version)
+        loaded_model = model_data["model"]
+    except HTTPException:
+        pass
+
+    expected_features = resolve_expected_features(loaded_model, metadata.feature_baseline)
+
+    # Aucun schéma disponible — validation impossible
+    if expected_features is None:
+        return ValidateInputResponse(
+            valid=True,
+            errors=[],
+            warnings=[],
+            expected_features=None,
+        )
+
+    errors, warnings = validate_input_features(features, expected_features)
+
+    return ValidateInputResponse(
+        valid=len(errors) == 0,
+        errors=errors,
+        warnings=warnings,
+        expected_features=sorted(expected_features),
+    )
 
 
 @router.delete("/models/{name}", response_model=ModelDeleteResponse)
