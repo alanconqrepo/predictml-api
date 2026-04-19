@@ -58,10 +58,10 @@ docker-compose up -d
 # Initialiser (premier déploiement uniquement)
 docker exec predictml-api python init_data/init_db.py
 
-# Tests automatisés
+# Tests automatisés (voir section Tests pour les prérequis)
 pytest tests/ -v
 
-# Smoke tests
+# Smoke tests (Docker requis)
 python smoke-tests/test_multimodel_api.py
 
 # Logs
@@ -93,10 +93,71 @@ Pour le dashboard Streamlit, les dépendances sont dans `streamlit_app/requireme
 Les tests dans `tests/` utilisent `TestClient` de FastAPI — aucun Docker requis.
 Ils couvrent : auth, endpoints publics, logique du `ModelService`.
 
+### Prérequis
+
+`pytest` est installé via **uv tool** (pas dans le venv du projet) :
+
 ```bash
-pytest tests/ -v           # tous les tests
-pytest tests/test_api.py   # endpoints uniquement
+# Installation initiale (une seule fois)
+WITH_ARGS=$(cat requirements.txt | grep -v '^#' | grep -v '^$' | sed 's/^/--with /' | tr '\n' ' ')
+uv tool install pytest --with fakeredis --with aiosqlite --with asyncpg $WITH_ARGS
 ```
+
+> Le `pytest` système (`/root/.local/bin/pytest`) est distinct du Python du projet.
+> Ne pas utiliser `python -m pytest` — le module n'est pas installé dans ce Python.
+
+### Lancer les tests
+
+```bash
+pytest tests/ -v                              # tous les tests
+pytest tests/test_api.py                      # endpoints de base uniquement
+pytest tests/test_predictions_purge.py -v     # purge RGPD uniquement
+pytest tests/test_ab_significance.py -v       # significativité A/B
+pytest tests/test_auto_promotion_policy.py -v # auto-promotion post-retrain
+
+# Filtrer par mot-clé
+pytest tests/ -k "purge" -v
+pytest tests/ -k "admin" -v
+
+# Arrêter au premier échec
+pytest tests/ -x -v
+
+# Sans les warnings
+pytest tests/ -v -p no:warnings
+```
+
+### Fichiers de tests par fonctionnalité
+
+| Fichier | Fonctionnalité |
+|---|---|
+| `test_api.py` | Endpoints de base, auth, health |
+| `test_predict_post.py` | POST /predict |
+| `test_predictions_get.py` | GET /predictions |
+| `test_predictions_purge.py` | DELETE /predictions/purge |
+| `test_export_endpoint.py` | GET /predictions/export |
+| `test_prediction_stats.py` | GET /predictions/stats |
+| `test_models_create.py` | POST /models |
+| `test_models_get.py` | GET /models |
+| `test_models_update.py` | PATCH /models |
+| `test_models_delete.py` | DELETE /models |
+| `test_retrain.py` | POST /models/{name}/{version}/retrain |
+| `test_auto_promotion_policy.py` | PATCH /models/{name}/policy |
+| `test_ab_shadow.py` | Routage A/B et shadow |
+| `test_ab_significance.py` | GET /models/{name}/ab-compare |
+| `test_feature_importance.py` | GET /models/{name}/feature-importance |
+| `test_observed_results.py` | POST/GET /observed-results |
+| `test_users.py` | Gestion utilisateurs |
+| `test_security.py` | Auth et tokens |
+| `test_rate_limit.py` | Rate limiting |
+| `test_drift.py` | Détection de drift |
+| `test_db_service_crud.py` | DBService (CRUD) |
+| `test_monitoring_api.py` | Endpoints monitoring |
+
+### Notes
+
+- La DB de test est SQLite en mémoire — les tables sont recréées à chaque session pytest.
+- MinIO et Redis sont mockés (pas de serveurs requis).
+- Certains tests `async def` nécessitent `pytest-asyncio` (non installé par défaut) — ils échouent avec "async def functions are not natively supported" ; ce sont des échecs pré-existants sans impact sur les fonctionnalités.
 
 Les smoke tests dans `smoke-tests/` nécessitent Docker et frappent l'API live.
 
@@ -112,6 +173,7 @@ Les smoke tests dans `smoke-tests/` nécessitent Docker et frappent l'API live.
 - `PATCH /models/{name}/policy` — Définir la politique d'auto-promotion post-retrain (admin)
 - `GET /models/{name}/feature-importance` — Importance globale des features (SHAP agrégé, Bearer auth)
 - `GET /models/{name}/ab-compare` — Comparaison A/B avec test de significativité statistique (Bearer auth)
+- `DELETE /predictions/purge` — Purge RGPD des prédictions anciennes (admin)
 
 ## Fonctionnalité A/B Significativité statistique
 
@@ -280,3 +342,60 @@ curl -X PATCH http://localhost:8000/models/mon_modele/policy \
 - Champ DB : `promotion_policy` (JSON) dans `src/db/models/model_metadata.py`
 - Migration : `alembic/versions/20260419_5ab8c1f0_add_promotion_policy.py`
 - Tests : `tests/test_auto_promotion_policy.py` (25 tests)
+
+## Fonctionnalité Purge RGPD (rétention des données)
+
+### Pourquoi
+
+La table `predictions` grossit indéfiniment. Sur un déploiement actif (1 000 prédictions/jour),
+elle atteint 365 000 lignes/an. Sans politique de rétention, les performances des requêtes
+analytiques se dégradent et la conformité RGPD devient un problème.
+
+### Signature
+
+```
+DELETE /predictions/purge
+  ?older_than_days=90    # supprimer les prédictions > 90 jours
+  &model_name=iris       # optionnel : purger un seul modèle
+  &dry_run=true          # simuler sans supprimer (défaut : true)
+```
+
+### Réponse
+
+```json
+{
+  "dry_run": false,
+  "deleted_count": 12450,
+  "oldest_remaining": "2026-01-15T08:32:00",
+  "models_affected": ["iris", "wine"],
+  "linked_observed_results_count": 3
+}
+```
+
+- `linked_observed_results_count > 0` → avertissement : des prédictions supprimées sont liées à des
+  `observed_results` (perte de données de performance historiques).
+
+### Comportement
+
+- `dry_run=true` par défaut — aucune suppression sans confirmation explicite (`dry_run=false`).
+- Filtre SQL : `WHERE timestamp < now() - interval 'N days'` + filtre optionnel `model_name`.
+- Admin uniquement.
+
+### Implémentation
+
+- Endpoint : `DELETE /predictions/purge` dans `src/api/predict.py`
+- Service DB : `DBService.purge_predictions()` dans `src/services/db_service.py`
+- Schéma réponse : `PurgeResponse` dans `src/schemas/prediction.py`
+- Tests : `tests/test_predictions_purge.py` (16 tests)
+
+### Exemple
+
+```bash
+# Simuler une purge (dry_run par défaut)
+curl -X DELETE "http://localhost:8000/predictions/purge?older_than_days=90" \
+  -H "Authorization: Bearer <admin_token>"
+
+# Purger réellement les prédictions iris > 90 jours
+curl -X DELETE "http://localhost:8000/predictions/purge?older_than_days=90&model_name=iris&dry_run=false" \
+  -H "Authorization: Bearer <admin_token>"
+```

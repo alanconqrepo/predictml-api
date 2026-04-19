@@ -7,7 +7,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, List, Optional
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -476,6 +476,75 @@ class DBService:
                 }
             )
         return stats
+
+    @staticmethod
+    async def purge_predictions(
+        db: AsyncSession,
+        older_than_days: int,
+        model_name: Optional[str] = None,
+        dry_run: bool = True,
+    ) -> dict:
+        """
+        Purge les prédictions plus anciennes que N jours (rétention RGPD).
+
+        En mode dry_run=True : comptage sans suppression.
+        En mode dry_run=False : suppression effective et commit.
+
+        Returns:
+            dict avec dry_run, deleted_count, oldest_remaining,
+            models_affected et linked_observed_results_count.
+        """
+        cutoff = _utcnow() - timedelta(days=older_than_days)
+
+        filters = [Prediction.timestamp < cutoff]
+        if model_name:
+            filters.append(Prediction.model_name == model_name)
+
+        # Count predictions to purge
+        count_result = await db.execute(select(func.count(Prediction.id)).where(and_(*filters)))
+        deleted_count = count_result.scalar() or 0
+
+        # Distinct model names affected
+        models_result = await db.execute(
+            select(Prediction.model_name).where(and_(*filters)).distinct()
+        )
+        models_affected = sorted(row[0] for row in models_result.all())
+
+        # Count predictions linked to observed_results (performance data loss warning)
+        linked_result = await db.execute(
+            select(func.count(Prediction.id))
+            .join(
+                ObservedResult,
+                and_(
+                    Prediction.id_obs == ObservedResult.id_obs,
+                    Prediction.model_name == ObservedResult.model_name,
+                ),
+            )
+            .where(and_(*filters))
+        )
+        linked_count = linked_result.scalar() or 0
+
+        # Oldest prediction that will remain after the purge
+        remaining_filters: list = [Prediction.timestamp >= cutoff]
+        if model_name:
+            remaining_filters.append(Prediction.model_name == model_name)
+
+        oldest_result = await db.execute(
+            select(func.min(Prediction.timestamp)).where(and_(*remaining_filters))
+        )
+        oldest_remaining = oldest_result.scalar()
+
+        if not dry_run and deleted_count > 0:
+            await db.execute(delete(Prediction).where(and_(*filters)))
+            await db.commit()
+
+        return {
+            "dry_run": dry_run,
+            "deleted_count": deleted_count,
+            "oldest_remaining": oldest_remaining,
+            "models_affected": models_affected,
+            "linked_observed_results_count": linked_count,
+        }
 
     # === Model Metadata ===
 
