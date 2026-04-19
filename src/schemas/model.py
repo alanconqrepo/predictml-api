@@ -287,6 +287,23 @@ class ABCompareResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Feature importance globale (SHAP agrégé)
+# ---------------------------------------------------------------------------
+
+
+class FeatureImportanceItem(BaseModel):
+    mean_abs_shap: float
+    rank: int
+
+
+class FeatureImportanceResponse(BaseModel):
+    model_name: str
+    version: str
+    sample_size: int
+    feature_importance: Dict[str, FeatureImportanceItem]
+
+
 class RetrainRequest(BaseModel):
     """Requête pour POST /models/{name}/{version}/retrain"""
 

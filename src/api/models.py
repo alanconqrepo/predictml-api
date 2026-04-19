@@ -8,9 +8,10 @@ import json
 import math
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional
 
+import numpy as np
 import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sklearn.metrics import (
@@ -37,6 +38,8 @@ from src.schemas.model import (
     ABVersionStats,
     DriftReportResponse,
     FeatureDriftResult,
+    FeatureImportanceItem,
+    FeatureImportanceResponse,
     ModelCreateResponse,
     ModelDeleteResponse,
     ModelGetResponse,
@@ -54,6 +57,7 @@ from src.services import drift_service
 from src.services.db_service import _ROLLBACK_FIELDS, DBService, _build_snapshot
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
+from src.services.shap_service import compute_shap_explanation
 
 logger = structlog.get_logger(__name__)
 
@@ -378,6 +382,130 @@ async def get_model_drift(
         baseline_available=True,
         drift_summary=summary,
         features=features,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Feature importance globale (SHAP agrégé)
+# IMPORTANT : déclarée AVANT /models/{name}/{version} pour éviter que
+# "feature-importance" soit interprété comme un paramètre `version`.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/models/{name}/feature-importance", response_model=FeatureImportanceResponse)
+async def get_feature_importance(
+    name: str,
+    version: Optional[str] = Query(
+        None, description="Version du modèle (défaut : production/dernière)"
+    ),
+    last_n: int = Query(100, ge=1, le=500, description="Nb de prédictions à échantillonner"),
+    days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours"),
+    user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Importance globale des features via valeurs SHAP agrégées.
+
+    Calcule la moyenne de |SHAP| par feature sur un échantillon de prédictions
+    récentes pour identifier les features les plus influentes du modèle en
+    production et détecter des dérives comportementales.
+
+    - **version** : version cible ; si absente, la version `is_production=True`
+      est utilisée, sinon la plus récente.
+    - **last_n** : nombre maximum de prédictions à échantillonner (défaut 100, max 500).
+    - **days** : fenêtre temporelle en jours (défaut 7).
+    """
+    metadata = await DBService.get_model_metadata(db, name, version)
+    if not metadata:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' introuvable.",
+        )
+
+    try:
+        model_data = await model_service.load_model(db, name, metadata.version)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Impossible de charger le modèle '{name}:{metadata.version}': {exc}",
+        )
+
+    model = model_data["model"]
+
+    if not hasattr(model, "feature_names_in_"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"Le modèle '{name}:{metadata.version}' ne possède pas 'feature_names_in_'. "
+                "Il doit avoir été entraîné avec un DataFrame pandas."
+            ),
+        )
+
+    feature_names = list(model.feature_names_in_)
+    feature_set = set(feature_names)
+
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
+
+    predictions, _ = await DBService.get_predictions(
+        db,
+        model_name=name,
+        start=start,
+        end=end,
+        model_version=metadata.version,
+        limit=last_n,
+    )
+
+    predictions = list(predictions)[:last_n]
+
+    if not predictions:
+        return FeatureImportanceResponse(
+            model_name=name,
+            version=metadata.version,
+            sample_size=0,
+            feature_importance={},
+        )
+
+    shap_accumulator: dict[str, list[float]] = {f: [] for f in feature_names}
+
+    for pred in predictions:
+        input_features = pred.input_features
+        if not isinstance(input_features, dict):
+            continue
+        if not feature_set.issubset(set(input_features.keys())):
+            continue
+        try:
+            x = np.array([[input_features[f] for f in feature_names]], dtype=float)
+            prediction_result = pred.prediction_result
+            explanation = compute_shap_explanation(
+                model=model,
+                feature_names=feature_names,
+                x=x,
+                prediction_result=prediction_result,
+                feature_baseline=metadata.feature_baseline,
+            )
+            for feat, val in explanation["shap_values"].items():
+                if feat in shap_accumulator:
+                    shap_accumulator[feat].append(abs(val))
+        except Exception:
+            continue
+
+    processed = max((len(v) for v in shap_accumulator.values()), default=0)
+    mean_abs = {
+        feat: sum(vals) / len(vals) if vals else 0.0
+        for feat, vals in shap_accumulator.items()
+    }
+    ranked = sorted(mean_abs.items(), key=lambda kv: kv[1], reverse=True)
+    feature_importance = {
+        feat: FeatureImportanceItem(mean_abs_shap=round(val, 6), rank=rank + 1)
+        for rank, (feat, val) in enumerate(ranked)
+    }
+
+    return FeatureImportanceResponse(
+        model_name=name,
+        version=metadata.version,
+        sample_size=processed,
+        feature_importance=feature_importance,
     )
 
 
