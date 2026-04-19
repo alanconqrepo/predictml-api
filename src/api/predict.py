@@ -2,6 +2,9 @@
 Endpoints pour les prédictions
 """
 
+import csv
+import io
+import json
 import time
 from datetime import datetime
 from typing import List, Optional
@@ -9,6 +12,7 @@ from typing import List, Optional
 import numpy as np
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import check_prediction_rate_limit, verify_token
@@ -205,6 +209,146 @@ async def get_predictions(
             )
             for p in page
         ],
+    )
+
+
+_EXPORT_PAGE_SIZE = 500
+
+
+@router.get("/predictions/export")
+async def export_predictions(
+    model_name: Optional[str] = Query(None, description="Filtrer par nom de modèle (optionnel)"),
+    start: datetime = Query(..., description="Début de la période (ISO 8601)"),
+    end: datetime = Query(..., description="Fin de la période (ISO 8601)"),
+    export_format: str = Query(
+        "csv",
+        alias="format",
+        description="Format d'export : csv ou jsonl (défaut : csv)",
+    ),
+    include_features: bool = Query(True, description="Inclure input_features dans l'export"),
+    pred_status: Optional[str] = Query(
+        None, alias="status", description="Filtrer par statut : success ou error"
+    ),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Export bulk des prédictions au format CSV ou JSONL via streaming par curseur.
+
+    - **model_name** : filtrer sur un modèle (optionnel — tous les modèles si absent)
+    - **start** / **end** : plage datetime — obligatoire
+    - **format** : `csv` (défaut) ou `jsonl`
+    - **include_features** : inclure `input_features` dans l'export (défaut : true)
+    - **status** : filtrer par statut `success` ou `error` (optionnel)
+
+    Retourne un fichier en téléchargement direct (Content-Disposition: attachment).
+    Le streaming par curseur évite de charger tout l'historique en mémoire.
+
+    Nécessite un token Bearer valide.
+    """
+    if start > end:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="'start' doit être antérieur à 'end'.",
+        )
+    if export_format not in ("csv", "jsonl"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Le paramètre 'format' doit être 'csv' ou 'jsonl'.",
+        )
+    if pred_status is not None and pred_status not in ("success", "error"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Le paramètre 'status' doit être 'success' ou 'error'.",
+        )
+
+    fmt = export_format
+    csv_cols = [
+        "id", "timestamp", "model_name", "model_version", "username",
+        "id_obs", "prediction_result", "probabilities", "response_time_ms",
+        "status", "error_message", "is_shadow",
+    ]
+    if include_features:
+        csv_cols.append("input_features")
+
+    async def _generate():
+        cursor: Optional[int] = None
+        header_written = False
+
+        while True:
+            rows = await DBService.get_predictions_for_export(
+                db=db,
+                model_name=model_name,
+                start=start,
+                end=end,
+                status_filter=pred_status,
+                limit=_EXPORT_PAGE_SIZE,
+                cursor=cursor,
+            )
+
+            if not rows:
+                if fmt == "csv" and not header_written:
+                    buf = io.StringIO()
+                    csv.writer(buf).writerow(csv_cols)
+                    yield buf.getvalue()
+                break
+
+            if fmt == "csv":
+                if not header_written:
+                    buf = io.StringIO()
+                    csv.writer(buf).writerow(csv_cols)
+                    yield buf.getvalue()
+                    header_written = True
+                for row in rows:
+                    buf = io.StringIO()
+                    vals = [
+                        row.id,
+                        row.timestamp.isoformat() if row.timestamp else None,
+                        row.model_name,
+                        row.model_version,
+                        row.user.username if row.user else None,
+                        row.id_obs,
+                        json.dumps(row.prediction_result),
+                        json.dumps(row.probabilities),
+                        row.response_time_ms,
+                        row.status,
+                        row.error_message,
+                        row.is_shadow,
+                    ]
+                    if include_features:
+                        vals.append(json.dumps(row.input_features))
+                    csv.writer(buf).writerow(vals)
+                    yield buf.getvalue()
+            else:
+                for row in rows:
+                    record: dict = {
+                        "id": row.id,
+                        "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                        "model_name": row.model_name,
+                        "model_version": row.model_version,
+                        "username": row.user.username if row.user else None,
+                        "id_obs": row.id_obs,
+                        "prediction_result": row.prediction_result,
+                        "probabilities": row.probabilities,
+                        "response_time_ms": row.response_time_ms,
+                        "status": row.status,
+                        "error_message": row.error_message,
+                        "is_shadow": row.is_shadow,
+                    }
+                    if include_features:
+                        record["input_features"] = row.input_features
+                    yield json.dumps(record) + "\n"
+
+            if len(rows) < _EXPORT_PAGE_SIZE:
+                break
+            cursor = rows[-1].id
+
+    media_type = "text/csv" if fmt == "csv" else "application/x-ndjson"
+    filename = f"predictions_export.{fmt}"
+    return StreamingResponse(
+        _generate(),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

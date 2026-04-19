@@ -201,6 +201,42 @@ class DBService:
         return result.scalars().all(), total
 
     @staticmethod
+    async def get_predictions_for_export(
+        db: AsyncSession,
+        model_name: Optional[str],
+        start: datetime,
+        end: datetime,
+        status_filter: Optional[str] = None,
+        limit: int = 500,
+        cursor: Optional[int] = None,
+    ) -> List[Prediction]:
+        """
+        Récupère une page de prédictions pour l'export streaming (cursor keyset DESC).
+        Contrairement à get_predictions, model_name est optionnel et le user est eager-loaded.
+        """
+        filters = [
+            Prediction.timestamp >= start,
+            Prediction.timestamp <= end,
+        ]
+        if model_name:
+            filters.append(Prediction.model_name == model_name)
+        if status_filter:
+            filters.append(Prediction.status == status_filter)
+        if cursor is not None:
+            filters.append(Prediction.id < cursor)
+
+        query = (
+            select(Prediction)
+            .where(and_(*filters))
+            .options(selectinload(Prediction.user))
+            .order_by(Prediction.id.desc())
+            .limit(limit)
+        )
+
+        result = await db.execute(query)
+        return list(result.scalars().all())
+
+    @staticmethod
     async def count_predictions(
         db: AsyncSession,
         model_name: str,
