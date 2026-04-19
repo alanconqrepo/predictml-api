@@ -9,4 +9,11 @@ a partir de l'historique des git mettre à jour là documentation présents dans
 
 
 ------------------------------------
+
 ------------------------------------
+reflechis en mode plan 
+a partir des de deniers PR (une semaine) et de la documentation 
+1.ajouter lzs tests unitaires manquants.
+2.ajouter les tests d'intégration nécessaire pour valider le bon fonctionnement global du produit
+ajouter les tests end to end e2e pour valider le bon fonctionnement globale du produit
+détermine quel est le taux de recouvrement des tests avant et après ton plan
