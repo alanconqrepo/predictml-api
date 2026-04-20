@@ -364,6 +364,83 @@ class DBService:
         ]
 
     @staticmethod
+    async def get_confidence_trend(
+        db: AsyncSession,
+        model_name: str,
+        version: Optional[str],
+        days: int,
+        confidence_threshold: float = 0.5,
+    ) -> dict:
+        """
+        Agrège la confiance (max des probabilités) par jour sur une fenêtre glissante.
+        Retourne overall stats + liste journalière triée.
+        Compatible SQLite (tests) et PostgreSQL (production).
+        """
+        import numpy as np
+
+        cutoff = _utcnow() - timedelta(days=days)
+
+        filters = [
+            Prediction.model_name == model_name,
+            Prediction.status == "success",
+            Prediction.is_shadow.is_(False),
+            Prediction.probabilities.isnot(None),
+            Prediction.timestamp >= cutoff,
+        ]
+        if version:
+            filters.append(Prediction.model_version == version)
+
+        stmt = select(
+            func.date(Prediction.timestamp).label("day"),
+            Prediction.probabilities,
+        ).where(and_(*filters))
+
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        daily: dict[str, list[float]] = {}
+        for row in rows:
+            probs = row.probabilities
+            if isinstance(probs, dict):
+                confidence = max(probs.values()) if probs else None
+            elif isinstance(probs, list):
+                confidence = max(probs) if probs else None
+            else:
+                continue
+            if confidence is not None:
+                daily.setdefault(str(row.day), []).append(float(confidence))
+
+        all_confidences: list[float] = []
+        trend = []
+        for day in sorted(daily):
+            values = daily[day]
+            arr = np.array(values)
+            all_confidences.extend(values)
+            trend.append(
+                {
+                    "date": day,
+                    "mean_confidence": round(float(np.mean(arr)), 4),
+                    "p25": round(float(np.percentile(arr, 25)), 4),
+                    "p75": round(float(np.percentile(arr, 75)), 4),
+                    "predictions": len(values),
+                    "low_confidence_count": int(np.sum(arr < confidence_threshold)),
+                }
+            )
+
+        if not all_confidences:
+            return {"has_data": False, "overall": None, "trend": []}
+
+        all_arr = np.array(all_confidences)
+        low_count = int(np.sum(all_arr < confidence_threshold))
+        overall = {
+            "mean_confidence": round(float(np.mean(all_arr)), 4),
+            "p25_confidence": round(float(np.percentile(all_arr, 25)), 4),
+            "p75_confidence": round(float(np.percentile(all_arr, 75)), 4),
+            "low_confidence_rate": round(low_count / len(all_confidences), 4),
+        }
+        return {"has_data": True, "overall": overall, "trend": trend}
+
+    @staticmethod
     async def get_feature_production_stats(
         db: AsyncSession,
         model_name: str,
