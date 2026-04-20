@@ -40,3 +40,12 @@ class UserResponse(BaseModel):
     last_login: Optional[datetime]
 
     model_config = {"from_attributes": True}
+
+
+class QuotaResponse(BaseModel):
+    """Quota journalier de l'utilisateur courant"""
+
+    rate_limit_per_day: int
+    used_today: int
+    remaining_today: int
+    reset_at: datetime

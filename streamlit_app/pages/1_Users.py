@@ -4,7 +4,7 @@ Gestion des utilisateurs — admin only
 import streamlit as st
 import pandas as pd
 import streamlit.components.v1 as components
-from utils.auth import require_admin, get_client
+from utils.auth import require_admin, require_auth, get_client
 
 def show_token_with_copy(token: str) -> None:
     """Display a token with a one-click copy button."""
@@ -24,6 +24,36 @@ def show_token_with_copy(token: str) -> None:
 
 
 st.set_page_config(page_title="Users — PredictML", page_icon="👥", layout="wide")
+
+require_auth()
+
+if not st.session_state.get("is_admin"):
+    client = get_client()
+    with st.expander("Mon profil", expanded=True):
+        try:
+            me = client.get_me()
+            quota = client.get_my_quota()
+            st.markdown(f"**Utilisateur :** {me['username']}  |  **Rôle :** {me['role']}")
+            st.markdown(f"**Email :** {me['email']}")
+
+            st.markdown("**Token API :**")
+            token_placeholder = st.empty()
+            token_placeholder.text("••••••••••••••••••••••••")
+            if st.button("Révéler le token"):
+                show_token_with_copy(me["api_token"])
+
+            st.markdown("**Quota journalier :**")
+            used = quota["used_today"]
+            limit = quota["rate_limit_per_day"]
+            remaining = quota["remaining_today"]
+            st.progress(used / limit if limit > 0 else 0)
+            st.caption(f"{used} / {limit} aujourd'hui — {remaining} restantes")
+            if remaining == 0:
+                st.warning("Quota épuisé pour aujourd'hui.")
+        except Exception as e:
+            st.error(f"Impossible de charger le profil : {e}")
+    st.stop()
+
 require_admin()
 
 st.title("👥 Gestion des utilisateurs")

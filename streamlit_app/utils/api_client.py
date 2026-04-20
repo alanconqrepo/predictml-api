@@ -92,6 +92,16 @@ class APIClient:
         r = self._delete(f"/users/{user_id}")
         return r.status_code == 204
 
+    def get_me(self) -> dict:
+        r = self._get("/users/me")
+        r.raise_for_status()
+        return r.json()
+
+    def get_my_quota(self) -> dict:
+        r = self._get("/users/me/quota")
+        r.raise_for_status()
+        return r.json()
+
     # --- Models ---
 
     def list_models(self) -> list:

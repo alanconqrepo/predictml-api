@@ -3,6 +3,7 @@ Endpoints pour la gestion des utilisateurs
 """
 
 import secrets
+from datetime import date, datetime, time, timedelta, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,10 +13,41 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.security import require_admin, verify_token
 from src.db.database import get_db
 from src.db.models import User, UserRole
-from src.schemas.user import UserCreateInput, UserResponse, UserUpdateInput
+from src.schemas.user import QuotaResponse, UserCreateInput, UserResponse, UserUpdateInput
 from src.services.db_service import DBService
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_me(current_user: User = Depends(verify_token)):
+    """
+    Retourne le profil de l'utilisateur authentifié.
+
+    Accessible par tous les rôles.
+    """
+    return current_user
+
+
+@router.get("/me/quota", response_model=QuotaResponse)
+async def get_my_quota(
+    current_user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retourne le quota journalier de l'utilisateur authentifié.
+
+    Accessible par tous les rôles.
+    """
+    used = await DBService.get_user_prediction_count_today(db, current_user.id)
+    remaining = max(0, current_user.rate_limit_per_day - used)
+    reset_at = datetime.combine(date.today() + timedelta(days=1), time.min, tzinfo=timezone.utc)
+    return QuotaResponse(
+        rate_limit_per_day=current_user.rate_limit_per_day,
+        used_today=used,
+        remaining_today=remaining,
+        reset_at=reset_at,
+    )
 
 
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

@@ -443,3 +443,92 @@ def test_patch_user_cannot_deactivate_self():
         json={"is_active": False},
     )
     assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# GET /users/me
+# ---------------------------------------------------------------------------
+
+def test_get_me_without_auth():
+    """GET /users/me sans auth → 401/403"""
+    r = client.get("/users/me")
+    assert r.status_code in [401, 403]
+
+
+def test_get_me_as_user():
+    """GET /users/me avec token user → 200 avec profil correct"""
+    r = client.get("/users/me", headers={"Authorization": f"Bearer {USER_TOKEN}"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["username"] == f"{USERNAME_PREFIX}_regular"
+    assert data["role"] == "user"
+    assert "api_token" in data
+    assert "id" in data
+    assert "email" in data
+
+
+def test_get_me_as_admin():
+    """GET /users/me avec token admin → 200 avec profil admin"""
+    r = client.get("/users/me", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["username"] == f"{USERNAME_PREFIX}_admin"
+    assert data["role"] == "admin"
+
+
+def test_get_me_returns_own_token():
+    """GET /users/me retourne le token de l'utilisateur authentifié"""
+    r = client.get("/users/me", headers={"Authorization": f"Bearer {USER_TOKEN}"})
+    assert r.status_code == 200
+    assert r.json()["api_token"] == USER_TOKEN
+
+
+# ---------------------------------------------------------------------------
+# GET /users/me/quota
+# ---------------------------------------------------------------------------
+
+def test_get_my_quota_without_auth():
+    """GET /users/me/quota sans auth → 401/403"""
+    r = client.get("/users/me/quota")
+    assert r.status_code in [401, 403]
+
+
+def test_get_my_quota_structure():
+    """GET /users/me/quota → 200 avec les 4 champs attendus"""
+    r = client.get("/users/me/quota", headers={"Authorization": f"Bearer {USER_TOKEN}"})
+    assert r.status_code == 200
+    data = r.json()
+    assert "rate_limit_per_day" in data
+    assert "used_today" in data
+    assert "remaining_today" in data
+    assert "reset_at" in data
+
+
+def test_get_my_quota_values():
+    """GET /users/me/quota → valeurs cohérentes"""
+    r = client.get("/users/me/quota", headers={"Authorization": f"Bearer {USER_TOKEN}"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["rate_limit_per_day"] == 10000
+    assert data["used_today"] >= 0
+    assert data["remaining_today"] == max(0, data["rate_limit_per_day"] - data["used_today"])
+
+
+def test_get_my_quota_reset_at_is_tomorrow():
+    """GET /users/me/quota → reset_at est demain à minuit UTC"""
+    from datetime import date, timedelta, timezone
+    import dateutil.parser
+
+    r = client.get("/users/me/quota", headers={"Authorization": f"Bearer {USER_TOKEN}"})
+    assert r.status_code == 200
+    reset_at = dateutil.parser.isoparse(r.json()["reset_at"])
+    tomorrow = date.today() + timedelta(days=1)
+    assert reset_at.date() == tomorrow
+
+
+def test_get_my_quota_as_admin():
+    """GET /users/me/quota fonctionne aussi pour un admin"""
+    r = client.get("/users/me/quota", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["rate_limit_per_day"] == 10000
