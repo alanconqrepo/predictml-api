@@ -54,6 +54,21 @@ def show_home():
         token=st.session_state["api_token"],
     )
 
+    with st.sidebar:
+        st.subheader("Mon compte")
+        try:
+            quota = client.get_my_quota()
+            used = quota["used_today"]
+            limit = quota["rate_limit_per_day"]
+            remaining = quota["remaining_today"]
+            st.progress(used / limit if limit > 0 else 0)
+            st.caption(f"{used} / {limit} aujourd'hui")
+            if remaining == 0:
+                st.warning("Quota épuisé pour aujourd'hui.")
+        except Exception:
+            pass
+        st.divider()
+
     # Statut API
     try:
         health = client.get_health()
