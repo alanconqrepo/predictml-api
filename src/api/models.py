@@ -37,10 +37,12 @@ from src.schemas.model import (
     ABCompareResponse,
     ABSignificance,
     ABVersionStats,
+    ComputeBaselineResponse,
     DriftReportResponse,
     FeatureDriftResult,
     FeatureImportanceItem,
     FeatureImportanceResponse,
+    FeatureStats,
     ModelCreateResponse,
     ModelDeleteResponse,
     ModelGetResponse,
@@ -1325,6 +1327,10 @@ async def get_model(
         f1_score=model_meta.f1_score,
         precision=model_meta.precision,
         recall=model_meta.recall,
+        confidence_threshold=model_meta.confidence_threshold,
+        feature_baseline=model_meta.feature_baseline,
+        tags=model_meta.tags,
+        webhook_url=model_meta.webhook_url,
         mlflow_run_id=model_meta.mlflow_run_id,
         minio_bucket=model_meta.minio_bucket,
         minio_object_key=model_meta.minio_object_key,
@@ -1753,6 +1759,86 @@ async def validate_model_input(
         errors=errors,
         warnings=warnings,
         expected_features=sorted(expected_features),
+    )
+
+
+@router.post(
+    "/models/{name}/{version}/compute-baseline",
+    response_model=ComputeBaselineResponse,
+)
+async def compute_model_baseline(
+    name: str,
+    version: str,
+    days: int = Query(30, ge=1, le=180, description="Fenêtre temporelle en jours"),
+    dry_run: bool = Query(True, description="Calculer sans sauvegarder (défaut : True)"),
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Calcule un baseline de features depuis les prédictions de production récentes.
+
+    Utilise les `days` derniers jours de prédictions pour calculer {mean, std, min, max}
+    par feature numérique. Le résultat peut être sauvegardé comme `feature_baseline`
+    du modèle pour activer la détection de drift.
+
+    - **dry_run=true** (défaut) : calcule et retourne sans sauvegarder.
+    - **dry_run=false** : sauvegarde le baseline et active le drift monitoring.
+
+    Lève une erreur 422 si le nombre de prédictions disponibles est inférieur à 100.
+
+    Réservé aux administrateurs.
+    """
+    metadata = await DBService.get_model_metadata(db, name, version)
+    if not metadata:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' version '{version}' introuvable.",
+        )
+
+    production_stats = await DBService.get_feature_production_stats(db, name, version, days)
+
+    predictions_used = min((v["count"] for v in production_stats.values()), default=0)
+    if predictions_used < 100:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Données insuffisantes pour un baseline fiable : "
+                f"{predictions_used} prédictions disponibles (minimum requis : 100). "
+                f"Augmentez la fenêtre temporelle avec ?days=N ou attendez plus de prédictions."
+            ),
+        )
+
+    baseline = {
+        feat: {
+            "mean": round(s["mean"], 6),
+            "std": round(s["std"], 6),
+            "min": round(s["min"], 6),
+            "max": round(s["max"], 6),
+        }
+        for feat, s in production_stats.items()
+    }
+
+    if not dry_run:
+        metadata.feature_baseline = baseline
+        await db.flush()
+        await DBService.log_model_history(
+            db, metadata, HistoryActionType.UPDATED, user.id, user.username, ["feature_baseline"]
+        )
+        await db.commit()
+        logger.info(
+            "Baseline calculé et sauvegardé",
+            model=name,
+            version=version,
+            features=list(baseline.keys()),
+            predictions_used=predictions_used,
+        )
+
+    return ComputeBaselineResponse(
+        model_name=name,
+        version=version,
+        predictions_used=predictions_used,
+        dry_run=dry_run,
+        baseline={feat: FeatureStats(**stats) for feat, stats in baseline.items()},
     )
 
 

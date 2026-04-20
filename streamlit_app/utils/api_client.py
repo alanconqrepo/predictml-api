@@ -24,11 +24,14 @@ class APIClient:
             timeout=10,
         )
 
-    def _post(self, path: str, json: Optional[dict] = None) -> requests.Response:
+    def _post(
+        self, path: str, json: Optional[dict] = None, params: Optional[dict] = None
+    ) -> requests.Response:
         return requests.post(
             f"{self.base_url}{path}",
             headers=self._headers(),
             json=json,
+            params={k: v for k, v in (params or {}).items() if v is not None},
             timeout=10,
         )
 
@@ -142,6 +145,17 @@ class APIClient:
     def rollback_model(self, name: str, version: str, history_id: int) -> dict:
         """Restaure les métadonnées d'un modèle à un état antérieur (admin requis)."""
         r = self._post(f"/models/{name}/{version}/rollback/{history_id}")
+        r.raise_for_status()
+        return r.json()
+
+    def compute_baseline(
+        self, name: str, version: str, days: int = 30, dry_run: bool = True
+    ) -> dict:
+        """Calcule le baseline de features depuis les prédictions de production (admin requis)."""
+        r = self._post(
+            f"/models/{name}/{version}/compute-baseline",
+            params={"days": days, "dry_run": dry_run},
+        )
         r.raise_for_status()
         return r.json()
 

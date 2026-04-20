@@ -417,3 +417,18 @@ class ValidateInputResponse(BaseModel):
     errors: List[InputValidationError]
     warnings: List[InputValidationWarning]
     expected_features: Optional[List[str]]
+
+
+# ---------------------------------------------------------------------------
+# Calcul du baseline depuis la production
+# ---------------------------------------------------------------------------
+
+
+class ComputeBaselineResponse(BaseModel):
+    """Réponse de POST /models/{name}/{version}/compute-baseline"""
+
+    model_name: str
+    version: str
+    predictions_used: int
+    dry_run: bool
+    baseline: Dict[str, FeatureStats]
