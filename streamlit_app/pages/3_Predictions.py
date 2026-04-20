@@ -14,6 +14,41 @@ st.title("📊 Historique des prédictions")
 
 client = get_client()
 
+# --- Import CSV résultats observés ---
+CSV_TEMPLATE = "id_obs,model_name,observed_result,date_time\n"
+
+with st.expander("📤 Importer des résultats observés (CSV)"):
+    st.download_button(
+        "⬇️ Télécharger un template CSV",
+        data=CSV_TEMPLATE,
+        file_name="template_observed_results.csv",
+        mime="text/csv",
+    )
+    uploaded_file = st.file_uploader("Fichier CSV", type=["csv"], key="csv_obs_upload")
+    model_name_override = st.text_input(
+        "Modèle (override colonne CSV — optionnel)",
+        key="csv_obs_model_override",
+    )
+    if uploaded_file is not None and st.button("Importer", key="csv_obs_submit"):
+        try:
+            result = client.upload_observed_results_csv(
+                file_bytes=uploaded_file.read(),
+                filename=uploaded_file.name,
+                model_name=model_name_override.strip() or None,
+            )
+            st.success(f"{result['upserted']} résultats importés depuis **{result['filename']}**")
+            if result.get("skipped_rows", 0) > 0:
+                st.warning(f"{result['skipped_rows']} ligne(s) ignorée(s)")
+                errors = result.get("parse_errors", [])
+                if errors:
+                    st.dataframe(
+                        pd.DataFrame(errors),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+        except Exception as exc:
+            st.error(f"Erreur lors de l'import : {exc}")
+
 # --- Filtres ---
 with st.expander("🔍 Filtres", expanded=True):
     col1, col2, col3, col4, col5 = st.columns(5)

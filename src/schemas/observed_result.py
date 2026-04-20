@@ -76,3 +76,15 @@ class ObservedResultsListResponse(BaseModel):
     limit: int
     offset: int
     results: List[ObservedResultResponse]
+
+
+class CSVParseError(BaseModel):
+    row: int = Field(..., description="Numéro de ligne dans le CSV (en-tête = 1)")
+    reason: str = Field(..., description="Raison du rejet")
+
+
+class CSVUploadResponse(BaseModel):
+    upserted: int = Field(..., description="Nombre de lignes importées avec succès")
+    skipped_rows: int = Field(..., description="Nombre de lignes ignorées pour erreur")
+    parse_errors: List[CSVParseError] = Field(default_factory=list)
+    filename: str = Field(..., description="Nom du fichier uploadé")
