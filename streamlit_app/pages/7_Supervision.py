@@ -414,6 +414,103 @@ with col_feat:
     else:
         st.info("Aucune donnée de drift disponible.")
 
+# --- Tendance de confiance ---
+st.divider()
+st.markdown("#### 📉 Tendance de confiance")
+
+period_days = max(1, (end_date - start_date).days)
+try:
+    conf_trend = client.get_confidence_trend(selected_model, days=period_days)
+except Exception as exc:
+    conf_trend = None
+    st.info(f"Tendance de confiance non disponible : {exc}")
+
+if conf_trend is not None:
+    trend_data = conf_trend.get("trend", [])
+    overall = conf_trend.get("overall", {})
+
+    if not trend_data:
+        st.info("Ce modèle ne retourne pas de probabilités — tendance de confiance indisponible.")
+    else:
+        df_conf = pd.DataFrame(trend_data)
+        df_conf["date"] = pd.to_datetime(df_conf["date"])
+        df_conf = df_conf.sort_values("date")
+
+        threshold_val = 0.5  # default; endpoint uses model's confidence_threshold
+        mean_conf = overall.get("mean_confidence", 0.0)
+        low_rate = overall.get("low_confidence_rate", 0.0)
+
+        # Delta: dernière semaine vs semaine précédente
+        mid = len(df_conf) // 2
+        delta_str = None
+        if mid > 0:
+            avg_first = df_conf["mean_confidence"].iloc[:mid].mean()
+            avg_second = df_conf["mean_confidence"].iloc[mid:].mean()
+            delta_val = avg_second - avg_first
+            delta_str = f"{delta_val:+.1%} (1re vs 2e moitié)"
+
+        ct1, ct2, ct3 = st.columns(3)
+        ct1.metric(
+            "Confiance moyenne",
+            f"{mean_conf:.2%}",
+            delta=delta_str,
+            delta_color="normal",
+        )
+        ct2.metric("P25", f"{overall.get('p25_confidence', 0):.2%}")
+        ct3.metric("P75", f"{overall.get('p75_confidence', 0):.2%}")
+
+        # Graphique : ligne mean + bande IQR + seuil
+        fig_conf = go.Figure()
+
+        # Bande IQR semi-transparente
+        fig_conf.add_trace(
+            go.Scatter(
+                x=pd.concat([df_conf["date"], df_conf["date"][::-1]]),
+                y=pd.concat([df_conf["p75"], df_conf["p25"][::-1]]),
+                fill="toself",
+                fillcolor="rgba(41, 128, 185, 0.15)",
+                line=dict(color="rgba(0,0,0,0)"),
+                name="IQR (P25–P75)",
+                hoverinfo="skip",
+            )
+        )
+
+        # Ligne mean_confidence
+        fig_conf.add_trace(
+            go.Scatter(
+                x=df_conf["date"],
+                y=df_conf["mean_confidence"],
+                name="Confiance moyenne",
+                mode="lines+markers",
+                line=dict(color="#2980b9", width=2),
+                marker=dict(size=5),
+            )
+        )
+
+        # Seuil de confiance en pointillé
+        fig_conf.add_hline(
+            y=threshold_val,
+            line_dash="dot",
+            line_color="#e74c3c",
+            annotation_text=f"Seuil {threshold_val:.0%}",
+            annotation_position="bottom right",
+        )
+
+        fig_conf.update_layout(
+            xaxis_title="Date",
+            yaxis_title="Confiance",
+            yaxis=dict(tickformat=".0%", range=[0, 1]),
+            hovermode="x unified",
+            legend=dict(orientation="h", y=1.02),
+        )
+        st.plotly_chart(fig_conf, use_container_width=True)
+
+        if low_rate > 0.15:
+            st.warning(
+                f"{low_rate * 100:.0f} % des prédictions sont sous le seuil de confiance "
+                f"— signal possible de drift d'entrée."
+            )
+
 # --- Calibration des probabilités ---
 st.divider()
 st.markdown("#### 📏 Calibration")

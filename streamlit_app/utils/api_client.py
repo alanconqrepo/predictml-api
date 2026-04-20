@@ -264,6 +264,19 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def get_confidence_trend(
+        self,
+        model_name: str,
+        version: Optional[str] = None,
+        days: int = 30,
+        granularity: str = "day",
+    ) -> dict:
+        """Tendance de confiance du modèle (max proba) sur une fenêtre glissante."""
+        params = {k: v for k, v in {"version": version, "days": days, "granularity": granularity}.items() if v is not None}
+        r = self._get(f"/models/{model_name}/confidence-trend", params=params)
+        r.raise_for_status()
+        return r.json()
+
     def get_model_calibration(
         self,
         model_name: str,

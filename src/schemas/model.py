@@ -420,6 +420,35 @@ class ValidateInputResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Tendance de confiance
+# ---------------------------------------------------------------------------
+
+
+class ConfidenceTrendPoint(BaseModel):
+    date: str
+    mean_confidence: float
+    p25: float
+    p75: float
+    predictions: int
+    low_confidence_count: int
+
+
+class ConfidenceTrendOverall(BaseModel):
+    mean_confidence: float
+    p25_confidence: float
+    p75_confidence: float
+    low_confidence_rate: float
+
+
+class ConfidenceTrendResponse(BaseModel):
+    model_name: str
+    version: Optional[str]
+    period_days: int
+    overall: ConfidenceTrendOverall
+    trend: List[ConfidenceTrendPoint]
+
+
+# ---------------------------------------------------------------------------
 # Calibration des probabilités
 # ---------------------------------------------------------------------------
 

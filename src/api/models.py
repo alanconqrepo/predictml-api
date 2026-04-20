@@ -39,6 +39,9 @@ from src.schemas.model import (
     ABVersionStats,
     CalibrationResponse,
     ComputeBaselineResponse,
+    ConfidenceTrendOverall,
+    ConfidenceTrendPoint,
+    ConfidenceTrendResponse,
     DriftReportResponse,
     FeatureDriftResult,
     FeatureImportanceItem,
@@ -1365,6 +1368,64 @@ async def get_model_calibration(
         mean_accuracy=round(mean_accuracy, 4),
         overconfidence_gap=round(gap, 4),
         reliability=reliability,
+    )
+
+
+@router.get("/models/{name}/confidence-trend", response_model=ConfidenceTrendResponse)
+async def get_confidence_trend(
+    name: str,
+    version: Optional[str] = Query(None, description="Version du modèle (toutes si absent)"),
+    days: int = Query(30, ge=1, le=365, description="Fenêtre glissante en jours"),
+    granularity: str = Query("day", description="Granularité temporelle (day)"),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Tendance de confiance du modèle sur une fenêtre glissante.
+
+    confidence = max(probabilities) par prédiction — signal précoce de drift
+    sans nécessiter de baseline ni d'observed_results.
+    Si le modèle ne retourne pas de probabilités, la liste trend est vide.
+    """
+    metadata = await DBService.get_model_metadata(db, name, version)
+    if not metadata:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' introuvable.",
+        )
+
+    threshold = metadata.confidence_threshold if metadata.confidence_threshold is not None else 0.5
+
+    result = await DBService.get_confidence_trend(
+        db,
+        model_name=name,
+        version=version,
+        days=days,
+        confidence_threshold=threshold,
+    )
+
+    empty_overall = ConfidenceTrendOverall(
+        mean_confidence=0.0,
+        p25_confidence=0.0,
+        p75_confidence=0.0,
+        low_confidence_rate=0.0,
+    )
+
+    if not result["has_data"]:
+        return ConfidenceTrendResponse(
+            model_name=name,
+            version=version,
+            period_days=days,
+            overall=empty_overall,
+            trend=[],
+        )
+
+    return ConfidenceTrendResponse(
+        model_name=name,
+        version=version,
+        period_days=days,
+        overall=ConfidenceTrendOverall(**result["overall"]),
+        trend=[ConfidenceTrendPoint(**p) for p in result["trend"]],
     )
 
 
