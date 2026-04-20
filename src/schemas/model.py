@@ -420,6 +420,34 @@ class ValidateInputResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Calibration des probabilités
+# ---------------------------------------------------------------------------
+
+
+class ReliabilityBin(BaseModel):
+    """Un bucket de la courbe de calibration (reliability diagram)"""
+
+    confidence_bin: str
+    predicted_rate: float
+    observed_rate: float
+    count: int
+
+
+class CalibrationResponse(BaseModel):
+    """Réponse de GET /models/{name}/calibration"""
+
+    model_name: str
+    version: Optional[str]
+    sample_size: int
+    brier_score: Optional[float]
+    calibration_status: str  # "ok" | "overconfident" | "underconfident" | "insufficient_data"
+    mean_confidence: Optional[float]
+    mean_accuracy: Optional[float]
+    overconfidence_gap: Optional[float]
+    reliability: List[ReliabilityBin]
+
+
+# ---------------------------------------------------------------------------
 # Calcul du baseline depuis la production
 # ---------------------------------------------------------------------------
 

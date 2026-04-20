@@ -264,6 +264,20 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def get_model_calibration(
+        self,
+        model_name: str,
+        version: Optional[str] = None,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        n_bins: int = 10,
+    ) -> dict:
+        """Calibration des probabilités d'un modèle (Brier score, reliability diagram)."""
+        params = {k: v for k, v in {"version": version, "start": start, "end": end, "n_bins": n_bins}.items() if v is not None}
+        r = self._get(f"/models/{model_name}/calibration", params=params)
+        r.raise_for_status()
+        return r.json()
+
     # --- Observed Results ---
 
     # --- Monitoring / Supervision Dashboard ---

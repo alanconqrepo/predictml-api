@@ -414,6 +414,101 @@ with col_feat:
     else:
         st.info("Aucune donnée de drift disponible.")
 
+# --- Calibration des probabilités ---
+st.divider()
+st.markdown("#### 📏 Calibration")
+
+try:
+    calib = client.get_model_calibration(
+        model_name=selected_model,
+        start=start_iso,
+        end=end_iso,
+    )
+except Exception as exc:
+    st.info(f"Calibration non disponible : {exc}")
+    calib = None
+
+if calib:
+    calib_status = calib.get("calibration_status", "insufficient_data")
+
+    if calib_status == "insufficient_data":
+        st.info(
+            "Soumettez des observed_results pour activer la calibration "
+            f"(échantillon actuel : {calib.get('sample_size', 0)} paires)."
+        )
+    else:
+        STATUS_CALIB = {"ok": "🟢 OK", "overconfident": "🟡 Sur-confiant", "underconfident": "🔴 Sous-confiant"}
+        label_status = STATUS_CALIB.get(calib_status, calib_status)
+
+        cc1, cc2, cc3 = st.columns(3)
+        brier = calib.get("brier_score")
+        gap = calib.get("overconfidence_gap")
+        cc1.metric("Brier score", f"{brier:.4f}" if brier is not None else "—")
+        cc2.metric(
+            "Gap confiance/précision",
+            f"{gap:+.2%}" if gap is not None else "—",
+        )
+        cc3.metric("Statut", label_status)
+
+        reliability = calib.get("reliability", [])
+        if reliability:
+            bins = [b["confidence_bin"] for b in reliability]
+            pred_rates = [b["predicted_rate"] for b in reliability]
+            obs_rates = [b["observed_rate"] for b in reliability]
+            counts = [b["count"] for b in reliability]
+
+            fig_cal = go.Figure()
+
+            # Zone grisée entre courbe réelle et diagonale
+            diag_vals = [(float(b.split("–")[0]) + float(b.split("–")[1])) / 2 for b in bins]
+            fig_cal.add_trace(
+                go.Scatter(
+                    x=bins,
+                    y=diag_vals,
+                    name="Calibration parfaite",
+                    line=dict(color="grey", dash="dot", width=1),
+                    mode="lines",
+                )
+            )
+            fig_cal.add_trace(
+                go.Scatter(
+                    x=bins + bins[::-1],
+                    y=obs_rates + diag_vals[::-1],
+                    fill="toself",
+                    fillcolor="rgba(200,200,200,0.25)",
+                    line=dict(color="rgba(0,0,0,0)"),
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+            marker_sizes = [max(8, min(24, c // 5)) for c in counts]
+            fig_cal.add_trace(
+                go.Scatter(
+                    x=bins,
+                    y=obs_rates,
+                    name="Taux observé",
+                    mode="markers+lines",
+                    marker=dict(size=marker_sizes, color="#2980b9"),
+                    customdata=counts,
+                    hovertemplate="Bucket : %{x}<br>Taux observé : %{y:.2%}<br>N : %{customdata}<extra></extra>",
+                )
+            )
+            fig_cal.update_layout(
+                title="Courbe de calibration (reliability diagram)",
+                xaxis_title="Confiance prédite",
+                yaxis_title="Taux observé",
+                yaxis=dict(tickformat=".0%", range=[0, 1]),
+                hovermode="x unified",
+                legend=dict(orientation="h", y=1.05),
+            )
+            st.plotly_chart(fig_cal, use_container_width=True)
+
+        if calib_status == "overconfident":
+            st.warning(
+                "Envisagez `CalibratedClassifierCV(method='isotonic')` lors du prochain retrain "
+                "pour corriger la sur-confiance du modèle."
+            )
+
 # --- Comparaison A/B & Shadow ---
 if ab_comparison:
     st.divider()
