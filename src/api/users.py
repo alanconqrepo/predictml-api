@@ -41,9 +41,7 @@ async def get_my_quota(
     """
     used = await DBService.get_user_prediction_count_today(db, current_user.id)
     remaining = max(0, current_user.rate_limit_per_day - used)
-    reset_at = datetime.combine(
-        date.today() + timedelta(days=1), time.min, tzinfo=timezone.utc
-    )
+    reset_at = datetime.combine(date.today() + timedelta(days=1), time.min, tzinfo=timezone.utc)
     return QuotaResponse(
         rate_limit_per_day=current_user.rate_limit_per_day,
         used_today=used,
