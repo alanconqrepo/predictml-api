@@ -1258,7 +1258,9 @@ async def get_model_calibration(
     version: Optional[str] = Query(None, description="Version du modèle (toutes si absent)"),
     start: Optional[datetime] = Query(None, description="Début de la plage temporelle"),
     end: Optional[datetime] = Query(None, description="Fin de la plage temporelle"),
-    n_bins: int = Query(10, ge=2, le=20, description="Nombre de buckets pour la courbe de calibration"),
+    n_bins: int = Query(
+        10, ge=2, le=20, description="Nombre de buckets pour la courbe de calibration"
+    ),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):
