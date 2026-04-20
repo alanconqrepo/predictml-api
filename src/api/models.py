@@ -37,6 +37,7 @@ from src.schemas.model import (
     ABCompareResponse,
     ABSignificance,
     ABVersionStats,
+    CalibrationResponse,
     ComputeBaselineResponse,
     DriftReportResponse,
     FeatureDriftResult,
@@ -54,6 +55,7 @@ from src.schemas.model import (
     PeriodPerformance,
     PolicyUpdateResponse,
     PromotionPolicy,
+    ReliabilityBin,
     RetrainRequest,
     RetrainResponse,
     RetrainScheduleInput,
@@ -1242,6 +1244,125 @@ async def get_ab_comparison(
         period_days=days,
         versions=versions_out,
         ab_significance=ab_significance,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Calibration des probabilités
+# ---------------------------------------------------------------------------
+
+
+@router.get("/models/{name}/calibration", response_model=CalibrationResponse)
+async def get_model_calibration(
+    name: str,
+    version: Optional[str] = Query(None, description="Version du modèle (toutes si absent)"),
+    start: Optional[datetime] = Query(None, description="Début de la plage temporelle"),
+    end: Optional[datetime] = Query(None, description="Fin de la plage temporelle"),
+    n_bins: int = Query(10, ge=2, le=20, description="Nombre de buckets pour la courbe de calibration"),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Analyse la calibration des probabilités d'un modèle de classification.
+
+    Retourne le Brier score, le gap confiance/accuracy, le statut de calibration
+    et la courbe de fiabilité (reliability diagram) pour diagnostiquer la sur/sous-confiance.
+    """
+    pairs = await DBService.get_performance_pairs(db, name, start, end, version)
+
+    if not pairs:
+        return CalibrationResponse(
+            model_name=name,
+            version=version,
+            sample_size=0,
+            brier_score=None,
+            calibration_status="insufficient_data",
+            mean_confidence=None,
+            mean_accuracy=None,
+            overconfidence_gap=None,
+            reliability=[],
+        )
+
+    # Filtrer les paires avec des probabilités disponibles (list ou dict)
+    valid = [
+        (row.prediction_result, row.observed_result, row.probabilities)
+        for row in pairs
+        if row.probabilities
+    ]
+
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Toutes les probabilités sont null pour ce modèle. "
+                "Ce modèle ne supporte pas predict_proba."
+            ),
+        )
+
+    def _max_prob(p) -> float:
+        return max(p.values()) if isinstance(p, dict) else max(p)
+
+    confidences = np.array([_max_prob(p) for _, _, p in valid], dtype=float)
+    corrects = np.array(
+        [1.0 if str(pred) == str(obs) else 0.0 for pred, obs, _ in valid],
+        dtype=float,
+    )
+
+    sample_size = len(valid)
+
+    if sample_size < 30:
+        return CalibrationResponse(
+            model_name=name,
+            version=version,
+            sample_size=sample_size,
+            brier_score=None,
+            calibration_status="insufficient_data",
+            mean_confidence=None,
+            mean_accuracy=None,
+            overconfidence_gap=None,
+            reliability=[],
+        )
+
+    brier_score = float(np.mean((confidences - corrects) ** 2))
+    mean_confidence = float(np.mean(confidences))
+    mean_accuracy = float(np.mean(corrects))
+    gap = mean_confidence - mean_accuracy
+
+    if abs(gap) < 0.05:
+        calibration_status = "ok"
+    elif gap > 0.05:
+        calibration_status = "overconfident"
+    else:
+        calibration_status = "underconfident"
+
+    # Reliability diagram — buckets [0, 1/n_bins), [1/n_bins, 2/n_bins), ...
+    bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+    reliability: List[ReliabilityBin] = []
+    for i in range(n_bins):
+        lo, hi = bin_edges[i], bin_edges[i + 1]
+        mask = (confidences >= lo) & (confidences < hi if i < n_bins - 1 else confidences <= hi)
+        count = int(mask.sum())
+        if count == 0:
+            continue
+        reliability.append(
+            ReliabilityBin(
+                confidence_bin=f"{lo:.1f}–{hi:.1f}",
+                predicted_rate=round(float(np.mean(confidences[mask])), 4),
+                observed_rate=round(float(np.mean(corrects[mask])), 4),
+                count=count,
+            )
+        )
+
+    return CalibrationResponse(
+        model_name=name,
+        version=version,
+        sample_size=sample_size,
+        brier_score=round(brier_score, 4),
+        calibration_status=calibration_status,
+        mean_confidence=round(mean_confidence, 4),
+        mean_accuracy=round(mean_accuracy, 4),
+        overconfidence_gap=round(gap, 4),
+        reliability=reliability,
     )
 
 
