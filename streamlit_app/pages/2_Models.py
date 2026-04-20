@@ -103,6 +103,7 @@ for m in models:
             "Algorithme": m.get("algorithm") or "—",
             "Accuracy": f"{m['accuracy']:.3f}" if m.get("accuracy") is not None else "—",
             "F1": f"{m['f1_score']:.3f}" if m.get("f1_score") is not None else "—",
+            "Baseline": "✅ Baseline" if m.get("feature_baseline") else "⚠️ No baseline",
             "Statut": statut,
             "Créateur": m.get("creator_username") or "—",
             "Créé le": (
@@ -334,6 +335,39 @@ if is_admin:
                                 reload()
                         except Exception as e:
                             st.error(f"Erreur lors du ré-entraînement : {e}")
+
+    # Calcul du baseline depuis la production
+    with st.expander("📐 Calculer le baseline depuis la production"):
+        st.markdown(
+            "Calcule `{mean, std, min, max}` par feature depuis les prédictions de production "
+            "récentes et sauvegarde le résultat comme **feature_baseline** du modèle, "
+            "activant ainsi la détection de drift."
+        )
+        baseline_days = st.slider("Fenêtre temporelle (jours)", 7, 180, 30, key="baseline_days")
+        baseline_dry_run = st.checkbox("dry_run (simuler sans sauvegarder)", value=True, key="baseline_dry_run")
+        if st.button("Calculer", key="baseline_compute_btn", type="primary"):
+            with st.spinner("Calcul en cours…"):
+                try:
+                    result = client.compute_baseline(
+                        name=selected["name"],
+                        version=selected["version"],
+                        days=baseline_days,
+                        dry_run=baseline_dry_run,
+                    )
+                    st.markdown(
+                        f"**Prédictions utilisées :** {result.get('predictions_used')} "
+                        f"— fenêtre : {baseline_days} jours"
+                    )
+                    st.json(result.get("baseline", {}))
+                    if baseline_dry_run:
+                        st.info("Décochez **dry_run** pour sauvegarder le baseline.")
+                    else:
+                        st.success(
+                            "Baseline sauvegardé — le drift est maintenant actif pour ce modèle."
+                        )
+                        st.cache_data.clear()
+                except Exception as e:
+                    st.error(f"Erreur : {e}")
 
     # Historique des modifications
     with st.expander("📜 Historique des modifications"):
