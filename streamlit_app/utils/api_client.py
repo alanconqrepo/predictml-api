@@ -316,3 +316,22 @@ class APIClient:
         )
         r.raise_for_status()
         return r.json()
+
+    def upload_observed_results_csv(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        model_name: Optional[str] = None,
+    ) -> dict:
+        data = {}
+        if model_name:
+            data["model_name"] = model_name
+        r = requests.post(
+            f"{self.base_url}/observed-results/upload-csv",
+            headers=self._headers(),
+            files={"file": (filename, file_bytes, "text/csv")},
+            data=data,
+            timeout=60,
+        )
+        r.raise_for_status()
+        return r.json()
