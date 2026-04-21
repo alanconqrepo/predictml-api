@@ -339,6 +339,22 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def export_observed_results(
+        self,
+        start: str,
+        end: str,
+        model_name: Optional[str] = None,
+        export_format: str = "csv",
+    ) -> bytes:
+        r = requests.get(
+            f"{self.base_url}/observed-results/export",
+            headers=self._headers(),
+            params={k: v for k, v in {"model_name": model_name, "start": start, "end": end, "format": export_format}.items() if v is not None},
+            timeout=60,
+        )
+        r.raise_for_status()
+        return r.content
+
     def upload_observed_results_csv(
         self,
         file_bytes: bytes,
