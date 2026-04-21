@@ -133,7 +133,9 @@ def compute_feature_drift(
                 production_mean=round(prod_mean, 6) if prod_mean is not None else None,
                 production_std=round(prod_std, 6) if prod_std is not None else None,
                 production_count=prod_count,
-                null_rate_production=round(null_rate_prod, 6) if null_rate_prod is not None else None,
+                null_rate_production=(
+                    round(null_rate_prod, 6) if null_rate_prod is not None else None
+                ),
                 drift_status="no_baseline",
             )
             continue
@@ -159,7 +161,9 @@ def compute_feature_drift(
                 production_mean=round(prod_mean, 6) if prod_mean is not None else None,
                 production_std=round(prod_std, 6) if prod_std is not None else None,
                 production_count=prod_count,
-                null_rate_production=round(null_rate_prod, 6) if null_rate_prod is not None else None,
+                null_rate_production=(
+                    round(null_rate_prod, 6) if null_rate_prod is not None else None
+                ),
                 null_rate_baseline=round(null_rate_base, 6) if null_rate_base is not None else None,
                 null_rate_status=null_rate_status,
                 drift_status="insufficient_data",
@@ -222,7 +226,8 @@ def summarize_drift(features: Dict[str, FeatureDriftResult], baseline_available:
     ranked = [s for s in statuses if s in ("ok", "warning", "critical")]
     # null_rate_status des features à données insuffisantes contribue aussi au résumé
     null_ranked = [
-        f.null_rate_status for f in features.values()
+        f.null_rate_status
+        for f in features.values()
         if f.null_rate_status in ("ok", "warning", "critical")
     ]
     all_ranked = ranked + null_ranked
