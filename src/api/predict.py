@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.security import check_prediction_rate_limit, require_admin, verify_token
 from src.db.database import AsyncSessionLocal, get_db
 from src.db.models import Prediction, User
+from src.db.models.user import UserRole
 from src.schemas.prediction import (
     BatchPredictionInput,
     BatchPredictionOutput,
@@ -400,6 +401,47 @@ async def purge_predictions(
         dry_run=dry_run,
     )
     return PurgeResponse(**result)
+
+
+@router.get("/predictions/{prediction_id}", response_model=PredictionResponse)
+async def get_prediction_by_id(
+    prediction_id: int,
+    user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Lookup direct d'une prédiction par son id.
+
+    - Retourne 404 si la prédiction n'existe pas.
+    - Un utilisateur standard ne voit que ses propres prédictions (403 sinon).
+    - Un admin voit toutes les prédictions.
+    """
+    prediction = await DBService.get_prediction_by_id(db, prediction_id)
+    if prediction is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Prédiction {prediction_id} introuvable.",
+        )
+    if user.role != UserRole.ADMIN and prediction.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accès refusé : cette prédiction ne vous appartient pas.",
+        )
+    return PredictionResponse(
+        id=prediction.id,
+        model_name=prediction.model_name,
+        model_version=prediction.model_version,
+        id_obs=prediction.id_obs,
+        input_features=prediction.input_features,
+        prediction_result=prediction.prediction_result,
+        probabilities=prediction.probabilities,
+        response_time_ms=prediction.response_time_ms,
+        timestamp=prediction.timestamp,
+        status=prediction.status,
+        error_message=prediction.error_message,
+        username=prediction.user.username if prediction.user else None,
+        is_shadow=prediction.is_shadow,
+    )
 
 
 @router.post("/predict", response_model=PredictionOutput)

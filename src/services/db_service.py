@@ -156,6 +156,19 @@ class DBService:
         return prediction
 
     @staticmethod
+    async def get_prediction_by_id(
+        db: AsyncSession,
+        prediction_id: int,
+    ) -> Optional[Prediction]:
+        """Récupère une prédiction par son id, avec la relation user chargée."""
+        result = await db.execute(
+            select(Prediction)
+            .options(selectinload(Prediction.user))
+            .where(Prediction.id == prediction_id)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
     async def get_predictions(
         db: AsyncSession,
         model_name: str,
