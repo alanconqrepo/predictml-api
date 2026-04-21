@@ -383,6 +383,9 @@ async def get_model_drift(
                     production_mean=round(stats["mean"], 6),
                     production_std=round(stats["std"], 6),
                     production_count=stats["count"],
+                    null_rate_production=(
+                        round(stats["null_rate"], 6) if "null_rate" in stats else None
+                    ),
                     drift_status="no_baseline",
                 )
                 for feat, stats in production_stats.items()
@@ -2061,6 +2064,7 @@ async def compute_model_baseline(
             "std": round(s["std"], 6),
             "min": round(s["min"], 6),
             "max": round(s["max"], 6),
+            "null_rate": round(s.get("null_rate", 0.0), 6),
         }
         for feat, s in production_stats.items()
     }

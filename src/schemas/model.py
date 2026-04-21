@@ -24,6 +24,7 @@ class FeatureStats(BaseModel):
     std: float
     min: float
     max: float
+    null_rate: Optional[float] = None
 
 
 class ModelUpdateInput(BaseModel):
@@ -201,6 +202,9 @@ class FeatureDriftResult(BaseModel):
     production_count: int = 0
     z_score: Optional[float] = None
     psi: Optional[float] = None
+    null_rate_production: Optional[float] = None
+    null_rate_baseline: Optional[float] = None
+    null_rate_status: Optional[str] = None  # "ok" | "warning" | "critical"
     drift_status: str  # "ok" | "warning" | "critical" | "insufficient_data" | "no_baseline"
 
 

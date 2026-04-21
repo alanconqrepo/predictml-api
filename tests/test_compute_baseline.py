@@ -127,8 +127,8 @@ def _make_prod_stats(count: int = 200):
     rng = np.random.default_rng(42)
     values = rng.normal(5.84, 0.83, count).tolist()
     return {
-        "sepal_length": {"mean": 5.84, "std": 0.83, "min": 4.3, "max": 7.9, "count": count, "values": values},
-        "petal_length": {"mean": 3.76, "std": 1.77, "min": 1.0, "max": 6.9, "count": count, "values": values},
+        "sepal_length": {"mean": 5.84, "std": 0.83, "min": 4.3, "max": 7.9, "count": count, "values": values, "null_rate": 0.0},
+        "petal_length": {"mean": 3.76, "std": 1.77, "min": 1.0, "max": 6.9, "count": count, "values": values, "null_rate": 0.0},
     }
 
 
@@ -273,7 +273,7 @@ def test_compute_baseline_dry_run_response_format():
 
 
 def test_compute_baseline_feature_stats_keys():
-    """Chaque feature du baseline a exactement {mean, std, min, max}"""
+    """Chaque feature du baseline a exactement {mean, std, min, max, null_rate}"""
     meta = _fake_metadata()
     stats = _make_prod_stats(count=150)
     with _AdminOverride(), \
@@ -282,7 +282,7 @@ def test_compute_baseline_feature_stats_keys():
         r = client.post("/models/iris/1.0.0/compute-baseline", headers=AUTH_HEADERS)
     assert r.status_code == 200
     for feat_stats in r.json()["baseline"].values():
-        assert set(feat_stats.keys()) == {"mean", "std", "min", "max"}
+        assert set(feat_stats.keys()) == {"mean", "std", "min", "max", "null_rate"}
         assert "count" not in feat_stats
         assert "values" not in feat_stats
 
@@ -359,7 +359,7 @@ def test_compute_baseline_dry_run_false_saves_baseline():
     saved_baseline = r2.json()["feature_baseline"]
     assert saved_baseline is not None
     assert "sepal_length" in saved_baseline
-    assert set(saved_baseline["sepal_length"].keys()) == {"mean", "std", "min", "max"}
+    assert set(saved_baseline["sepal_length"].keys()) == {"mean", "std", "min", "max", "null_rate"}
 
 
 def test_compute_baseline_dry_run_false_logs_history():
