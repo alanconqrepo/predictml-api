@@ -1,12 +1,14 @@
 """
 Statistiques et graphiques d'utilisation
 """
-from datetime import datetime, timedelta, date
-import streamlit as st
+
+from datetime import datetime, timedelta
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from utils.auth import require_auth, get_client
+import streamlit as st
+from utils.auth import get_client, require_auth
 
 st.set_page_config(page_title="Stats — PredictML", page_icon="📈", layout="wide")
 require_auth()
@@ -65,15 +67,17 @@ try:
     raw_stats = client.get_prediction_stats(days=days, model_name=selected_model)
     if raw_stats:
         df_stats = pd.DataFrame(raw_stats)
-        df_stats = df_stats.rename(columns={
-            "model_name": "Modèle",
-            "total_predictions": "Total",
-            "error_count": "Erreurs",
-            "error_rate": "Taux d'erreur",
-            "avg_response_time_ms": "Moy. RT (ms)",
-            "p50_response_time_ms": "p50 RT (ms)",
-            "p95_response_time_ms": "p95 RT (ms)",
-        })
+        df_stats = df_stats.rename(
+            columns={
+                "model_name": "Modèle",
+                "total_predictions": "Total",
+                "error_count": "Erreurs",
+                "error_rate": "Taux d'erreur",
+                "avg_response_time_ms": "Moy. RT (ms)",
+                "p50_response_time_ms": "p50 RT (ms)",
+                "p95_response_time_ms": "p95 RT (ms)",
+            }
+        )
         df_stats["Taux d'erreur"] = (df_stats["Taux d'erreur"] * 100).round(2).astype(str) + " %"
         st.dataframe(df_stats, use_container_width=True, hide_index=True)
     else:
@@ -112,10 +116,20 @@ row1_l, row1_r = st.columns(2)
 # Distribution par modèle
 with row1_l:
     st.subheader("Distribution par modèle")
-    model_counts = df.groupby("model_name").size().reset_index(name="count").sort_values("count", ascending=False)
-    fig = px.bar(model_counts, x="model_name", y="count", color="model_name",
-                 labels={"model_name": "Modèle", "count": "Nb prédictions"},
-                 color_discrete_sequence=px.colors.qualitative.Set2)
+    model_counts = (
+        df.groupby("model_name")
+        .size()
+        .reset_index(name="count")
+        .sort_values("count", ascending=False)
+    )
+    fig = px.bar(
+        model_counts,
+        x="model_name",
+        y="count",
+        color="model_name",
+        labels={"model_name": "Modèle", "count": "Nb prédictions"},
+        color_discrete_sequence=px.colors.qualitative.Set2,
+    )
     fig.update_layout(showlegend=False, margin=dict(t=20))
     st.plotly_chart(fig, use_container_width=True)
 
@@ -124,7 +138,7 @@ with row1_r:
     st.subheader("Distribution des temps de réponse")
     if "response_time_ms" in df.columns:
         fig = px.histogram(
-            df[df["is_error"] == False],
+            df[~df["is_error"]],
             x="response_time_ms",
             nbins=40,
             labels={"response_time_ms": "Temps (ms)", "count": "Nb"},
@@ -142,7 +156,10 @@ with row2_l:
     st.subheader("Prédictions par jour")
     daily = df.groupby(["date", "model_name"]).size().reset_index(name="count")
     fig = px.line(
-        daily, x="date", y="count", color="model_name",
+        daily,
+        x="date",
+        y="count",
+        color="model_name",
         labels={"date": "Date", "count": "Nb prédictions", "model_name": "Modèle"},
         markers=True,
     )
@@ -154,7 +171,10 @@ with row2_r:
     st.subheader("Succès vs Erreurs par jour")
     status_daily = df.groupby(["date", "status"]).size().reset_index(name="count")
     fig = px.area(
-        status_daily, x="date", y="count", color="status",
+        status_daily,
+        x="date",
+        y="count",
+        color="status",
         labels={"date": "Date", "count": "Nb", "status": "Statut"},
         color_discrete_map={"success": "#00CC96", "error": "#EF553B"},
     )
@@ -165,8 +185,9 @@ with row2_r:
 if "response_time_ms" in df.columns and df["response_time_ms"].notna().any():
     st.subheader("Temps de réponse par modèle (boîte à moustaches)")
     fig = px.box(
-        df[df["is_error"] == False],
-        x="model_name", y="response_time_ms",
+        df[~df["is_error"]],
+        x="model_name",
+        y="response_time_ms",
         color="model_name",
         labels={"model_name": "Modèle", "response_time_ms": "Temps (ms)"},
         color_discrete_sequence=px.colors.qualitative.Set2,
@@ -225,22 +246,31 @@ else:
     drift_df = drift_df.sort_values("date").reset_index(drop=True)
 
     if metric_col in drift_df.columns and drift_df[metric_col].notna().any():
-        drift_df["rolling_7d"] = (
-            drift_df[metric_col].rolling(7, min_periods=1).mean().round(4)
-        )
-        drift_df["rolling_30d"] = (
-            drift_df[metric_col].rolling(30, min_periods=1).mean().round(4)
-        )
+        drift_df["rolling_7d"] = drift_df[metric_col].rolling(7, min_periods=1).mean().round(4)
+        drift_df["rolling_30d"] = drift_df[metric_col].rolling(30, min_periods=1).mean().round(4)
 
         # Métriques résumé
         last_val = drift_df[metric_col].iloc[-1]
-        prev_7d_val = drift_df[metric_col].iloc[-8] if len(drift_df) >= 8 else drift_df[metric_col].iloc[0]
+        prev_7d_val = (
+            drift_df[metric_col].iloc[-8] if len(drift_df) >= 8 else drift_df[metric_col].iloc[0]
+        )
         delta = round(last_val - prev_7d_val, 4)
         matched_total = int(drift_df["matched_count"].sum())
 
         m1, m2, m3 = st.columns(3)
-        m1.metric(f"{metric_label} (dernier jour)", f"{last_val:.1%}" if model_type == "classification" else f"{last_val:.4f}", delta=f"{delta:+.1%}" if model_type == "classification" else f"{delta:+.4f}")
-        m2.metric("Moyenne mobile 7j", f"{drift_df['rolling_7d'].iloc[-1]:.1%}" if model_type == "classification" else f"{drift_df['rolling_7d'].iloc[-1]:.4f}")
+        m1.metric(
+            f"{metric_label} (dernier jour)",
+            f"{last_val:.1%}" if model_type == "classification" else f"{last_val:.4f}",
+            delta=f"{delta:+.1%}" if model_type == "classification" else f"{delta:+.4f}",
+        )
+        m2.metric(
+            "Moyenne mobile 7j",
+            (
+                f"{drift_df['rolling_7d'].iloc[-1]:.1%}"
+                if model_type == "classification"
+                else f"{drift_df['rolling_7d'].iloc[-1]:.4f}"
+            ),
+        )
         m3.metric("Prédictions avec résultat observé (30j)", f"{matched_total:,}")
 
         # Alerte drift
@@ -254,29 +284,35 @@ else:
 
         # Graphique Plotly
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=drift_df["date"],
-            y=drift_df[metric_col],
-            mode="lines+markers",
-            name=f"{metric_label} journalier",
-            line=dict(color="#AAAAAA", width=1, dash="dot"),
-            marker=dict(size=5),
-            opacity=0.6,
-        ))
-        fig.add_trace(go.Scatter(
-            x=drift_df["date"],
-            y=drift_df["rolling_7d"],
-            mode="lines",
-            name="Moyenne mobile 7j",
-            line=dict(color="#636EFA", width=2),
-        ))
-        fig.add_trace(go.Scatter(
-            x=drift_df["date"],
-            y=drift_df["rolling_30d"],
-            mode="lines",
-            name="Moyenne mobile 30j",
-            line=dict(color="#FF7F0E", width=2, dash="dash"),
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=drift_df["date"],
+                y=drift_df[metric_col],
+                mode="lines+markers",
+                name=f"{metric_label} journalier",
+                line=dict(color="#AAAAAA", width=1, dash="dot"),
+                marker=dict(size=5),
+                opacity=0.6,
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=drift_df["date"],
+                y=drift_df["rolling_7d"],
+                mode="lines",
+                name="Moyenne mobile 7j",
+                line=dict(color="#636EFA", width=2),
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=drift_df["date"],
+                y=drift_df["rolling_30d"],
+                mode="lines",
+                name="Moyenne mobile 30j",
+                line=dict(color="#FF7F0E", width=2, dash="dash"),
+            )
+        )
         if alert_enabled and model_type == "classification":
             fig.add_hline(
                 y=threshold,

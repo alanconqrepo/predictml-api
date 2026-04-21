@@ -1,7 +1,9 @@
 """
 Page d'accueil et login — PredictML Admin Dashboard
 """
+
 import os
+
 import streamlit as st
 from utils.api_client import APIClient
 from utils.auth import logout
@@ -75,7 +77,9 @@ def show_home():
         api_status = health.get("status", "unknown")
         db_status = health.get("database", "unknown")
         col_status, col_db, col_cache = st.columns(3)
-        col_status.metric("Statut API", "✅ En ligne" if api_status == "healthy" else f"⚠️ {api_status}")
+        col_status.metric(
+            "Statut API", "✅ En ligne" if api_status == "healthy" else f"⚠️ {api_status}"
+        )
         col_db.metric("Base de données", "✅ OK" if db_status == "connected" else f"⚠️ {db_status}")
         cached = health.get("cached_models", 0)
         col_cache.metric("Modèles en cache", cached)

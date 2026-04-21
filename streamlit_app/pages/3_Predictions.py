@@ -1,11 +1,12 @@
 """
 Historique des prédictions avec filtres
 """
-import json
-from datetime import datetime, timedelta, date
-import streamlit as st
+
+from datetime import date, datetime, timedelta
+
 import pandas as pd
-from utils.auth import require_auth, get_client
+import streamlit as st
+from utils.auth import get_client, require_auth
 
 st.set_page_config(page_title="Predictions — PredictML", page_icon="📊", layout="wide")
 require_auth()
@@ -74,6 +75,38 @@ with st.expander("📤 Importer des résultats observés (CSV)"):
         except Exception as exc:
             st.error(f"Erreur lors de l'import : {exc}")
 
+# --- Export résultats observés ---
+with st.expander("📥 Exporter les résultats observés (ground truth)"):
+    col_ex1, col_ex2, col_ex3, col_ex4 = st.columns(4)
+    ex_model = col_ex1.text_input("Modèle (optionnel)", key="ex_obs_model")
+    ex_start = col_ex2.date_input(
+        "Date début", value=date.today() - timedelta(days=30), key="ex_obs_start"
+    )
+    ex_end = col_ex3.date_input("Date fin", value=date.today(), key="ex_obs_end")
+    ex_format = col_ex4.selectbox("Format", ["csv", "jsonl"], key="ex_obs_format")
+
+    if st.button("Préparer l'export", key="ex_obs_btn"):
+        if ex_start > ex_end:
+            st.error("La date de début doit être avant la date de fin.")
+        else:
+            try:
+                content = client.export_observed_results(
+                    start=datetime.combine(ex_start, datetime.min.time()).isoformat(),
+                    end=datetime.combine(ex_end, datetime.max.time()).isoformat(),
+                    model_name=ex_model.strip() or None,
+                    export_format=ex_format,
+                )
+                mime = "text/csv" if ex_format == "csv" else "application/x-ndjson"
+                st.download_button(
+                    label=f"⬇️ Télécharger observed_results_export.{ex_format}",
+                    data=content,
+                    file_name=f"observed_results_export.{ex_format}",
+                    mime=mime,
+                    key="ex_obs_download",
+                )
+            except Exception as exc:
+                st.error(f"Erreur lors de l'export : {exc}")
+
 # --- Filtres ---
 with st.expander("🔍 Filtres", expanded=True):
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -130,25 +163,35 @@ predictions = data.get("predictions", [])
 if status_filter != "Tous":
     predictions = [p for p in predictions if p.get("status") == status_filter]
 
-st.caption(f"**{total}** prédictions trouvées — affichage {st.session_state['pred_offset'] + 1}–{min(st.session_state['pred_offset'] + limit, total)}")
+st.caption(
+    f"**{total}** prédictions trouvées — affichage {st.session_state['pred_offset'] + 1}–{min(st.session_state['pred_offset'] + limit, total)}"
+)
 
 if not predictions:
     st.info("Aucune prédiction pour ces critères.")
 else:
     rows = []
     for p in predictions:
-        rows.append({
-            "ID": p.get("id"),
-            "Timestamp": pd.to_datetime(p.get("timestamp")).strftime("%Y-%m-%d %H:%M:%S") if p.get("timestamp") else "—",
-            "Modèle": p.get("model_name", ""),
-            "Version": p.get("model_version") or "—",
-            "id_obs": p.get("id_obs") or "—",
-            "Résultat": str(p.get("prediction_result", "")),
-            "Temps (ms)": f"{p['response_time_ms']:.1f}" if p.get("response_time_ms") is not None else "—",
-            "Statut": "✅" if p.get("status") == "success" else "❌",
-            "Shadow": "🔮" if p.get("is_shadow") else "—",
-            "Utilisateur": p.get("username") or "—",
-        })
+        rows.append(
+            {
+                "ID": p.get("id"),
+                "Timestamp": (
+                    pd.to_datetime(p.get("timestamp")).strftime("%Y-%m-%d %H:%M:%S")
+                    if p.get("timestamp")
+                    else "—"
+                ),
+                "Modèle": p.get("model_name", ""),
+                "Version": p.get("model_version") or "—",
+                "id_obs": p.get("id_obs") or "—",
+                "Résultat": str(p.get("prediction_result", "")),
+                "Temps (ms)": (
+                    f"{p['response_time_ms']:.1f}" if p.get("response_time_ms") is not None else "—"
+                ),
+                "Statut": "✅" if p.get("status") == "success" else "❌",
+                "Shadow": "🔮" if p.get("is_shadow") else "—",
+                "Utilisateur": p.get("username") or "—",
+            }
+        )
 
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
@@ -172,7 +215,12 @@ else:
                 st.json(p.get("input_features", {}))
             with col_r:
                 st.markdown("**Résultat :**")
-                st.json({"prediction": p.get("prediction_result"), "probabilities": p.get("probabilities")})
+                st.json(
+                    {
+                        "prediction": p.get("prediction_result"),
+                        "probabilities": p.get("probabilities"),
+                    }
+                )
                 if p.get("error_message"):
                     st.error(f"Erreur : {p['error_message']}")
 

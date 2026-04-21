@@ -1,10 +1,12 @@
 """
 Gestion des utilisateurs — admin only
 """
-import streamlit as st
+
 import pandas as pd
+import streamlit as st
 import streamlit.components.v1 as components
-from utils.auth import require_admin, require_auth, get_client
+from utils.auth import get_client, require_admin, require_auth
+
 
 def show_token_with_copy(token: str) -> None:
     """Display a token with a one-click copy button."""
@@ -80,7 +82,9 @@ with st.expander("➕ Créer un nouvel utilisateur", expanded=False):
         email = col2.text_input("Email", placeholder="john@example.com")
         col3, col4 = st.columns(2)
         role = col3.selectbox("Rôle", ["user", "admin", "readonly"])
-        rate_limit = col4.number_input("Quota journalier", min_value=1, max_value=100000, value=1000)
+        rate_limit = col4.number_input(
+            "Quota journalier", min_value=1, max_value=100000, value=1000
+        )
         submitted = st.form_submit_button("Créer", use_container_width=True, type="primary")
 
     if submitted:
@@ -88,12 +92,14 @@ with st.expander("➕ Créer un nouvel utilisateur", expanded=False):
             st.error("Nom d'utilisateur et email sont requis.")
         else:
             try:
-                result = client.create_user({
-                    "username": username,
-                    "email": email,
-                    "role": role,
-                    "rate_limit": rate_limit,
-                })
+                result = client.create_user(
+                    {
+                        "username": username,
+                        "email": email,
+                        "role": role,
+                        "rate_limit": rate_limit,
+                    }
+                )
                 st.success(f"Utilisateur **{result['username']}** créé avec succès.")
                 st.info("Conservez ce token — il ne sera plus affiché !")
                 show_token_with_copy(result["api_token"])
@@ -114,7 +120,18 @@ if not users:
     st.info("Aucun utilisateur trouvé.")
     st.stop()
 
-df = pd.DataFrame(users)[["id", "username", "email", "role", "is_active", "rate_limit_per_day", "last_login", "created_at"]]
+df = pd.DataFrame(users)[
+    [
+        "id",
+        "username",
+        "email",
+        "role",
+        "is_active",
+        "rate_limit_per_day",
+        "last_login",
+        "created_at",
+    ]
+]
 df["last_login"] = pd.to_datetime(df["last_login"]).dt.strftime("%Y-%m-%d %H:%M").fillna("—")
 df["created_at"] = pd.to_datetime(df["created_at"]).dt.strftime("%Y-%m-%d")
 df["is_active"] = df["is_active"].map({True: "✅ Actif", False: "❌ Inactif"})
@@ -168,7 +185,9 @@ with col_d:
         st.session_state["confirm_delete_user"] = selected["id"]
 
 if st.session_state.get("confirm_delete_user") == selected["id"]:
-    st.warning(f"Confirmer la suppression de **{selected['username']}** et toutes ses prédictions ?")
+    st.warning(
+        f"Confirmer la suppression de **{selected['username']}** et toutes ses prédictions ?"
+    )
     c1, c2 = st.columns(2)
     if c1.button("Oui, supprimer", type="primary"):
         try:

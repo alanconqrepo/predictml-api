@@ -1,12 +1,15 @@
 """
 Dashboard A/B Testing & Shadow Deployment
 """
-import streamlit as st
+
+from collections import defaultdict
+from datetime import datetime, timedelta
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
-from utils.auth import require_auth, require_admin, get_client
+import streamlit as st
+from utils.auth import get_client, require_auth
 
 st.set_page_config(page_title="A/B Testing — PredictML", page_icon="🧪", layout="wide")
 require_auth()
@@ -31,8 +34,6 @@ if not all_models:
     st.stop()
 
 # Grouper les versions par nom de modèle
-from collections import defaultdict
-
 model_groups: dict = defaultdict(list)
 for m in all_models:
     model_groups[m["name"]].append(m)
@@ -325,7 +326,9 @@ else:
                         "Version": ver,
                         "Observations actuelles": n,
                         "Minimum recommandé": min_needed if min_needed > 0 else "—",
-                        "Suffisant ?": "✅ Oui" if enough else f"❌ Non ({min_needed - n} manquantes)",
+                        "Suffisant ?": (
+                            "✅ Oui" if enough else f"❌ Non ({min_needed - n} manquantes)"
+                        ),
                     }
                 )
             st.dataframe(
@@ -463,15 +466,17 @@ else:
         shadow_rows.append(
             {
                 "ID": p.get("id"),
-                "Timestamp": pd.to_datetime(p.get("timestamp")).strftime("%Y-%m-%d %H:%M:%S")
-                if p.get("timestamp")
-                else "—",
+                "Timestamp": (
+                    pd.to_datetime(p.get("timestamp")).strftime("%Y-%m-%d %H:%M:%S")
+                    if p.get("timestamp")
+                    else "—"
+                ),
                 "Version": p.get("model_version") or "—",
                 "id_obs": p.get("id_obs") or "—",
                 "Résultat": str(p.get("prediction_result", "")),
-                "Latence (ms)": f"{p['response_time_ms']:.1f}"
-                if p.get("response_time_ms") is not None
-                else "—",
+                "Latence (ms)": (
+                    f"{p['response_time_ms']:.1f}" if p.get("response_time_ms") is not None else "—"
+                ),
                 "Statut": "✅" if p.get("status") == "success" else "❌",
             }
         )

@@ -1,7 +1,9 @@
 """
 Exemple de code complet : MLflow + API
 """
+
 import os
+
 import streamlit as st
 from utils.auth import require_auth
 
@@ -9,7 +11,9 @@ st.set_page_config(page_title="Code Example — PredictML", page_icon="💡", la
 require_auth()
 
 st.title("💡 Exemple de code : MLflow + API")
-st.markdown("Exemple complet pour entraîner un modèle, le tracker avec MLflow, puis l'uploader et l'utiliser via l'API.")
+st.markdown(
+    "Exemple complet pour entraîner un modèle, le tracker avec MLflow, puis l'uploader et l'utiliser via l'API."
+)
 
 API_URL = st.session_state.get("api_url", "http://localhost:8000")
 MLFLOW_URL = os.environ.get("MLFLOW_URL", "http://localhost:5000")
@@ -20,7 +24,7 @@ MLFLOW_URL = os.environ.get("MLFLOW_URL", "http://localhost:5000")
 st.subheader("1. Entraîner un modèle et le tracker avec MLflow")
 st.markdown("Installez les dépendances : `pip install scikit-learn mlflow boto3`")
 
-code_mlflow = f'''\
+code_mlflow = f"""\
 import mlflow
 import mlflow.sklearn
 import pickle
@@ -70,7 +74,7 @@ with open(f"{{MODEL_NAME}}_v{{MODEL_VERSION}}.pkl", "wb") as f:
     pickle.dump(model, f)
 
 print("Modèle sauvegardé.")
-'''
+"""
 st.code(code_mlflow, language="python")
 
 # ============================================================
@@ -78,7 +82,7 @@ st.code(code_mlflow, language="python")
 # ============================================================
 st.subheader("2. Uploader le modèle via l'API")
 
-code_upload = f'''\
+code_upload = f"""\
 import requests
 
 # ── Configuration ──────────────────────────────────────────────
@@ -113,7 +117,7 @@ with open(PKL_FILE, "rb") as f:
 response.raise_for_status()
 model_data = response.json()
 print(f"Modèle uploadé : {{model_data['name']}} v{{model_data['version']}}")
-'''
+"""
 st.code(code_upload, language="python")
 
 # ============================================================
@@ -121,7 +125,7 @@ st.code(code_upload, language="python")
 # ============================================================
 st.subheader("3. Faire une prédiction")
 
-code_predict = f'''\
+code_predict = f"""\
 import requests
 
 API_URL = "{API_URL}"
@@ -154,7 +158,7 @@ requests.patch(
     json={{"is_production": True}},
 ).raise_for_status()
 print("Version 1.0.0 passée en production.")
-'''
+"""
 st.code(code_predict, language="python")
 
 # ============================================================
@@ -163,7 +167,7 @@ st.code(code_predict, language="python")
 st.subheader("4. Enregistrer les résultats observés (optionnel)")
 st.markdown("Permet de comparer les prédictions avec les vraies valeurs.")
 
-code_observed = f'''\
+code_observed = f"""\
 import requests
 from datetime import datetime
 
@@ -185,7 +189,7 @@ payload = {{
 response = requests.post(f"{{API_URL}}/observed-results", headers=headers, json=payload)
 response.raise_for_status()
 print(f"{{response.json()[\'upserted\']}} résultat(s) enregistré(s).")
-'''
+"""
 st.code(code_observed, language="python")
 
 st.divider()

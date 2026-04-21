@@ -2,8 +2,9 @@
 Client HTTP pour l'API predictml
 """
 
-import requests
 from typing import Optional, Tuple
+
+import requests
 
 
 class APIClient:
@@ -272,7 +273,11 @@ class APIClient:
         granularity: str = "day",
     ) -> dict:
         """Tendance de confiance du modèle (max proba) sur une fenêtre glissante."""
-        params = {k: v for k, v in {"version": version, "days": days, "granularity": granularity}.items() if v is not None}
+        params = {
+            k: v
+            for k, v in {"version": version, "days": days, "granularity": granularity}.items()
+            if v is not None
+        }
         r = self._get(f"/models/{model_name}/confidence-trend", params=params)
         r.raise_for_status()
         return r.json()
@@ -286,7 +291,11 @@ class APIClient:
         n_bins: int = 10,
     ) -> dict:
         """Calibration des probabilités d'un modèle (Brier score, reliability diagram)."""
-        params = {k: v for k, v in {"version": version, "start": start, "end": end, "n_bins": n_bins}.items() if v is not None}
+        params = {
+            k: v
+            for k, v in {"version": version, "start": start, "end": end, "n_bins": n_bins}.items()
+            if v is not None
+        }
         r = self._get(f"/models/{model_name}/calibration", params=params)
         r.raise_for_status()
         return r.json()
@@ -338,6 +347,31 @@ class APIClient:
         )
         r.raise_for_status()
         return r.json()
+
+    def export_observed_results(
+        self,
+        start: str,
+        end: str,
+        model_name: Optional[str] = None,
+        export_format: str = "csv",
+    ) -> bytes:
+        r = requests.get(
+            f"{self.base_url}/observed-results/export",
+            headers=self._headers(),
+            params={
+                k: v
+                for k, v in {
+                    "model_name": model_name,
+                    "start": start,
+                    "end": end,
+                    "format": export_format,
+                }.items()
+                if v is not None
+            },
+            timeout=60,
+        )
+        r.raise_for_status()
+        return r.content
 
     def upload_observed_results_csv(
         self,
