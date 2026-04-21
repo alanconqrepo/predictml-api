@@ -293,6 +293,15 @@ class APIClient:
 
     # --- Observed Results ---
 
+    def get_observed_results_stats(self, model_name: Optional[str] = None) -> dict:
+        """Taux de couverture du ground truth (labeled / total prédictions)."""
+        r = self._get(
+            "/observed-results/stats",
+            params={"model_name": model_name},
+        )
+        r.raise_for_status()
+        return r.json()
+
     # --- Monitoring / Supervision Dashboard ---
 
     def get_monitoring_overview(self, start: str, end: str) -> dict:

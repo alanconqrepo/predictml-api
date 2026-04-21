@@ -14,6 +14,31 @@ st.title("📊 Historique des prédictions")
 
 client = get_client()
 
+# --- Couverture du ground truth ---
+with st.expander("🏷️ Couverture du ground truth", expanded=True):
+    try:
+        coverage_data = client.get_observed_results_stats()
+        total_pred = coverage_data.get("total_predictions", 0)
+        labeled = coverage_data.get("labeled_count", 0)
+        rate = coverage_data.get("coverage_rate", 0.0)
+
+        col_a, col_b, col_c = st.columns(3)
+        col_a.metric("Prédictions totales", f"{total_pred:,}")
+        col_b.metric("Labellisées", f"{labeled:,}")
+        col_c.metric("Couverture", f"{rate * 100:.1f} %")
+
+        by_model = coverage_data.get("by_model") or []
+        if by_model:
+            st.markdown("**Par modèle :**")
+            for m in by_model:
+                cov = m.get("coverage", 0.0)
+                st.progress(
+                    cov,
+                    text=f"{m['model_name']} — {m['labeled']}/{m['predictions']} ({cov * 100:.1f} %)",
+                )
+    except Exception:
+        st.caption("Données de couverture non disponibles.")
+
 # --- Import CSV résultats observés ---
 CSV_TEMPLATE = "id_obs,model_name,observed_result,date_time\n"
 

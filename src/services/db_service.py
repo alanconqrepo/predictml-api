@@ -791,6 +791,155 @@ class DBService:
         )
         return result.scalars().all(), total
 
+    @staticmethod
+    async def get_observed_results_stats(
+        db: AsyncSession,
+        model_name: Optional[str] = None,
+    ) -> dict:
+        """Taux de couverture du ground truth : combien de prédictions ont un résultat observé.
+
+        Compatible SQLite (tests) et PostgreSQL (production).
+        Retourne total_predictions, labeled_count, coverage_rate, oldest/newest label,
+        et un breakdown by_version (si model_name fourni) ou by_model (si global).
+        """
+        pred_filters = []
+        if model_name:
+            pred_filters.append(Prediction.model_name == model_name)
+
+        where_pred = and_(*pred_filters) if pred_filters else True
+
+        total_predictions = (
+            await db.execute(select(func.count(Prediction.id)).where(where_pred))
+        ).scalar() or 0
+
+        # Predictions joined with observed_results on (id_obs, model_name)
+        labeled_base = (
+            select(func.count(Prediction.id))
+            .join(
+                ObservedResult,
+                and_(
+                    Prediction.id_obs == ObservedResult.id_obs,
+                    Prediction.model_name == ObservedResult.model_name,
+                ),
+            )
+            .where(where_pred)
+        )
+        labeled_count = (await db.execute(labeled_base)).scalar() or 0
+
+        obs_filters = []
+        if model_name:
+            obs_filters.append(ObservedResult.model_name == model_name)
+        where_obs = and_(*obs_filters) if obs_filters else True
+
+        dates_row = (
+            await db.execute(
+                select(
+                    func.min(ObservedResult.date_time),
+                    func.max(ObservedResult.date_time),
+                ).where(where_obs)
+            )
+        ).one()
+        oldest_label = dates_row[0]
+        newest_label = dates_row[1]
+
+        coverage_rate = round(labeled_count / total_predictions, 3) if total_predictions > 0 else 0.0
+
+        if model_name:
+            pred_by_version = (
+                await db.execute(
+                    select(Prediction.model_version, func.count(Prediction.id).label("cnt"))
+                    .where(Prediction.model_name == model_name)
+                    .group_by(Prediction.model_version)
+                )
+            ).all()
+
+            labeled_by_version_rows = (
+                await db.execute(
+                    select(Prediction.model_version, func.count(Prediction.id).label("cnt"))
+                    .join(
+                        ObservedResult,
+                        and_(
+                            Prediction.id_obs == ObservedResult.id_obs,
+                            Prediction.model_name == ObservedResult.model_name,
+                        ),
+                    )
+                    .where(Prediction.model_name == model_name)
+                    .group_by(Prediction.model_version)
+                )
+            ).all()
+            labeled_map = {r.model_version: r.cnt for r in labeled_by_version_rows}
+
+            by_version = sorted(
+                [
+                    {
+                        "version": r.model_version or "unknown",
+                        "predictions": r.cnt,
+                        "labeled": labeled_map.get(r.model_version, 0),
+                        "coverage": round(labeled_map.get(r.model_version, 0) / r.cnt, 3) if r.cnt > 0 else 0.0,
+                    }
+                    for r in pred_by_version
+                ],
+                key=lambda x: x["version"],
+                reverse=True,
+            )
+
+            return {
+                "model_name": model_name,
+                "total_predictions": total_predictions,
+                "labeled_count": labeled_count,
+                "coverage_rate": coverage_rate,
+                "oldest_label": oldest_label,
+                "newest_label": newest_label,
+                "by_version": by_version,
+                "by_model": None,
+            }
+        else:
+            pred_by_model = (
+                await db.execute(
+                    select(Prediction.model_name, func.count(Prediction.id).label("cnt"))
+                    .group_by(Prediction.model_name)
+                )
+            ).all()
+
+            labeled_by_model_rows = (
+                await db.execute(
+                    select(Prediction.model_name, func.count(Prediction.id).label("cnt"))
+                    .join(
+                        ObservedResult,
+                        and_(
+                            Prediction.id_obs == ObservedResult.id_obs,
+                            Prediction.model_name == ObservedResult.model_name,
+                        ),
+                    )
+                    .group_by(Prediction.model_name)
+                )
+            ).all()
+            labeled_map_model = {r.model_name: r.cnt for r in labeled_by_model_rows}
+
+            by_model = sorted(
+                [
+                    {
+                        "model_name": r.model_name,
+                        "predictions": r.cnt,
+                        "labeled": labeled_map_model.get(r.model_name, 0),
+                        "coverage": round(labeled_map_model.get(r.model_name, 0) / r.cnt, 3) if r.cnt > 0 else 0.0,
+                    }
+                    for r in pred_by_model
+                ],
+                key=lambda x: x["model_name"] or "",
+            )
+
+            return {
+                "model_name": None,
+                "total_predictions": total_predictions,
+                "labeled_count": labeled_count,
+                "coverage_rate": coverage_rate,
+                "oldest_label": oldest_label,
+                "newest_label": newest_label,
+                "by_version": None,
+                "by_model": by_model,
+            }
+
     # === Model History ===
 
     @staticmethod
