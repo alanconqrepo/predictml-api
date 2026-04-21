@@ -197,6 +197,51 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def set_schedule(
+        self,
+        name: str,
+        version: str,
+        cron: Optional[str],
+        lookback_days: int = 30,
+        auto_promote: bool = False,
+        enabled: bool = True,
+    ) -> dict:
+        """Configure le planning cron de ré-entraînement d'un modèle (admin requis)."""
+        r = self._patch(
+            f"/models/{name}/{version}/schedule",
+            json={
+                "cron": cron,
+                "lookback_days": lookback_days,
+                "auto_promote": auto_promote,
+                "enabled": enabled,
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def set_policy(
+        self,
+        name: str,
+        min_accuracy: Optional[float] = None,
+        max_mae: Optional[float] = None,
+        max_latency_p95_ms: Optional[float] = None,
+        min_sample_validation: int = 10,
+        auto_promote: bool = False,
+    ) -> dict:
+        """Définit la politique d'auto-promotion post-retrain d'un modèle (admin requis)."""
+        r = self._patch(
+            f"/models/{name}/policy",
+            json={
+                "min_accuracy": min_accuracy,
+                "max_mae": max_mae,
+                "max_latency_p95_ms": max_latency_p95_ms,
+                "min_sample_validation": min_sample_validation,
+                "auto_promote": auto_promote,
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
     # --- Predictions ---
 
     def get_predictions(
