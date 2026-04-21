@@ -286,3 +286,100 @@ def test_ab_compare_endpoint_includes_significance_field():
         assert "confidence_level" in sig
         assert "current_samples" in sig
         assert "min_samples_needed" in sig
+
+
+# ---------------------------------------------------------------------------
+# compute_ab_significance — chemin régression (résidus de prédiction)
+# ---------------------------------------------------------------------------
+
+
+def _make_stats_regression(version, n_total, prediction_errors, times=None):
+    """Crée un dict version_stats avec prediction_errors pour tester la régression."""
+    return {
+        "version": version,
+        "total_predictions": n_total,
+        "error_count": 0,
+        "response_times": times or [],
+        "prediction_errors": prediction_errors,
+    }
+
+
+def test_significance_regression_mae_significant():
+    """Régression : résidus très différents → Mann-Whitney U significatif, metric=mae."""
+    # v1 : erreurs faibles, v2 : erreurs élevées
+    errors_v1 = [0.1] * 30
+    errors_v2 = [5.0] * 30
+    stats = [
+        _make_stats_regression("v1", 30, errors_v1),
+        _make_stats_regression("v2", 30, errors_v2),
+    ]
+    result = compute_ab_significance(stats)
+    assert result is not None
+    assert result["metric"] == "mae"
+    assert result["test"] == "mann_whitney_u"
+    assert result["significant"] is True
+    assert result["winner"] == "v1"  # v1 a MAE plus faible
+    assert result["p_value"] < 0.05
+    assert result["current_samples"]["v1"] == 30
+    assert result["current_samples"]["v2"] == 30
+
+
+def test_significance_regression_mae_not_significant():
+    """Régression : résidus identiques → Mann-Whitney non significatif."""
+    errors = [1.0, 1.1, 0.9, 1.0, 1.05, 0.95, 1.0, 1.0]
+    stats = [
+        _make_stats_regression("v1", 8, list(errors)),
+        _make_stats_regression("v2", 8, list(errors)),
+    ]
+    result = compute_ab_significance(stats)
+    if result is not None:
+        assert result["metric"] == "mae"
+        assert result["significant"] is False
+
+
+def test_significance_regression_prioritized_over_response_times():
+    """Si prediction_errors disponibles, on les utilise en priorité sur response_times."""
+    errors_v1 = [0.1] * 20
+    errors_v2 = [5.0] * 20
+    # Aussi des temps de réponse très différents (ne doivent pas être utilisés)
+    times_v1 = [100.0] * 20
+    times_v2 = [10.0] * 20
+    stats = [
+        _make_stats_regression("v1", 20, errors_v1, times=times_v1),
+        _make_stats_regression("v2", 20, errors_v2, times=times_v2),
+    ]
+    result = compute_ab_significance(stats)
+    assert result is not None
+    assert result["metric"] == "mae"  # Pas response_time_ms
+    assert result["winner"] == "v1"  # Basé sur MAE, pas latence
+
+
+def test_significance_regression_no_errors_fallback_to_none():
+    """Régression sans résidus ni temps de réponse → None."""
+    stats = [
+        _make_stats_regression("v1", 5, []),
+        _make_stats_regression("v2", 5, []),
+    ]
+    result = compute_ab_significance(stats)
+    assert result is None
+
+
+def test_significance_regression_fields_complete():
+    """La réponse régression contient tous les champs requis."""
+    stats = [
+        _make_stats_regression("v1", 30, [0.5] * 30),
+        _make_stats_regression("v2", 30, [2.0] * 30),
+    ]
+    result = compute_ab_significance(stats)
+    assert result is not None
+    required_keys = {
+        "metric",
+        "test",
+        "p_value",
+        "significant",
+        "confidence_level",
+        "winner",
+        "min_samples_needed",
+        "current_samples",
+    }
+    assert required_keys.issubset(result.keys())

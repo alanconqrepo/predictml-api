@@ -74,11 +74,16 @@ async def run_alert_check() -> None:
                 # Alerte drift de performance
                 perf_by_day = await DBService.get_accuracy_drift(db, model_name, start, end)
                 if len(perf_by_day) >= 2:
-                    accuracies = [d["accuracy"] for d in perf_by_day if d["matched_count"] > 0]
-                    if len(accuracies) >= 2:
-                        mid = len(accuracies) // 2
-                        avg_first = sum(accuracies[:mid]) / mid
-                        avg_second = sum(accuracies[mid:]) / (len(accuracies) - mid)
+                    use_mae = any(d.get("mae") is not None for d in perf_by_day)
+                    if use_mae:
+                        # Régression : hausse de MAE = dégradation → on inverse
+                        metrics = [-d["mae"] for d in perf_by_day if d["matched_count"] > 0 and d.get("mae") is not None]
+                    else:
+                        metrics = [d["accuracy"] for d in perf_by_day if d["matched_count"] > 0]
+                    if len(metrics) >= 2:
+                        mid = len(metrics) // 2
+                        avg_first = sum(metrics[:mid]) / mid
+                        avg_second = sum(metrics[mid:]) / (len(metrics) - mid)
                         drop = avg_first - avg_second
                         if drop >= settings.PERFORMANCE_DRIFT_ALERT_THRESHOLD:
                             logger.warning(

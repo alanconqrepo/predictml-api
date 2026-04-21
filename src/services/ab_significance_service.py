@@ -111,6 +111,41 @@ def compute_ab_significance(
             "current_samples": {va["version"]: n_a, vb["version"]: n_b},
         }
 
+    # --- Mann-Whitney U sur les résidus de prédiction (régression) ---
+    errors_a: list[float] = va.get("prediction_errors", [])
+    errors_b: list[float] = vb.get("prediction_errors", [])
+
+    if len(errors_a) >= 2 and len(errors_b) >= 2:
+        _, p_value = stats.mannwhitneyu(errors_a, errors_b, alternative="two-sided")
+        significant = bool(p_value < alpha)
+
+        mean_a = sum(errors_a) / len(errors_a)
+        mean_b = sum(errors_b) / len(errors_b)
+        std_a = math.sqrt(sum((e - mean_a) ** 2 for e in errors_a) / len(errors_a))
+        std_b = math.sqrt(sum((e - mean_b) ** 2 for e in errors_b) / len(errors_b))
+
+        d = _cohen_d(mean_a, mean_b, std_a, std_b, len(errors_a), len(errors_b))
+        min_samples = _min_samples_continuous(d, alpha=alpha)
+
+        # Vainqueur = version avec MAE plus faible
+        if mean_a < mean_b:
+            winner = va["version"]
+        elif mean_b < mean_a:
+            winner = vb["version"]
+        else:
+            winner = None
+
+        return {
+            "metric": "mae",
+            "test": "mann_whitney_u",
+            "p_value": round(p_value, 6),
+            "significant": significant,
+            "confidence_level": confidence_level,
+            "winner": winner,
+            "min_samples_needed": min_samples,
+            "current_samples": {va["version"]: len(errors_a), vb["version"]: len(errors_b)},
+        }
+
     # --- Mann-Whitney U sur les temps de réponse (métrique continue) ---
     times_a: list[float] = va.get("response_times", [])
     times_b: list[float] = vb.get("response_times", [])

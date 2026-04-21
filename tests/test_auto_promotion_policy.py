@@ -617,3 +617,73 @@ class TestEvaluateAutoPromotion:
         ):
             ok, _ = self._run(evaluate_auto_promotion(db, "m", policy))
         assert ok is True
+
+    # --- Tests régression ---
+
+    def _make_regression_pairs(self, n: int, base: float = 10.0, noise: float = 0.5):
+        """Génère n paires (prediction, observed_result) avec valeurs float (régression)."""
+        import random
+        random.seed(42)
+        pairs = []
+        for _ in range(n):
+            pred = base + random.uniform(-noise, noise)
+            obs = base + random.uniform(-noise, noise)
+            pairs.append((str(pred), str(obs), None, None))
+        return pairs
+
+    def test_regression_max_mae_ok_returns_true(self):
+        """Régression : MAE < seuil → promu."""
+        pairs = self._make_regression_pairs(10, base=10.0, noise=0.3)
+        db, pairs_mock = self._make_db(pairs)
+        # Avec noise=0.3, MAE attendu ≈ 0.3 → max_mae=1.0 largement suffisant
+        policy = {"max_mae": 1.0, "min_sample_validation": 5, "auto_promote": True}
+        with patch(
+            "src.services.auto_promotion_service.DBService.get_performance_pairs",
+            new=pairs_mock,
+        ):
+            ok, reason = self._run(evaluate_auto_promotion(db, "m", policy))
+        assert ok is True
+
+    def test_regression_max_mae_too_high_returns_false(self):
+        """Régression : MAE > seuil → non promu."""
+        pairs = self._make_regression_pairs(10, base=10.0, noise=2.0)
+        db, pairs_mock = self._make_db(pairs)
+        # Avec noise=2.0, MAE attendu ≈ 1.3 → max_mae=0.1 trop strict
+        policy = {"max_mae": 0.1, "min_sample_validation": 5, "auto_promote": True}
+        with patch(
+            "src.services.auto_promotion_service.DBService.get_performance_pairs",
+            new=pairs_mock,
+        ):
+            ok, reason = self._run(evaluate_auto_promotion(db, "m", policy))
+        assert ok is False
+        assert "mae" in reason.lower()
+
+    def test_regression_no_mae_policy_returns_true(self):
+        """Régression : sans max_mae dans la policy → promu (pas de critère à vérifier)."""
+        pairs = self._make_regression_pairs(10, base=10.0, noise=5.0)
+        db, pairs_mock = self._make_db(pairs)
+        policy = {"min_sample_validation": 5, "auto_promote": True}
+        with patch(
+            "src.services.auto_promotion_service.DBService.get_performance_pairs",
+            new=pairs_mock,
+        ):
+            ok, _ = self._run(evaluate_auto_promotion(db, "m", policy))
+        assert ok is True
+
+    def test_regression_min_accuracy_ignored_for_float_values(self):
+        """Régression : min_accuracy ignoré pour des floats → ne bloque pas la promotion.
+
+        Des floats non-entiers déclenchent la branche régression, donc min_accuracy
+        est ignoré même si défini (on n'a pas de max_mae ici).
+        """
+        pairs = self._make_regression_pairs(10, base=100.0, noise=10.0)
+        db, pairs_mock = self._make_db(pairs)
+        # min_accuracy avec valeur impossible pour régression, mais ignoré
+        policy = {"min_accuracy": 0.99, "min_sample_validation": 5, "auto_promote": True}
+        with patch(
+            "src.services.auto_promotion_service.DBService.get_performance_pairs",
+            new=pairs_mock,
+        ):
+            ok, _ = self._run(evaluate_auto_promotion(db, "m", policy))
+        # La branche régression est détectée → min_accuracy ignoré → promu
+        assert ok is True

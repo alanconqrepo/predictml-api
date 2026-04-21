@@ -70,13 +70,24 @@ def _error_rate_status(error_rate: float) -> str:
 def _performance_drift_status(perf_by_day: list[dict]) -> str:
     """
     Compare la 1re moitié de la période vs la 2e moitié.
+    Utilise MAE pour la régression, accuracy pour la classification.
     Retourne ok / warning / critical / no_data.
     """
     if len(perf_by_day) < 4:
         return "no_data"
     mid = len(perf_by_day) // 2
-    first_half = [d["accuracy"] for d in perf_by_day[:mid] if d["matched_count"] > 0]
-    second_half = [d["accuracy"] for d in perf_by_day[mid:] if d["matched_count"] > 0]
+    use_mae = any(d.get("mae") is not None for d in perf_by_day)
+    if use_mae:
+        # Pour la régression : hausse de MAE = dégradation → on inverse pour réutiliser la même logique
+        first_half = [
+            -d["mae"] for d in perf_by_day[:mid] if d["matched_count"] > 0 and d.get("mae") is not None
+        ]
+        second_half = [
+            -d["mae"] for d in perf_by_day[mid:] if d["matched_count"] > 0 and d.get("mae") is not None
+        ]
+    else:
+        first_half = [d["accuracy"] for d in perf_by_day[:mid] if d["matched_count"] > 0]
+        second_half = [d["accuracy"] for d in perf_by_day[mid:] if d["matched_count"] > 0]
     if not first_half or not second_half:
         return "no_data"
     avg_first = sum(first_half) / len(first_half)
