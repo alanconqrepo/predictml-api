@@ -242,21 +242,25 @@ async def export_observed_results(
                     header_written = True
                 for row in rows:
                     buf = io.StringIO()
-                    csv.writer(buf).writerow([
-                        row.id_obs,
-                        row.model_name,
-                        json.dumps(row.observed_result),
-                        row.date_time.isoformat() if row.date_time else None,
-                    ])
+                    csv.writer(buf).writerow(
+                        [
+                            row.id_obs,
+                            row.model_name,
+                            json.dumps(row.observed_result),
+                            row.date_time.isoformat() if row.date_time else None,
+                        ]
+                    )
                     yield buf.getvalue()
             else:
                 for row in rows:
-                    yield json.dumps({
-                        "id_obs": row.id_obs,
-                        "model_name": row.model_name,
-                        "observed_result": row.observed_result,
-                        "date_time": row.date_time.isoformat() if row.date_time else None,
-                    }) + "\n"
+                    yield json.dumps(
+                        {
+                            "id_obs": row.id_obs,
+                            "model_name": row.model_name,
+                            "observed_result": row.observed_result,
+                            "date_time": row.date_time.isoformat() if row.date_time else None,
+                        }
+                    ) + "\n"
 
             if len(rows) < _EXPORT_PAGE_SIZE:
                 break

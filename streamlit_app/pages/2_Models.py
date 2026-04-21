@@ -3,10 +3,10 @@ Gestion des modèles ML
 """
 
 import os
-import json
-import streamlit as st
+
 import pandas as pd
-from utils.auth import require_auth, get_client
+import streamlit as st
+from utils.auth import get_client, require_auth
 
 # --- Helpers historique ---
 
@@ -344,7 +344,9 @@ if is_admin:
             "activant ainsi la détection de drift."
         )
         baseline_days = st.slider("Fenêtre temporelle (jours)", 7, 180, 30, key="baseline_days")
-        baseline_dry_run = st.checkbox("dry_run (simuler sans sauvegarder)", value=True, key="baseline_dry_run")
+        baseline_dry_run = st.checkbox(
+            "dry_run (simuler sans sauvegarder)", value=True, key="baseline_dry_run"
+        )
         if st.button("Calculer", key="baseline_compute_btn", type="primary"):
             with st.spinner("Calcul en cours…"):
                 try:

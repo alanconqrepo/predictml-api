@@ -1,7 +1,9 @@
 """
 Helpers d'authentification pour les pages Streamlit
 """
+
 import streamlit as st
+
 from utils.api_client import APIClient
 
 

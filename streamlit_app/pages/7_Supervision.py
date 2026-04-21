@@ -5,13 +5,12 @@ Vue globale : état de santé de tous les modèles sur une plage calendaire.
 Vue détaillée : zoom sur un modèle (série temporelle, drift, A/B testing).
 """
 
-from datetime import datetime, timedelta, date
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-
 from utils.auth import get_client, require_auth
 
 st.set_page_config(
@@ -113,9 +112,8 @@ for m in models_data:
         {
             "Modèle": m["model_name"],
             "Versions": ", ".join(m.get("versions", [])),
-            "Mode": ", ".join(
-                sorted(set(v for v in m.get("deployment_modes", {}).values() if v))
-            ) or "—",
+            "Mode": ", ".join(sorted(set(v for v in m.get("deployment_modes", {}).values() if v)))
+            or "—",
             "Prédictions": m["total_predictions"],
             "Shadow": m["shadow_predictions"],
             "Erreurs": f"{m['error_rate'] * 100:.1f} %",
@@ -165,7 +163,9 @@ fig_err = px.bar(
     color_continuous_scale=["#27ae60", "#e67e22", "#c0392b"],
 )
 fig_err.add_hline(y=5, line_dash="dash", line_color="#e67e22", annotation_text="Seuil warning 5%")
-fig_err.add_hline(y=10, line_dash="dash", line_color="#c0392b", annotation_text="Seuil critique 10%")
+fig_err.add_hline(
+    y=10, line_dash="dash", line_color="#c0392b", annotation_text="Seuil critique 10%"
+)
 fig_err.update_layout(showlegend=False, coloraxis_showscale=False)
 col_err.plotly_chart(fig_err, use_container_width=True)
 
@@ -183,9 +183,7 @@ if not selected_model:
 
 with st.spinner(f"Chargement du détail pour {selected_model}…"):
     try:
-        detail = client.get_monitoring_model(
-            name=selected_model, start=start_iso, end=end_iso
-        )
+        detail = client.get_monitoring_model(name=selected_model, start=start_iso, end=end_iso)
     except Exception as exc:
         st.error(f"Impossible de charger le détail : {exc}")
         st.stop()
@@ -209,7 +207,9 @@ if per_version:
                 "Prédictions": v["total_predictions"],
                 "Shadow": v["shadow_predictions"],
                 "Erreurs": f"{v['error_rate'] * 100:.1f} %",
-                "Latence moy.": f"{v['avg_latency_ms'] or '—'} ms" if v.get("avg_latency_ms") else "—",
+                "Latence moy.": (
+                    f"{v['avg_latency_ms'] or '—'} ms" if v.get("avg_latency_ms") else "—"
+                ),
                 "p50": f"{v['p50_latency_ms']} ms" if v.get("p50_latency_ms") else "—",
                 "p95": f"{v['p95_latency_ms']} ms" if v.get("p95_latency_ms") else "—",
             }
@@ -289,12 +289,8 @@ if timeseries:
         labels={"date": "Date", "error_rate": "Taux d'erreur"},
         color_discrete_sequence=["#e74c3c"],
     )
-    fig_err_ts.add_hline(
-        y=0.05, line_dash="dash", line_color="#e67e22", annotation_text="5%"
-    )
-    fig_err_ts.add_hline(
-        y=0.10, line_dash="dash", line_color="#c0392b", annotation_text="10%"
-    )
+    fig_err_ts.add_hline(y=0.05, line_dash="dash", line_color="#e67e22", annotation_text="5%")
+    fig_err_ts.add_hline(y=0.10, line_dash="dash", line_color="#c0392b", annotation_text="10%")
     fig_err_ts.update_yaxes(tickformat=".1%")
     st.plotly_chart(fig_err_ts, use_container_width=True)
 
@@ -349,9 +345,9 @@ with col_perf:
                 avg2 = df_perf["accuracy"].iloc[mid:].mean()
                 drop = avg1 - avg2
                 drift_label = (
-                    "🔴 Critique" if drop >= 0.10
-                    else "🟡 Attention" if drop >= 0.05
-                    else "🟢 Stable"
+                    "🔴 Critique"
+                    if drop >= 0.10
+                    else "🟡 Attention" if drop >= 0.05 else "🟢 Stable"
                 )
                 st.metric(
                     "Tendance performance",
@@ -400,9 +396,7 @@ with col_feat:
                         else "—"
                     ),
                     "PSI": (
-                        round(feat_data["psi"], 4)
-                        if feat_data.get("psi") is not None
-                        else "—"
+                        round(feat_data["psi"], 4) if feat_data.get("psi") is not None else "—"
                     ),
                     "N prod.": feat_data.get("production_count", 0),
                 }
@@ -534,7 +528,11 @@ if calib:
             f"(échantillon actuel : {calib.get('sample_size', 0)} paires)."
         )
     else:
-        STATUS_CALIB = {"ok": "🟢 OK", "overconfident": "🟡 Sur-confiant", "underconfident": "🔴 Sous-confiant"}
+        STATUS_CALIB = {
+            "ok": "🟢 OK",
+            "overconfident": "🟡 Sur-confiant",
+            "underconfident": "🔴 Sous-confiant",
+        }
         label_status = STATUS_CALIB.get(calib_status, calib_status)
 
         cc1, cc2, cc3 = st.columns(3)
