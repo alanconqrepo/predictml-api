@@ -164,6 +164,9 @@ with st.expander("📋 Détails complets", expanded=True):
         st.markdown(f"**Algorithme :** {selected.get('algorithm') or '—'}")
         st.markdown(f"**Dataset d'entraînement :** {selected.get('training_dataset') or '—'}")
         st.markdown(f"**Entraîné par :** {selected.get('trained_by') or '—'}")
+        parent_v = selected.get("parent_version")
+        if parent_v:
+            st.markdown(f"**Dérivé de :** `v{parent_v}`")
         tags = selected.get("tags")
         st.markdown(f"**Tags :** {', '.join(tags) if tags else '—'}")
         webhook = selected.get("webhook_url")

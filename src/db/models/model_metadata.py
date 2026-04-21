@@ -66,6 +66,9 @@ class ModelMetadata(Base):
     # Planification du ré-entraînement automatique
     retrain_schedule = Column(JSON, nullable=True)
 
+    # Traçabilité de la lignée des modèles
+    parent_version = Column(String(50), nullable=True)  # Version source lors d'un retrain ou upload dérivé
+
     # Créateur
     user_id_creator = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     creator = relationship("User", foreign_keys=[user_id_creator], back_populates="created_models")

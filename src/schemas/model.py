@@ -76,6 +76,7 @@ class ModelCreateResponse(BaseModel):
     train_script_object_key: Optional[str] = None
     promotion_policy: Optional[Dict[str, Any]] = None
     retrain_schedule: Optional[Dict[str, Any]] = None
+    parent_version: Optional[str] = None
     created_at: datetime
     user_id_creator: Optional[int]
     creator_username: Optional[str] = None
@@ -133,6 +134,7 @@ class ModelGetResponse(BaseModel):
     traffic_weight: Optional[float] = None
     deployment_mode: Optional[str] = None
     promotion_policy: Optional[Dict[str, Any]] = None
+    parent_version: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime]
     deprecated_at: Optional[datetime]

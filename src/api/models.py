@@ -976,6 +976,7 @@ async def retrain_model(
         user_id_creator=user.id,
         is_active=True,
         is_production=False,
+        parent_version=version,
     )
     db.add(new_metadata)
     await db.flush()
@@ -1588,6 +1589,10 @@ async def create_model(
             "et contenir un appel pickle.dump/joblib.dump/save_model."
         ),
     ),
+    parent_version: Optional[str] = Form(
+        None,
+        description="Version parente dont ce modèle est dérivé (traçabilité de lignée).",
+    ),
     user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1709,6 +1714,7 @@ async def create_model(
         user_id_creator=user.id,
         is_active=True,
         is_production=False,
+        parent_version=parent_version,
     )
     db.add(metadata)
     await db.flush()  # obtenir l'id avant le snapshot
