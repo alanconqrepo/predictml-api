@@ -792,6 +792,38 @@ class DBService:
         return result.scalars().all(), total
 
     @staticmethod
+    async def get_observed_results_for_export(
+        db: AsyncSession,
+        model_name: Optional[str],
+        start: datetime,
+        end: datetime,
+        limit: int = 500,
+        cursor: Optional[int] = None,
+    ) -> List[ObservedResult]:
+        """
+        Récupère une page de résultats observés pour l'export streaming (cursor keyset DESC).
+        """
+        filters = [
+            ObservedResult.date_time >= start,
+            ObservedResult.date_time <= end,
+        ]
+        if model_name:
+            filters.append(ObservedResult.model_name == model_name)
+        if cursor is not None:
+            filters.append(ObservedResult.id < cursor)
+
+        query = (
+            select(ObservedResult)
+            .where(and_(*filters))
+            .options(selectinload(ObservedResult.user))
+            .order_by(ObservedResult.id.desc())
+            .limit(limit)
+        )
+
+        result = await db.execute(query)
+        return list(result.scalars().all())
+
+    @staticmethod
     async def get_observed_results_stats(
         db: AsyncSession,
         model_name: Optional[str] = None,

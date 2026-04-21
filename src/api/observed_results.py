@@ -4,13 +4,15 @@ Endpoints pour les résultats observés
 
 import csv
 import io
+import json
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.security import verify_token
+from src.core.security import require_admin, verify_token
 from src.db.database import get_db
 from src.db.models import User
 from src.schemas.observed_result import (
@@ -167,6 +169,105 @@ async def upload_observed_results_csv(
         skipped_rows=len(parse_errors),
         parse_errors=parse_errors,
         filename=file.filename or "",
+    )
+
+
+_EXPORT_PAGE_SIZE = 500
+
+
+@router.get("/observed-results/export")
+async def export_observed_results(
+    model_name: Optional[str] = Query(None, description="Filtrer par nom de modèle (optionnel)"),
+    start: datetime = Query(..., description="Début de la période (ISO 8601)"),
+    end: datetime = Query(..., description="Fin de la période (ISO 8601)"),
+    export_format: str = Query(
+        "csv",
+        alias="format",
+        description="Format d'export : csv ou jsonl (défaut : csv)",
+    ),
+    _auth: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Export bulk des résultats observés au format CSV ou JSONL via streaming par curseur.
+
+    - **model_name** : filtrer sur un modèle (optionnel — tous les modèles si absent)
+    - **start** / **end** : plage datetime — obligatoire
+    - **format** : `csv` (défaut) ou `jsonl`
+
+    Retourne un fichier en téléchargement direct (Content-Disposition: attachment).
+
+    Admin uniquement.
+    """
+    if start > end:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="'start' doit être antérieur à 'end'.",
+        )
+    if export_format not in ("csv", "jsonl"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Le paramètre 'format' doit être 'csv' ou 'jsonl'.",
+        )
+
+    fmt = export_format
+    csv_cols = ["id_obs", "model_name", "observed_result", "date_time"]
+
+    async def _generate():
+        cursor: Optional[int] = None
+        header_written = False
+
+        while True:
+            rows = await DBService.get_observed_results_for_export(
+                db=db,
+                model_name=model_name,
+                start=start,
+                end=end,
+                limit=_EXPORT_PAGE_SIZE,
+                cursor=cursor,
+            )
+
+            if not rows:
+                if fmt == "csv" and not header_written:
+                    buf = io.StringIO()
+                    csv.writer(buf).writerow(csv_cols)
+                    yield buf.getvalue()
+                break
+
+            if fmt == "csv":
+                if not header_written:
+                    buf = io.StringIO()
+                    csv.writer(buf).writerow(csv_cols)
+                    yield buf.getvalue()
+                    header_written = True
+                for row in rows:
+                    buf = io.StringIO()
+                    csv.writer(buf).writerow([
+                        row.id_obs,
+                        row.model_name,
+                        json.dumps(row.observed_result),
+                        row.date_time.isoformat() if row.date_time else None,
+                    ])
+                    yield buf.getvalue()
+            else:
+                for row in rows:
+                    yield json.dumps({
+                        "id_obs": row.id_obs,
+                        "model_name": row.model_name,
+                        "observed_result": row.observed_result,
+                        "date_time": row.date_time.isoformat() if row.date_time else None,
+                    }) + "\n"
+
+            if len(rows) < _EXPORT_PAGE_SIZE:
+                break
+            cursor = rows[-1].id
+
+    media_type = "text/csv" if fmt == "csv" else "application/x-ndjson"
+    filename = f"observed_results_export.{fmt}"
+    return StreamingResponse(
+        _generate(),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
