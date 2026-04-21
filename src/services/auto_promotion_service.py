@@ -15,6 +15,22 @@ from src.db.models import Prediction
 from src.services.db_service import DBService
 
 
+def _is_regression_pairs(pairs: list) -> bool:
+    """Retourne True si les paires semblent provenir d'un modèle de régression.
+
+    Heuristique : au moins une valeur (prédiction ou observé) est un float non-entier.
+    """
+    for pred, obs, _, _ in pairs:
+        for val in (pred, obs):
+            try:
+                f = float(val)
+                if f != int(f):
+                    return True
+            except (ValueError, TypeError):
+                pass
+    return False
+
+
 async def evaluate_auto_promotion(
     db: AsyncSession,
     model_name: str,
@@ -29,13 +45,14 @@ async def evaluate_auto_promotion(
     Logique :
     1. Récupère toutes les paires (prediction, observed_result) pour le modèle.
     2. Si le nombre de paires < ``min_sample_validation`` → non promu.
-    3. Si ``min_accuracy`` est défini : calcule l'accuracy sur les
-       ``min_sample_validation`` paires les plus récentes → non promu si
-       accuracy < seuil.
+    3. Détecte automatiquement le type (classification / régression) :
+       - Régression : si ``max_mae`` est défini, vérifie la MAE sur les N dernières paires.
+       - Classification : si ``min_accuracy`` est défini, vérifie l'accuracy (égalité exacte).
     4. Si ``max_latency_p95_ms`` est défini : calcule le P95 des temps de
        réponse des prédictions réussies → non promu si P95 > seuil.
     """
     min_accuracy: Optional[float] = policy.get("min_accuracy")
+    max_mae: Optional[float] = policy.get("max_mae")
     max_latency_p95_ms: Optional[float] = policy.get("max_latency_p95_ms")
     min_sample_validation: int = int(policy.get("min_sample_validation", 10))
 
@@ -52,16 +69,30 @@ async def evaluate_auto_promotion(
             ),
         )
 
-    # --- Vérification de l'accuracy ---
-    if min_accuracy is not None:
-        recent = pairs[-min_sample_validation:]
-        correct = sum(1 for pred, obs, _, _ in recent if str(pred) == str(obs))
-        accuracy = correct / len(recent)
-        if accuracy < min_accuracy:
-            return (
-                False,
-                (f"Précision insuffisante : {accuracy:.4f} " f"< {min_accuracy:.4f} requis."),
-            )
+    recent = pairs[-min_sample_validation:]
+    is_regression = _is_regression_pairs(recent)
+
+    # --- Vérification de la métrique de performance ---
+    if is_regression:
+        if max_mae is not None:
+            try:
+                mae = sum(abs(float(p) - float(o)) for p, o, _, _ in recent) / len(recent)
+            except (ValueError, TypeError):
+                mae = None
+            if mae is not None and mae > max_mae:
+                return (
+                    False,
+                    (f"MAE trop élevée : {mae:.4f} > {max_mae:.4f} requis."),
+                )
+    else:
+        if min_accuracy is not None:
+            correct = sum(1 for pred, obs, _, _ in recent if str(pred) == str(obs))
+            accuracy = correct / len(recent)
+            if accuracy < min_accuracy:
+                return (
+                    False,
+                    (f"Précision insuffisante : {accuracy:.4f} " f"< {min_accuracy:.4f} requis."),
+                )
 
     # --- Vérification de la latence P95 ---
     if max_latency_p95_ms is not None:

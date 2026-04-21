@@ -194,6 +194,55 @@ def test_performance_drift_status_no_matched_count():
     assert _performance_drift_status(data) == "no_data"
 
 
+# --- Tests drift régression (MAE) ---
+
+
+def test_performance_drift_status_regression_mae_stable():
+    """Régression : MAE stable → ok."""
+    data = [{"accuracy": 0.0, "mae": 1.0, "matched_count": 10}] * 8
+    assert _performance_drift_status(data) == "ok"
+
+
+def test_performance_drift_status_regression_mae_critical():
+    """Régression : MAE augmente de plus de 10 % → critical."""
+    first_half = [{"accuracy": 0.0, "mae": 1.0, "matched_count": 10}] * 4
+    second_half = [{"accuracy": 0.0, "mae": 1.12, "matched_count": 10}] * 4
+    # drop = -(-1.0) - (-(-1.12)) = 1.0 - 1.12 = -0.12 en termes de -MAE
+    # avg_first = -1.0, avg_second = -1.12 → drop = -1.0 - (-1.12) = 0.12 > 0.10
+    assert _performance_drift_status(first_half + second_half) == "critical"
+
+
+def test_performance_drift_status_regression_mae_warning():
+    """Régression : MAE augmente entre 5 % et 10 % → warning."""
+    first_half = [{"accuracy": 0.0, "mae": 1.0, "matched_count": 10}] * 4
+    second_half = [{"accuracy": 0.0, "mae": 1.06, "matched_count": 10}] * 4
+    result = _performance_drift_status(first_half + second_half)
+    assert result in ("warning", "critical")
+
+
+def test_performance_drift_status_regression_mae_improves():
+    """Régression : MAE diminue → ok (amélioration)."""
+    first_half = [{"accuracy": 0.0, "mae": 2.0, "matched_count": 10}] * 4
+    second_half = [{"accuracy": 0.0, "mae": 1.0, "matched_count": 10}] * 4
+    assert _performance_drift_status(first_half + second_half) == "ok"
+
+
+def test_performance_drift_status_regression_mixed_mae_none():
+    """Régression : certains points ont mae=None → ignorés dans le calcul."""
+    data = [
+        {"accuracy": 0.0, "mae": 1.0, "matched_count": 5},
+        {"accuracy": 0.0, "mae": 1.0, "matched_count": 5},
+        {"accuracy": 0.0, "mae": None, "matched_count": 0},
+        {"accuracy": 0.0, "mae": 1.0, "matched_count": 5},
+        {"accuracy": 0.0, "mae": 1.0, "matched_count": 5},
+        {"accuracy": 0.0, "mae": None, "matched_count": 0},
+        {"accuracy": 0.0, "mae": 1.0, "matched_count": 5},
+        {"accuracy": 0.0, "mae": 1.0, "matched_count": 5},
+    ]
+    result = _performance_drift_status(data)
+    assert result in ("ok", "no_data")
+
+
 # ---------------------------------------------------------------------------
 # GET /monitoring/overview
 # ---------------------------------------------------------------------------

@@ -354,14 +354,32 @@ class DBService:
             day = str(row.day)
             daily.setdefault(day, []).append((str(row.prediction_result), str(row.observed_result)))
 
-        return [
-            {
+        def _is_float_val(v: str) -> bool:
+            try:
+                f = float(v)
+                return f != int(f)
+            except (ValueError, TypeError):
+                return False
+
+        result = []
+        for day, items in sorted(daily.items()):
+            is_regression = any(_is_float_val(p) or _is_float_val(o) for p, o in items)
+            entry: dict = {
                 "date": day,
                 "matched_count": len(items),
                 "accuracy": round(sum(p == o for p, o in items) / len(items), 4),
             }
-            for day, items in sorted(daily.items())
-        ]
+            if is_regression:
+                try:
+                    entry["mae"] = round(
+                        sum(abs(float(p) - float(o)) for p, o in items) / len(items), 4
+                    )
+                except (ValueError, TypeError):
+                    entry["mae"] = None
+            else:
+                entry["mae"] = None
+            result.append(entry)
+        return result
 
     @staticmethod
     async def get_confidence_trend(

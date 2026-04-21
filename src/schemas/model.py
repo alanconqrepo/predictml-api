@@ -308,6 +308,7 @@ class PromotionPolicy(BaseModel):
     """Politique d'auto-promotion appliquée après un ré-entraînement"""
 
     min_accuracy: Optional[float] = Field(None, ge=0.0, le=1.0)
+    max_mae: Optional[float] = Field(None, gt=0.0)
     max_latency_p95_ms: Optional[float] = Field(None, gt=0.0)
     min_sample_validation: int = Field(10, ge=1)
     auto_promote: bool = False

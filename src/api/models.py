@@ -1220,6 +1220,18 @@ async def get_ab_comparison(
     raw_stats = await DBService.get_ab_comparison_stats(db, name, days=days)
     agreement_by_version = await DBService.get_shadow_agreement_rate(db, name, days=days)
 
+    # Enrichir chaque version avec les erreurs absolues de prédiction (pour régression)
+    def _try_abs_error(pred, obs) -> Optional[float]:
+        try:
+            return abs(float(pred) - float(obs))
+        except (ValueError, TypeError):
+            return None
+
+    for s in raw_stats:
+        pairs = await DBService.get_performance_pairs(db, name, model_version=s["version"])
+        errors = [e for p, o, _, _ in pairs if (e := _try_abs_error(p, o)) is not None]
+        s["prediction_errors"] = errors
+
     versions_out = []
     for s in raw_stats:
         ver = s["version"]
