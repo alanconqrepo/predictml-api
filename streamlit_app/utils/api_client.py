@@ -149,6 +149,12 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def warmup_model(self, name: str, version: str) -> dict:
+        """Préchauffe le cache Redis pour un modèle (admin requis)."""
+        r = self._post(f"/models/{name}/{version}/warmup")
+        r.raise_for_status()
+        return r.json()
+
     def compute_baseline(
         self, name: str, version: str, days: int = 30, dry_run: bool = True
     ) -> dict:

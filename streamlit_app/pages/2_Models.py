@@ -42,6 +42,24 @@ def fetch_models(api_url, token):
     return c.list_models()
 
 
+@st.cache_data(ttl=10, show_spinner=False)
+def fetch_cached_models(api_url, token):
+    """Retourne la liste des clés 'name:version' actuellement en cache Redis."""
+    try:
+        import requests
+
+        r = requests.get(
+            f"{api_url}/models/cached",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            return r.json().get("cached_models", [])
+    except Exception:
+        pass
+    return []
+
+
 def reload():
     st.cache_data.clear()
     st.rerun()
@@ -52,6 +70,12 @@ try:
 except Exception as e:
     st.error(f"Impossible de charger les modèles : {e}")
     st.stop()
+
+cached_model_keys: list = []
+if is_admin:
+    cached_model_keys = fetch_cached_models(
+        st.session_state.get("api_url"), st.session_state.get("api_token")
+    )
 
 if not models:
     st.info("Aucun modèle disponible.")
@@ -95,6 +119,7 @@ for m in models:
     else:
         statut = "⚫ Inactif"
 
+    in_cache = f"{m.get('name')}:{m.get('version')}" in cached_model_keys
     rows.append(
         {
             "Nom": m.get("name", ""),
@@ -104,6 +129,7 @@ for m in models:
             "Accuracy": f"{m['accuracy']:.3f}" if m.get("accuracy") is not None else "—",
             "F1": f"{m['f1_score']:.3f}" if m.get("f1_score") is not None else "—",
             "Baseline": "✅ Baseline" if m.get("feature_baseline") else "⚠️ No baseline",
+            "Cache": "🔥 En cache" if in_cache else "❄️ Non chargé",
             "Statut": statut,
             "Créateur": m.get("creator_username") or "—",
             "Créé le": (
@@ -191,6 +217,34 @@ if is_admin:
                 st.error(f"Erreur : {e}")
     else:
         col_p.info("🟢 Déjà en production")
+
+    # Préchauffage du cache
+    selected_cache_key = f"{selected['name']}:{selected['version']}"
+    is_selected_cached = selected_cache_key in cached_model_keys
+    col_w1, col_w2 = st.columns([1, 3])
+    if is_selected_cached:
+        col_w1.success("🔥 En cache")
+    else:
+        col_w1.warning("❄️ Non chargé")
+    if not is_selected_cached:
+        if col_w2.button(
+            "🔥 Préchauffer le cache",
+            use_container_width=True,
+            key="warmup_btn",
+            help="Charge le modèle en mémoire pour éliminer la latence de cold-start",
+        ):
+            with st.spinner("Chargement du modèle en cache…"):
+                try:
+                    result = client.warmup_model(selected["name"], selected["version"])
+                    st.success(
+                        f"Modèle chargé en {result['load_time_ms']:.0f} ms "
+                        f"— clé cache : `{result['cache_key']}`"
+                    )
+                    reload()
+                except Exception as e:
+                    st.error(f"Erreur lors du préchauffage : {e}")
+    else:
+        col_w2.info("Le modèle est déjà en cache — aucun préchauffage nécessaire.")
 
     # Supprimer
     if col_d.button("🗑️ Supprimer cette version", use_container_width=True, type="secondary"):

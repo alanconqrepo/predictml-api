@@ -490,3 +490,18 @@ class ComputeBaselineResponse(BaseModel):
     predictions_used: int
     dry_run: bool
     baseline: Dict[str, FeatureStats]
+
+
+# ---------------------------------------------------------------------------
+# Préchauffage du cache (warmup)
+# ---------------------------------------------------------------------------
+
+
+class WarmupResponse(BaseModel):
+    """Réponse de POST /models/{name}/{version}/warmup"""
+
+    model_name: str
+    version: str
+    already_cached: bool
+    load_time_ms: float
+    cache_key: str
