@@ -842,7 +842,9 @@ class DBService:
         oldest_label = dates_row[0]
         newest_label = dates_row[1]
 
-        coverage_rate = round(labeled_count / total_predictions, 3) if total_predictions > 0 else 0.0
+        coverage_rate = (
+            round(labeled_count / total_predictions, 3) if total_predictions > 0 else 0.0
+        )
 
         if model_name:
             pred_by_version = (
@@ -875,7 +877,11 @@ class DBService:
                         "version": r.model_version or "unknown",
                         "predictions": r.cnt,
                         "labeled": labeled_map.get(r.model_version, 0),
-                        "coverage": round(labeled_map.get(r.model_version, 0) / r.cnt, 3) if r.cnt > 0 else 0.0,
+                        "coverage": (
+                            round(labeled_map.get(r.model_version, 0) / r.cnt, 3)
+                            if r.cnt > 0
+                            else 0.0
+                        ),
                     }
                     for r in pred_by_version
                 ],
@@ -896,8 +902,9 @@ class DBService:
         else:
             pred_by_model = (
                 await db.execute(
-                    select(Prediction.model_name, func.count(Prediction.id).label("cnt"))
-                    .group_by(Prediction.model_name)
+                    select(Prediction.model_name, func.count(Prediction.id).label("cnt")).group_by(
+                        Prediction.model_name
+                    )
                 )
             ).all()
 
@@ -922,7 +929,11 @@ class DBService:
                         "model_name": r.model_name,
                         "predictions": r.cnt,
                         "labeled": labeled_map_model.get(r.model_name, 0),
-                        "coverage": round(labeled_map_model.get(r.model_name, 0) / r.cnt, 3) if r.cnt > 0 else 0.0,
+                        "coverage": (
+                            round(labeled_map_model.get(r.model_name, 0) / r.cnt, 3)
+                            if r.cnt > 0
+                            else 0.0
+                        ),
                     }
                     for r in pred_by_model
                 ],
