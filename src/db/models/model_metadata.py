@@ -67,7 +67,9 @@ class ModelMetadata(Base):
     retrain_schedule = Column(JSON, nullable=True)
 
     # Traçabilité de la lignée des modèles
-    parent_version = Column(String(50), nullable=True)  # Version source lors d'un retrain ou upload dérivé
+    parent_version = Column(
+        String(50), nullable=True
+    )  # Version source lors d'un retrain ou upload dérivé
 
     # Créateur
     user_id_creator = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
