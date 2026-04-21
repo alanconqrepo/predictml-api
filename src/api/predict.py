@@ -16,9 +16,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import check_prediction_rate_limit, require_admin, verify_token
-from src.db.models.user import UserRole
 from src.db.database import AsyncSessionLocal, get_db
 from src.db.models import Prediction, User
+from src.db.models.user import UserRole
 from src.schemas.prediction import (
     BatchPredictionInput,
     BatchPredictionOutput,
