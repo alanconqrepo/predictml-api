@@ -8,6 +8,7 @@ import json
 import math
 import os
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional
 
@@ -65,6 +66,7 @@ from src.schemas.model import (
     RollbackResponse,
     ScheduleUpdateResponse,
     ValidateInputResponse,
+    WarmupResponse,
 )
 from src.services import drift_service
 from src.services.ab_significance_service import compute_ab_significance
@@ -1955,6 +1957,55 @@ async def validate_model_input(
         errors=errors,
         warnings=warnings,
         expected_features=sorted(expected_features),
+    )
+
+
+@router.post("/models/{name}/{version}/warmup", response_model=WarmupResponse)
+async def warmup_model(
+    name: str,
+    version: str,
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Préchauffe le cache Redis pour un modèle en le chargeant proactivement.
+
+    Élimine la latence de cold-start (download MinIO + désérialisation pickle) sur
+    la première prédiction après un déploiement ou un redémarrage, évitant ainsi
+    une fausse asymétrie de latence dans les comparaisons A/B.
+
+    Retourne `already_cached: true` si le modèle était déjà en mémoire cache.
+    """
+    cache_key = f"{name}:{version}"
+    cached_before = await model_service.get_cached_models()
+    already_cached = cache_key in cached_before
+
+    t0 = time.monotonic()
+    try:
+        await model_service.load_model(db, name, version)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erreur lors du préchauffage du modèle '{name}' v'{version}': {str(e)}",
+        )
+    load_time_ms = (time.monotonic() - t0) * 1000
+
+    logger.info(
+        "Modèle préchauffé",
+        model_name=name,
+        version=version,
+        already_cached=already_cached,
+        load_time_ms=round(load_time_ms, 1),
+    )
+
+    return WarmupResponse(
+        model_name=name,
+        version=version,
+        already_cached=already_cached,
+        load_time_ms=round(load_time_ms, 1),
+        cache_key=cache_key,
     )
 
 
