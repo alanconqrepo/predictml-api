@@ -1,15 +1,17 @@
 """
 Service de détection de data drift.
 
-Calcule deux métriques par feature numérique :
+Calcule trois métriques par feature numérique :
 - Z-score : écart normalisé entre la moyenne de production et la baseline
 - PSI (Population Stability Index) : divergence de distribution via bins normaux
+- Null rate : taux de valeurs nulles/manquantes en production vs baseline
 
 Seuils de statut :
-  Z-score : ok < 2 | warning 2–3 | critical ≥ 3
-  PSI     : ok < 0.1 | warning 0.1–0.2 | critical ≥ 0.2
+  Z-score    : ok < 2 | warning 2–3 | critical ≥ 3
+  PSI        : ok < 0.1 | warning 0.1–0.2 | critical ≥ 0.2
+  Null rate  : ok si écart absolu < 5 pts | warning 5–15 pts | critical > 15 pts ou prod > 30 %
 
-Statut final = pire des deux statuts.
+Statut final = pire des trois statuts.
 """
 
 import math
@@ -38,6 +40,17 @@ def _status_from_psi(psi: float) -> str:
     if psi < 0.2:
         return "warning"
     return "critical"
+
+
+def _status_from_null_rate(prod_null_rate: float, baseline_null_rate: float) -> str:
+    if prod_null_rate > 0.30:
+        return "critical"
+    diff = prod_null_rate - baseline_null_rate
+    if diff > 0.15:
+        return "critical"
+    if diff >= 0.05:
+        return "warning"
+    return "ok"
 
 
 def _worst_status(*statuses: str) -> str:
@@ -94,8 +107,8 @@ def compute_feature_drift(
     Compare les stats de production au baseline par feature.
 
     Args:
-        baseline: {feature: {mean, std, min, max}} — issu de model_metadata.feature_baseline
-        production_stats: {feature: {mean, std, min, max, count, values}} — calculé depuis les prédictions
+        baseline: {feature: {mean, std, min, max, null_rate?}} — issu de model_metadata.feature_baseline
+        production_stats: {feature: {mean, std, min, max, count, values, null_rate?}} — calculé depuis les prédictions
         min_count: nombre minimum de prédictions pour calculer le drift
 
     Returns:
@@ -112,6 +125,7 @@ def compute_feature_drift(
         prod_count = int(ps.get("count", 0))
         prod_mean: Optional[float] = ps.get("mean")
         prod_std: Optional[float] = ps.get("std")
+        null_rate_prod: Optional[float] = ps.get("null_rate")
 
         # Pas de baseline pour cette feature
         if bl is None:
@@ -119,6 +133,7 @@ def compute_feature_drift(
                 production_mean=round(prod_mean, 6) if prod_mean is not None else None,
                 production_std=round(prod_std, 6) if prod_std is not None else None,
                 production_count=prod_count,
+                null_rate_production=round(null_rate_prod, 6) if null_rate_prod is not None else None,
                 drift_status="no_baseline",
             )
             continue
@@ -127,6 +142,12 @@ def compute_feature_drift(
         bl_std = float(bl.get("std", 0))
         bl_min = float(bl.get("min", 0))
         bl_max = float(bl.get("max", 0))
+        null_rate_base: Optional[float] = bl.get("null_rate")
+
+        # Null rate status (computed independently of distribution metrics)
+        null_rate_status: Optional[str] = None
+        if null_rate_prod is not None and null_rate_base is not None:
+            null_rate_status = _status_from_null_rate(null_rate_prod, null_rate_base)
 
         # Données de production insuffisantes
         if prod_count < min_count or prod_mean is None:
@@ -138,6 +159,9 @@ def compute_feature_drift(
                 production_mean=round(prod_mean, 6) if prod_mean is not None else None,
                 production_std=round(prod_std, 6) if prod_std is not None else None,
                 production_count=prod_count,
+                null_rate_production=round(null_rate_prod, 6) if null_rate_prod is not None else None,
+                null_rate_baseline=round(null_rate_base, 6) if null_rate_base is not None else None,
+                null_rate_status=null_rate_status,
                 drift_status="insufficient_data",
             )
             continue
@@ -159,6 +183,11 @@ def compute_feature_drift(
             psi = _compute_psi(arr, bl_mean, bl_std, bl_min, bl_max)
             psi_status = _status_from_psi(psi)
 
+        # Statut final : pire des trois dimensions
+        candidate_statuses = [z_status, psi_status]
+        if null_rate_status is not None:
+            candidate_statuses.append(null_rate_status)
+
         results[feature] = FeatureDriftResult(
             baseline_mean=round(bl_mean, 6),
             baseline_std=round(bl_std, 6),
@@ -169,14 +198,20 @@ def compute_feature_drift(
             production_count=prod_count,
             z_score=z_score,
             psi=round(psi, 6) if psi is not None else None,
-            drift_status=_worst_status(z_status, psi_status),
+            null_rate_production=round(null_rate_prod, 6) if null_rate_prod is not None else None,
+            null_rate_baseline=round(null_rate_base, 6) if null_rate_base is not None else None,
+            null_rate_status=null_rate_status,
+            drift_status=_worst_status(*candidate_statuses),
         )
 
     return results
 
 
 def summarize_drift(features: Dict[str, FeatureDriftResult], baseline_available: bool) -> str:
-    """Retourne le statut global le plus défavorable parmi toutes les features."""
+    """Retourne le statut global le plus défavorable parmi toutes les features.
+
+    Prend en compte drift_status (Z-score + PSI) et null_rate_status comme quatrième dimension.
+    """
     if not baseline_available:
         return "no_baseline"
 
@@ -184,15 +219,19 @@ def summarize_drift(features: Dict[str, FeatureDriftResult], baseline_available:
     if not statuses:
         return "insufficient_data"
 
-    if all(s == "insufficient_data" for s in statuses):
-        return "insufficient_data"
-
     ranked = [s for s in statuses if s in ("ok", "warning", "critical")]
-    if not ranked:
+    # null_rate_status des features à données insuffisantes contribue aussi au résumé
+    null_ranked = [
+        f.null_rate_status for f in features.values()
+        if f.null_rate_status in ("ok", "warning", "critical")
+    ]
+    all_ranked = ranked + null_ranked
+
+    if not all_ranked:
         return "insufficient_data"
 
     order = {"ok": 0, "warning": 1, "critical": 2}
-    return max(ranked, key=lambda s: order[s])
+    return max(all_ranked, key=lambda s: order[s])
 
 
 def is_nan_safe(value: float) -> bool:

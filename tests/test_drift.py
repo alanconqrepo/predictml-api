@@ -15,7 +15,11 @@ from fastapi.testclient import TestClient
 
 from src.main import app
 from src.core.security import verify_token
-from src.services.drift_service import compute_feature_drift, summarize_drift
+from src.services.drift_service import (
+    _status_from_null_rate,
+    compute_feature_drift,
+    summarize_drift,
+)
 from src.schemas.model import FeatureDriftResult
 
 # Utilisateur admin fictif injecté via dependency_overrides
@@ -330,5 +334,195 @@ def test_drift_endpoint_structure():
 
     feat = data["features"]["f1"]
     for field in ("baseline_mean", "baseline_std", "production_mean", "production_count",
-                  "z_score", "drift_status"):
+                  "z_score", "drift_status", "null_rate_production", "null_rate_baseline",
+                  "null_rate_status"):
         assert field in feat, f"Champ feature manquant : {field}"
+
+
+# ---------------------------------------------------------------------------
+# Tests null rate — _status_from_null_rate
+# ---------------------------------------------------------------------------
+
+
+def test_null_rate_status_ok_small_diff():
+    """Écart < 5 pts → ok."""
+    assert _status_from_null_rate(0.04, 0.0) == "ok"
+
+
+def test_null_rate_status_ok_zero():
+    """Pas de nulls → ok."""
+    assert _status_from_null_rate(0.0, 0.0) == "ok"
+
+
+def test_null_rate_status_warning():
+    """Écart entre 5 et 15 pts → warning."""
+    assert _status_from_null_rate(0.10, 0.0) == "warning"
+    assert _status_from_null_rate(0.20, 0.07) == "warning"
+
+
+def test_null_rate_status_critical_diff():
+    """Écart > 15 pts → critical."""
+    assert _status_from_null_rate(0.20, 0.0) == "critical"
+
+
+def test_null_rate_status_critical_threshold():
+    """Taux de null > 30 % en production → critical même si baseline élevé."""
+    assert _status_from_null_rate(0.35, 0.30) == "critical"
+
+
+def test_null_rate_status_boundary_5pts():
+    """5 pts d'écart → warning (diff >= 0.05)."""
+    assert _status_from_null_rate(0.10, 0.05) == "warning"  # diff = 0.05
+    assert _status_from_null_rate(0.08, 0.02) == "warning"  # diff = 0.06
+
+
+def test_null_rate_status_boundary_15pts():
+    """Exactement 15 pts d'écart → warning (critique seulement au-delà de 15 pts)."""
+    assert _status_from_null_rate(0.16, 0.01) == "warning"  # diff = 0.15, pas > 0.15
+    assert _status_from_null_rate(0.17, 0.01) == "critical"  # diff = 0.16 > 0.15
+
+
+# ---------------------------------------------------------------------------
+# Tests null rate intégrés dans compute_feature_drift
+# ---------------------------------------------------------------------------
+
+
+def _make_baseline_with_null(mean=5.84, std=0.83, mn=4.3, mx=7.9, null_rate=0.0):
+    return {"sepal_length": {"mean": mean, "std": std, "min": mn, "max": mx, "null_rate": null_rate}}
+
+
+def _make_prod_stats_with_null(mean=5.84, std=0.83, mn=4.3, mx=7.9, count=100, null_rate=0.0):
+    import numpy as np
+    rng = np.random.default_rng(42)
+    values = rng.normal(loc=mean, scale=std, size=count).tolist()
+    return {
+        "sepal_length": {
+            "mean": mean, "std": std, "min": mn, "max": mx,
+            "count": count, "values": values, "null_rate": null_rate,
+        }
+    }
+
+
+def test_compute_feature_drift_null_rate_ok():
+    """Null rate de production proche du baseline → null_rate_status=ok, fields renseignés."""
+    baseline = _make_baseline_with_null(null_rate=0.02)
+    prod = _make_prod_stats_with_null(count=100, null_rate=0.04)
+
+    results = compute_feature_drift(baseline, prod, min_count=30)
+    feat = results["sepal_length"]
+
+    assert feat.null_rate_production == pytest.approx(0.04)
+    assert feat.null_rate_baseline == pytest.approx(0.02)
+    assert feat.null_rate_status == "ok"
+
+
+def test_compute_feature_drift_null_rate_warning():
+    """Null rate production à +10 pts du baseline → null_rate_status=warning."""
+    baseline = _make_baseline_with_null(null_rate=0.0)
+    prod = _make_prod_stats_with_null(count=100, null_rate=0.10)
+
+    results = compute_feature_drift(baseline, prod, min_count=30)
+    feat = results["sepal_length"]
+
+    assert feat.null_rate_status == "warning"
+
+
+def test_compute_feature_drift_null_rate_critical_diff():
+    """Null rate production à +20 pts du baseline → null_rate_status=critical."""
+    baseline = _make_baseline_with_null(null_rate=0.0)
+    prod = _make_prod_stats_with_null(count=100, null_rate=0.20)
+
+    results = compute_feature_drift(baseline, prod, min_count=30)
+    feat = results["sepal_length"]
+
+    assert feat.null_rate_status == "critical"
+    assert feat.drift_status == "critical"
+
+
+def test_compute_feature_drift_null_rate_critical_absolute():
+    """Null rate > 30 % en production → critical même avec baseline élevé."""
+    baseline = _make_baseline_with_null(null_rate=0.28)
+    prod = _make_prod_stats_with_null(count=100, null_rate=0.35)
+
+    results = compute_feature_drift(baseline, prod, min_count=30)
+    feat = results["sepal_length"]
+
+    assert feat.null_rate_status == "critical"
+    assert feat.drift_status == "critical"
+
+
+def test_compute_feature_drift_null_rate_no_baseline_null_rate():
+    """Baseline sans null_rate (ancienne baseline) → null_rate_status=None."""
+    baseline = {"sepal_length": {"mean": 5.84, "std": 0.83, "min": 4.3, "max": 7.9}}
+    prod = _make_prod_stats_with_null(count=100, null_rate=0.40)
+
+    results = compute_feature_drift(baseline, prod, min_count=30)
+    feat = results["sepal_length"]
+
+    assert feat.null_rate_status is None
+    assert feat.null_rate_production == pytest.approx(0.40)
+    assert feat.null_rate_baseline is None
+
+
+def test_compute_feature_drift_null_rate_no_baseline_feature():
+    """Feature sans baseline → null_rate_status=None, null_rate_production renseigné."""
+    baseline = {}
+    prod = _make_prod_stats_with_null(count=100, null_rate=0.20)
+
+    results = compute_feature_drift(baseline, prod, min_count=30)
+    feat = results["sepal_length"]
+
+    assert feat.drift_status == "no_baseline"
+    assert feat.null_rate_production == pytest.approx(0.20)
+    assert feat.null_rate_status is None
+
+
+def test_compute_feature_drift_null_rate_with_insufficient_data():
+    """Données insuffisantes mais null rate critical → null_rate_status renseigné, drift_status=insufficient_data."""
+    baseline = _make_baseline_with_null(null_rate=0.0)
+    prod = _make_prod_stats_with_null(count=5, null_rate=0.40)  # 5 < min_count=30
+
+    results = compute_feature_drift(baseline, prod, min_count=30)
+    feat = results["sepal_length"]
+
+    assert feat.drift_status == "insufficient_data"
+    assert feat.null_rate_status == "critical"
+    assert feat.null_rate_production == pytest.approx(0.40)
+
+
+# ---------------------------------------------------------------------------
+# Tests summarize_drift avec null_rate_status
+# ---------------------------------------------------------------------------
+
+
+def test_summarize_drift_null_rate_critical_promotes_summary():
+    """null_rate_status=critical sur une feature avec drift_status=ok → summary=critical."""
+    features = {
+        "f1": FeatureDriftResult(production_count=100, drift_status="ok", null_rate_status="critical"),
+    }
+    assert summarize_drift(features, baseline_available=True) == "critical"
+
+
+def test_summarize_drift_null_rate_warning_promotes_summary():
+    """null_rate_status=warning et toutes les autres ok → summary=warning."""
+    features = {
+        "f1": FeatureDriftResult(production_count=100, drift_status="ok", null_rate_status="warning"),
+        "f2": FeatureDriftResult(production_count=100, drift_status="ok", null_rate_status="ok"),
+    }
+    assert summarize_drift(features, baseline_available=True) == "warning"
+
+
+def test_summarize_drift_null_rate_critical_with_insufficient_data():
+    """Feature insufficient_data mais null_rate_status=critical → summary=critical."""
+    features = {
+        "f1": FeatureDriftResult(production_count=5, drift_status="insufficient_data", null_rate_status="critical"),
+    }
+    assert summarize_drift(features, baseline_available=True) == "critical"
+
+
+def test_summarize_drift_null_rate_none_no_change():
+    """null_rate_status=None → n'affecte pas le résumé."""
+    features = {
+        "f1": FeatureDriftResult(production_count=100, drift_status="ok", null_rate_status=None),
+    }
+    assert summarize_drift(features, baseline_available=True) == "ok"

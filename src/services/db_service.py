@@ -490,10 +490,12 @@ class DBService:
         result = await db.execute(stmt)
         rows = result.scalars().all()
 
+        total_rows = 0
         feature_values: dict[str, list] = {}
         for input_features in rows:
             if not isinstance(input_features, dict):
                 continue
+            total_rows += 1
             for feature, value in input_features.items():
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     feature_values.setdefault(feature, []).append(float(value))
@@ -501,13 +503,16 @@ class DBService:
         stats: dict = {}
         for feature, values in feature_values.items():
             arr = np.array(values, dtype=float)
+            count = len(arr)
+            null_rate = round(1.0 - count / total_rows, 6) if total_rows > 0 else 0.0
             stats[feature] = {
                 "mean": float(np.mean(arr)),
                 "std": float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0,
                 "min": float(np.min(arr)),
                 "max": float(np.max(arr)),
-                "count": len(arr),
+                "count": count,
                 "values": values,
+                "null_rate": null_rate,
             }
 
         return stats
