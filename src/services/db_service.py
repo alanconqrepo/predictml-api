@@ -1476,6 +1476,7 @@ _SNAPSHOT_FIELDS = [
     "deprecated_at",
     "traffic_weight",
     "deployment_mode",
+    "parent_version",
 ]
 
 # Champs restaurables lors d'un rollback (is_active et deprecated_at exclus :
