@@ -78,6 +78,31 @@ class ObservedResultsListResponse(BaseModel):
     results: List[ObservedResultResponse]
 
 
+class ObservedResultsStatsVersionItem(BaseModel):
+    version: str
+    predictions: int
+    labeled: int
+    coverage: float
+
+
+class ObservedResultsStatsModelItem(BaseModel):
+    model_name: str
+    predictions: int
+    labeled: int
+    coverage: float
+
+
+class ObservedResultsStatsResponse(BaseModel):
+    model_name: Optional[str] = Field(None, description="Nom du modèle, null si global")
+    total_predictions: int
+    labeled_count: int
+    coverage_rate: float
+    oldest_label: Optional[datetime] = None
+    newest_label: Optional[datetime] = None
+    by_version: Optional[List[ObservedResultsStatsVersionItem]] = None
+    by_model: Optional[List[ObservedResultsStatsModelItem]] = None
+
+
 class CSVParseError(BaseModel):
     row: int = Field(..., description="Numéro de ligne dans le CSV (en-tête = 1)")
     reason: str = Field(..., description="Raison du rejet")

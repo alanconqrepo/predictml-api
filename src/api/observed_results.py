@@ -18,6 +18,7 @@ from src.schemas.observed_result import (
     CSVUploadResponse,
     ObservedResultResponse,
     ObservedResultsListResponse,
+    ObservedResultsStatsResponse,
     ObservedResultsUpsertRequest,
     ObservedResultsUpsertResponse,
 )
@@ -167,6 +168,24 @@ async def upload_observed_results_csv(
         parse_errors=parse_errors,
         filename=file.filename or "",
     )
+
+
+@router.get("/observed-results/stats", response_model=ObservedResultsStatsResponse)
+async def get_observed_results_stats(
+    model_name: Optional[str] = Query(None, description="Filtrer par modèle ; omis = global"),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Taux de couverture du ground truth : combien de prédictions ont un résultat observé.
+
+    - **model_name** : si fourni, retourne les stats du modèle + breakdown par version.
+    - Si omis, retourne les stats globales + breakdown par modèle.
+
+    Nécessite un token Bearer valide.
+    """
+    stats = await DBService.get_observed_results_stats(db, model_name=model_name)
+    return ObservedResultsStatsResponse(**stats)
 
 
 @router.get("/observed-results", response_model=ObservedResultsListResponse)
