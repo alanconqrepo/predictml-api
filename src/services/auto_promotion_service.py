@@ -91,10 +91,7 @@ async def evaluate_auto_promotion(
             if accuracy < min_accuracy:
                 return (
                     False,
-                    (
-                        f"Précision insuffisante : {accuracy:.4f} "
-                        f"< {min_accuracy:.4f} requis."
-                    ),
+                    (f"Précision insuffisante : {accuracy:.4f} " f"< {min_accuracy:.4f} requis."),
                 )
 
     # --- Vérification de la latence P95 ---

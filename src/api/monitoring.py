@@ -80,10 +80,14 @@ def _performance_drift_status(perf_by_day: list[dict]) -> str:
     if use_mae:
         # Pour la régression : hausse de MAE = dégradation → on inverse pour réutiliser la même logique
         first_half = [
-            -d["mae"] for d in perf_by_day[:mid] if d["matched_count"] > 0 and d.get("mae") is not None
+            -d["mae"]
+            for d in perf_by_day[:mid]
+            if d["matched_count"] > 0 and d.get("mae") is not None
         ]
         second_half = [
-            -d["mae"] for d in perf_by_day[mid:] if d["matched_count"] > 0 and d.get("mae") is not None
+            -d["mae"]
+            for d in perf_by_day[mid:]
+            if d["matched_count"] > 0 and d.get("mae") is not None
         ]
     else:
         first_half = [d["accuracy"] for d in perf_by_day[:mid] if d["matched_count"] > 0]

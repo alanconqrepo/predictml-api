@@ -77,7 +77,11 @@ async def run_alert_check() -> None:
                     use_mae = any(d.get("mae") is not None for d in perf_by_day)
                     if use_mae:
                         # Régression : hausse de MAE = dégradation → on inverse
-                        metrics = [-d["mae"] for d in perf_by_day if d["matched_count"] > 0 and d.get("mae") is not None]
+                        metrics = [
+                            -d["mae"]
+                            for d in perf_by_day
+                            if d["matched_count"] > 0 and d.get("mae") is not None
+                        ]
                     else:
                         metrics = [d["accuracy"] for d in perf_by_day if d["matched_count"] > 0]
                     if len(metrics) >= 2:
