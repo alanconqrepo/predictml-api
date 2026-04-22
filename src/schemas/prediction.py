@@ -96,6 +96,17 @@ class PredictionOutput(BaseModel):
             "spécifié dans la requête et qu'un test A/B est actif)."
         ),
     )
+    shap_values: Optional[Dict[str, float]] = Field(
+        None,
+        description=(
+            "Valeurs SHAP par feature (uniquement si ?explain=true). "
+            "None si le paramètre n'est pas activé ou si le type de modèle n'est pas supporté."
+        ),
+    )
+    shap_base_value: Optional[float] = Field(
+        None,
+        description="Valeur de base SHAP E[f(X)] (uniquement si ?explain=true et modèle supporté).",
+    )
 
 
 class PredictionResponse(BaseModel):

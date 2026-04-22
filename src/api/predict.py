@@ -526,6 +526,13 @@ async def predict(
             "exactement au schéma du modèle (features inattendues incluses)."
         ),
     ),
+    explain: bool = Query(
+        False,
+        description=(
+            "Si true, calcule et retourne les valeurs SHAP locales inline dans la réponse "
+            "(shap_values, shap_base_value). Silencieux si le type de modèle n'est pas supporté."
+        ),
+    ),
     user: User = Depends(check_prediction_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
@@ -540,6 +547,8 @@ async def predict(
       Le modèle doit exposer `feature_names_in_` (entraîné avec un DataFrame pandas).
       Les clés manquantes retournent une erreur 422.
     - **strict_validation**: Si `true`, rejette également les features inattendues avec 422.
+    - **explain**: Si `true`, retourne les valeurs SHAP locales (`shap_values`, `shap_base_value`)
+      dans la réponse. Silencieux si le type de modèle n'est pas supporté par SHAP.
 
     Nécessite un token Bearer dans le header Authorization.
     Toutes les prédictions sont loggées dans la base de données.
@@ -677,6 +686,30 @@ async def predict(
         # selected_version est renseigné uniquement si le routage A/B a été utilisé
         selected_version = metadata.version if input_data.model_version is None else None
 
+        # Explication SHAP inline (silently skip si modèle non supporté ou feature manquante)
+        shap_values_inline = None
+        shap_base_value_inline = None
+        if explain:
+            try:
+                x_float = np.array(
+                    [[input_data.features[name] for name in model.feature_names_in_]], dtype=float
+                )
+                explanation = compute_shap_explanation(
+                    model=model,
+                    feature_names=list(model.feature_names_in_),
+                    x=x_float,
+                    prediction_result=prediction_result,
+                    feature_baseline=metadata.feature_baseline,
+                )
+                shap_values_inline = explanation["shap_values"]
+                shap_base_value_inline = explanation["base_value"]
+            except Exception:
+                logger.debug(
+                    "SHAP inline ignoré (modèle non supporté)",
+                    model=metadata.name,
+                    version=metadata.version,
+                )
+
         return PredictionOutput(
             model_name=metadata.name,
             model_version=metadata.version,
@@ -685,6 +718,8 @@ async def predict(
             probability=probability,
             low_confidence=low_confidence,
             selected_version=selected_version,
+            shap_values=shap_values_inline,
+            shap_base_value=shap_base_value_inline,
         )
 
     except HTTPException:
