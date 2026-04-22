@@ -444,6 +444,76 @@ async def get_prediction_by_id(
     )
 
 
+@router.get("/predictions/{prediction_id}/explain", response_model=ExplainOutput)
+async def explain_prediction_by_id(
+    prediction_id: int,
+    user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retourne l'explication SHAP d'une prédiction stockée (post-hoc).
+
+    - Retourne 404 si la prédiction n'existe pas.
+    - Un utilisateur standard ne voit que ses propres prédictions (403 sinon).
+    - Un admin voit toutes les prédictions.
+    - Retourne 422 si la prédiction est en erreur (status != 'success') ou si input_features est null.
+
+    Utilise les input_features déjà stockées en base — aucune re-soumission des features requise.
+    """
+    prediction = await DBService.get_prediction_by_id(db, prediction_id)
+    if prediction is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Prédiction {prediction_id} introuvable.",
+        )
+    if user.role != UserRole.ADMIN and prediction.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accès refusé : cette prédiction ne vous appartient pas.",
+        )
+    if prediction.status != "success" or prediction.input_features is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Impossible d'expliquer cette prédiction : "
+                "statut différent de 'success' ou input_features absent."
+            ),
+        )
+
+    model_data = await model_service.load_model(db, prediction.model_name, prediction.model_version)
+    model = model_data["model"]
+    metadata = model_data["metadata"]
+
+    if not hasattr(model, "feature_names_in_"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Le modèle '{prediction.model_name}' ne possède pas l'attribut "
+                "'feature_names_in_'. Le modèle doit avoir été entraîné avec un DataFrame pandas."
+            ),
+        )
+
+    feature_names = list(model.feature_names_in_)
+    x = np.array([[prediction.input_features[f] for f in feature_names]], dtype=float)
+
+    explanation = compute_shap_explanation(
+        model=model,
+        feature_names=feature_names,
+        x=x,
+        prediction_result=prediction.prediction_result,
+        feature_baseline=metadata.feature_baseline,
+    )
+
+    return ExplainOutput(
+        model_name=metadata.name,
+        model_version=metadata.version,
+        prediction=prediction.prediction_result,
+        shap_values=explanation["shap_values"],
+        base_value=explanation["base_value"],
+        model_type=explanation["model_type"],
+    )
+
+
 @router.post("/predict", response_model=PredictionOutput)
 async def predict(
     input_data: PredictionInput,
