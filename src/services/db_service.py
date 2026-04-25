@@ -706,13 +706,28 @@ class DBService:
             return result.scalars().first()
 
     @staticmethod
-    async def get_all_active_models(db: AsyncSession) -> List[ModelMetadata]:
+    async def get_all_active_models(
+        db: AsyncSession,
+        is_production: Optional[bool] = None,
+        algorithm: Optional[str] = None,
+        min_accuracy: Optional[float] = None,
+        deployment_mode: Optional[str] = None,
+    ) -> List[ModelMetadata]:
         """Récupère tous les modèles actifs avec leur créateur"""
-        result = await db.execute(
+        query = (
             select(ModelMetadata)
             .options(selectinload(ModelMetadata.creator))
             .where(ModelMetadata.is_active.is_(True))
         )
+        if is_production is not None:
+            query = query.where(ModelMetadata.is_production == is_production)
+        if algorithm:
+            query = query.where(ModelMetadata.algorithm == algorithm)
+        if min_accuracy is not None:
+            query = query.where(ModelMetadata.accuracy >= min_accuracy)
+        if deployment_mode:
+            query = query.where(ModelMetadata.deployment_mode == deployment_mode)
+        result = await db.execute(query)
         return result.scalars().all()
 
     @staticmethod
