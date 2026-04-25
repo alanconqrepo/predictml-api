@@ -48,6 +48,7 @@ from src.schemas.model import (
     FeatureImportanceItem,
     FeatureImportanceResponse,
     FeatureStats,
+    ModelCompareResponse,
     ModelCreateResponse,
     ModelDeleteResponse,
     ModelGetResponse,
@@ -55,6 +56,7 @@ from src.schemas.model import (
     ModelHistoryResponse,
     ModelPerformanceResponse,
     ModelUpdateInput,
+    ModelVersionSummary,
     PerClassMetrics,
     PeriodPerformance,
     PolicyUpdateResponse,
@@ -1456,6 +1458,131 @@ async def get_confidence_trend(
         period_days=days,
         overall=ConfidenceTrendOverall(**result["overall"]),
         trend=[ConfidenceTrendPoint(**p) for p in result["trend"]],
+    )
+
+
+@router.get("/models/{name}/compare", response_model=ModelCompareResponse)
+async def compare_model_versions(
+    name: str,
+    versions: Optional[str] = Query(
+        None,
+        description="Versions séparées par des virgules (ex: 1.0.0,2.0.0). Toutes les versions actives si absent.",
+    ),
+    days: int = Query(
+        7, ge=1, le=90, description="Fenêtre temporelle pour les stats de latence (jours)"
+    ),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Comparaison multi-versions d'un modèle en un seul appel.
+
+    Agrège pour chaque version : accuracy, F1, latence p50/p95, statut de drift,
+    Brier score, date d'entraînement et nombre de lignes d'entraînement.
+
+    Si ?versions est omis, retourne toutes les versions actives du modèle.
+    Nécessite un token Bearer valide.
+    """
+    all_metas_result = await db.execute(
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.is_active.is_(True))
+        )
+    )
+    all_metas = all_metas_result.scalars().all()
+    if not all_metas:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' introuvable ou inactif.",
+        )
+
+    if versions:
+        requested = {v.strip() for v in versions.split(",") if v.strip()}
+        filtered_metas = [m for m in all_metas if m.version in requested]
+        if not filtered_metas:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Aucune des versions demandées ({versions}) n'est active pour '{name}'.",
+            )
+    else:
+        filtered_metas = list(all_metas)
+
+    meta_by_version = {m.version: m for m in filtered_metas}
+
+    # Latency stats — single DB query covering all versions
+    ab_stats = await DBService.get_ab_comparison_stats(db, name, days=days)
+    latency_by_version: dict = {}
+    for s in ab_stats:
+        times = sorted(s.get("response_times", []))
+        n = len(times)
+        p50 = round(times[max(0, int(n * 0.5) - 1)], 2) if n > 0 else None
+        latency_by_version[s["version"]] = {
+            "p50": p50,
+            "p95": s.get("p95_response_time_ms"),
+        }
+
+    # Per-version extras (drift + Brier score) — parallel gather
+    async def _version_extras(version: str, meta: ModelMetadata):
+        prod_stats, pairs = await asyncio.gather(
+            DBService.get_feature_production_stats(db, name, version, days),
+            DBService.get_performance_pairs(db, name, model_version=version),
+        )
+
+        baseline = meta.feature_baseline or {}
+        if baseline and prod_stats:
+            feat_results = drift_service.compute_feature_drift(baseline, prod_stats, min_count=30)
+            drift_status = drift_service.summarize_drift(feat_results, baseline_available=True)
+        elif baseline:
+            drift_status = "insufficient_data"
+        else:
+            drift_status = "no_baseline"
+
+        brier_score = None
+        valid_pairs = [(row[0], row[1], row[2]) for row in pairs if row[2]]
+        if len(valid_pairs) >= 30:
+
+            def _max_prob(p):
+                return max(p.values()) if isinstance(p, dict) else max(p)
+
+            confidences = np.array([_max_prob(probs) for _, _, probs in valid_pairs])
+            corrects = np.array(
+                [1.0 if str(pred) == str(obs) else 0.0 for pred, obs, _ in valid_pairs]
+            )
+            brier_score = round(float(np.mean((confidences - corrects) ** 2)), 4)
+
+        return drift_status, brier_score
+
+    ordered_versions = sorted(meta_by_version.keys())
+    extras_list = await asyncio.gather(
+        *[_version_extras(v, meta_by_version[v]) for v in ordered_versions]
+    )
+    extras_by_version = dict(zip(ordered_versions, extras_list))
+
+    version_summaries = []
+    for version in ordered_versions:
+        meta = meta_by_version[version]
+        drift_status, brier_score = extras_by_version[version]
+        lat = latency_by_version.get(version, {})
+        training_stats = meta.training_stats or {}
+        n_rows = training_stats.get("n_rows")
+        version_summaries.append(
+            ModelVersionSummary(
+                version=version,
+                is_production=meta.is_production,
+                accuracy=meta.accuracy,
+                f1_score=meta.f1_score,
+                latency_p50_ms=lat.get("p50"),
+                latency_p95_ms=lat.get("p95"),
+                drift_status=drift_status,
+                brier_score=brier_score,
+                trained_at=meta.created_at,
+                n_rows_trained=n_rows,
+            )
+        )
+
+    return ModelCompareResponse(
+        model_name=name,
+        compared_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        versions=version_summaries,
     )
 
 

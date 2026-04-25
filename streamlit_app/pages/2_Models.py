@@ -148,6 +148,92 @@ for m in models:
 st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 st.divider()
+
+# ---------------------------------------------------------------------------
+# Comparaison multi-versions
+# ---------------------------------------------------------------------------
+
+st.subheader("📊 Comparaison multi-versions")
+
+model_names = sorted({m["name"] for m in models})
+compare_name = st.selectbox("Modèle à comparer", model_names, key="compare_model_name")
+
+versions_for_model = [m["version"] for m in models if m["name"] == compare_name]
+all_versions_label = f"Toutes ({len(versions_for_model)})"
+version_options = [all_versions_label] + versions_for_model
+selected_versions = st.multiselect(
+    "Versions à inclure (vide = toutes)",
+    versions_for_model,
+    default=[],
+    key="compare_versions_select",
+)
+compare_days = st.slider("Fenêtre latence (jours)", 1, 30, 7, key="compare_days")
+
+if st.button("🔍 Comparer", key="compare_btn", type="primary"):
+    versions_param = ",".join(selected_versions) if selected_versions else None
+    with st.spinner("Comparaison en cours…"):
+        try:
+            cmp = client.compare_model_versions(
+                compare_name, versions=versions_param, days=compare_days
+            )
+            cmp_versions = cmp.get("versions", [])
+            if not cmp_versions:
+                st.info("Aucune version active trouvée.")
+            else:
+                _DRIFT_BADGE = {
+                    "ok": "🟢 ok",
+                    "warning": "🟡 warning",
+                    "critical": "🔴 critical",
+                    "no_baseline": "⚫ no baseline",
+                    "insufficient_data": "⬜ insuff. data",
+                }
+                cmp_rows = []
+                for v in cmp_versions:
+                    cmp_rows.append(
+                        {
+                            "Version": v["version"],
+                            "Production": "🟢 Oui" if v["is_production"] else "—",
+                            "Accuracy": (
+                                f"{v['accuracy']:.3f}" if v.get("accuracy") is not None else "—"
+                            ),
+                            "F1": f"{v['f1_score']:.3f}" if v.get("f1_score") is not None else "—",
+                            "Latence p50 (ms)": (
+                                f"{v['latency_p50_ms']:.1f}"
+                                if v.get("latency_p50_ms") is not None
+                                else "—"
+                            ),
+                            "Latence p95 (ms)": (
+                                f"{v['latency_p95_ms']:.1f}"
+                                if v.get("latency_p95_ms") is not None
+                                else "—"
+                            ),
+                            "Drift": _DRIFT_BADGE.get(v.get("drift_status") or "", "—"),
+                            "Brier score": (
+                                f"{v['brier_score']:.4f}"
+                                if v.get("brier_score") is not None
+                                else "—"
+                            ),
+                            "Entraîné le": (
+                                pd.to_datetime(v["trained_at"]).strftime("%Y-%m-%d")
+                                if v.get("trained_at")
+                                else "—"
+                            ),
+                            "Lignes entraîn.": (
+                                f"{v['n_rows_trained']:,}"
+                                if v.get("n_rows_trained") is not None
+                                else "—"
+                            ),
+                        }
+                    )
+                st.dataframe(pd.DataFrame(cmp_rows), use_container_width=True, hide_index=True)
+                st.caption(
+                    f"Comparé le {pd.to_datetime(cmp['compared_at']).strftime('%Y-%m-%d %H:%M')} UTC"
+                    f" — fenêtre latence : {compare_days} j"
+                )
+        except Exception as e:
+            st.error(f"Erreur lors de la comparaison : {e}")
+
+st.divider()
 st.subheader("Détail et actions")
 
 model_options = {f"{m['name']} v{m['version']}": m for m in models}
