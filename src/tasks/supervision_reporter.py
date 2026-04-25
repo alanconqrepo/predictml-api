@@ -17,6 +17,14 @@ from src.core.config import settings
 
 logger = structlog.get_logger(__name__)
 
+
+def _get_model_threshold(thresholds: dict | None, key: str, default: float) -> float:
+    """Retourne le seuil du modèle si défini, sinon le seuil global."""
+    if thresholds and (val := thresholds.get(key)) is not None:
+        return val
+    return default
+
+
 try:
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -37,9 +45,9 @@ async def run_alert_check() -> None:
     """
     Vérification toutes les 6h des indicateurs de supervision sur les 24 dernières heures.
     Envoie des alertes e-mail si :
-      - taux d'erreur d'un modèle > ERROR_RATE_ALERT_THRESHOLD
+      - taux d'erreur d'un modèle > seuil (par modèle ou ERROR_RATE_ALERT_THRESHOLD global)
       - drift de performance détecté sur un modèle
-      - drift de features critique détecté sur un modèle
+      - drift de features critique détecté (sauf si drift_auto_alert=False sur le modèle)
     """
     if not settings.ENABLE_EMAIL_ALERTS:
         return
@@ -58,12 +66,26 @@ async def run_alert_check() -> None:
         async with AsyncSessionLocal() as db:
             raw_stats = await DBService.get_global_monitoring_stats(db, start, end)
 
+            # Charger tous les modèles actifs UNE SEULE FOIS avant la boucle
+            all_metas = await DBService.get_all_active_models(db)
+            meta_by_name: dict[str, list] = {}
+            for m in all_metas:
+                meta_by_name.setdefault(m.name, []).append(m)
+
             for model_stat in raw_stats:
                 model_name = model_stat["model_name"]
                 error_rate = model_stat["error_rate"]
 
+                # Résoudre les métadonnées et seuils pour ce modèle
+                metas = meta_by_name.get(model_name, [])
+                prod_meta = next((m for m in metas if m.is_production), metas[0] if metas else None)
+                thresholds = prod_meta.alert_thresholds if prod_meta else None
+
                 # Alerte pic d'erreurs
-                if error_rate >= settings.ERROR_RATE_ALERT_THRESHOLD:
+                error_threshold = _get_model_threshold(
+                    thresholds, "error_rate_max", settings.ERROR_RATE_ALERT_THRESHOLD
+                )
+                if error_rate >= error_threshold:
                     logger.warning(
                         "Pic d'erreurs détecté",
                         model=model_name,
@@ -88,21 +110,30 @@ async def run_alert_check() -> None:
                         mid = len(metrics) // 2
                         avg_first = sum(metrics[:mid]) / mid
                         avg_second = sum(metrics[mid:]) / (len(metrics) - mid)
-                        drop = avg_first - avg_second
-                        if drop >= settings.PERFORMANCE_DRIFT_ALERT_THRESHOLD:
+
+                        # Seuil absolu (accuracy_min) si configuré, sinon seuil relatif (drop)
+                        accuracy_min = thresholds.get("accuracy_min") if thresholds else None
+                        if accuracy_min is not None and not use_mae:
+                            should_alert = avg_second < accuracy_min
+                        else:
+                            drop = avg_first - avg_second
+                            should_alert = drop >= settings.PERFORMANCE_DRIFT_ALERT_THRESHOLD
+
+                        if should_alert:
                             logger.warning(
                                 "Drift de performance détecté",
                                 model=model_name,
-                                drop=drop,
                             )
                             email_service.send_performance_alert(model_name, avg_second, avg_first)
 
                 # Alerte drift features
-                all_metas = await DBService.get_all_active_models(db)
-                metas = [m for m in all_metas if m.name == model_name]
-                if metas:
-                    prod_meta = next((m for m in metas if m.is_production), metas[0])
-                    if prod_meta.feature_baseline:
+                if prod_meta and prod_meta.feature_baseline:
+                    drift_enabled = (
+                        thresholds.get("drift_auto_alert", True)
+                        if thresholds is not None
+                        else True
+                    )
+                    if drift_enabled:
                         production_stats = await DBService.get_feature_production_stats(
                             db, model_name, prod_meta.version, days=1
                         )
