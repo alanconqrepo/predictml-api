@@ -27,6 +27,14 @@ class FeatureStats(BaseModel):
     null_rate: Optional[float] = None
 
 
+class AlertThresholds(BaseModel):
+    """Seuils d'alerte configurables par modèle (surcharge les variables d'env globales)"""
+
+    accuracy_min: Optional[float] = Field(None, ge=0.0, le=1.0)
+    error_rate_max: Optional[float] = Field(None, ge=0.0, le=1.0)
+    drift_auto_alert: Optional[bool] = None
+
+
 class ModelUpdateInput(BaseModel):
     """Champs modifiables d'un modèle (tous optionnels)"""
 
@@ -44,6 +52,8 @@ class ModelUpdateInput(BaseModel):
     # A/B Testing & Shadow Deployment
     traffic_weight: Optional[float] = Field(None, ge=0.0, le=1.0)
     deployment_mode: Optional[str] = None
+
+    alert_thresholds: Optional[AlertThresholds] = None
 
     model_config = {"from_attributes": True}
 
@@ -77,6 +87,7 @@ class ModelCreateResponse(BaseModel):
     promotion_policy: Optional[Dict[str, Any]] = None
     retrain_schedule: Optional[Dict[str, Any]] = None
     parent_version: Optional[str] = None
+    alert_thresholds: Optional[Dict[str, Any]] = None
     created_at: datetime
     user_id_creator: Optional[int]
     creator_username: Optional[str] = None
@@ -135,6 +146,7 @@ class ModelGetResponse(BaseModel):
     deployment_mode: Optional[str] = None
     promotion_policy: Optional[Dict[str, Any]] = None
     parent_version: Optional[str] = None
+    alert_thresholds: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: Optional[datetime]
     deprecated_at: Optional[datetime]

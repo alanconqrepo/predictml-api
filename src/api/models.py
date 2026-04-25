@@ -1545,6 +1545,7 @@ async def get_model(
         traffic_weight=model_meta.traffic_weight,
         deployment_mode=model_meta.deployment_mode,
         promotion_policy=model_meta.promotion_policy,
+        alert_thresholds=model_meta.alert_thresholds,
         created_at=model_meta.created_at,
         updated_at=model_meta.updated_at,
         deprecated_at=model_meta.deprecated_at,
