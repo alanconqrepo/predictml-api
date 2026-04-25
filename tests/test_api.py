@@ -5,8 +5,8 @@ import asyncio
 import pickle
 from types import SimpleNamespace
 
-import pytest
 from fastapi.testclient import TestClient
+
 from src.main import app
 
 client = TestClient(app)
@@ -149,3 +149,124 @@ def test_cached_models_count_reflects_injected_model():
         assert resp_data["count"] >= 1
     finally:
         asyncio.run(model_service.clear_cache(key))
+
+
+# ---------------------------------------------------------------------------
+# GET /health/dependencies
+# ---------------------------------------------------------------------------
+
+def test_health_dependencies_returns_200():
+    """L'endpoint répond 200 quelle que soit l'état des dépendances."""
+    response = client.get("/health/dependencies")
+    assert response.status_code == 200
+
+
+def test_health_dependencies_response_structure():
+    """La réponse contient status, checked_at et les quatre dépendances."""
+    response = client.get("/health/dependencies")
+    data = response.json()
+
+    assert "status" in data
+    assert data["status"] in ("ok", "degraded", "critical")
+    assert "checked_at" in data
+    assert "dependencies" in data
+
+    deps = data["dependencies"]
+    for key in ("database", "redis", "minio", "mlflow"):
+        assert key in deps, f"Dépendance manquante : {key}"
+        assert deps[key]["status"] in ("ok", "error")
+
+
+def test_health_dependencies_db_ok(monkeypatch):
+    """Quand la DB répond, database.status == 'ok' et latency_ms est un nombre."""
+    response = client.get("/health/dependencies")
+    data = response.json()
+    # La DB est SQLite en mémoire — elle doit toujours répondre en test
+    assert data["dependencies"]["database"]["status"] == "ok"
+    assert data["dependencies"]["database"]["latency_ms"] is not None
+    assert data["dependencies"]["database"]["latency_ms"] >= 0
+
+
+def test_health_dependencies_redis_ok():
+    """Avec FakeRedis, redis.status == 'ok'."""
+    response = client.get("/health/dependencies")
+    data = response.json()
+    assert data["dependencies"]["redis"]["status"] == "ok"
+    assert data["dependencies"]["redis"]["latency_ms"] is not None
+
+
+def test_health_dependencies_global_status_critical_when_db_fails(monkeypatch):
+    """Si la DB échoue, le statut global est 'critical'."""
+    from unittest.mock import AsyncMock, patch
+
+    from src.schemas.health import DependencyDetail
+
+    db_error = DependencyDetail(status="error", latency_ms=None, detail="connection refused")
+    ok = DependencyDetail(status="ok", latency_ms=1.0)
+
+    with patch("src.main._check_db", AsyncMock(return_value=db_error)), \
+         patch("src.main._check_redis", AsyncMock(return_value=ok)), \
+         patch("src.main._check_minio", AsyncMock(return_value=ok)), \
+         patch("src.main._check_mlflow", AsyncMock(return_value=ok)):
+        response = client.get("/health/dependencies")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "critical"
+
+
+def test_health_dependencies_global_status_degraded_when_non_db_fails(monkeypatch):
+    """Si MinIO échoue (mais pas la DB), le statut global est 'degraded'."""
+    from unittest.mock import AsyncMock, patch
+
+    from src.schemas.health import DependencyDetail
+
+    ok = DependencyDetail(status="ok", latency_ms=1.0)
+    err = DependencyDetail(status="error", latency_ms=None, detail="timeout")
+
+    with patch("src.main._check_db", AsyncMock(return_value=ok)), \
+         patch("src.main._check_redis", AsyncMock(return_value=ok)), \
+         patch("src.main._check_minio", AsyncMock(return_value=err)), \
+         patch("src.main._check_mlflow", AsyncMock(return_value=ok)):
+        response = client.get("/health/dependencies")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "degraded"
+
+
+def test_health_dependencies_global_status_ok_when_all_pass(monkeypatch):
+    """Quand toutes les dépendances répondent, le statut global est 'ok'."""
+    from unittest.mock import AsyncMock, patch
+
+    from src.schemas.health import DependencyDetail
+
+    ok = DependencyDetail(status="ok", latency_ms=1.0)
+
+    with patch("src.main._check_db", AsyncMock(return_value=ok)), \
+         patch("src.main._check_redis", AsyncMock(return_value=ok)), \
+         patch("src.main._check_minio", AsyncMock(return_value=ok)), \
+         patch("src.main._check_mlflow", AsyncMock(return_value=ok)):
+        response = client.get("/health/dependencies")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
+def test_health_dependencies_error_detail_included():
+    """Quand une dépendance échoue, le champ detail est présent."""
+    from unittest.mock import AsyncMock, patch
+
+    from src.schemas.health import DependencyDetail
+
+    ok = DependencyDetail(status="ok", latency_ms=1.0)
+    err = DependencyDetail(status="error", latency_ms=None, detail="Connection refused")
+
+    with patch("src.main._check_db", AsyncMock(return_value=ok)), \
+         patch("src.main._check_redis", AsyncMock(return_value=ok)), \
+         patch("src.main._check_minio", AsyncMock(return_value=err)), \
+         patch("src.main._check_mlflow", AsyncMock(return_value=ok)):
+        response = client.get("/health/dependencies")
+
+    data = response.json()
+    assert data["dependencies"]["minio"]["status"] == "error"
+    assert data["dependencies"]["minio"]["detail"] == "Connection refused"
+    assert data["dependencies"]["minio"]["latency_ms"] is None
