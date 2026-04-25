@@ -123,7 +123,9 @@ def _validate_train_script(source: str) -> Optional[str]:
 async def list_models(
     tag: Optional[str] = Query(None, description="Filtrer par tag (ex: production, finance)"),
     is_production: Optional[bool] = Query(None, description="Filtrer sur is_production"),
-    algorithm: Optional[str] = Query(None, description="Filtre exact sur l'algorithme (ex: RandomForest)"),
+    algorithm: Optional[str] = Query(
+        None, description="Filtre exact sur l'algorithme (ex: RandomForest)"
+    ),
     min_accuracy: Optional[float] = Query(None, description="Filtre accuracy >= valeur (ex: 0.85)"),
     deployment_mode: Optional[Literal["production", "ab_test", "shadow"]] = Query(
         None, description="Mode de déploiement : production | ab_test | shadow"
