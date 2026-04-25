@@ -122,17 +122,36 @@ def _validate_train_script(source: str) -> Optional[str]:
 @router.get("/models", response_model=List[Dict[str, Any]])
 async def list_models(
     tag: Optional[str] = Query(None, description="Filtrer par tag (ex: production, finance)"),
+    is_production: Optional[bool] = Query(None, description="Filtrer sur is_production"),
+    algorithm: Optional[str] = Query(
+        None, description="Filtre exact sur l'algorithme (ex: RandomForest)"
+    ),
+    min_accuracy: Optional[float] = Query(None, description="Filtre accuracy >= valeur (ex: 0.85)"),
+    deployment_mode: Optional[Literal["production", "ab_test", "shadow"]] = Query(
+        None, description="Mode de déploiement : production | ab_test | shadow"
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Liste tous les modèles disponibles depuis la base de données.
 
-    - **tag** : filtrer par tag (optionnel)
+    Filtres optionnels (combinables en AND) :
+    - **tag** : filtrer par tag
+    - **is_production** : filtrer sur le statut de production
+    - **algorithm** : filtre exact sur l'algorithme
+    - **min_accuracy** : accuracy minimale (>= valeur)
+    - **deployment_mode** : mode de déploiement (`production`, `ab_test`, `shadow`)
 
     Returns:
         Liste des modèles actifs avec leurs métadonnées
     """
-    models = await model_service.get_available_models(db)
+    models = await model_service.get_available_models(
+        db,
+        is_production=is_production,
+        algorithm=algorithm,
+        min_accuracy=min_accuracy,
+        deployment_mode=deployment_mode,
+    )
     if tag:
         models = [m for m in models if m.get("tags") and tag in m["tags"]]
     return models

@@ -35,17 +35,34 @@ class ModelService:
             self._redis = aioredis.Redis.from_url(settings.REDIS_URL, decode_responses=False)
         return self._redis
 
-    async def get_available_models(self, db: AsyncSession) -> List[Dict[str, Any]]:
+    async def get_available_models(
+        self,
+        db: AsyncSession,
+        is_production: Optional[bool] = None,
+        algorithm: Optional[str] = None,
+        min_accuracy: Optional[float] = None,
+        deployment_mode: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Retourne la liste des modèles disponibles depuis la base de données
 
         Args:
             db: Session de base de données
+            is_production: filtre sur is_production
+            algorithm: filtre exact sur l'algorithme
+            min_accuracy: filtre accuracy >= valeur
+            deployment_mode: filtre sur le mode de déploiement
 
         Returns:
             Liste des modèles actifs avec leurs métadonnées
         """
-        models = await DBService.get_all_active_models(db)
+        models = await DBService.get_all_active_models(
+            db,
+            is_production=is_production,
+            algorithm=algorithm,
+            min_accuracy=min_accuracy,
+            deployment_mode=deployment_mode,
+        )
         last_seen_map = await DBService.get_models_last_seen(db)
         return [
             {
