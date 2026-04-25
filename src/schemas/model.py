@@ -525,3 +525,31 @@ class WarmupResponse(BaseModel):
     already_cached: bool
     load_time_ms: float
     cache_key: str
+
+
+# ---------------------------------------------------------------------------
+# Comparaison multi-versions
+# ---------------------------------------------------------------------------
+
+
+class ModelVersionSummary(BaseModel):
+    """Résumé d'une version pour GET /models/{name}/compare"""
+
+    version: str
+    is_production: bool
+    accuracy: Optional[float] = None
+    f1_score: Optional[float] = None
+    latency_p50_ms: Optional[float] = None
+    latency_p95_ms: Optional[float] = None
+    drift_status: Optional[str] = None
+    brier_score: Optional[float] = None
+    trained_at: Optional[datetime] = None
+    n_rows_trained: Optional[int] = None
+
+
+class ModelCompareResponse(BaseModel):
+    """Réponse de GET /models/{name}/compare"""
+
+    model_name: str
+    compared_at: datetime
+    versions: List[ModelVersionSummary]

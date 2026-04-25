@@ -316,6 +316,20 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def compare_model_versions(
+        self,
+        model_name: str,
+        versions: Optional[str] = None,
+        days: int = 7,
+    ) -> dict:
+        """Comparaison multi-versions d'un modèle en un seul appel."""
+        r = self._get(
+            f"/models/{model_name}/compare",
+            params={"versions": versions, "days": days},
+        )
+        r.raise_for_status()
+        return r.json()
+
     def get_confidence_trend(
         self,
         model_name: str,
