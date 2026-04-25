@@ -177,6 +177,22 @@ class PeriodPerformance(BaseModel):
     rmse: Optional[float] = None
 
 
+class VersionTimelineEntry(BaseModel):
+    version: str
+    deployed_at: datetime
+    accuracy: Optional[float] = None
+    mae: Optional[float] = None
+    f1_score: Optional[float] = None
+    sample_count: int
+    trained_at: Optional[datetime] = None
+    n_rows_trained: Optional[int] = None
+
+
+class PerformanceTimelineResponse(BaseModel):
+    model_name: str
+    timeline: List[VersionTimelineEntry]
+
+
 class ModelPerformanceResponse(BaseModel):
     model_name: str
     model_version: Optional[str]

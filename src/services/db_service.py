@@ -7,6 +7,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, List, Optional
 
+from sklearn.metrics import accuracy_score, mean_absolute_error
+from sklearn.metrics import f1_score as sklearn_f1_score
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -317,6 +319,89 @@ class DBService:
 
         result = await db.execute(stmt)
         return result.all()
+
+    @staticmethod
+    async def get_performance_timeline(
+        db: AsyncSession,
+        model_name: str,
+    ) -> List[dict]:
+        """
+        Retourne l'évolution chronologique des métriques par version pour un modèle.
+        Pour chaque version active, calcule accuracy/F1 (classification) ou MAE (régression)
+        via les paires (prediction, observed_result). Ordonnées par created_at ASC.
+        """
+        stmt = (
+            select(ModelMetadata)
+            .where(and_(ModelMetadata.name == model_name, ModelMetadata.is_active.is_(True)))
+            .order_by(ModelMetadata.created_at.asc())
+        )
+        result = await db.execute(stmt)
+        versions = result.scalars().all()
+
+        timeline = []
+        for meta in versions:
+            pairs = await DBService.get_performance_pairs(
+                db, model_name, model_version=meta.version
+            )
+            sample_count = len(pairs)
+
+            accuracy = None
+            mae = None
+            f1 = None
+
+            if sample_count > 0:
+                y_true = [row.observed_result for row in pairs]
+                y_pred = [row.prediction_result for row in pairs]
+
+                is_classification = bool(meta.classes)
+                if not is_classification:
+                    if any(row.probabilities for row in pairs):
+                        is_classification = True
+                    elif y_pred and all(
+                        isinstance(v, (int, str, bool)) for v in y_pred if v is not None
+                    ):
+                        is_classification = True
+
+                if is_classification:
+                    y_true_s = [str(v) for v in y_true]
+                    y_pred_s = [str(v) for v in y_pred]
+                    accuracy = round(accuracy_score(y_true_s, y_pred_s), 4)
+                    f1 = round(
+                        float(
+                            sklearn_f1_score(
+                                y_true_s, y_pred_s, average="weighted", zero_division=0
+                            )
+                        ),
+                        4,
+                    )
+                else:
+                    y_true_f = [float(v) for v in y_true]
+                    y_pred_f = [float(v) for v in y_pred]
+                    mae = round(float(mean_absolute_error(y_true_f, y_pred_f)), 4)
+
+            training_stats = meta.training_stats or {}
+            trained_at = None
+            raw_trained_at = training_stats.get("trained_at")
+            if raw_trained_at:
+                try:
+                    trained_at = datetime.fromisoformat(raw_trained_at)
+                except (ValueError, TypeError):
+                    trained_at = None
+
+            timeline.append(
+                {
+                    "version": meta.version,
+                    "deployed_at": meta.created_at,
+                    "accuracy": accuracy,
+                    "mae": mae,
+                    "f1_score": f1,
+                    "sample_count": sample_count,
+                    "trained_at": trained_at,
+                    "n_rows_trained": training_stats.get("n_rows"),
+                }
+            )
+
+        return timeline
 
     @staticmethod
     async def get_accuracy_drift(

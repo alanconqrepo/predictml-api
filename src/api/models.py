@@ -58,6 +58,7 @@ from src.schemas.model import (
     ModelUpdateInput,
     ModelVersionSummary,
     PerClassMetrics,
+    PerformanceTimelineResponse,
     PeriodPerformance,
     PolicyUpdateResponse,
     PromotionPolicy,
@@ -68,6 +69,7 @@ from src.schemas.model import (
     RollbackResponse,
     ScheduleUpdateResponse,
     ValidateInputResponse,
+    VersionTimelineEntry,
     WarmupResponse,
 )
 from src.services import drift_service
@@ -347,6 +349,39 @@ async def get_model_performance(
         response.by_period = by_period
 
     return response
+
+
+@router.get("/models/{name}/performance-timeline", response_model=PerformanceTimelineResponse)
+async def get_model_performance_timeline(
+    name: str,
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retourne l'évolution chronologique des métriques de performance par version du modèle.
+
+    Pour chaque version active (triée par date de déploiement), calcule :
+    - **Classification** : accuracy + F1 weighted
+    - **Régression** : MAE
+
+    Les métriques sont `null` si aucun observed_result n'est disponible pour la version.
+    `sample_count` indique le nombre de paires (prédiction, observed_result) utilisées.
+
+    Nécessite un token Bearer valide.
+    """
+    metadata = await DBService.get_model_metadata(db, name)
+    if not metadata:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' introuvable.",
+        )
+
+    timeline_data = await DBService.get_performance_timeline(db, name)
+
+    return PerformanceTimelineResponse(
+        model_name=name,
+        timeline=[VersionTimelineEntry(**entry) for entry in timeline_data],
+    )
 
 
 @router.get("/models/{name}/drift", response_model=DriftReportResponse)
