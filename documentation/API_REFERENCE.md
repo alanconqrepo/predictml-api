@@ -164,6 +164,7 @@ print(model["traffic_weight"])    # 0.8
   "deployment_mode": "production",
   "traffic_weight": 1.0,
   "train_script_object_key": "iris_model/v1.0.0_train.py",
+  "parent_version": null,
   "created_at": "2024-01-15T10:35:00",
   "updated_at": "2024-01-20T08:00:00",
   "deprecated_at": null,
@@ -313,6 +314,7 @@ requests.patch(f"{BASE_URL}/models/iris_model/1.0.0", headers=headers,
 | `webhook_url` | str | URL appelée après chaque prédiction |
 | `deployment_mode` | str | `"production"`, `"ab_test"` ou `"shadow"` |
 | `traffic_weight` | float (0–1) | Part du trafic routée vers cette version |
+| `alert_thresholds` | dict | Seuils d'alerte spécifiques au modèle (ex: `{"error_rate": 0.05, "drift_zscore": 2.0}`) — surcharge les seuils globaux |
 
 ---
 
@@ -443,6 +445,12 @@ print(data["drift_summary"])  # "ok" | "warning" | "critical" | "no_baseline"
   }
 }
 ```
+
+Le rapport couvre **4 dimensions de monitoring** :
+1. **Dérive de distribution** (Z-score sur la moyenne, PSI sur la distribution)
+2. **Dérive de performance** (accuracy/MAE vs baseline)
+3. **Dérive de taux d'erreur** (HTTP 500 et erreurs de prédiction)
+4. **Null rate** — taux de valeurs nulles par feature (`null_rate_current` vs `null_rate_baseline`)
 
 **Statuts de dérive**
 
@@ -635,7 +643,22 @@ print(data["stdout"])   # logs d'entraînement
   "stdout": "Epoch 1/10 ... \n{\"accuracy\": 0.96, \"f1_score\": 0.95}",
   "stderr": "",
   "error": null,
-  "new_model_metadata": { "id": 5, "name": "iris_model", "version": "1.1.0" }
+  "auto_promoted": null,
+  "auto_promote_reason": null,
+  "new_model_metadata": {
+    "id": 5,
+    "name": "iris_model",
+    "version": "1.1.0",
+    "parent_version": "1.0.0",
+    "training_stats": {
+      "trained_at": "2026-04-25T03:00:00",
+      "train_start_date": "2026-03-26",
+      "train_end_date": "2026-04-25",
+      "n_rows": 12450,
+      "feature_stats": {"sepal_length": {"mean": 5.8, "std": 0.83}},
+      "label_distribution": {"setosa": 0.33, "versicolor": 0.34, "virginica": 0.33}
+    }
+  }
 }
 ```
 
@@ -797,7 +820,97 @@ if sig:
 > Chi-² si au moins une erreur est observée dans l'un des groupes (tableau de contingence succès/erreur).  
 > Fallback Mann-Whitney U sur les temps de réponse si aucune erreur n'est présente.  
 > `ab_significance: null` si moins de 2 versions actives ou données insuffisantes.
+
+---
+
+### `GET /models/{name}/confidence-trend` — Tendance de confiance
+
+Retourne l'évolution de la probabilité de confiance maximale moyenne sur une période, par fenêtre temporelle.
+
+**Auth requise**
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `version` | str | production | Version cible |
+| `days` | int | 30 | Fenêtre d'analyse en jours |
+| `granularity` | str | `"day"` | Granularité : `"hour"`, `"day"`, `"week"` |
+
+```python
+response = requests.get(
+    f"{BASE_URL}/models/iris_model/confidence-trend",
+    headers=headers,
+    params={"days": 14, "granularity": "day"}
+)
+data = response.json()
+
+for point in data["trend"]:
+    print(f"{point['period']}: conf_avg={point['avg_confidence']:.3f}, "
+          f"low_conf_rate={point['low_confidence_rate']:.1%}")
 ```
+
+**Schéma `ConfidenceTrendResponse`**
+
+```json
+{
+  "model_name": "iris_model",
+  "version": "1.0.0",
+  "days": 14,
+  "granularity": "day",
+  "trend": [
+    {
+      "period": "2026-04-11",
+      "prediction_count": 142,
+      "avg_confidence": 0.91,
+      "low_confidence_rate": 0.04
+    },
+    {
+      "period": "2026-04-12",
+      "prediction_count": 158,
+      "avg_confidence": 0.88,
+      "low_confidence_rate": 0.07
+    }
+  ]
+}
+```
+
+> Une baisse progressive de `avg_confidence` sans dégradation d'accuracy peut indiquer que le modèle rencontre des observations de plus en plus proches des frontières de décision — signe précoce de dérive.
+
+---
+
+### `POST /models/{name}/{version}/warmup` — Préchauffage du cache
+
+Précharge le modèle dans le cache Redis sans attendre la première requête de prédiction. Réduit la latence à froid lors des déploiements.
+
+**Auth requise**
+
+```python
+response = requests.post(
+    f"{BASE_URL}/models/iris_model/1.0.0/warmup",
+    headers=headers
+)
+data = response.json()
+print(f"Chargé en {data['load_time_ms']:.1f} ms — {data['status']}")
+```
+
+**Schéma `WarmupResponse`**
+
+```json
+{
+  "model_name": "iris_model",
+  "version": "1.0.0",
+  "status": "loaded",
+  "load_time_ms": 42.3,
+  "cached": true
+}
+```
+
+| `status` | Signification |
+|---|---|
+| `loaded` | Modèle chargé et mis en cache |
+| `already_cached` | Modèle déjà présent dans le cache Redis |
+| `error` | Échec du chargement (voir `detail`) |
 
 ---
 
@@ -882,6 +995,29 @@ response = requests.post(
 )
 result = response.json()
 ```
+
+**Query parameter `explain`** (optionnel, défaut `false`) :
+
+Ajouter `?explain=true` pour recevoir les valeurs SHAP directement dans la réponse, sans appel séparé à `POST /explain`.
+
+```python
+response = requests.post(
+    f"{BASE_URL}/predict?explain=true",
+    headers=headers,
+    json={
+        "model_name": "iris_model",
+        "features": {"sepal length (cm)": 5.1, "sepal width (cm)": 3.5,
+                     "petal length (cm)": 1.4, "petal width (cm)": 0.2}
+    }
+)
+data = response.json()
+# data["explanation"]["shap_values"] contient les valeurs SHAP locales
+if data.get("explanation"):
+    for feat, val in data["explanation"]["shap_values"].items():
+        print(f"  {feat}: {val:+.4f}")
+```
+
+Le champ `explanation` suit le schéma `ExplainOutput` (voir `POST /explain`). Si le modèle ne supporte pas SHAP, `explanation` est `null`.
 
 **Query parameter `strict_validation`** (optionnel, défaut `false`) :
 
@@ -1118,6 +1254,50 @@ if data["next_cursor"]:
 
 ---
 
+### `GET /predictions/{prediction_id}` — Consulter une prédiction par ID
+
+Retourne le détail complet d'une prédiction à partir de son identifiant interne.
+
+**Auth requise**
+
+```python
+prediction_id = 1040
+
+response = requests.get(
+    f"{BASE_URL}/predictions/{prediction_id}",
+    headers=headers
+)
+data = response.json()
+print(f"Modèle : {data['model_name']} v{data['model_version']}")
+print(f"Résultat : {data['prediction_result']}")
+print(f"Latence : {data['response_time_ms']} ms")
+```
+
+Retourne le même schéma qu'un élément de `GET /predictions` (voir ci-dessus). Retourne `404` si la prédiction n'existe pas ou appartient à un autre utilisateur (non admin).
+
+---
+
+### `GET /predictions/{prediction_id}/explain` — Explication SHAP post-hoc
+
+Génère a posteriori l'explication SHAP d'une prédiction existante, en rechargeant les features depuis la base de données.
+
+**Auth requise**
+
+```python
+response = requests.get(
+    f"{BASE_URL}/predictions/{prediction_id}/explain",
+    headers=headers
+)
+data = response.json()
+print(f"Prédiction : {data['prediction']}")
+for feat, val in sorted(data["shap_values"].items(), key=lambda x: abs(x[1]), reverse=True):
+    print(f"  {'↑' if val > 0 else '↓'} {feat}: {val:+.4f}")
+```
+
+Retourne le même schéma que `POST /explain`. Retourne `404` si la prédiction n'existe pas, `422` si le modèle ne supporte pas SHAP.
+
+---
+
 ### `GET /predictions/stats`
 
 Statistiques agrégées des prédictions par modèle.
@@ -1155,6 +1335,55 @@ for stat in data["stats"]:
   ]
 }
 ```
+
+---
+
+### `DELETE /predictions/purge` — Purge RGPD
+
+Supprime les prédictions antérieures à N jours. `dry_run=true` par défaut — aucune suppression sans confirmation explicite.
+
+**Auth requise : admin**
+
+**Paramètres de requête**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `older_than_days` | int | Oui | Supprimer les prédictions > N jours |
+| `model_name` | str | Non | Limiter la purge à un seul modèle |
+| `dry_run` | bool | `true` | Simuler sans supprimer |
+
+```python
+# Simuler (dry_run par défaut)
+response = requests.delete(
+    f"{BASE_URL}/predictions/purge",
+    headers=headers,
+    params={"older_than_days": 90}
+)
+data = response.json()
+print(f"Seraient supprimées : {data['deleted_count']} prédictions")
+print(f"Résultats observés liés : {data['linked_observed_results_count']}")
+
+# Purger réellement
+response = requests.delete(
+    f"{BASE_URL}/predictions/purge",
+    headers=headers,
+    params={"older_than_days": 90, "model_name": "iris_model", "dry_run": "false"}
+)
+```
+
+**Schéma `PurgeResponse`**
+
+```json
+{
+  "dry_run": false,
+  "deleted_count": 12450,
+  "oldest_remaining": "2026-01-15T08:32:00",
+  "models_affected": ["iris_model", "wine"],
+  "linked_observed_results_count": 3
+}
+```
+
+> `linked_observed_results_count > 0` indique que des prédictions liées à des `observed_results` seront supprimées — perte de données de performance historiques.
 
 ---
 
@@ -1237,6 +1466,112 @@ data = response.json()
   ]
 }
 ```
+
+---
+
+### `GET /observed-results/export` — Export CSV/JSON
+
+Exporte les résultats observés filtrés dans un fichier téléchargeable.
+
+**Auth requise**
+
+**Paramètres de requête**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `model_name` | str | Non | Filtre sur le modèle |
+| `start` | datetime | Non | Date de début |
+| `end` | datetime | Non | Date de fin |
+| `format` | str | `"csv"` | `"csv"` ou `"json"` |
+
+```python
+response = requests.get(
+    f"{BASE_URL}/observed-results/export",
+    headers=headers,
+    params={"model_name": "iris_model", "format": "csv"}
+)
+
+with open("observed_results.csv", "wb") as f:
+    f.write(response.content)
+# Colonnes : id_obs, model_name, observed_result, date_time, username
+```
+
+---
+
+### `GET /observed-results/stats` — Statistiques de couverture
+
+Retourne des statistiques sur la couverture ground truth : combien de prédictions ont un résultat observé associé.
+
+**Auth requise**
+
+```python
+response = requests.get(
+    f"{BASE_URL}/observed-results/stats",
+    headers=headers,
+    params={"model_name": "iris_model", "days": 30}
+)
+data = response.json()
+print(f"Prédictions : {data['total_predictions']}")
+print(f"Avec ground truth : {data['matched_count']}")
+print(f"Couverture : {data['coverage_rate']:.1%}")
+```
+
+**Schéma `ObservedResultsStatsResponse`**
+
+```json
+{
+  "model_name": "iris_model",
+  "days": 30,
+  "total_predictions": 1500,
+  "matched_count": 420,
+  "coverage_rate": 0.28,
+  "unmatched_count": 1080
+}
+```
+
+---
+
+### `POST /observed-results/upload-csv` — Import CSV en lot
+
+Importe un fichier CSV de résultats observés. Idempotent sur `(id_obs, model_name)`.
+
+**Auth requise**
+
+**Format du CSV**
+
+```
+id_obs,model_name,date_time,observed_result
+obs-001,iris_model,2026-01-15T10:00:00,0
+obs-002,iris_model,2026-01-15T10:01:00,2
+```
+
+```python
+import io
+
+csv_content = """id_obs,model_name,date_time,observed_result
+obs-001,iris_model,2026-01-15T10:00:00,0
+obs-002,iris_model,2026-01-15T10:01:00,2
+obs-003,iris_model,2026-01-15T10:02:00,1
+"""
+
+response = requests.post(
+    f"{BASE_URL}/observed-results/upload-csv",
+    headers=headers,
+    files={"file": ("results.csv", io.StringIO(csv_content), "text/csv")}
+)
+print(response.json())
+```
+
+**Schéma `CSVUploadResponse`**
+
+```json
+{
+  "upserted": 3,
+  "errors": []
+}
+```
+
+Si certaines lignes sont invalides, elles sont listées dans `errors` et les lignes valides sont quand même insérées.
 
 ---
 

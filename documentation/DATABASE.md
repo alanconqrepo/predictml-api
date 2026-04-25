@@ -207,6 +207,18 @@ CREATE INDEX ix_model_metadata_user_id_creator ON model_metadata (user_id_creato
 | `training_params` | JSONB | Hyperparamètres d'entraînement |
 | `is_active` | BOOLEAN | Modèle disponible ou non |
 | `is_production` | BOOLEAN | Version de production (une par `name`) |
+| `deployment_mode` | VARCHAR | `production`, `ab_test`, `shadow` |
+| `traffic_weight` | FLOAT | Fraction du trafic A/B (0.0–1.0) |
+| `confidence_threshold` | FLOAT | Seuil de confiance min (`low_confidence`) |
+| `feature_baseline` | JSONB | Stats par feature pour drift detection |
+| `tags` | JSONB | Liste de tags libres |
+| `webhook_url` | VARCHAR | URL de callback post-prédiction |
+| `train_script_object_key` | VARCHAR | Clé MinIO du script `train.py` |
+| `parent_version` | VARCHAR | Version source du retrain (lignée) |
+| `promotion_policy` | JSONB | Politique d'auto-promotion (`min_accuracy`, `max_latency_p95_ms`, `min_sample_validation`, `auto_promote`) |
+| `retrain_schedule` | JSONB | Planning cron (`cron`, `lookback_days`, `enabled`, `last_run_at`, `next_run_at`) |
+| `alert_thresholds` | JSONB | Seuils d'alerte spécifiques au modèle (surcharge les variables d'env globales) |
+| `training_stats` | JSONB | Snapshot du dernier retrain (`n_rows`, `feature_stats`, `label_distribution`, `trained_at`) |
 | `created_at` | TIMESTAMP | Date de création |
 | `updated_at` | TIMESTAMP | Dernière mise à jour |
 | `deprecated_at` | TIMESTAMP | Date de dépréciation |

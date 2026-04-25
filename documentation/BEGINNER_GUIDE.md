@@ -470,6 +470,100 @@ else:
     print(f"Erreur : {data['error']}")
 ```
 
+### Explication SHAP inline sur /predict
+
+Obtenir les valeurs SHAP directement dans la réponse de prédiction sans appel supplémentaire :
+
+```python
+response = requests.post(
+    f"{BASE_URL}/predict",
+    headers=HEADERS,
+    params={"explain": "true"},          # paramètre de requête
+    json={
+        "model_name": "iris_model",
+        "features": {
+            "sepal length (cm)": 5.1,
+            "sepal width (cm)": 3.5,
+            "petal length (cm)": 1.4,
+            "petal width (cm)": 0.2
+        }
+    }
+)
+data = response.json()
+print(f"Prédiction : {data['prediction']}")
+# La réponse contient un champ "explanation" avec les valeurs SHAP
+if data.get("explanation"):
+    for feat, val in data["explanation"]["shap_values"].items():
+        print(f"  {feat}: {val:+.4f}")
+```
+
+### Consulter une prédiction par son ID
+
+Retrouver le détail d'une prédiction passée (features, résultat, latence) depuis son identifiant interne :
+
+```python
+prediction_id = 42   # ID retourné par /predict ou trouvé dans /predictions
+
+response = requests.get(
+    f"{BASE_URL}/predictions/{prediction_id}",
+    headers=HEADERS
+)
+data = response.json()
+print(f"Modèle : {data['model_name']} v{data['model_version']}")
+print(f"Résultat : {data['prediction_result']}")
+print(f"Latence : {data['response_time_ms']} ms")
+
+# Récupérer l'explication SHAP post-hoc (si le modèle supporte SHAP)
+explain = requests.get(
+    f"{BASE_URL}/predictions/{prediction_id}/explain",
+    headers=HEADERS
+)
+print(explain.json()["shap_values"])
+```
+
+### Import CSV de résultats observés
+
+Plutôt que d'envoyer les résultats un par un, importez-les en lot depuis un fichier CSV :
+
+```python
+import io
+import requests
+
+BASE_URL = "http://localhost:8000"
+HEADERS = {"Authorization": "Bearer ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"}
+
+# Format attendu : colonnes id_obs, model_name, date_time, observed_result
+csv_content = """id_obs,model_name,date_time,observed_result
+obs-001,iris_model,2026-01-15T10:00:00,0
+obs-002,iris_model,2026-01-15T10:01:00,2
+obs-003,iris_model,2026-01-15T10:02:00,1
+"""
+
+response = requests.post(
+    f"{BASE_URL}/observed-results/upload-csv",
+    headers=HEADERS,
+    files={"file": ("results.csv", io.StringIO(csv_content), "text/csv")}
+)
+print(response.json())  # {"upserted": 3, "errors": []}
+```
+
+Vous pouvez également exporter les résultats observés et vérifier la couverture :
+
+```python
+# Statistiques de couverture (combien de prédictions ont un résultat observé)
+stats = requests.get(f"{BASE_URL}/observed-results/stats", headers=HEADERS,
+                     params={"model_name": "iris_model"})
+data = stats.json()
+print(f"Prédictions avec ground truth : {data['matched_count']} / {data['total_predictions']}")
+print(f"Couverture : {data['coverage_rate']:.1%}")
+
+# Export CSV des résultats observés
+export = requests.get(f"{BASE_URL}/observed-results/export", headers=HEADERS,
+                      params={"model_name": "iris_model", "format": "csv"})
+with open("observed_results_export.csv", "wb") as f:
+    f.write(export.content)
+```
+
 ### Webhooks
 
 Recevoir une notification après chaque prédiction :
@@ -496,6 +590,9 @@ Ouvrez **http://localhost:8501** et connectez-vous avec le token admin.
 | Prédictions | Historique filtrable par modèle, date, version |
 | Stats | Graphiques : volume, temps de réponse, distribution |
 | Code Example | Exemples Python générés pour MLflow + API |
+| A/B Testing | Shadow mode, comparaison statistique, décision de promotion |
+| Supervision | Monitoring global, drift, alertes, tendances de performance |
+| Retrain | Planifier, déclencher et suivre les ré-entraînements |
 
 ---
 

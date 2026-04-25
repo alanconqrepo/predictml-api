@@ -21,7 +21,7 @@ predictml-api/
 ├── src/
 │   ├── api/                        # Endpoints HTTP
 │   │   ├── models.py               # CRUD + drift + history + retrain + A/B
-│   │   ├── predict.py              # POST /predict, /predict-batch, /explain, GET /predictions, /stats
+│   │   ├── predict.py              # POST /predict, /predict-batch, /explain, GET /predictions, /predictions/{id}, /predictions/{id}/explain, /stats, DELETE /predictions/purge
 │   │   ├── users.py                # CRUD /users
 │   │   ├── observed_results.py     # /observed-results
 │   │   └── monitoring.py           # /monitoring/overview, /monitoring/model/{name}
@@ -38,13 +38,17 @@ predictml-api/
 │   │   │   └── model_history.py    # Table model_history
 │   │   └── database.py             # Session async (asyncpg)
 │   ├── services/
-│   │   ├── db_service.py           # Toutes les requêtes DB (~37KB)
-│   │   ├── model_service.py        # Chargement, cache Redis, routage A/B/shadow
-│   │   ├── minio_service.py        # Upload/download MinIO
-│   │   ├── drift_service.py        # Calcul dérive Z-score + PSI
-│   │   ├── shap_service.py         # Explications SHAP locales (tree + linear)
-│   │   ├── email_service.py        # Alertes email & rapports hebdomadaires
-│   │   └── webhook_service.py      # Webhooks HTTP post-prédiction
+│   │   ├── db_service.py               # Toutes les requêtes DB
+│   │   ├── model_service.py            # Chargement, cache Redis, routage A/B/shadow
+│   │   ├── minio_service.py            # Upload/download MinIO
+│   │   ├── drift_service.py            # Calcul dérive Z-score + PSI + null rate (4 dimensions)
+│   │   ├── shap_service.py             # Explications SHAP locales (tree + linear)
+│   │   ├── ab_significance_service.py  # Tests statistiques A/B (Chi-², Mann-Whitney U)
+│   │   ├── auto_promotion_service.py   # Évaluation politique d'auto-promotion post-retrain
+│   │   ├── input_validation_service.py # Validation schéma de features d'entrée
+│   │   ├── supervision_reporter.py     # Rapports de supervision et seuils d'alerte par modèle
+│   │   ├── email_service.py            # Alertes email & rapports hebdomadaires
+│   │   └── webhook_service.py          # Webhooks HTTP post-prédiction
 │   ├── schemas/                    # Schémas Pydantic (validation I/O)
 │   │   ├── model.py
 │   │   ├── prediction.py
@@ -64,7 +68,10 @@ predictml-api/
 │       ├── 2_Models.py
 │       ├── 3_Predictions.py
 │       ├── 4_Stats.py
-│       └── 5_Code_Example.py
+│       ├── 5_Code_Example.py
+│       ├── 6_AB_Testing.py      # A/B testing, shadow mode, comparaison statistique
+│       ├── 7_Supervision.py     # Monitoring global, drift, alertes, performance
+│       └── 8_Retrain.py         # Gestion centralisée des retrains (manuel + planifié)
 ├── tests/                          # Tests pytest (automatisés, sans Docker)
 ├── smoke-tests/                    # Tests manuels (Docker live)
 ├── init_data/                      # Scripts one-shot (init_db, create_multiple_models)
@@ -166,7 +173,7 @@ Le dashboard Streamlit ne parle **jamais directement** à la DB ou à MinIO — 
 | `changed_fields` | JSON | Liste des champs modifiés |
 | `changed_by_user_id` | int | Auteur du changement |
 
-### Table `model_metadata` — colonnes A/B
+### Table `model_metadata` — colonnes notables
 
 | Colonne | Type | Description |
 |---|---|---|
@@ -177,6 +184,11 @@ Le dashboard Streamlit ne parle **jamais directement** à la DB ou à MinIO — 
 | `tags` | JSON | Liste de tags libres |
 | `webhook_url` | str | URL de callback post-prédiction |
 | `train_script_object_key` | str | Clé MinIO du script train.py |
+| `parent_version` | str | Version source du retrain (traçabilité de lignée) |
+| `promotion_policy` | JSON | Politique d'auto-promotion post-retrain (`min_accuracy`, `max_latency_p95_ms`, etc.) |
+| `retrain_schedule` | JSON | Planning cron de ré-entraînement automatique (`cron`, `lookback_days`, `enabled`, etc.) |
+| `alert_thresholds` | JSON | Seuils d'alerte spécifiques au modèle (surcharge les seuils globaux) |
+| `training_stats` | JSON | Snapshot des données d'entraînement du dernier retrain (`n_rows`, `feature_stats`, etc.) |
 
 ---
 
