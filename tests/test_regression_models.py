@@ -49,7 +49,7 @@ def _pkl(model) -> bytes:
     return pickle.dumps(model)
 
 
-def _inject_cache(model_name: str, version: str, model) -> str:
+def _inject_cache(model_name: str, version: str, model, feature_baseline=None) -> str:
     key = f"{model_name}:{version}"
     data = {
         "model": model,
@@ -58,6 +58,7 @@ def _inject_cache(model_name: str, version: str, model) -> str:
             version=version,
             confidence_threshold=None,
             webhook_url=None,
+            feature_baseline=feature_baseline,
         ),
     }
     asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
@@ -139,6 +140,48 @@ _minio_mock.upload_file_bytes.return_value = {
     "object_name": "mock_train.py",
     "size": len(VALID_TRAIN_SCRIPT),
 }
+
+REG_SHAP_LR_MODEL = "reg_shap_lr_model"
+REG_SHAP_RIDGE_MODEL = "reg_shap_ridge_model"
+REG_FI_MODEL = "reg_fi_model"
+REG_IV_MODEL = "reg_iv_model"
+
+
+async def _setup_extra():
+    async with _TestSessionLocal() as db:
+        for name, ver in [
+            (REG_SHAP_LR_MODEL, "1.0.0"),
+            (REG_SHAP_RIDGE_MODEL, "1.0.0"),
+            (REG_FI_MODEL, "1.0.0"),
+            (REG_IV_MODEL, "1.0.0"),
+        ]:
+            if not await DBService.get_model_metadata(db, name, ver):
+                await DBService.create_model_metadata(
+                    db,
+                    name=name,
+                    version=ver,
+                    minio_bucket="models",
+                    minio_object_key=f"{name}/v{ver}.pkl",
+                    is_active=True,
+                    is_production=True,
+                )
+
+        # Seed predictions for feature-importance tests
+        user = await DBService.get_user_by_token(db, USER_TOKEN)
+        for _ in range(6):
+            await DBService.create_prediction(
+                db,
+                user_id=user.id,
+                model_name=REG_FI_MODEL,
+                model_version="1.0.0",
+                input_features={"area": 75.0, "rooms": 3.0},
+                prediction_result=225000.0,
+                probabilities=None,
+                response_time_ms=5.0,
+            )
+
+
+asyncio.run(_setup_extra())
 
 
 # ---------------------------------------------------------------------------
@@ -385,3 +428,189 @@ class TestRegressionConfidenceTrend:
         # Pour un régresseur, pas de probabilités → trend vide
         assert data["trend"] == []
         assert data["model_name"] == REG_MODEL
+
+
+# ---------------------------------------------------------------------------
+# POST /explain — SHAP pour régresseurs linéaires (LinearExplainer)
+# ---------------------------------------------------------------------------
+
+
+class TestRegressionSHAP:
+    def test_explain_linear_regression_returns_200(self):
+        """POST /explain sur LinearRegression → 200, model_type=linear."""
+        model = _make_linear_regression()
+        baseline = {"area": {"mean": 80.0, "std": 25.0, "min": 30.0, "max": 150.0},
+                    "rooms": {"mean": 2.8, "std": 0.8, "min": 1.0, "max": 5.0}}
+        key = _inject_cache(REG_SHAP_LR_MODEL, "1.0.0", model, feature_baseline=baseline)
+        try:
+            r = client.post(
+                "/explain",
+                headers={"Authorization": f"Bearer {USER_TOKEN}"},
+                json={"model_name": REG_SHAP_LR_MODEL, "features": {"area": 75.0, "rooms": 3.0}},
+            )
+            assert r.status_code == 200
+            result = r.json()
+            assert result["model_type"] == "linear"
+            assert isinstance(result["shap_values"], dict)
+            assert set(result["shap_values"].keys()) == {"area", "rooms"}
+            for v in result["shap_values"].values():
+                assert isinstance(v, float)
+        finally:
+            asyncio.run(model_service._redis.delete(f"model:{key}"))
+
+    def test_explain_ridge_regression_returns_200(self):
+        """POST /explain sur Ridge → 200, model_type=linear, shap_values complet."""
+        model = _make_ridge_regression()
+        key = _inject_cache(REG_SHAP_RIDGE_MODEL, "1.0.0", model)
+        try:
+            r = client.post(
+                "/explain",
+                headers={"Authorization": f"Bearer {USER_TOKEN}"},
+                json={"model_name": REG_SHAP_RIDGE_MODEL, "features": {"x1": 3.0, "x2": 6.0}},
+            )
+            assert r.status_code == 200
+            result = r.json()
+            assert result["model_type"] == "linear"
+            assert set(result["shap_values"].keys()) == {"x1", "x2"}
+        finally:
+            asyncio.run(model_service._redis.delete(f"model:{key}"))
+
+    def test_explain_linear_regression_base_value_is_float(self):
+        """base_value de LinearRegression est bien un float scalaire."""
+        model = _make_linear_regression()
+        key = _inject_cache(REG_SHAP_LR_MODEL, "1.0.0", model)
+        try:
+            r = client.post(
+                "/explain",
+                headers={"Authorization": f"Bearer {USER_TOKEN}"},
+                json={"model_name": REG_SHAP_LR_MODEL, "features": {"area": 100.0, "rooms": 4.0}},
+            )
+            assert r.status_code == 200
+            assert isinstance(r.json()["base_value"], float)
+        finally:
+            asyncio.run(model_service._redis.delete(f"model:{key}"))
+
+    def test_predict_explain_true_linear_regression(self):
+        """POST /predict?explain=true sur LinearRegression → shap_values inline non-null."""
+        model = _make_linear_regression()
+        key = _inject_cache(REG_SHAP_LR_MODEL, "1.0.0", model)
+        try:
+            r = client.post(
+                "/predict",
+                headers={"Authorization": f"Bearer {USER_TOKEN}"},
+                params={"explain": "true"},
+                json={"model_name": REG_SHAP_LR_MODEL, "features": {"area": 80.0, "rooms": 3.0}},
+            )
+            assert r.status_code == 200
+            data = r.json()
+            assert data["shap_values"] is not None
+            assert isinstance(data["shap_values"], dict)
+            assert set(data["shap_values"].keys()) == {"area", "rooms"}
+        finally:
+            asyncio.run(model_service._redis.delete(f"model:{key}"))
+
+
+# ---------------------------------------------------------------------------
+# GET /models/{name}/feature-importance — régresseur linéaire
+# ---------------------------------------------------------------------------
+
+
+class TestRegressionFeatureImportance:
+    def test_feature_importance_linear_regression_returns_200(self):
+        """GET /feature-importance sur LinearRegression avec prédictions seedées → 200."""
+        model = _make_linear_regression()
+        key = _inject_cache(REG_FI_MODEL, "1.0.0", model)
+        try:
+            r = client.get(
+                f"/models/{REG_FI_MODEL}/feature-importance",
+                headers={"Authorization": f"Bearer {USER_TOKEN}"},
+                params={"last_n": 10, "days": 30},
+            )
+            assert r.status_code == 200
+            data = r.json()
+            assert data["model_name"] == REG_FI_MODEL
+            assert data["sample_size"] > 0
+            fi = data["feature_importance"]
+            assert set(fi.keys()) == {"area", "rooms"}
+        finally:
+            asyncio.run(model_service._redis.delete(f"model:{key}"))
+
+    def test_feature_importance_linear_regression_ranks_valid(self):
+        """Rangs 1 et 2 présents, rank 1 a le mean_abs_shap le plus élevé."""
+        model = _make_linear_regression()
+        key = _inject_cache(REG_FI_MODEL, "1.0.0", model)
+        try:
+            r = client.get(
+                f"/models/{REG_FI_MODEL}/feature-importance",
+                headers={"Authorization": f"Bearer {USER_TOKEN}"},
+                params={"last_n": 10, "days": 30},
+            )
+            assert r.status_code == 200
+            fi = r.json()["feature_importance"]
+            ranks = sorted(v["rank"] for v in fi.values())
+            assert ranks == list(range(1, len(fi) + 1))
+            rank1 = next(v for v in fi.values() if v["rank"] == 1)
+            rank2 = next(v for v in fi.values() if v["rank"] == 2)
+            assert rank1["mean_abs_shap"] >= rank2["mean_abs_shap"]
+        finally:
+            asyncio.run(model_service._redis.delete(f"model:{key}"))
+
+
+# ---------------------------------------------------------------------------
+# POST /models/{name}/{version}/validate-input — régresseur
+# ---------------------------------------------------------------------------
+
+
+class TestRegressionInputValidation:
+    def test_validate_input_all_features_present_returns_valid(self):
+        """validate-input avec toutes les features du régresseur → valid=true."""
+        model = _make_linear_regression()
+        key = _inject_cache(REG_IV_MODEL, "1.0.0", model)
+        try:
+            r = client.post(
+                f"/models/{REG_IV_MODEL}/1.0.0/validate-input",
+                headers={"Authorization": f"Bearer {USER_TOKEN}"},
+                json={"area": 80.0, "rooms": 3.0},
+            )
+            assert r.status_code == 200
+            data = r.json()
+            assert data["valid"] is True
+            assert data["errors"] == []
+            assert set(data["expected_features"]) == {"area", "rooms"}
+        finally:
+            asyncio.run(model_service._redis.delete(f"model:{key}"))
+
+    def test_validate_input_missing_feature_returns_invalid(self):
+        """validate-input avec une feature manquante → valid=false, erreur missing_feature."""
+        model = _make_linear_regression()
+        key = _inject_cache(REG_IV_MODEL, "1.0.0", model)
+        try:
+            r = client.post(
+                f"/models/{REG_IV_MODEL}/1.0.0/validate-input",
+                headers={"Authorization": f"Bearer {USER_TOKEN}"},
+                json={"area": 80.0},  # 'rooms' manquant
+            )
+            assert r.status_code == 200
+            data = r.json()
+            assert data["valid"] is False
+            error_types = [e["type"] for e in data["errors"]]
+            assert "missing_feature" in error_types
+        finally:
+            asyncio.run(model_service._redis.delete(f"model:{key}"))
+
+    def test_validate_input_unexpected_feature_reported(self):
+        """validate-input avec une feature non attendue → unexpected_feature dans errors."""
+        model = _make_linear_regression()
+        key = _inject_cache(REG_IV_MODEL, "1.0.0", model)
+        try:
+            r = client.post(
+                f"/models/{REG_IV_MODEL}/1.0.0/validate-input",
+                headers={"Authorization": f"Bearer {USER_TOKEN}"},
+                json={"area": 80.0, "rooms": 3.0, "extra_col": 99.0},
+            )
+            assert r.status_code == 200
+            data = r.json()
+            error_types = [e["type"] for e in data["errors"]]
+            assert "unexpected_feature" in error_types
+        finally:
+            asyncio.run(model_service._redis.delete(f"model:{key}"))
