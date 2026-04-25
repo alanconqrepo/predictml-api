@@ -135,6 +135,24 @@ curl http://localhost:8000/health
 - `GET /models/{name}/drift` : rapport de dérive par feature (Z-score + PSI)
 - Statuts : `ok`, `warning`, `critical`, `no_baseline`, `insufficient_data`
 - Basé sur la `feature_baseline` enregistrée à l'upload du modèle
+- **4 dimensions de monitoring** : dérive de distribution, dérive de performance, dérive de taux d'erreur, et **null rate** (taux de valeurs nulles par feature)
+
+### Seuils d'alerte par modèle
+
+- `alert_thresholds` configurable via `PATCH /models/{name}/{version}` pour définir des seuils spécifiques à chaque modèle (dérive, taux d'erreur, null rate)
+- Surcharge les seuils globaux définis par variables d'environnement
+- Utilisé par le service de supervision pour déclencher des alertes ciblées
+
+### Tendance de confiance & Lignée
+
+- `GET /models/{name}/confidence-trend` : évolution de la confiance moyenne des prédictions dans le temps (par fenêtre temporelle)
+- `parent_version` : chaque nouvelle version issue d'un retrain stocke la référence vers sa version source (traçabilité de lignée complète)
+- `training_stats` : snapshot des données d'entraînement sauvegardé automatiquement à chaque retrain (n_rows, feature_stats, label_distribution)
+
+### Préchauffage du cache
+
+- `POST /models/{name}/{version}/warmup` : précharge un modèle en mémoire (cache Redis) sans attendre la première requête de prédiction
+- Réduit la latence à froid lors des déploiements
 
 ### Performance réelle
 - `GET /models/{name}/performance` : métriques calculées via les résultats observés
@@ -195,15 +213,23 @@ curl http://localhost:8000/health
 | PATCH | `/models/{name}/{version}/schedule` | Admin | Configurer le planning cron de ré-entraînement |
 | PATCH | `/models/{name}/policy` | Admin | Définir la politique d'auto-promotion post-retrain |
 | GET | `/models/{name}/ab-compare` | Oui | Rapport de comparaison A/B |
+| GET | `/models/{name}/confidence-trend` | Oui | Tendance de confiance dans le temps |
+| POST | `/models/{name}/{version}/warmup` | Oui | Préchauffer le modèle dans le cache Redis |
 | **Prédictions** | | | |
-| POST | `/predict` | Oui | Prédiction unitaire |
+| POST | `/predict` | Oui | Prédiction unitaire (`?explain=true` pour SHAP inline) |
 | POST | `/predict-batch` | Oui | Prédictions en lot |
 | POST | `/explain` | Oui | Explicabilité SHAP locale |
 | GET | `/predictions` | Oui | Historique des prédictions (pagination curseur) |
+| GET | `/predictions/{id}` | Oui | Consulter une prédiction par son ID |
+| GET | `/predictions/{id}/explain` | Oui | Explication SHAP post-hoc d'une prédiction existante |
 | GET | `/predictions/stats` | Oui | Statistiques agrégées par modèle |
+| DELETE | `/predictions/purge` | Admin | Purge RGPD des prédictions anciennes (`dry_run` par défaut) |
 | **Résultats observés** | | | |
 | POST | `/observed-results` | Oui | Enregistrer des résultats réels |
 | GET | `/observed-results` | Oui | Consulter les résultats observés |
+| GET | `/observed-results/export` | Oui | Exporter les résultats observés (CSV/JSON) |
+| GET | `/observed-results/stats` | Oui | Statistiques de couverture ground truth |
+| POST | `/observed-results/upload-csv` | Oui | Import en lot depuis un fichier CSV |
 | **Utilisateurs** | | | |
 | POST | `/users` | Admin | Créer un utilisateur |
 | GET | `/users` | Admin | Lister tous les utilisateurs |
@@ -306,18 +332,21 @@ src/
 │   ├── database.py
 │   └── models/             # User, Prediction, ModelMetadata, ObservedResult, ModelHistory
 ├── services/               # Logique métier
-│   ├── db_service.py           # Toutes les requêtes DB
-│   ├── model_service.py        # Chargement, cache Redis, routage A/B/shadow
-│   ├── minio_service.py        # Upload/download MinIO
-│   ├── drift_service.py        # Calcul dérive Z-score + PSI
-│   ├── shap_service.py         # Explications SHAP locales
+│   ├── db_service.py               # Toutes les requêtes DB
+│   ├── model_service.py            # Chargement, cache Redis, routage A/B/shadow
+│   ├── minio_service.py            # Upload/download MinIO
+│   ├── drift_service.py            # Calcul dérive Z-score + PSI + null rate
+│   ├── shap_service.py             # Explications SHAP locales
 │   ├── ab_significance_service.py  # Tests statistiques A/B (Chi-², Mann-Whitney U)
-│   ├── email_service.py        # Alertes email & rapports hebdomadaires
-│   └── webhook_service.py      # Webhooks HTTP post-prédiction
+│   ├── auto_promotion_service.py   # Évaluation politique d'auto-promotion post-retrain
+│   ├── input_validation_service.py # Validation schéma de features d'entrée
+│   ├── supervision_reporter.py     # Rapports de supervision et alertes par modèle
+│   ├── email_service.py            # Alertes email & rapports hebdomadaires
+│   └── webhook_service.py          # Webhooks HTTP post-prédiction
 ├── schemas/                # Schémas Pydantic (validation I/O)
 └── main.py
 
-streamlit_app/              # Dashboard admin multipage
+streamlit_app/              # Dashboard admin multipage (8 pages : Users, Models, Predictions, Stats, Code, A/B, Supervision, Retrain)
 tests/                      # Tests automatisés (pytest)
 smoke-tests/                # Tests manuels contre Docker live
 init_data/                  # Scripts d'initialisation one-shot

@@ -231,6 +231,9 @@ Le dashboard permet de :
 - **Prédictions** — historique filtrable avec les features et résultats
 - **Stats** — graphiques de volume, temps de réponse, taux d'erreur
 - **Code Example** — exemples générés pour MLflow + API
+- **A/B Testing** — shadow mode, comparaison statistique, décision de promotion
+- **Supervision** — monitoring global, drift, alertes, tendances de performance
+- **Retrain** — planifier et déclencher les ré-entraînements, consulter les logs
 
 ---
 
