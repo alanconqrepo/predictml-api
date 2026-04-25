@@ -927,16 +927,26 @@ async def retrain_model(
     # 6. Extraire les métriques JSON depuis la dernière ligne stdout
     new_accuracy = source_model.accuracy
     new_f1 = source_model.f1_score
+    parsed_metrics: dict = {}
     for line in reversed(stdout_text.strip().splitlines()):
         stripped = line.strip()
         if stripped.startswith("{") and stripped.endswith("}"):
             try:
-                metrics = json.loads(stripped)
-                new_accuracy = metrics.get("accuracy", new_accuracy)
-                new_f1 = metrics.get("f1_score", new_f1)
+                parsed_metrics = json.loads(stripped)
+                new_accuracy = parsed_metrics.get("accuracy", new_accuracy)
+                new_f1 = parsed_metrics.get("f1_score", new_f1)
             except json.JSONDecodeError:
                 pass
             break
+
+    training_stats = {
+        "train_start_date": str(payload.start_date),
+        "train_end_date": str(payload.end_date),
+        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "n_rows": parsed_metrics.get("n_rows"),
+        "feature_stats": parsed_metrics.get("feature_stats"),
+        "label_distribution": parsed_metrics.get("label_distribution"),
+    }
 
     # 7. Uploader le nouveau modèle dans MinIO
     new_object_key = f"{name}/v{new_version}.pkl"
@@ -977,6 +987,7 @@ async def retrain_model(
         is_active=True,
         is_production=False,
         parent_version=version,
+        training_stats=training_stats,
     )
     db.add(new_metadata)
     await db.flush()
@@ -1092,6 +1103,7 @@ async def retrain_model(
             else None
         ),
         auto_promote_reason=auto_promote_reason,
+        training_stats=new_metadata.training_stats,
     )
 
 

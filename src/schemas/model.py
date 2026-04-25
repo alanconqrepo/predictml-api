@@ -147,6 +147,7 @@ class ModelGetResponse(BaseModel):
     promotion_policy: Optional[Dict[str, Any]] = None
     parent_version: Optional[str] = None
     alert_thresholds: Optional[Dict[str, Any]] = None
+    training_stats: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: Optional[datetime]
     deprecated_at: Optional[datetime]
@@ -384,6 +385,7 @@ class RetrainResponse(BaseModel):
     new_model_metadata: Optional[ModelCreateResponse] = None
     auto_promoted: Optional[bool] = None
     auto_promote_reason: Optional[str] = None
+    training_stats: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
