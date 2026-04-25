@@ -326,6 +326,22 @@ imprimer sur **stdout** un JSON sur la **dernière ligne JSON** de la sortie :
 {"accuracy": 0.95, "f1_score": 0.94}
 ```
 
+Les clés optionnelles suivantes enrichissent le champ `training_stats` de la nouvelle version
+(snapshot automatique des données d'entraînement) :
+
+```python
+print(json.dumps({
+    "accuracy": 0.95,
+    "f1_score": 0.94,
+    "n_rows": 12450,
+    "feature_stats": {"sepal_length": {"mean": 5.8, "std": 0.83}},
+    "label_distribution": {"setosa": 0.33, "versicolor": 0.34, "virginica": 0.33}
+}))
+```
+
+`train_start_date`, `train_end_date` et `trained_at` sont toujours renseignés automatiquement.
+`n_rows`, `feature_stats` et `label_distribution` sont `null` si absents du JSON stdout.
+
 ### Upload avec train.py
 
 ```bash

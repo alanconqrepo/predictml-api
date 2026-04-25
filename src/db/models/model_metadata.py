@@ -74,6 +74,9 @@ class ModelMetadata(Base):
     # Seuils d'alerte par modèle (surcharge les variables d'env globales)
     alert_thresholds = Column(JSON, nullable=True)
 
+    # Snapshot des données d'entraînement (dates, n_rows, feature_stats, label_distribution)
+    training_stats = Column(JSON, nullable=True)
+
     # Créateur
     user_id_creator = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     creator = relationship("User", foreign_keys=[user_id_creator], back_populates="created_models")
