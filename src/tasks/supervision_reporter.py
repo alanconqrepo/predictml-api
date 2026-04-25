@@ -129,9 +129,7 @@ async def run_alert_check() -> None:
                 # Alerte drift features
                 if prod_meta and prod_meta.feature_baseline:
                     drift_enabled = (
-                        thresholds.get("drift_auto_alert", True)
-                        if thresholds is not None
-                        else True
+                        thresholds.get("drift_auto_alert", True) if thresholds is not None else True
                     )
                     if drift_enabled:
                         production_stats = await DBService.get_feature_production_stats(
