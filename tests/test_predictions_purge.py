@@ -344,7 +344,7 @@ def test_purge_dry_run_false_preserves_recent_predictions():
 def test_purge_dry_run_false_returns_false_in_response():
     """Le champ dry_run dans la réponse reflète bien le paramètre passé."""
     response = client.delete(
-        "/predictions/purge?older_than_days=1&dry_run=false",
+        f"/predictions/purge?older_than_days=1&model_name={MODEL_A}&dry_run=false",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     )
     assert response.status_code == 200
