@@ -77,6 +77,127 @@ if is_admin:
         st.session_state.get("api_url"), st.session_state.get("api_token")
     )
 
+if is_admin:
+    with st.expander("➕ Uploader un nouveau modèle", expanded=not models):
+        with st.form("upload_model_form", clear_on_submit=True):
+            st.markdown("##### Fichiers")
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                pkl_file = st.file_uploader(
+                    "Fichier modèle (.pkl) *",
+                    type=["pkl"],
+                    help="Fichier pickle sérialisé. Aucune limite de taille imposée.",
+                )
+            with col_f2:
+                train_file = st.file_uploader(
+                    "Script d'entraînement (train.py) — optionnel",
+                    type=["py"],
+                    help="Doit référencer TRAIN_START_DATE, TRAIN_END_DATE, OUTPUT_MODEL_PATH.",
+                )
+
+            st.markdown("##### Identité")
+            col_n, col_v = st.columns(2)
+            with col_n:
+                up_name = st.text_input("Nom du modèle *", placeholder="ex : iris-classifier")
+            with col_v:
+                up_version = st.text_input("Version *", placeholder="ex : 1.0.0")
+
+            up_description = st.text_area(
+                "Description", placeholder="Description courte du modèle…", height=80
+            )
+
+            _ALGO_OPTIONS = [
+                "",
+                "RandomForest",
+                "GradientBoosting",
+                "XGBoost",
+                "LightGBM",
+                "LogisticRegression",
+                "SVM",
+                "KNN",
+                "DecisionTree",
+                "NeuralNetwork",
+                "LinearRegression",
+                "Ridge",
+                "Lasso",
+                "ElasticNet",
+                "Autre",
+            ]
+            up_algorithm = st.selectbox("Algorithme", _ALGO_OPTIONS)
+
+            st.markdown("##### Métriques")
+            col_acc, col_f1s = st.columns(2)
+            with col_acc:
+                up_accuracy = st.number_input(
+                    "Accuracy", min_value=0.0, max_value=1.0, value=None, step=0.001, format="%.4f"
+                )
+            with col_f1s:
+                up_f1 = st.number_input(
+                    "F1 score", min_value=0.0, max_value=1.0, value=None, step=0.001, format="%.4f"
+                )
+
+            up_tags_raw = st.text_input(
+                "Tags (séparés par des virgules)",
+                placeholder="ex : production, finance, v2",
+            )
+
+            submitted = st.form_submit_button("⬆️ Uploader le modèle", type="primary")
+
+        if submitted:
+            errors = []
+            if not pkl_file:
+                errors.append("Le fichier .pkl est obligatoire.")
+            if not up_name.strip():
+                errors.append("Le nom du modèle est obligatoire.")
+            if not up_version.strip():
+                errors.append("La version est obligatoire.")
+
+            if errors:
+                for err in errors:
+                    st.error(err)
+            else:
+                tags = (
+                    [t.strip() for t in up_tags_raw.split(",") if t.strip()]
+                    if up_tags_raw.strip()
+                    else []
+                )
+                algorithm = up_algorithm if up_algorithm and up_algorithm != "Autre" else None
+
+                with st.spinner(f"Upload de {pkl_file.name} en cours…"):
+                    progress = st.progress(0, text="Envoi du fichier…")
+                    try:
+                        train_bytes = train_file.read() if train_file else None
+                        train_fname = train_file.name if train_file else None
+                        progress.progress(30, text="Envoi en cours…")
+                        result = client.upload_model(
+                            name=up_name.strip(),
+                            version=up_version.strip(),
+                            file_bytes=pkl_file.read(),
+                            filename=pkl_file.name,
+                            description=up_description.strip() or None,
+                            algorithm=algorithm,
+                            accuracy=up_accuracy,
+                            f1_score=up_f1,
+                            tags=tags or None,
+                            train_file_bytes=train_bytes,
+                            train_filename=train_fname,
+                        )
+                        progress.progress(100, text="Terminé.")
+                        st.success(
+                            f"Modèle **{result['name']}** v{result['version']} uploadé avec succès."
+                        )
+                        reload()
+                    except Exception as exc:
+                        progress.empty()
+                        detail = ""
+                        try:
+                            if hasattr(exc, "response") and exc.response is not None:
+                                body = exc.response.json()
+                                detail = body.get("detail") or str(body)
+                        except Exception:
+                            detail = str(exc)
+                        st.error(f"Erreur lors de l'upload : {detail or exc}")
+
 if not models:
     st.info("Aucun modèle disponible.")
     st.stop()

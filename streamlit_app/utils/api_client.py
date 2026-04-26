@@ -108,6 +108,49 @@ class APIClient:
 
     # --- Models ---
 
+    def upload_model(
+        self,
+        name: str,
+        version: str,
+        file_bytes: bytes,
+        filename: str,
+        description: Optional[str] = None,
+        algorithm: Optional[str] = None,
+        accuracy: Optional[float] = None,
+        f1_score: Optional[float] = None,
+        tags: Optional[list] = None,
+        train_file_bytes: Optional[bytes] = None,
+        train_filename: Optional[str] = None,
+    ) -> dict:
+        """Upload un modèle .pkl avec ses métadonnées (multipart/form-data)."""
+        import json
+
+        data: dict = {"name": name, "version": version}
+        if description:
+            data["description"] = description
+        if algorithm:
+            data["algorithm"] = algorithm
+        if accuracy is not None:
+            data["accuracy"] = str(accuracy)
+        if f1_score is not None:
+            data["f1_score"] = str(f1_score)
+        if tags:
+            data["tags"] = json.dumps(tags)
+
+        files: dict = {"file": (filename, file_bytes, "application/octet-stream")}
+        if train_file_bytes is not None and train_filename:
+            files["train_file"] = (train_filename, train_file_bytes, "text/x-python")
+
+        r = requests.post(
+            f"{self.base_url}/models",
+            headers=self._headers(),
+            files=files,
+            data=data,
+            timeout=300,
+        )
+        r.raise_for_status()
+        return r.json()
+
     def list_models(self) -> list:
         r = self._get("/models")
         r.raise_for_status()
