@@ -192,6 +192,12 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def validate_input(self, name: str, version: str, features: dict) -> dict:
+        """Valide le schéma d'entrée sans lancer de prédiction."""
+        r = self._post(f"/models/{name}/{version}/validate-input", json=features)
+        r.raise_for_status()
+        return r.json()
+
     def warmup_model(self, name: str, version: str) -> dict:
         """Préchauffe le cache Redis pour un modèle (admin requis)."""
         r = self._post(f"/models/{name}/{version}/warmup")
