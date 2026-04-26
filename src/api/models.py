@@ -74,6 +74,9 @@ from src.schemas.model import (
     PeriodPerformance,
     PolicyUpdateResponse,
     PromotionPolicy,
+    ReadinessCheck,
+    ReadinessChecks,
+    ReadinessResponse,
     ReliabilityBin,
     RetrainRequest,
     RetrainResponse,
@@ -472,6 +475,85 @@ async def get_model_drift(
         drift_summary=summary,
         features=features,
     )
+
+
+# ---------------------------------------------------------------------------
+# Readiness gate
+# ---------------------------------------------------------------------------
+
+
+@router.get("/models/{name}/readiness")
+async def get_model_readiness(
+    name: str,
+    version: str = Query(..., description="Version du modèle à vérifier"),
+    user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Vérifie si une version de modèle est opérationnellement prête pour la mise en trafic.
+
+    Exécute 4 checks :
+    - **is_production** : la version est marquée comme production
+    - **file_accessible** : le fichier .pkl est accessible dans MinIO
+    - **baseline_computed** : le profil baseline des features est calculé
+    - **no_critical_drift** : aucun drift critique sur les dernières 24h
+
+    Toujours HTTP 200 — `ready: false` est un état, pas une erreur.
+    """
+    from fastapi.responses import JSONResponse
+
+    model_meta = await DBService.get_model_metadata(db, name, version)
+    if not model_meta:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' version '{version}' introuvable.",
+        )
+
+    prod_check = ReadinessCheck(
+        pass_=model_meta.is_production,
+        detail=None if model_meta.is_production else "is_production=False",
+    )
+    baseline_check = ReadinessCheck(
+        pass_=model_meta.feature_baseline is not None,
+        detail=None if model_meta.feature_baseline is not None else "feature_baseline is null",
+    )
+
+    async def _check_file() -> ReadinessCheck:
+        info = await asyncio.to_thread(minio_service.get_object_info, model_meta.minio_object_key)
+        if info is not None:
+            return ReadinessCheck(pass_=True)
+        return ReadinessCheck(pass_=False, detail="model file not found in MinIO")
+
+    async def _check_drift() -> ReadinessCheck:
+        if not model_meta.feature_baseline:
+            return ReadinessCheck(pass_=True)
+        prod_stats = await DBService.get_feature_production_stats(db, name, version, days=1)
+        features = drift_service.compute_feature_drift(
+            model_meta.feature_baseline, prod_stats, min_count=30
+        )
+        drift_status = drift_service.summarize_drift(features, baseline_available=True)
+        if drift_status == "critical":
+            return ReadinessCheck(pass_=False, detail=f"drift_status={drift_status}")
+        return ReadinessCheck(pass_=True)
+
+    file_check, drift_check = await asyncio.gather(_check_file(), _check_drift())
+
+    checks = ReadinessChecks(
+        is_production=prod_check,
+        file_accessible=file_check,
+        baseline_computed=baseline_check,
+        no_critical_drift=drift_check,
+    )
+    ready = prod_check.pass_ and file_check.pass_ and baseline_check.pass_ and drift_check.pass_
+
+    response = ReadinessResponse(
+        model_name=name,
+        version=version,
+        ready=ready,
+        checked_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        checks=checks,
+    )
+    return JSONResponse(content=response.model_dump(by_alias=True, mode="json"))
 
 
 # ---------------------------------------------------------------------------
