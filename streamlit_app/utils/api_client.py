@@ -553,3 +553,30 @@ class APIClient:
         )
         r.raise_for_status()
         return r.json()
+
+    def predict_batch_from_df(
+        self,
+        model_name: str,
+        rows: list,
+        model_version: Optional[str] = None,
+    ) -> dict:
+        """
+        Envoie une liste de dicts de features à POST /predict-batch et retourne les prédictions.
+
+        rows: liste de dicts {"feature1": val, "feature2": val, ...}
+        Timeout de 120s pour accommoder les gros batches.
+        """
+        payload: dict = {
+            "model_name": model_name,
+            "inputs": [{"features": row} for row in rows],
+        }
+        if model_version:
+            payload["model_version"] = model_version
+        r = requests.post(
+            f"{self.base_url}/predict-batch",
+            headers=self._headers(),
+            json=payload,
+            timeout=120,
+        )
+        r.raise_for_status()
+        return r.json()
