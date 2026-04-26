@@ -3,6 +3,8 @@ Gestion des utilisateurs — admin only
 """
 
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
 from utils.auth import get_client, require_admin, require_auth
@@ -200,3 +202,83 @@ if st.session_state.get("confirm_delete_user") == selected["id"]:
     if c2.button("Annuler"):
         st.session_state.pop("confirm_delete_user", None)
         st.rerun()
+
+# --- Analytics d'usage ---
+st.divider()
+with st.expander(
+    f"📊 Analytics d'usage — {selected['username']} (30 derniers jours)", expanded=True
+):
+    try:
+        usage = client.get_user_usage(selected["id"], days=30)
+        daily_limit = selected["rate_limit_per_day"]
+
+        today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
+        today_calls = next((d["calls"] for d in usage["by_day"] if str(d["date"]) == today_str), 0)
+        pct = today_calls / daily_limit * 100 if daily_limit > 0 else 0
+
+        st.metric(
+            label="Consommation quota (aujourd'hui)",
+            value=f"{pct:.1f}%",
+            delta=f"{today_calls} / {daily_limit} appels",
+            delta_color="off",
+        )
+
+        col_left, col_right = st.columns(2)
+
+        with col_left:
+            if usage["by_model"]:
+                df_model = pd.DataFrame(usage["by_model"])
+                fig_model = px.bar(
+                    df_model,
+                    x="model_name",
+                    y="calls",
+                    title="Prédictions par modèle",
+                    labels={"model_name": "Modèle", "calls": "Appels"},
+                    color_discrete_sequence=["#4C78A8"],
+                )
+                fig_model.update_layout(
+                    xaxis_title="Modèle",
+                    yaxis_title="Appels",
+                    showlegend=False,
+                    margin={"t": 40},
+                )
+                st.plotly_chart(fig_model, use_container_width=True)
+            else:
+                st.info("Aucune prédiction par modèle sur la période.")
+
+        with col_right:
+            if usage["by_day"]:
+                df_day = pd.DataFrame(usage["by_day"])
+                df_day["date"] = pd.to_datetime(df_day["date"])
+                df_day = df_day.sort_values("date")
+
+                fig_day = go.Figure()
+                fig_day.add_trace(
+                    go.Scatter(
+                        x=df_day["date"],
+                        y=df_day["calls"],
+                        mode="lines+markers",
+                        name="Appels/jour",
+                        line={"color": "#4C78A8"},
+                    )
+                )
+                fig_day.add_hline(
+                    y=daily_limit,
+                    line_dash="dash",
+                    line_color="red",
+                    annotation_text=f"Quota ({daily_limit}/jour)",
+                    annotation_position="top right",
+                )
+                fig_day.update_layout(
+                    title="Volume par jour",
+                    xaxis_title="Date",
+                    yaxis_title="Appels",
+                    showlegend=False,
+                    margin={"t": 40},
+                )
+                st.plotly_chart(fig_day, use_container_width=True)
+            else:
+                st.info("Aucune donnée journalière sur la période.")
+
+    except Exception as e:
+        st.error(f"Impossible de charger les analytics : {e}")
