@@ -509,9 +509,7 @@ async def get_model_readiness(
     )
 
     async def _check_file() -> ReadinessCheck:
-        info = await asyncio.to_thread(
-            minio_service.get_object_info, model_meta.minio_object_key
-        )
+        info = await asyncio.to_thread(minio_service.get_object_info, model_meta.minio_object_key)
         if info is not None:
             return ReadinessCheck(pass_=True)
         return ReadinessCheck(pass_=False, detail="model file not found in MinIO")
