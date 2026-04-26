@@ -8,6 +8,8 @@ import io
 import json
 from datetime import datetime, timedelta, timezone
 
+import pandas as pd
+
 from fastapi.testclient import TestClient
 
 from src.main import app
@@ -310,3 +312,93 @@ def test_export_empty_result_jsonl():
     )
     assert r.status_code == 200
     assert r.text.strip() == ""
+
+
+# ---------------------------------------------------------------------------
+# Format Parquet
+# ---------------------------------------------------------------------------
+
+
+def test_export_parquet_format():
+    r = client.get(
+        f"/predictions/export?start={START}&end={END}&model_name={TEST_MODEL}&format=parquet",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+    )
+    assert r.status_code == 200
+    assert "application/octet-stream" in r.headers["content-type"]
+    assert ".parquet" in r.headers["content-disposition"]
+
+
+def test_export_parquet_row_count():
+    r = client.get(
+        f"/predictions/export?start={START}&end={END}&model_name={TEST_MODEL}&format=parquet",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+    )
+    df = pd.read_parquet(io.BytesIO(r.content))
+    assert len(df) == 4  # 3 success + 1 error
+
+
+def test_export_parquet_columns():
+    r = client.get(
+        f"/predictions/export?start={START}&end={END}&model_name={TEST_MODEL}&format=parquet",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+    )
+    df = pd.read_parquet(io.BytesIO(r.content))
+    expected = {
+        "id",
+        "timestamp",
+        "model_name",
+        "model_version",
+        "username",
+        "id_obs",
+        "prediction_result",
+        "probabilities",
+        "response_time_ms",
+        "status",
+        "error_message",
+        "is_shadow",
+        "input_features",
+    }
+    assert expected == set(df.columns)
+
+
+def test_export_parquet_values():
+    r = client.get(
+        f"/predictions/export?start={START}&end={END}&model_name={TEST_MODEL}&format=parquet",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+    )
+    df = pd.read_parquet(io.BytesIO(r.content))
+    assert (df["model_name"] == TEST_MODEL).all()
+    assert (df["model_version"] == "1.0.0").all()
+    assert (df["username"] == "test_export_user").all()
+
+
+def test_export_parquet_without_features():
+    r = client.get(
+        f"/predictions/export?start={START}&end={END}&model_name={TEST_MODEL}"
+        "&format=parquet&include_features=false",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+    )
+    df = pd.read_parquet(io.BytesIO(r.content))
+    assert "input_features" not in df.columns
+
+
+def test_export_parquet_status_filter():
+    r = client.get(
+        f"/predictions/export?start={START}&end={END}&model_name={TEST_MODEL}"
+        "&format=parquet&status=success",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+    )
+    df = pd.read_parquet(io.BytesIO(r.content))
+    assert len(df) == 3
+    assert (df["status"] == "success").all()
+
+
+def test_export_parquet_empty_result():
+    r = client.get(
+        f"/predictions/export?start={START}&end={END}&model_name=model_inexistant&format=parquet",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+    )
+    assert r.status_code == 200
+    df = pd.read_parquet(io.BytesIO(r.content))
+    assert len(df) == 0

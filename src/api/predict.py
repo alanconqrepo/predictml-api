@@ -10,9 +10,10 @@ from datetime import datetime
 from typing import List, Optional
 
 import numpy as np
+import pandas as pd
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import check_prediction_rate_limit, require_admin, verify_token
@@ -226,7 +227,7 @@ async def export_predictions(
     export_format: str = Query(
         "csv",
         alias="format",
-        description="Format d'export : csv ou jsonl (défaut : csv)",
+        description="Format d'export : csv, jsonl ou parquet (défaut : csv)",
     ),
     include_features: bool = Query(True, description="Inclure input_features dans l'export"),
     pred_status: Optional[str] = Query(
@@ -236,16 +237,17 @@ async def export_predictions(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Export bulk des prédictions au format CSV ou JSONL via streaming par curseur.
+    Export bulk des prédictions au format CSV, JSONL ou Parquet via streaming par curseur.
 
     - **model_name** : filtrer sur un modèle (optionnel — tous les modèles si absent)
     - **start** / **end** : plage datetime — obligatoire
-    - **format** : `csv` (défaut) ou `jsonl`
+    - **format** : `csv` (défaut), `jsonl` ou `parquet`
     - **include_features** : inclure `input_features` dans l'export (défaut : true)
     - **status** : filtrer par statut `success` ou `error` (optionnel)
 
     Retourne un fichier en téléchargement direct (Content-Disposition: attachment).
-    Le streaming par curseur évite de charger tout l'historique en mémoire.
+    Le streaming par curseur évite de charger tout l'historique en mémoire (CSV/JSONL).
+    Le format Parquet charge toutes les lignes en mémoire avant sérialisation.
 
     Nécessite un token Bearer valide.
     """
@@ -254,10 +256,10 @@ async def export_predictions(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="'start' doit être antérieur à 'end'.",
         )
-    if export_format not in ("csv", "jsonl"):
+    if export_format not in ("csv", "jsonl", "parquet"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Le paramètre 'format' doit être 'csv' ou 'jsonl'.",
+            detail="Le paramètre 'format' doit être 'csv', 'jsonl' ou 'parquet'.",
         )
     if pred_status is not None and pred_status not in ("success", "error"):
         raise HTTPException(
@@ -354,6 +356,53 @@ async def export_predictions(
             if len(rows) < _EXPORT_PAGE_SIZE:
                 break
             cursor = rows[-1].id
+
+    if fmt == "parquet":
+        all_rows = []
+        cursor: Optional[int] = None
+        while True:
+            rows = await DBService.get_predictions_for_export(
+                db=db,
+                model_name=model_name,
+                start=start,
+                end=end,
+                status_filter=pred_status,
+                limit=_EXPORT_PAGE_SIZE,
+                cursor=cursor,
+            )
+            if not rows:
+                break
+            for row in rows:
+                record: dict = {
+                    "id": row.id,
+                    "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                    "model_name": row.model_name,
+                    "model_version": row.model_version,
+                    "username": row.user.username if row.user else None,
+                    "id_obs": row.id_obs,
+                    "prediction_result": json.dumps(row.prediction_result),
+                    "probabilities": json.dumps(row.probabilities),
+                    "response_time_ms": row.response_time_ms,
+                    "status": row.status,
+                    "error_message": row.error_message,
+                    "is_shadow": row.is_shadow,
+                }
+                if include_features:
+                    record["input_features"] = json.dumps(row.input_features)
+                all_rows.append(record)
+            if len(rows) < _EXPORT_PAGE_SIZE:
+                break
+            cursor = rows[-1].id
+
+        buf = io.BytesIO()
+        pd.DataFrame(all_rows, columns=csv_cols).to_parquet(buf, index=False, engine="pyarrow")
+        buf.seek(0)
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        return Response(
+            content=buf.read(),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="predictions_{today}.parquet"'},
+        )
 
     media_type = "text/csv" if fmt == "csv" else "application/x-ndjson"
     filename = f"predictions_export.{fmt}"
