@@ -106,6 +106,11 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def get_user_usage(self, user_id: int, days: int = 30) -> dict:
+        r = self._get(f"/users/{user_id}/usage", params={"days": days})
+        r.raise_for_status()
+        return r.json()
+
     # --- Models ---
 
     def upload_model(
