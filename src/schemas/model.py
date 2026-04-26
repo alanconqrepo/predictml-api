@@ -486,6 +486,29 @@ class ConfidenceTrendResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Distribution de confiance
+# ---------------------------------------------------------------------------
+
+
+class ConfidenceBin(BaseModel):
+    bin_min: float
+    bin_max: float
+    count: int
+    pct: float
+
+
+class ConfidenceDistributionResponse(BaseModel):
+    model_name: str
+    version: Optional[str]
+    period_days: int
+    sample_count: int
+    mean_confidence: float
+    pct_high_confidence: float
+    pct_uncertain: float
+    histogram: List[ConfidenceBin]
+
+
+# ---------------------------------------------------------------------------
 # Calibration des probabilités
 # ---------------------------------------------------------------------------
 

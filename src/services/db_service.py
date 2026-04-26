@@ -557,6 +557,70 @@ class DBService:
         return {"has_data": True, "overall": overall, "trend": trend}
 
     @staticmethod
+    async def get_confidence_distribution(
+        db: AsyncSession,
+        model_name: str,
+        version: Optional[str],
+        days: int,
+        high_threshold: float = 0.80,
+        uncertain_threshold: float = 0.60,
+    ) -> dict:
+        import numpy as np
+
+        cutoff = _utcnow() - timedelta(days=days)
+
+        filters = [
+            Prediction.model_name == model_name,
+            Prediction.status == "success",
+            Prediction.is_shadow.is_(False),
+            Prediction.probabilities.isnot(None),
+            Prediction.timestamp >= cutoff,
+        ]
+        if version:
+            filters.append(Prediction.model_version == version)
+
+        stmt = select(Prediction.probabilities).where(and_(*filters))
+        result = await db.execute(stmt)
+        rows = result.scalars().all()
+
+        confidences = []
+        for probs in rows:
+            if isinstance(probs, dict):
+                c = max(probs.values()) if probs else None
+            elif isinstance(probs, list):
+                c = max(probs) if probs else None
+            else:
+                continue
+            if c is not None:
+                confidences.append(float(c))
+
+        if not confidences:
+            return {"has_data": False}
+
+        arr = np.array(confidences)
+        total = len(confidences)
+        counts, edges = np.histogram(arr, bins=10, range=(0.5, 1.0))
+
+        histogram = [
+            {
+                "bin_min": round(float(edges[i]), 2),
+                "bin_max": round(float(edges[i + 1]), 2),
+                "count": int(counts[i]),
+                "pct": round(float(counts[i]) / total, 4),
+            }
+            for i in range(len(counts))
+        ]
+
+        return {
+            "has_data": True,
+            "sample_count": total,
+            "mean_confidence": round(float(np.mean(arr)), 4),
+            "pct_high_confidence": round(float(np.sum(arr > high_threshold)) / total, 4),
+            "pct_uncertain": round(float(np.sum(arr < uncertain_threshold)) / total, 4),
+            "histogram": histogram,
+        }
+
+    @staticmethod
     async def get_feature_production_stats(
         db: AsyncSession,
         model_name: str,
