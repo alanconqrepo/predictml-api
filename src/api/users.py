@@ -13,7 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.security import require_admin, verify_token
 from src.db.database import get_db
 from src.db.models import User, UserRole
-from src.schemas.user import QuotaResponse, UserCreateInput, UserResponse, UserUpdateInput, UserUsageResponse
+from src.schemas.user import (
+    QuotaResponse,
+    UserCreateInput,
+    UserResponse,
+    UserUpdateInput,
+    UserUsageResponse,
+)
 from src.services.db_service import DBService
 
 router = APIRouter(prefix="/users", tags=["users"])

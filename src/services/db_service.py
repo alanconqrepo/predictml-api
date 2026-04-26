@@ -160,9 +160,7 @@ class DBService:
                 }
             )
 
-        day_stats = [
-            {"date": d, "calls": c} for d, c in sorted(by_day.items())
-        ]
+        day_stats = [{"date": d, "calls": c} for d, c in sorted(by_day.items())]
 
         return {
             "total_calls": len(rows),
