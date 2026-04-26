@@ -340,6 +340,12 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def explain_prediction(self, prediction_id: int) -> dict:
+        """Retourne l'explication SHAP post-hoc pour une prédiction (GET /predictions/{id}/explain)."""
+        r = self._get(f"/predictions/{prediction_id}/explain")
+        r.raise_for_status()
+        return r.json()
+
     def get_prediction_stats(
         self,
         days: int = 30,

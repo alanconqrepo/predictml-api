@@ -230,6 +230,81 @@ with tab_history:
                         if p.get("error_message"):
                             st.error(f"Erreur : {p['error_message']}")
 
+            # Explication SHAP par prédiction
+            with st.expander("🧠 Explication SHAP d'une prédiction"):
+                import plotly.graph_objects as go
+
+                shap_pred_ids = {str(p["id"]): p for p in predictions if p.get("status") == "success"}
+                if not shap_pred_ids:
+                    st.info("Aucune prédiction réussie sur cette page — sélectionnez une autre plage de dates.")
+                else:
+                    shap_sel_id = st.selectbox(
+                        "Prédiction ID",
+                        list(shap_pred_ids.keys()),
+                        key="shap_pred_sel",
+                    )
+                    if st.button("🔍 Expliquer", key="shap_explain_btn"):
+                        with st.spinner("Calcul de l'explication SHAP en cours…"):
+                            try:
+                                explanation = client.explain_prediction(int(shap_sel_id))
+                            except Exception as exc:
+                                st.error(f"Impossible de calculer l'explication : {exc}")
+                                explanation = None
+
+                        if explanation:
+                            shap_values: dict = explanation.get("shap_values", {})
+                            base_value: float = explanation.get("base_value", 0.0)
+                            prediction = explanation.get("prediction")
+                            model_type: str = explanation.get("model_type", "")
+
+                            col_m1, col_m2, col_m3 = st.columns(3)
+                            col_m1.metric("Valeur de base E[f(X)]", f"{base_value:.4f}")
+                            col_m2.metric("Prédiction finale", str(prediction))
+                            col_m3.metric("Type de modèle", model_type)
+
+                            if shap_values:
+                                # Top 10 features par valeur absolue
+                                sorted_features = sorted(
+                                    shap_values.items(), key=lambda x: abs(x[1]), reverse=True
+                                )[:10]
+                                features_names = [f for f, _ in sorted_features]
+                                shap_vals = [v for _, v in sorted_features]
+                                colors = ["#e05252" if v >= 0 else "#5282e0" for v in shap_vals]
+
+                                fig = go.Figure(
+                                    go.Bar(
+                                        x=shap_vals,
+                                        y=features_names,
+                                        orientation="h",
+                                        marker_color=colors,
+                                        text=[f"{v:+.4f}" for v in shap_vals],
+                                        textposition="outside",
+                                    )
+                                )
+                                fig.update_layout(
+                                    title="Contributions SHAP (top 10 features)",
+                                    xaxis_title="Contribution SHAP",
+                                    yaxis={"autorange": "reversed"},
+                                    height=max(300, len(sorted_features) * 40 + 100),
+                                    margin={"l": 20, "r": 60, "t": 50, "b": 40},
+                                    showlegend=False,
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+
+                                # Tableau complet si plus de 10 features
+                                if len(shap_values) > 10:
+                                    with st.expander("Voir toutes les features"):
+                                        all_sorted = sorted(
+                                            shap_values.items(), key=lambda x: abs(x[1]), reverse=True
+                                        )
+                                        st.dataframe(
+                                            pd.DataFrame(all_sorted, columns=["Feature", "SHAP"]),
+                                            use_container_width=True,
+                                            hide_index=True,
+                                        )
+                            else:
+                                st.info("Aucune valeur SHAP retournée pour cette prédiction.")
+
         # --- Pagination ---
         st.divider()
         col_prev, col_info, col_next = st.columns([1, 2, 1])
