@@ -82,6 +82,7 @@ class ModelService:
                 "tags": m.tags,
                 "webhook_url": m.webhook_url,
                 "is_active": m.is_active,
+                "status": m.status,
                 "traffic_weight": m.traffic_weight,
                 "deployment_mode": m.deployment_mode,
                 "train_script_object_key": m.train_script_object_key,
@@ -234,6 +235,7 @@ class ModelService:
                 and_(
                     ModelMetadata.name == model_name,
                     ModelMetadata.is_active.is_(True),
+                    ModelMetadata.status != "deprecated",
                 )
             )
         )

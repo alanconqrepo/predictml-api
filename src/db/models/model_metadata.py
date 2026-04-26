@@ -17,6 +17,14 @@ class DeploymentMode:
     SHADOW = "shadow"
 
 
+class ModelStatus:
+    """Constantes pour le cycle de vie d'une version de modèle."""
+
+    ACTIVE = "active"
+    DEPRECATED = "deprecated"
+    ARCHIVED = "archived"
+
+
 class ModelMetadata(Base):
     """Métadonnées et versioning des modèles ML"""
 
@@ -95,6 +103,7 @@ class ModelMetadata(Base):
     # Status
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     is_production = Column(Boolean, default=False, nullable=False)
+    status = Column(String(20), nullable=False, default=ModelStatus.ACTIVE)
 
     # A/B Testing & Shadow Deployment
     # traffic_weight : fraction de trafic (0.0–1.0) pour le routage A/B ; None = non géré
