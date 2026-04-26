@@ -481,6 +481,24 @@ class APIClient:
         r.raise_for_status()
         return r.content
 
+    def purge_predictions(
+        self,
+        older_than_days: int,
+        model_name: Optional[str] = None,
+        dry_run: bool = True,
+    ) -> dict:
+        params: dict = {"older_than_days": older_than_days, "dry_run": dry_run}
+        if model_name:
+            params["model_name"] = model_name
+        r = requests.delete(
+            f"{self.base_url}/predictions/purge",
+            headers=self._headers(),
+            params=params,
+            timeout=30,
+        )
+        r.raise_for_status()
+        return r.json()
+
     def upload_observed_results_csv(
         self,
         file_bytes: bytes,
