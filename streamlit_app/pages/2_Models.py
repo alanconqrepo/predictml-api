@@ -2,6 +2,7 @@
 Gestion des modèles ML
 """
 
+import json as _json
 import os
 import time
 
@@ -603,6 +604,89 @@ with st.expander("🧪 Tester le modèle", expanded=False):
 
                 except Exception as e:
                     st.error(f"Erreur lors de la prédiction : {e}")
+
+    st.divider()
+    with st.expander("🔍 Valider le schéma JSON", expanded=False):
+        st.markdown(
+            "Testez un payload JSON avant d'envoyer une prédiction pour détecter "
+            "les features manquantes, inattendues ou mal typées."
+        )
+
+        # Build example JSON from feature_baseline or feature_names_list
+        if feature_baseline:
+            example_payload = {
+                feat: float(info.get("mean") or 0.0)
+                for feat, info in feature_baseline.items()
+            }
+        elif feature_names_list:
+            example_payload = {feat: 0.0 for feat in feature_names_list}
+        else:
+            example_payload = {}
+
+        raw_json = st.text_area(
+            "Payload JSON à valider",
+            value=_json.dumps(example_payload, indent=2),
+            height=180,
+            key=f"validate_json_{selected['name']}_{selected['version']}",
+        )
+
+        if st.button(
+            "✅ Valider",
+            key=f"validate_btn_{selected['name']}_{selected['version']}",
+        ):
+            try:
+                parsed = _json.loads(raw_json)
+            except _json.JSONDecodeError as exc:
+                st.error(f"JSON invalide : {exc}")
+                parsed = None
+
+            if parsed is not None:
+                with st.spinner("Validation en cours…"):
+                    try:
+                        result = client.validate_input(
+                            selected["name"], selected["version"], parsed
+                        )
+
+                        if result.get("valid"):
+                            st.success("✅ Schéma valide")
+                        else:
+                            st.error("❌ Schéma invalide")
+
+                        errors = result.get("errors") or []
+                        warnings = result.get("warnings") or []
+                        expected = result.get("expected_features")
+
+                        for err in errors:
+                            etype = err.get("type", "")
+                            feat = err.get("feature", "")
+                            if etype == "missing_feature":
+                                st.markdown(f"❌ **Feature manquante** : `{feat}`")
+                            elif etype == "unexpected_feature":
+                                st.markdown(f"❌ **Feature inattendue** : `{feat}`")
+                            else:
+                                st.markdown(f"❌ `{feat}` — {etype}")
+
+                        for warn in warnings:
+                            wtype = warn.get("type", "")
+                            feat = warn.get("feature", "")
+                            from_t = warn.get("from_type", "")
+                            to_t = warn.get("to_type", "")
+                            if wtype == "type_coercion":
+                                st.markdown(
+                                    f"⚠️ **Coercition de type** : `{feat}` "
+                                    f"({from_t} → {to_t})"
+                                )
+                            else:
+                                st.markdown(f"⚠️ `{feat}` — {wtype}")
+
+                        if expected:
+                            st.markdown("**Features attendues :**")
+                            st.markdown(
+                                " ".join(f"`{f}`" for f in expected)
+                            )
+
+                    except Exception as e:
+                        st.error(f"Erreur lors de la validation : {e}")
 
 # Actions
 if is_admin:
