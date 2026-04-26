@@ -705,9 +705,38 @@ if is_admin:
     st.subheader("Actions admin")
     col_p, col_d = st.columns(2)
 
+    # Readiness checklist
+    try:
+        readiness = client.get_model_readiness(selected["name"], selected["version"])
+        checks = readiness.get("checks", {})
+        check_labels = {
+            "file_accessible": "Fichier accessible dans MinIO",
+            "baseline_computed": "Baseline des features calculée",
+            "no_critical_drift": "Aucun drift critique (24h)",
+            "is_production": "Marqué en production",
+        }
+        st.markdown("**Checklist de production-readiness**")
+        for key, label in check_labels.items():
+            check = checks.get(key, {})
+            passed = check.get("pass", False)
+            detail = check.get("detail")
+            icon = "✅" if passed else "❌"
+            suffix = f" — `{detail}`" if detail else ""
+            st.markdown(f"{icon} {label}{suffix}")
+        ready = readiness.get("ready", False)
+    except Exception:
+        ready = True  # ne pas bloquer si l'endpoint échoue
+
     # Passer en production
     if not selected.get("is_production"):
-        if col_p.button("🚀 Passer en production", use_container_width=True, type="primary"):
+        promote_help = None if ready else "Résoudre les checks ❌ ci-dessus avant de promouvoir"
+        if col_p.button(
+            "🚀 Passer en production",
+            use_container_width=True,
+            type="primary",
+            disabled=not ready,
+            help=promote_help,
+        ):
             try:
                 client.update_model(selected["name"], selected["version"], {"is_production": True})
                 st.success(
