@@ -14,7 +14,17 @@ from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
 import structlog
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
@@ -2354,6 +2364,54 @@ async def compute_model_baseline(
         predictions_used=predictions_used,
         dry_run=dry_run,
         baseline={feat: FeatureStats(**stats) for feat, stats in baseline.items()},
+    )
+
+
+@router.get("/models/{name}/{version}/download")
+async def download_model(
+    name: str,
+    version: str,
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Télécharge le fichier .pkl d'un modèle.
+
+    Admin uniquement — le .pkl contient la logique interne du modèle.
+    """
+    result = await db.execute(
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.version == version)
+        )
+    )
+    model_meta = result.scalar_one_or_none()
+
+    if not model_meta:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' version '{version}' introuvable.",
+        )
+
+    if not model_meta.minio_object_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Aucun fichier .pkl disponible pour '{name}' version '{version}'.",
+        )
+
+    try:
+        model_bytes = minio_service.download_file_bytes(model_meta.minio_object_key)
+    except Exception as e:
+        logger.error("Erreur téléchargement modèle", name=name, version=version, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erreur lors du téléchargement du modèle : {str(e)}",
+        )
+
+    filename = f"{name}_{version}.pkl"
+    return Response(
+        content=model_bytes,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
