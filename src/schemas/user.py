@@ -2,8 +2,8 @@
 Schémas Pydantic pour la gestion des utilisateurs
 """
 
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime
+from typing import List, Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -49,3 +49,30 @@ class QuotaResponse(BaseModel):
     used_today: int
     remaining_today: int
     reset_at: datetime
+
+
+class UserUsageByModel(BaseModel):
+    """Statistiques d'usage pour un modèle donné"""
+
+    model_name: str
+    calls: int
+    errors: int
+    avg_latency_ms: Optional[float]
+
+
+class UserUsageByDay(BaseModel):
+    """Statistiques d'usage pour un jour donné"""
+
+    date: date
+    calls: int
+
+
+class UserUsageResponse(BaseModel):
+    """Statistiques d'usage d'un utilisateur sur une période"""
+
+    user_id: int
+    username: str
+    period_days: int
+    total_calls: int
+    by_model: List[UserUsageByModel]
+    by_day: List[UserUsageByDay]

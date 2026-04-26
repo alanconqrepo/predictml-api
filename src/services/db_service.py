@@ -117,6 +117,59 @@ class DBService:
         )
         return result.scalar() or 0
 
+    @staticmethod
+    async def get_user_usage(db: AsyncSession, user_id: int, days: int = 30) -> dict:
+        """Retourne les statistiques d'usage d'un utilisateur sur les N derniers jours.
+
+        Agrège les prédictions par modèle (calls, errors, avg_latency_ms)
+        et par jour (calls), calculées côté Python pour compatibilité SQLite/PostgreSQL.
+        """
+        cutoff = _utcnow() - timedelta(days=days)
+        stmt = select(
+            Prediction.model_name,
+            Prediction.status,
+            Prediction.response_time_ms,
+            Prediction.timestamp,
+        ).where(and_(Prediction.user_id == user_id, Prediction.timestamp >= cutoff))
+
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        by_model: dict = defaultdict(lambda: {"calls": 0, "errors": 0, "latencies": []})
+        by_day: dict = defaultdict(int)
+
+        for row in rows:
+            by_model[row.model_name]["calls"] += 1
+            if row.status != "success":
+                by_model[row.model_name]["errors"] += 1
+            elif row.response_time_ms is not None:
+                by_model[row.model_name]["latencies"].append(row.response_time_ms)
+            if row.timestamp is not None:
+                day_key = row.timestamp.date()
+                by_day[day_key] += 1
+
+        model_stats = []
+        for model_name, g in sorted(by_model.items()):
+            lats = g["latencies"]
+            model_stats.append(
+                {
+                    "model_name": model_name,
+                    "calls": g["calls"],
+                    "errors": g["errors"],
+                    "avg_latency_ms": round(sum(lats) / len(lats), 2) if lats else None,
+                }
+            )
+
+        day_stats = [
+            {"date": d, "calls": c} for d, c in sorted(by_day.items())
+        ]
+
+        return {
+            "total_calls": len(rows),
+            "by_model": model_stats,
+            "by_day": day_stats,
+        }
+
     # === Predictions ===
 
     @staticmethod
