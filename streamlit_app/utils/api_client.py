@@ -368,6 +368,21 @@ class APIClient:
             payload["traffic_weight"] = traffic_weight
         return self.update_model(name, version, payload)
 
+    def get_feature_importance(
+        self,
+        name: str,
+        version: Optional[str] = None,
+        last_n: int = 100,
+        days: int = 7,
+    ) -> dict:
+        """Récupère l'importance globale des features via SHAP agrégé."""
+        r = self._get(
+            f"/models/{name}/feature-importance",
+            params={"version": version, "last_n": last_n, "days": days},
+        )
+        r.raise_for_status()
+        return r.json()
+
     def get_ab_comparison(self, model_name: str, days: int = 30) -> dict:
         """Retourne les statistiques de comparaison A/B / shadow pour un modèle."""
         r = self._get(f"/models/{model_name}/ab-compare", params={"days": days})
