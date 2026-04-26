@@ -49,6 +49,12 @@ def fetch_model_detail(api_url, token, name, version):
     return c.get_model(name, version)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_feature_importance(api_url, token, name, version, last_n, days):
+    c = get_client()
+    return c.get_feature_importance(name, version=version, last_n=last_n, days=days)
+
+
 @st.cache_data(ttl=10, show_spinner=False)
 def fetch_cached_models(api_url, token):
     """Retourne la liste des clés 'name:version' actuellement en cache Redis."""
@@ -415,6 +421,67 @@ with st.expander("📋 Détails complets", expanded=True):
         size = selected.get("file_size_bytes")
         if size:
             st.markdown(f"**Taille fichier :** {size / 1024:.1f} KB")
+
+# Importance des features (SHAP agrégé)
+with st.expander("📊 Importance des features (SHAP)", expanded=False):
+    fi_col1, fi_col2 = st.columns(2)
+    fi_days = fi_col1.slider("Fenêtre (jours)", 1, 30, 7, key="fi_days_slider")
+    fi_last_n = fi_col2.slider("Prédictions max", 10, 500, 100, step=10, key="fi_last_n_slider")
+    try:
+        fi_data = fetch_feature_importance(
+            st.session_state.get("api_url"),
+            st.session_state.get("api_token"),
+            selected["name"],
+            selected["version"],
+            last_n=fi_last_n,
+            days=fi_days,
+        )
+        fi = fi_data.get("feature_importance", {})
+        sample_size = fi_data.get("sample_size", 0)
+        if not fi or sample_size == 0:
+            st.info("Pas encore assez de prédictions pour calculer l'importance des features.")
+        else:
+            fi_rows = [
+                {"Feature": feat, "Importance SHAP": vals["mean_abs_shap"]}
+                for feat, vals in sorted(fi.items(), key=lambda x: x[1]["rank"])
+            ]
+            fi_df = pd.DataFrame(fi_rows).head(15).sort_values("Importance SHAP")
+            try:
+                import plotly.express as px
+
+                fig = px.bar(
+                    fi_df,
+                    x="Importance SHAP",
+                    y="Feature",
+                    orientation="h",
+                    title=(
+                        f"Top {len(fi_df)} features — "
+                        f"{fi_data['model_name']} v{fi_data['version']}"
+                    ),
+                )
+                fig.update_layout(
+                    yaxis_title="",
+                    xaxis_title="Importance SHAP (valeur absolue moyenne)",
+                    margin={"l": 10, "r": 10, "t": 40, "b": 10},
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            except ImportError:
+                st.bar_chart(fi_df.set_index("Feature")["Importance SHAP"])
+            st.caption(
+                f"{sample_size} prédictions analysées"
+                f" — fenêtre : {fi_days} j — version : {fi_data.get('version')}"
+            )
+    except Exception as e:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status == 422:
+            st.info(
+                "Ce modèle ne supporte pas l'importance des features SHAP "
+                "(entraîner avec un DataFrame pandas pour activer cette fonctionnalité)."
+            )
+        elif status == 404:
+            st.error("Modèle introuvable.")
+        else:
+            st.warning(f"Impossible de calculer l'importance des features : {e}")
 
 # Test interactif de prédiction
 with st.expander("🧪 Tester le modèle", expanded=False):
