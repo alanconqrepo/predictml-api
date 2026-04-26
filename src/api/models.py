@@ -14,7 +14,17 @@ from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
 import structlog
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
