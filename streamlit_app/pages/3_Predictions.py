@@ -241,3 +241,88 @@ with col_next:
         if st.button("Suivant →", use_container_width=True):
             st.session_state["pred_offset"] += limit
             st.rerun()
+
+# --- Maintenance RGPD (admin uniquement) ---
+if st.session_state.get("is_admin", False):
+    st.divider()
+    with st.expander("🗑️ Maintenance RGPD — Purge des prédictions"):
+        st.caption(
+            "Supprime définitivement les prédictions anciennes. "
+            "Utilisez **Simuler** avant de confirmer."
+        )
+
+        col_m1, col_m2 = st.columns(2)
+        purge_days = col_m1.slider(
+            "Purger les prédictions antérieures à",
+            min_value=7,
+            max_value=365,
+            value=90,
+            format="%d jours",
+            key="purge_days_slider",
+        )
+        purge_model_sel = col_m2.selectbox(
+            "Filtrer par modèle (optionnel)",
+            ["(tous)"] + model_names,
+            key="purge_model_sel",
+        )
+        purge_model_name = None if purge_model_sel == "(tous)" else purge_model_sel
+
+        col_sim, col_purge = st.columns(2)
+
+        if col_sim.button("🔍 Simuler (dry_run)", key="purge_simulate", use_container_width=True):
+            try:
+                result = client.purge_predictions(
+                    older_than_days=purge_days,
+                    model_name=purge_model_name,
+                    dry_run=True,
+                )
+                st.info(
+                    f"Simulation : **{result['deleted_count']}** prédiction(s) seraient supprimées."
+                )
+                if result.get("oldest_remaining"):
+                    st.caption(f"Prédiction la plus ancienne restante : {result['oldest_remaining']}")
+                if result.get("models_affected"):
+                    st.caption(f"Modèles affectés : {', '.join(result['models_affected'])}")
+                if result.get("linked_observed_results_count", 0) > 0:
+                    st.warning(
+                        f"⚠️ {result['linked_observed_results_count']} résultat(s) observé(s) "
+                        "lié(s) seraient perdus (perte de données de performance historiques)."
+                    )
+            except Exception as exc:
+                st.error(f"Erreur lors de la simulation : {exc}")
+
+        @st.dialog("⚠️ Confirmer la purge définitive")
+        def _confirm_purge_dialog():
+            st.warning(
+                f"Vous allez **supprimer définitivement** toutes les prédictions "
+                f"antérieures à **{purge_days} jours**."
+            )
+            if purge_model_name:
+                st.info(f"Modèle ciblé : **{purge_model_name}**")
+            else:
+                st.info("Tous les modèles sont ciblés.")
+            st.markdown("Cette action est **irréversible**.")
+            if st.button("Confirmer la suppression", type="primary", key="purge_dialog_confirm"):
+                try:
+                    result = client.purge_predictions(
+                        older_than_days=purge_days,
+                        model_name=purge_model_name,
+                        dry_run=False,
+                    )
+                    st.success(f"✅ {result['deleted_count']} prédiction(s) supprimée(s).")
+                    if result.get("linked_observed_results_count", 0) > 0:
+                        st.warning(
+                            f"{result['linked_observed_results_count']} résultat(s) observé(s) "
+                            "liés ont été perdus."
+                        )
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Erreur lors de la purge : {exc}")
+
+        if col_purge.button(
+            "⚠️ Confirmer la purge",
+            key="purge_open_dialog",
+            type="primary",
+            use_container_width=True,
+        ):
+            _confirm_purge_dialog()
