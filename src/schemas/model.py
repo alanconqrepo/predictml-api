@@ -81,6 +81,7 @@ class ModelCreateResponse(BaseModel):
     webhook_url: Optional[str] = None
     is_active: bool
     is_production: bool
+    status: str = "active"
     traffic_weight: Optional[float] = None
     deployment_mode: Optional[str] = None
     train_script_object_key: Optional[str] = None
@@ -142,6 +143,7 @@ class ModelGetResponse(BaseModel):
     # Status
     is_active: bool
     is_production: bool
+    status: str = "active"
     traffic_weight: Optional[float] = None
     deployment_mode: Optional[str] = None
     promotion_policy: Optional[Dict[str, Any]] = None
@@ -290,6 +292,17 @@ class RollbackResponse(BaseModel):
     new_history_id: int
     restored_fields: List[str]
     snapshot: Dict[str, Any]
+
+
+class DeprecateModelResponse(BaseModel):
+    """Réponse pour PATCH /models/{name}/{version}/deprecate"""
+
+    name: str
+    version: str
+    status: str
+    is_production: bool
+    deprecated_at: Optional[datetime]
+    deprecated_by: str
 
 
 # ---------------------------------------------------------------------------

@@ -562,7 +562,20 @@ async def predict(
     try:
         # --- Routage : version explicite OU routage A/B/shadow ---
         if input_data.model_version is not None:
-            # Chemin explicite → pas de routage A/B, pas de shadow
+            # Chemin explicite → vérifier la dépréciation AVANT de charger depuis MinIO
+            explicit_meta = await DBService.get_model_metadata(
+                db, input_data.model_name, input_data.model_version
+            )
+            if explicit_meta and getattr(explicit_meta, "status", "active") == "deprecated":
+                prod_meta = await DBService.get_model_metadata(db, input_data.model_name)
+                prod_hint = f"{input_data.model_name}/{prod_meta.version}" if prod_meta else "none"
+                raise HTTPException(
+                    status_code=status.HTTP_410_GONE,
+                    detail=(
+                        f"Model {input_data.model_name}/{input_data.model_version} is deprecated. "
+                        f"Current production: {prod_hint}"
+                    ),
+                )
             model_data = await model_service.load_model(
                 db, input_data.model_name, input_data.model_version
             )

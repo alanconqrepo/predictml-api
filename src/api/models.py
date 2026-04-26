@@ -55,6 +55,7 @@ from src.schemas.model import (
     ConfidenceTrendOverall,
     ConfidenceTrendPoint,
     ConfidenceTrendResponse,
+    DeprecateModelResponse,
     DriftReportResponse,
     FeatureDriftResult,
     FeatureImportanceItem,
@@ -832,6 +833,67 @@ async def rollback_model(
         new_history_id=new_entry.id,
         restored_fields=restored_fields,
         snapshot=history_entry.snapshot,
+    )
+
+
+@router.patch("/models/{name}/{version}/deprecate", response_model=DeprecateModelResponse)
+async def deprecate_model_version(
+    name: str,
+    version: str,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Déprécie une version de modèle (status → deprecated, is_production → False).
+
+    Le modèle reste consultable (historique, métriques, prédictions passées) mais
+    les appels à POST /predict retourneront HTTP 410 Gone avec suggestion de la
+    version production courante. Réversible via PATCH /models/{name}/{version}.
+
+    Réservé aux administrateurs.
+    """
+    # Charger directement (sans filtre deprecated) pour détecter déjà-déprécié
+    result = await db.execute(
+        select(ModelMetadata).where(
+            and_(
+                ModelMetadata.name == name,
+                ModelMetadata.version == version,
+                ModelMetadata.is_active.is_(True),
+            )
+        )
+    )
+    meta = result.scalar_one_or_none()
+    if not meta:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}/{version}' introuvable ou inactif.",
+        )
+    if meta.status == "deprecated":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Le modèle '{name}/{version}' est déjà déprécié.",
+        )
+
+    meta = await DBService.deprecate_model(db, name, version)
+
+    await DBService.log_model_history(
+        db,
+        meta,
+        HistoryActionType.DEPRECATED,
+        user.id,
+        user.username,
+        ["status", "is_production", "deprecated_at"],
+    )
+
+    logger.info("Modèle déprécié", model=name, version=version, by=user.username)
+
+    return DeprecateModelResponse(
+        name=meta.name,
+        version=meta.version,
+        status=meta.status,
+        is_production=meta.is_production,
+        deprecated_at=meta.deprecated_at,
+        deprecated_by=user.username,
     )
 
 

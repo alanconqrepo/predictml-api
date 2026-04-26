@@ -898,8 +898,8 @@ class DBService:
             return result.scalar_one_or_none()
         else:
             # Sans version explicite : priorité à is_production=True, sinon la plus récente
-            # Utiliser first() car plusieurs versions peuvent exister
-            query = query.order_by(
+            # Exclure les versions dépréciées pour éviter de les sélectionner en routage
+            query = query.where(ModelMetadata.status != "deprecated").order_by(
                 ModelMetadata.is_production.desc(), ModelMetadata.created_at.desc()
             )
             result = await db.execute(query)
@@ -918,6 +918,7 @@ class DBService:
             select(ModelMetadata)
             .options(selectinload(ModelMetadata.creator))
             .where(ModelMetadata.is_active.is_(True))
+            .where(ModelMetadata.status != "archived")
         )
         if is_production is not None:
             query = query.where(ModelMetadata.is_production == is_production)
@@ -950,6 +951,28 @@ class DBService:
             await db.commit()
             return True
         return False
+
+    @staticmethod
+    async def deprecate_model(db: AsyncSession, name: str, version: str) -> Optional[ModelMetadata]:
+        """Marque un modèle comme déprécié (status=deprecated, is_production=False)."""
+        result = await db.execute(
+            select(ModelMetadata).where(
+                and_(
+                    ModelMetadata.name == name,
+                    ModelMetadata.version == version,
+                    ModelMetadata.is_active.is_(True),
+                )
+            )
+        )
+        metadata = result.scalar_one_or_none()
+        if not metadata:
+            return None
+        metadata.status = "deprecated"
+        metadata.is_production = False
+        metadata.deprecated_at = _utcnow()
+        await db.commit()
+        await db.refresh(metadata)
+        return metadata
 
     # === Observed Results ===
 
@@ -1701,6 +1724,7 @@ _SNAPSHOT_FIELDS = [
     "webhook_url",
     "is_production",
     "is_active",
+    "status",
     "deprecated_at",
     "traffic_weight",
     "deployment_mode",
@@ -1728,6 +1752,7 @@ _ROLLBACK_FIELDS = [
     "tags",
     "webhook_url",
     "is_production",
+    "status",
     "traffic_weight",
     "deployment_mode",
 ]
