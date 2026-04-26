@@ -422,6 +422,18 @@ with st.expander("📋 Détails complets", expanded=True):
         size = selected.get("file_size_bytes")
         if size:
             st.markdown(f"**Taille fichier :** {size / 1024:.1f} KB")
+        if is_admin:
+            size_label = f" ({size / 1024:.1f} KB)" if size else ""
+            try:
+                pkl_bytes = client.download_model(selected["name"], selected["version"])
+                st.download_button(
+                    label=f"⬇️ Télécharger le .pkl{size_label}",
+                    data=pkl_bytes,
+                    file_name=f"{selected['name']}_{selected['version']}.pkl",
+                    mime="application/octet-stream",
+                )
+            except Exception as e:
+                st.error(f"Erreur lors du téléchargement : {e}")
 
 # Importance des features (SHAP agrégé)
 with st.expander("📊 Importance des features (SHAP)", expanded=False):
