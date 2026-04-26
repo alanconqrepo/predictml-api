@@ -625,3 +625,16 @@ class ReadinessResponse(BaseModel):
     ready: bool
     checked_at: datetime
     checks: ReadinessChecks
+
+
+class LeaderboardEntry(BaseModel):
+    """Entrée du classement global de performance — GET /models/leaderboard"""
+
+    rank: int
+    name: str
+    version: str
+    accuracy: Optional[float] = None
+    f1_score: Optional[float] = None
+    latency_p95_ms: Optional[float] = None
+    drift_status: str = "unknown"
+    predictions_count: int = 0

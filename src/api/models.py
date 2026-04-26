@@ -60,6 +60,7 @@ from src.schemas.model import (
     FeatureImportanceItem,
     FeatureImportanceResponse,
     FeatureStats,
+    LeaderboardEntry,
     ModelCompareResponse,
     ModelCreateResponse,
     ModelDeleteResponse,
@@ -99,6 +100,25 @@ from src.services.shap_service import compute_shap_explanation
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["models"])
+
+_leaderboard_cache: dict = {}
+_LEADERBOARD_TTL = 300  # 5 minutes
+
+
+async def _get_leaderboard_drift_status(
+    db: AsyncSession,
+    name: str,
+    version: str,
+    period_days: int,
+    feature_baseline: Optional[dict],
+) -> str:
+    if not feature_baseline:
+        return "no_baseline"
+    prod_stats = await DBService.get_feature_production_stats(db, name, version, period_days)
+    if not prod_stats:
+        return "no_data"
+    features = drift_service.compute_feature_drift(feature_baseline, prod_stats, min_count=10)
+    return drift_service.summarize_drift(features, baseline_available=True)
 
 
 def _validate_train_script(source: str) -> Optional[str]:
@@ -184,6 +204,67 @@ async def list_cached_models():
     """
     cached = await model_service.get_cached_models()
     return {"cached_models": cached, "count": len(cached)}
+
+
+@router.get("/models/leaderboard", response_model=List[LeaderboardEntry])
+async def get_models_leaderboard(
+    metric: Literal["accuracy", "f1_score", "latency_p95_ms", "predictions_count"] = Query(
+        "accuracy", description="Metric to rank by"
+    ),
+    days: int = Query(30, ge=1, le=365, description="Sliding window in days"),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(verify_token),
+) -> List[LeaderboardEntry]:
+    """
+    Classement global des modèles en production par métrique de performance.
+
+    Trie tous les modèles actifs en production selon `metric` sur les `days` derniers jours.
+    Résultat mis en cache 5 minutes (TTL) pour éviter de recalculer le drift à chaque appel.
+    """
+    cache_key = f"{metric}:{days}"
+    cached = _leaderboard_cache.get(cache_key)
+    if cached and (time.time() - cached["ts"]) < _LEADERBOARD_TTL:
+        return cached["data"]
+
+    models = await DBService.get_all_active_models(db, is_production=True)
+    pred_stats_list = await DBService.get_prediction_stats(db, days=days)
+    stats_by_name = {s["model_name"]: s for s in pred_stats_list}
+
+    entries: List[LeaderboardEntry] = []
+    for m in models:
+        ps = stats_by_name.get(m.name, {})
+        drift_status = await _get_leaderboard_drift_status(
+            db, m.name, m.version, days, m.feature_baseline
+        )
+        entries.append(
+            LeaderboardEntry(
+                rank=0,
+                name=m.name,
+                version=m.version,
+                accuracy=m.accuracy,
+                f1_score=m.f1_score,
+                latency_p95_ms=ps.get("p95_response_time_ms"),
+                drift_status=drift_status,
+                predictions_count=ps.get("total_predictions", 0),
+            )
+        )
+
+    if metric == "latency_p95_ms":
+        entries.sort(
+            key=lambda e: e.latency_p95_ms if e.latency_p95_ms is not None else float("inf")
+        )
+    elif metric == "predictions_count":
+        entries.sort(key=lambda e: e.predictions_count, reverse=True)
+    elif metric == "f1_score":
+        entries.sort(key=lambda e: e.f1_score if e.f1_score is not None else -1, reverse=True)
+    else:  # accuracy
+        entries.sort(key=lambda e: e.accuracy if e.accuracy is not None else -1, reverse=True)
+
+    for i, entry in enumerate(entries, start=1):
+        entry.rank = i
+
+    _leaderboard_cache[cache_key] = {"ts": time.time(), "data": entries}
+    return entries
 
 
 # ---------------------------------------------------------------------------
