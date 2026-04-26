@@ -592,3 +592,36 @@ class ModelCompareResponse(BaseModel):
     model_name: str
     compared_at: datetime
     versions: List[ModelVersionSummary]
+
+
+# ---------------------------------------------------------------------------
+# Readiness gate
+# ---------------------------------------------------------------------------
+
+
+class ReadinessCheck(BaseModel):
+    """Résultat d'un check individuel de readiness"""
+
+    model_config = {"populate_by_name": True}
+
+    pass_: bool = Field(..., alias="pass")
+    detail: Optional[str] = None
+
+
+class ReadinessChecks(BaseModel):
+    """Ensemble des 4 checks de readiness"""
+
+    is_production: ReadinessCheck
+    file_accessible: ReadinessCheck
+    baseline_computed: ReadinessCheck
+    no_critical_drift: ReadinessCheck
+
+
+class ReadinessResponse(BaseModel):
+    """Réponse de GET /models/{name}/readiness"""
+
+    model_name: str
+    version: str
+    ready: bool
+    checked_at: datetime
+    checks: ReadinessChecks
