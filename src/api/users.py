@@ -4,7 +4,7 @@ Endpoints pour la gestion des utilisateurs
 
 import secrets
 from datetime import date, datetime, time, timedelta, timezone
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -13,7 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.security import require_admin, verify_token
 from src.db.database import get_db
 from src.db.models import User, UserRole
-from src.schemas.user import QuotaResponse, UserCreateInput, UserResponse, UserUpdateInput
+from src.schemas.user import (
+    QuotaResponse,
+    UserCreateInput,
+    UserResponse,
+    UserUpdateInput,
+    UserUsageResponse,
+)
 from src.services.db_service import DBService
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -125,6 +131,48 @@ async def get_user(
             detail=f"Utilisateur {user_id} introuvable.",
         )
     return user
+
+
+@router.get("/{user_id}/usage", response_model=UserUsageResponse)
+async def get_user_usage(
+    user_id: int,
+    days: Optional[int] = 30,
+    current_user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retourne les statistiques d'usage d'un utilisateur sur les N derniers jours.
+
+    - **by_model** : appels, erreurs et latence moyenne par modèle.
+    - **by_day** : nombre d'appels par jour sur la période.
+
+    Accessible par l'administrateur ou par l'utilisateur lui-même.
+    """
+    if current_user.role != UserRole.ADMIN and current_user.id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accès refusé : vous ne pouvez consulter que vos propres statistiques.",
+        )
+
+    user = await DBService.get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Utilisateur {user_id} introuvable.",
+        )
+
+    if days is None or days < 1:
+        days = 30
+
+    usage = await DBService.get_user_usage(db, user_id, days)
+    return UserUsageResponse(
+        user_id=user.id,
+        username=user.username,
+        period_days=days,
+        total_calls=usage["total_calls"],
+        by_model=usage["by_model"],
+        by_day=usage["by_day"],
+    )
 
 
 @router.patch("/{user_id}", response_model=UserResponse)
