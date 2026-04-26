@@ -40,6 +40,8 @@ from src.schemas.model import (
     ABVersionStats,
     CalibrationResponse,
     ComputeBaselineResponse,
+    ConfidenceBin,
+    ConfidenceDistributionResponse,
     ConfidenceTrendOverall,
     ConfidenceTrendPoint,
     ConfidenceTrendResponse,
@@ -1512,6 +1514,68 @@ async def get_confidence_trend(
         period_days=days,
         overall=ConfidenceTrendOverall(**result["overall"]),
         trend=[ConfidenceTrendPoint(**p) for p in result["trend"]],
+    )
+
+
+@router.get(
+    "/models/{name}/confidence-distribution",
+    response_model=ConfidenceDistributionResponse,
+)
+async def get_confidence_distribution(
+    name: str,
+    version: Optional[str] = Query(None, description="Version du modèle (toutes si absent)"),
+    days: int = Query(7, ge=1, le=90, description="Fenêtre glissante en jours"),
+    high_threshold: float = Query(0.80, ge=0.5, le=1.0, description="Seuil confiance élevée"),
+    uncertain_threshold: float = Query(
+        0.60, ge=0.5, le=1.0, description="Seuil d'alerte incertitude"
+    ),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Histogramme de confiance du modèle sur une fenêtre glissante.
+
+    confidence = max(probabilities) par prédiction — aucune ground truth requise.
+    Retourne 10 bins uniformes dans [0.5, 1.0] plus les métriques globales.
+    Si le modèle ne retourne pas de probabilités, histogram est vide.
+    """
+    metadata = await DBService.get_model_metadata(db, name, version)
+    if not metadata:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' introuvable.",
+        )
+
+    result = await DBService.get_confidence_distribution(
+        db,
+        model_name=name,
+        version=version,
+        days=days,
+        high_threshold=high_threshold,
+        uncertain_threshold=uncertain_threshold,
+    )
+
+    if not result["has_data"]:
+        return ConfidenceDistributionResponse(
+            model_name=name,
+            version=version,
+            period_days=days,
+            sample_count=0,
+            mean_confidence=0.0,
+            pct_high_confidence=0.0,
+            pct_uncertain=0.0,
+            histogram=[],
+        )
+
+    return ConfidenceDistributionResponse(
+        model_name=name,
+        version=version,
+        period_days=days,
+        sample_count=result["sample_count"],
+        mean_confidence=result["mean_confidence"],
+        pct_high_confidence=result["pct_high_confidence"],
+        pct_uncertain=result["pct_uncertain"],
+        histogram=[ConfidenceBin(**b) for b in result["histogram"]],
     )
 
 
