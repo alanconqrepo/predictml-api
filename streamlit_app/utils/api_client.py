@@ -589,3 +589,8 @@ class APIClient:
         )
         r.raise_for_status()
         return r.json()
+
+    def get_model_readiness(self, name: str, version: str) -> dict:
+        r = self._get(f"/models/{name}/readiness", params={"version": version})
+        r.raise_for_status()
+        return r.json()
