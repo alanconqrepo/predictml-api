@@ -56,6 +56,12 @@ def fetch_feature_importance(api_url, token, name, version, last_n, days):
     return c.get_feature_importance(name, version=version, last_n=last_n, days=days)
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def fetch_model_performance(api_url, token, name, version):
+    c = get_client()
+    return c.get_model_performance(name, version=version)
+
+
 @st.cache_data(ttl=10, show_spinner=False)
 def fetch_cached_models(api_url, token):
     """Retourne la liste des clés 'name:version' actuellement en cache Redis."""
@@ -495,6 +501,98 @@ with st.expander("📊 Importance des features (SHAP)", expanded=False):
             st.error("Modèle introuvable.")
         else:
             st.warning(f"Impossible de calculer l'importance des features : {e}")
+
+# Métriques de performance (matrice de confusion + métriques par classe)
+with st.expander("📈 Métriques de performance", expanded=False):
+    try:
+        import numpy as np
+        import plotly.express as px
+
+        perf = fetch_model_performance(
+            st.session_state.get("api_url"),
+            st.session_state.get("api_token"),
+            selected["name"],
+            selected["version"],
+        )
+
+        model_type = perf.get("model_type", "classification")
+        matched = perf.get("matched_predictions", 0)
+
+        if matched == 0:
+            st.info(
+                "Aucune paire (prédiction, résultat observé) disponible. "
+                "Ajoutez des résultats via POST /observed-results pour activer cette vue."
+            )
+        elif model_type != "classification":
+            col_mae, col_rmse, col_r2 = st.columns(3)
+            col_mae.metric("MAE", f"{perf['mae']:.4f}" if perf.get("mae") is not None else "—")
+            col_rmse.metric(
+                "RMSE", f"{perf['rmse']:.4f}" if perf.get("rmse") is not None else "—"
+            )
+            col_r2.metric("R²", f"{perf['r2']:.4f}" if perf.get("r2") is not None else "—")
+            st.caption(f"{matched} prédictions appariées")
+        else:
+            col_acc, col_prec, col_rec, col_f1 = st.columns(4)
+            col_acc.metric(
+                "Accuracy",
+                f"{perf['accuracy']:.3f}" if perf.get("accuracy") is not None else "—",
+            )
+            col_prec.metric(
+                "Precision (w.)",
+                f"{perf['precision_weighted']:.3f}"
+                if perf.get("precision_weighted") is not None
+                else "—",
+            )
+            col_rec.metric(
+                "Recall (w.)",
+                f"{perf['recall_weighted']:.3f}"
+                if perf.get("recall_weighted") is not None
+                else "—",
+            )
+            col_f1.metric(
+                "F1 (w.)",
+                f"{perf['f1_weighted']:.3f}" if perf.get("f1_weighted") is not None else "—",
+            )
+            st.caption(f"{matched} prédictions appariées")
+
+            cm = perf.get("confusion_matrix")
+            classes = perf.get("classes") or []
+            if cm and classes:
+                cm_arr = np.array(cm)
+                class_labels = [str(c) for c in classes]
+                fig = px.imshow(
+                    cm_arr,
+                    x=class_labels,
+                    y=class_labels,
+                    text_auto=True,
+                    color_continuous_scale="Blues",
+                    title="Matrice de confusion",
+                    labels={"x": "Prédit", "y": "Réel", "color": "Compte"},
+                )
+                fig.update_layout(
+                    xaxis_title="Prédit",
+                    yaxis_title="Réel",
+                    margin={"l": 10, "r": 10, "t": 40, "b": 10},
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            per_class = perf.get("per_class_metrics")
+            if per_class:
+                st.markdown("**Métriques par classe**")
+                pc_rows = [
+                    {
+                        "Classe": str(label),
+                        "Precision": f"{m['precision']:.3f}",
+                        "Recall": f"{m['recall']:.3f}",
+                        "F1": f"{m['f1_score']:.3f}",
+                        "Support": m["support"],
+                    }
+                    for label, m in per_class.items()
+                ]
+                st.dataframe(pd.DataFrame(pc_rows), use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.warning(f"Impossible de charger les métriques de performance : {e}")
 
 # Test interactif de prédiction
 with st.expander("🧪 Tester le modèle", expanded=False):
