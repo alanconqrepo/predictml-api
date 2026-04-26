@@ -244,6 +244,21 @@ class APIClient:
 
     # --- Predictions ---
 
+    def predict(
+        self,
+        model_name: str,
+        model_version: Optional[str] = None,
+        features: Optional[dict] = None,
+        explain: bool = False,
+    ) -> dict:
+        payload: dict = {"model_name": model_name, "features": features or {}}
+        if model_version:
+            payload["model_version"] = model_version
+        params = {"explain": "true"} if explain else None
+        r = self._post("/predict", json=payload, params=params)
+        r.raise_for_status()
+        return r.json()
+
     def get_predictions(
         self,
         model_name: str,

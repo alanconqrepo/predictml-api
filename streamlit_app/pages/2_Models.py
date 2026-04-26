@@ -3,6 +3,7 @@ Gestion des modèles ML
 """
 
 import os
+import time
 
 import pandas as pd
 import streamlit as st
@@ -40,6 +41,12 @@ MLFLOW_URL = os.environ.get("MLFLOW_URL", "http://localhost:5000")
 def fetch_models(api_url, token):
     c = get_client()
     return c.list_models()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_model_detail(api_url, token, name, version):
+    c = get_client()
+    return c.get_model(name, version)
 
 
 @st.cache_data(ttl=10, show_spinner=False)
@@ -287,6 +294,127 @@ with st.expander("📋 Détails complets", expanded=True):
         size = selected.get("file_size_bytes")
         if size:
             st.markdown(f"**Taille fichier :** {size / 1024:.1f} KB")
+
+# Test interactif de prédiction
+with st.expander("🧪 Tester le modèle", expanded=False):
+    api_url_key = st.session_state.get("api_url")
+    api_token_key = st.session_state.get("api_token")
+
+    # Resolve feature list: prefer feature_baseline from list cache, else call get_model
+    feature_baseline = selected.get("feature_baseline") or {}
+    feature_names_list: list = []
+
+    if feature_baseline:
+        feature_names_list = list(feature_baseline.keys())
+    else:
+        try:
+            detail = fetch_model_detail(
+                api_url_key, api_token_key, selected["name"], selected["version"]
+            )
+            feature_names_list = detail.get("feature_names") or []
+            feature_baseline = detail.get("feature_baseline") or {}
+        except Exception as e:
+            st.warning(f"Impossible de charger les features : {e}")
+
+    classes = selected.get("classes") or []
+
+    if not feature_names_list:
+        st.info(
+            "Aucune information de features disponible pour ce modèle. "
+            "Uploadez le modèle avec un `feature_baseline` ou entraînez-le avec un DataFrame pandas."
+        )
+    else:
+        st.markdown(f"**{len(feature_names_list)} features attendues**")
+
+        with_shap = st.checkbox(
+            "Avec explication SHAP",
+            value=False,
+            key=f"shap_cb_{selected['name']}_{selected['version']}",
+        )
+
+        n_cols = 3 if len(feature_names_list) > 4 else 2
+        cols = st.columns(n_cols)
+        feature_values: dict = {}
+        for i, feat in enumerate(feature_names_list):
+            with cols[i % n_cols]:
+                baseline_info = feature_baseline.get(feat)
+                if baseline_info is not None:
+                    default_val = float(baseline_info.get("mean") or 0.0)
+                    feature_values[feat] = st.number_input(
+                        feat,
+                        value=default_val,
+                        key=f"feat_{selected['name']}_{selected['version']}_{feat}",
+                        format="%.4f",
+                    )
+                else:
+                    raw = st.text_input(
+                        feat,
+                        value="",
+                        key=f"feat_{selected['name']}_{selected['version']}_{feat}",
+                    )
+                    try:
+                        feature_values[feat] = float(raw) if raw != "" else 0.0
+                    except ValueError:
+                        feature_values[feat] = raw
+
+        if st.button(
+            "🔮 Prédire",
+            key=f"predict_btn_{selected['name']}_{selected['version']}",
+            type="primary",
+        ):
+            with st.spinner("Prédiction en cours…"):
+                try:
+                    t0 = time.time()
+                    result = client.predict(
+                        model_name=selected["name"],
+                        model_version=selected["version"],
+                        features=feature_values,
+                        explain=with_shap,
+                    )
+                    latency_ms = (time.time() - t0) * 1000
+
+                    col_pred, col_ver, col_lat = st.columns(3)
+                    col_pred.metric("Prédiction", str(result.get("prediction", "—")))
+                    col_ver.metric(
+                        "Version utilisée",
+                        result.get("selected_version") or result.get("model_version", "—"),
+                    )
+                    col_lat.metric("Latence", f"{latency_ms:.0f} ms")
+
+                    if result.get("low_confidence"):
+                        st.warning("⚠️ Confiance faible (en dessous du seuil configuré)")
+
+                    probs = result.get("probability")
+                    if probs:
+                        st.markdown("**Probabilités par classe :**")
+                        if classes and len(classes) == len(probs):
+                            prob_rows = [
+                                {"Classe": str(c), "Probabilité": f"{p:.4f}"}
+                                for c, p in zip(classes, probs)
+                            ]
+                        else:
+                            prob_rows = [
+                                {"Classe": f"Classe {i}", "Probabilité": f"{p:.4f}"}
+                                for i, p in enumerate(probs)
+                            ]
+                        st.dataframe(
+                            pd.DataFrame(prob_rows),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                    shap_vals = result.get("shap_values")
+                    if with_shap and shap_vals:
+                        st.markdown("**Contributions SHAP :**")
+                        sorted_shap = dict(
+                            sorted(shap_vals.items(), key=lambda x: abs(x[1]), reverse=True)
+                        )
+                        st.bar_chart(pd.DataFrame({"SHAP": sorted_shap}))
+                    elif with_shap:
+                        st.info("Les valeurs SHAP ne sont pas disponibles pour ce type de modèle.")
+
+                except Exception as e:
+                    st.error(f"Erreur lors de la prédiction : {e}")
 
 # Actions
 if is_admin:
