@@ -384,7 +384,15 @@ st.subheader("Détail et actions")
 model_options = {f"{m['name']} v{m['version']}": m for m in models}
 detail_search = st.text_input("Filtrer par nom", key="detail_search", placeholder="Rechercher un modèle…")
 filtered_keys = [k for k in model_options if detail_search.lower() in k.lower()] if detail_search else list(model_options.keys())
-selected_label = st.selectbox("Sélectionner un modèle", filtered_keys or list(model_options.keys()))
+
+_preselect = st.session_state.pop("_nav_model", None) or st.query_params.get("model")
+_detail_keys = filtered_keys or list(model_options.keys())
+_detail_idx = 0
+if _preselect:
+    _hits = [i for i, k in enumerate(_detail_keys) if k.split(" v")[0] == _preselect]
+    if _hits:
+        _detail_idx = _hits[0]
+selected_label = st.selectbox("Sélectionner un modèle", _detail_keys, index=_detail_idx)
 selected = model_options[selected_label]
 
 # Détails
