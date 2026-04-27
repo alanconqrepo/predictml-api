@@ -40,6 +40,114 @@ if not model_names:
 end_dt = datetime.utcnow()
 start_dt = end_dt - timedelta(days=days)
 
+# --- 🏆 Leaderboard ---
+st.subheader("🏆 Leaderboard — Modèles en production")
+
+lb_col_metric, _ = st.columns([2, 3])
+lb_metric = lb_col_metric.selectbox(
+    "Trier par",
+    options=["accuracy", "f1_score", "latency_p95_ms", "predictions_count"],
+    format_func=lambda x: {
+        "accuracy": "Accuracy",
+        "f1_score": "F1 Score",
+        "latency_p95_ms": "Latence p95",
+        "predictions_count": "Volume de prédictions",
+    }.get(x, x),
+    key="lb_metric",
+)
+
+_DRIFT_EMOJI = {
+    "ok": "🟢 ok",
+    "warning": "🟡 warning",
+    "critical": "🔴 critique",
+    "no_baseline": "⚪ pas de baseline",
+    "no_data": "⚪ pas de données",
+    "insufficient_data": "⚪ données insuffisantes",
+    "unknown": "⚪ inconnu",
+}
+
+
+def _bg_accuracy(val):
+    try:
+        v = float(val)
+    except (TypeError, ValueError):
+        return ""
+    if v >= 0.90:
+        return "background-color: #d4edda"
+    if v >= 0.70:
+        return "background-color: #fff3cd"
+    return "background-color: #f8d7da"
+
+
+def _build_leaderboard_fallback(models_list, stats_list, metric, n_days):
+    """Construit le leaderboard côté client si l'endpoint API n'est pas disponible."""
+    stats_by_name = {s["model_name"]: s for s in stats_list}
+    rows = [
+        {
+            "rank": 0,
+            "name": m["name"],
+            "version": m.get("version", ""),
+            "accuracy": m.get("accuracy"),
+            "f1_score": m.get("f1_score"),
+            "latency_p95_ms": stats_by_name.get(m["name"], {}).get("p95_response_time_ms"),
+            "drift_status": "unknown",
+            "predictions_count": stats_by_name.get(m["name"], {}).get("total_predictions", 0),
+        }
+        for m in models_list
+        if m.get("is_production")
+    ]
+    if metric == "latency_p95_ms":
+        rows.sort(
+            key=lambda r: r["latency_p95_ms"] if r["latency_p95_ms"] is not None else float("inf")
+        )
+    elif metric == "predictions_count":
+        rows.sort(key=lambda r: r["predictions_count"], reverse=True)
+    elif metric == "f1_score":
+        rows.sort(key=lambda r: r["f1_score"] if r["f1_score"] is not None else -1, reverse=True)
+    else:
+        rows.sort(key=lambda r: r["accuracy"] if r["accuracy"] is not None else -1, reverse=True)
+    for i, row in enumerate(rows, start=1):
+        row["rank"] = i
+    return rows
+
+
+try:
+    leaderboard = client.get_leaderboard(metric=lb_metric, days=days)
+except Exception:
+    try:
+        _lb_models = client.list_models()
+        _lb_stats = client.get_prediction_stats(days=days)
+        leaderboard = _build_leaderboard_fallback(_lb_models, _lb_stats, lb_metric, days)
+    except Exception:
+        leaderboard = []
+
+if leaderboard:
+    df_lb = pd.DataFrame(leaderboard)
+    df_display = df_lb.rename(
+        columns={
+            "rank": "Rang",
+            "name": "Modèle",
+            "version": "Version",
+            "accuracy": "Accuracy",
+            "f1_score": "F1 Score",
+            "latency_p95_ms": "Latence p95 (ms)",
+            "drift_status": "Drift",
+            "predictions_count": f"Prédictions ({days}j)",
+        }
+    )
+    df_display["Drift"] = df_display["Drift"].map(lambda x: _DRIFT_EMOJI.get(x, x))
+    df_display["Accuracy"] = df_display["Accuracy"].round(4)
+    df_display["F1 Score"] = df_display["F1 Score"].round(4)
+    df_display["Latence p95 (ms)"] = df_display["Latence p95 (ms)"].apply(
+        lambda x: f"{x:.0f} ms" if pd.notna(x) and x is not None else "—"
+    )
+    styled = df_display.style.map(_bg_accuracy, subset=["Accuracy"]).hide(axis="index")
+    st.dataframe(styled, use_container_width=True)
+else:
+    st.info("Aucun modèle en production trouvé.")
+
+st.divider()
+
 # Charger les prédictions pour chaque modèle (ou le modèle sélectionné)
 all_preds = []
 

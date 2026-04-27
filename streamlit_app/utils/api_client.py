@@ -357,6 +357,11 @@ class APIClient:
         r.raise_for_status()
         return r.json().get("stats", [])
 
+    def get_leaderboard(self, metric: str = "accuracy", days: int = 30) -> list:
+        r = self._get("/models/leaderboard", params={"metric": metric, "days": days})
+        r.raise_for_status()
+        return r.json()
+
     # --- Performance ---
 
     def get_model_performance(
