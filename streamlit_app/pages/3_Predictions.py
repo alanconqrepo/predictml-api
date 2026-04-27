@@ -125,7 +125,10 @@ with tab_history:
         except Exception:
             model_names = []
 
-        model_name = col1.selectbox("Modèle", ["(tous)"] + model_names)
+        with col1:
+            hist_search = st.text_input("Filtrer par nom", key="hist_model_search", placeholder="Rechercher…")
+            hist_filtered = [n for n in model_names if hist_search.lower() in n.lower()] if hist_search else model_names
+            model_name = st.selectbox("Modèle", ["(tous)"] + (hist_filtered or model_names))
         if model_name == "(tous)":
             model_name = model_names[0] if model_names else None
 
@@ -470,7 +473,10 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
         st.stop()
 
     col_b1, col_b2 = st.columns(2)
-    batch_model = col_b1.selectbox("Modèle cible", model_names_batch, key="batch_model_sel")
+    with col_b1:
+        batch_search = st.text_input("Filtrer par nom", key="batch_model_search", placeholder="Rechercher…")
+        batch_filtered = [n for n in model_names_batch if batch_search.lower() in n.lower()] if batch_search else model_names_batch
+        batch_model = st.selectbox("Modèle cible", batch_filtered or model_names_batch, key="batch_model_sel")
 
     # Versions disponibles pour le modèle sélectionné
     batch_versions = ["(production / auto)"] + sorted(

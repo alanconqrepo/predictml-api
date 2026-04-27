@@ -176,7 +176,9 @@ st.divider()
 st.subheader("🔎 Détail d'un modèle")
 
 model_names = [m["model_name"] for m in models_data]
-selected_model = st.selectbox("Sélectionner un modèle", model_names)
+sup_search = st.text_input("Filtrer par nom", key="sup_model_search", placeholder="Rechercher un modèle…")
+sup_filtered = [n for n in model_names if sup_search.lower() in n.lower()] if sup_search else model_names
+selected_model = st.selectbox("Sélectionner un modèle", sup_filtered or model_names)
 
 if not selected_model:
     st.stop()

@@ -297,7 +297,9 @@ st.divider()
 st.subheader("📊 Comparaison multi-versions")
 
 model_names = sorted({m["name"] for m in models})
-compare_name = st.selectbox("Modèle à comparer", model_names, key="compare_model_name")
+compare_search = st.text_input("Filtrer par nom", key="compare_search", placeholder="Rechercher un modèle…")
+compare_filtered = [n for n in model_names if compare_search.lower() in n.lower()] if compare_search else model_names
+compare_name = st.selectbox("Modèle à comparer", compare_filtered or model_names, key="compare_model_name")
 
 versions_for_model = [m["version"] for m in models if m["name"] == compare_name]
 all_versions_label = f"Toutes ({len(versions_for_model)})"
@@ -378,7 +380,9 @@ st.divider()
 st.subheader("Détail et actions")
 
 model_options = {f"{m['name']} v{m['version']}": m for m in models}
-selected_label = st.selectbox("Sélectionner un modèle", list(model_options.keys()))
+detail_search = st.text_input("Filtrer par nom", key="detail_search", placeholder="Rechercher un modèle…")
+filtered_keys = [k for k in model_options if detail_search.lower() in k.lower()] if detail_search else list(model_options.keys())
+selected_label = st.selectbox("Sélectionner un modèle", filtered_keys or list(model_options.keys()))
 selected = model_options[selected_label]
 
 # Détails

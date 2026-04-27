@@ -29,7 +29,10 @@ try:
 except Exception:
     model_names = []
 
-model_filter = col_model.selectbox("Modèle", ["(tous)"] + model_names)
+with col_model:
+    stats_search = st.text_input("Filtrer par nom", key="stats_model_search", placeholder="Rechercher…")
+    stats_filtered = [n for n in model_names if stats_search.lower() in n.lower()] if stats_search else model_names
+    model_filter = st.selectbox("Modèle", ["(tous)"] + (stats_filtered or model_names))
 selected_model = None if model_filter == "(tous)" else model_filter
 
 # Utiliser le premier modèle disponible si on veut filtrer
@@ -308,11 +311,10 @@ st.divider()
 st.subheader("Drift de performance — accuracy rolling (30j)")
 
 drift_col_model, drift_col_threshold = st.columns([2, 2])
-drift_model = drift_col_model.selectbox(
-    "Modèle (drift)",
-    model_names,
-    key="drift_model",
-)
+with drift_col_model:
+    drift_search = st.text_input("Filtrer par nom", key="drift_model_search", placeholder="Rechercher…")
+    drift_filtered = [n for n in model_names if drift_search.lower() in n.lower()] if drift_search else model_names
+    drift_model = st.selectbox("Modèle (drift)", drift_filtered or model_names, key="drift_model")
 alert_enabled = drift_col_threshold.checkbox("Activer alerte seuil", value=True)
 threshold = drift_col_threshold.slider(
     "Seuil d'alerte accuracy",
