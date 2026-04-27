@@ -97,6 +97,7 @@ from src.services.input_validation_service import resolve_expected_features, val
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
 from src.services.shap_service import compute_shap_explanation
+from src.services.webhook_service import send_webhook
 
 logger = structlog.get_logger(__name__)
 
@@ -1369,6 +1370,40 @@ async def retrain_model(
 
     await db.commit()
     await db.refresh(new_metadata)
+
+    _wh = new_metadata.webhook_url
+    if _wh:
+        _ts = datetime.now(timezone.utc).isoformat()
+        asyncio.create_task(
+            send_webhook(
+                _wh,
+                {
+                    "model_name": name,
+                    "version": new_version,
+                    "timestamp": _ts,
+                    "details": {
+                        "source_version": version,
+                        "accuracy": new_metadata.accuracy,
+                        "f1_score": new_metadata.f1_score,
+                        "set_production": payload.set_production,
+                    },
+                },
+                event_type="retrain_completed",
+            )
+        )
+        if auto_promoted:
+            asyncio.create_task(
+                send_webhook(
+                    _wh,
+                    {
+                        "model_name": name,
+                        "version": new_version,
+                        "timestamp": _ts,
+                        "details": {"reason": auto_promote_reason},
+                    },
+                    event_type="model_promoted",
+                )
+            )
 
     logger.info(
         "Ré-entraînement réussi",

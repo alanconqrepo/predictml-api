@@ -3,17 +3,20 @@ Scheduler de supervision — rapport hebdomadaire et alertes automatiques.
 
 Utilise APScheduler (AsyncIOScheduler) intégré au cycle de vie FastAPI.
 Activé via les variables d'environnement :
-  - ENABLE_EMAIL_ALERTS=true   → vérification toutes les 6h
+  - ENABLE_EMAIL_ALERTS=true   → vérification toutes les 6h (e-mails)
   - WEEKLY_REPORT_ENABLED=true → rapport le WEEKLY_REPORT_DAY à WEEKLY_REPORT_HOUR h
 
-Aucun scheduler n'est démarré si les deux variables sont false.
+Le job d'alerte tourne toujours (même sans e-mail) pour déclencher les webhooks
+configurés sur les modèles (drift_critical, error_rate_threshold).
 """
 
+import asyncio
 from datetime import datetime, timedelta
 
 import structlog
 
 from src.core.config import settings
+from src.services.webhook_service import send_webhook
 
 logger = structlog.get_logger(__name__)
 
@@ -44,14 +47,11 @@ except ImportError:
 async def run_alert_check() -> None:
     """
     Vérification toutes les 6h des indicateurs de supervision sur les 24 dernières heures.
-    Envoie des alertes e-mail si :
-      - taux d'erreur d'un modèle > seuil (par modèle ou ERROR_RATE_ALERT_THRESHOLD global)
-      - drift de performance détecté sur un modèle
-      - drift de features critique détecté (sauf si drift_auto_alert=False sur le modèle)
+    Envoie des alertes e-mail si ENABLE_EMAIL_ALERTS=true.
+    Déclenche les webhooks configurés sur les modèles indépendamment des e-mails :
+      - error_rate_threshold : taux d'erreur > seuil
+      - drift_critical       : drift de features critique détecté
     """
-    if not settings.ENABLE_EMAIL_ALERTS:
-        return
-
     logger.info("Vérification des alertes de supervision")
 
     try:
@@ -91,7 +91,24 @@ async def run_alert_check() -> None:
                         model=model_name,
                         error_rate=error_rate,
                     )
-                    email_service.send_error_spike_alert(model_name, error_rate)
+                    if settings.ENABLE_EMAIL_ALERTS:
+                        email_service.send_error_spike_alert(model_name, error_rate)
+                    if prod_meta and prod_meta.webhook_url:
+                        asyncio.create_task(
+                            send_webhook(
+                                prod_meta.webhook_url,
+                                {
+                                    "model_name": model_name,
+                                    "version": prod_meta.version,
+                                    "timestamp": end.isoformat() + "Z",
+                                    "details": {
+                                        "error_rate": error_rate,
+                                        "threshold": error_threshold,
+                                    },
+                                },
+                                event_type="error_rate_threshold",
+                            )
+                        )
 
                 # Alerte drift de performance
                 perf_by_day = await DBService.get_accuracy_drift(db, model_name, start, end)
@@ -124,7 +141,10 @@ async def run_alert_check() -> None:
                                 "Drift de performance détecté",
                                 model=model_name,
                             )
-                            email_service.send_performance_alert(model_name, avg_second, avg_first)
+                            if settings.ENABLE_EMAIL_ALERTS:
+                                email_service.send_performance_alert(
+                                    model_name, avg_second, avg_first
+                                )
 
                 # Alerte drift features
                 if prod_meta and prod_meta.feature_baseline:
@@ -145,13 +165,32 @@ async def run_alert_check() -> None:
                                     model=model_name,
                                     feature=feat_name,
                                 )
-                                email_service.send_drift_alert(
-                                    model_name=model_name,
-                                    feature=feat_name,
-                                    drift_status=feat_result.drift_status,
-                                    z_score=feat_result.z_score,
-                                    psi=feat_result.psi,
-                                )
+                                if settings.ENABLE_EMAIL_ALERTS:
+                                    email_service.send_drift_alert(
+                                        model_name=model_name,
+                                        feature=feat_name,
+                                        drift_status=feat_result.drift_status,
+                                        z_score=feat_result.z_score,
+                                        psi=feat_result.psi,
+                                    )
+                                if prod_meta.webhook_url:
+                                    asyncio.create_task(
+                                        send_webhook(
+                                            prod_meta.webhook_url,
+                                            {
+                                                "model_name": model_name,
+                                                "version": prod_meta.version,
+                                                "timestamp": end.isoformat() + "Z",
+                                                "details": {
+                                                    "feature": feat_name,
+                                                    "psi": feat_result.psi,
+                                                    "z_score": feat_result.z_score,
+                                                    "status": feat_result.drift_status,
+                                                },
+                                            },
+                                            event_type="drift_critical",
+                                        )
+                                    )
 
     except Exception as exc:
         logger.error("Erreur lors de la vérification des alertes", error=str(exc))
@@ -243,15 +282,14 @@ def start_scheduler() -> None:
         logger.warning("APScheduler indisponible, scheduler non démarré")
         return
 
-    if settings.ENABLE_EMAIL_ALERTS:
-        _scheduler.add_job(
-            run_alert_check,
-            "interval",
-            hours=6,
-            id="alert_check",
-            replace_existing=True,
-        )
-        logger.info("Job de vérification d'alertes configuré (toutes les 6h)")
+    _scheduler.add_job(
+        run_alert_check,
+        "interval",
+        hours=6,
+        id="alert_check",
+        replace_existing=True,
+    )
+    logger.info("Job de vérification d'alertes configuré (toutes les 6h)")
 
     if settings.WEEKLY_REPORT_ENABLED:
         _scheduler.add_job(

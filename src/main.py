@@ -74,15 +74,14 @@ async def lifespan(app: FastAPI):
         minio_bucket=settings.MINIO_BUCKET,
     )
 
-    # Démarrer le scheduler d'alertes e-mail si activé
-    if settings.ENABLE_EMAIL_ALERTS or settings.WEEKLY_REPORT_ENABLED:
-        try:
-            from src.tasks.supervision_reporter import start_scheduler
+    # Démarrer le scheduler de supervision (alertes + webhooks sur événements modèle)
+    try:
+        from src.tasks.supervision_reporter import start_scheduler
 
-            start_scheduler()
-            logger.info("Scheduler de supervision démarré")
-        except Exception as e:
-            logger.warning("Impossible de démarrer le scheduler", error=str(e))
+        start_scheduler()
+        logger.info("Scheduler de supervision démarré")
+    except Exception as e:
+        logger.warning("Impossible de démarrer le scheduler", error=str(e))
 
     # Démarrer le scheduler de ré-entraînement automatique
     try:
@@ -97,13 +96,12 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Fermeture de l'application")
-    if settings.ENABLE_EMAIL_ALERTS or settings.WEEKLY_REPORT_ENABLED:
-        try:
-            from src.tasks.supervision_reporter import stop_scheduler
+    try:
+        from src.tasks.supervision_reporter import stop_scheduler
 
-            stop_scheduler()
-        except Exception:
-            pass
+        stop_scheduler()
+    except Exception:
+        pass
 
     try:
         from src.tasks.retrain_scheduler import stop_retrain_scheduler

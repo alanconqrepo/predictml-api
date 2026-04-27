@@ -322,10 +322,14 @@ async def _do_retrain(name: str, version: str) -> None:
         )
 
         # 8. Auto-promotion si activée et policy définie
+        _auto_promoted = False
+        _auto_promote_reason: Optional[str] = None
         if schedule.get("auto_promote") and source_model.promotion_policy:
             should_promote, reason = await evaluate_auto_promotion(
                 db, name, source_model.promotion_policy
             )
+            _auto_promoted = should_promote
+            _auto_promote_reason = reason
             if should_promote:
                 other_result = await db.execute(
                     select(ModelMetadata).where(
@@ -358,6 +362,41 @@ async def _do_retrain(name: str, version: str) -> None:
         }
 
         await db.commit()
+
+        _wh = new_metadata.webhook_url
+        if _wh:
+            _ts = datetime.utcnow().isoformat() + "Z"
+            from src.services.webhook_service import send_webhook
+
+            asyncio.create_task(
+                send_webhook(
+                    _wh,
+                    {
+                        "model_name": name,
+                        "version": new_version,
+                        "timestamp": _ts,
+                        "details": {
+                            "source_version": version,
+                            "accuracy": new_metadata.accuracy,
+                            "f1_score": new_metadata.f1_score,
+                        },
+                    },
+                    event_type="retrain_completed",
+                )
+            )
+            if _auto_promoted:
+                asyncio.create_task(
+                    send_webhook(
+                        _wh,
+                        {
+                            "model_name": name,
+                            "version": new_version,
+                            "timestamp": _ts,
+                            "details": {"reason": _auto_promote_reason},
+                        },
+                        event_type="model_promoted",
+                    )
+                )
 
         logger.info(
             "Ré-entraînement planifié terminé",
