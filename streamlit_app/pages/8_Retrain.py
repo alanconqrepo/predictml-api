@@ -6,6 +6,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
+from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
 
 st.set_page_config(page_title="Retrain — PredictML", page_icon="🔄", layout="wide")
@@ -21,10 +22,8 @@ st.title("🔄 Gestion des ré-entraînements")
 client = get_client()
 
 
-@st.cache_data(ttl=15, show_spinner=False)
 def fetch_models(api_url, token):
-    c = get_client()
-    return c.list_models()
+    return get_models_cached(api_url, token)
 
 
 def reload():

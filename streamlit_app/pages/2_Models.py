@@ -8,6 +8,8 @@ import time
 
 import pandas as pd
 import streamlit as st
+from utils.api_client import get_model_detail as get_model_detail_cached
+from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
 
 # --- Helpers historique ---
@@ -30,7 +32,11 @@ def _action_badge(action: str) -> str:
 st.set_page_config(page_title="Models — PredictML", page_icon="🤖", layout="wide")
 require_auth()
 
-st.title("🤖 Gestion des modèles")
+col_title, col_refresh = st.columns([8, 1])
+col_title.title("🤖 Gestion des modèles")
+if col_refresh.button("🔄 Rafraîchir", key="models_refresh", use_container_width=True):
+    st.cache_data.clear()
+    st.rerun()
 
 client = get_client()
 is_admin = st.session_state.get("is_admin", False)
@@ -38,16 +44,12 @@ is_admin = st.session_state.get("is_admin", False)
 MLFLOW_URL = os.environ.get("MLFLOW_URL", "http://localhost:5000")
 
 
-@st.cache_data(ttl=15, show_spinner=False)
 def fetch_models(api_url, token):
-    c = get_client()
-    return c.list_models()
+    return get_models_cached(api_url, token)
 
 
-@st.cache_data(ttl=60, show_spinner=False)
 def fetch_model_detail(api_url, token, name, version):
-    c = get_client()
-    return c.get_model(name, version)
+    return get_model_detail_cached(api_url, token, name, version)
 
 
 @st.cache_data(ttl=60, show_spinner=False)

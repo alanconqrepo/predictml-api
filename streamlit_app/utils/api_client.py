@@ -5,6 +5,19 @@ Client HTTP pour l'API predictml
 from typing import Optional, Tuple
 
 import requests
+import streamlit as st
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def get_models(api_url: str, token: str) -> list:
+    """Liste tous les modèles — résultat mis en cache 30 secondes."""
+    return APIClient(api_url, token).list_models()
+
+
+@st.cache_data(ttl=10, show_spinner=False)
+def get_model_detail(api_url: str, token: str, name: str, version: str) -> dict:
+    """Détail d'une version de modèle — résultat mis en cache 10 secondes."""
+    return APIClient(api_url, token).get_model(name, version)
 
 
 class APIClient:

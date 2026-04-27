@@ -8,12 +8,17 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
 
 st.set_page_config(page_title="Stats — PredictML", page_icon="📈", layout="wide")
 require_auth()
 
-st.title("📈 Statistiques")
+col_title, col_refresh = st.columns([8, 1])
+col_title.title("📈 Statistiques")
+if col_refresh.button("🔄 Rafraîchir", key="stats_refresh", use_container_width=True):
+    st.cache_data.clear()
+    st.rerun()
 
 client = get_client()
 
@@ -24,7 +29,9 @@ days_map = {"7 jours": 7, "30 jours": 30, "90 jours": 90}
 days = days_map[period]
 
 try:
-    models = client.list_models()
+    models = get_models_cached(
+        st.session_state.get("api_url"), st.session_state.get("api_token")
+    )
     model_names = sorted({m["name"] for m in models})
 except Exception:
     model_names = []
@@ -118,7 +125,9 @@ try:
     leaderboard = client.get_leaderboard(metric=lb_metric, days=days)
 except Exception:
     try:
-        _lb_models = client.list_models()
+        _lb_models = get_models_cached(
+                st.session_state.get("api_url"), st.session_state.get("api_token")
+            )
         _lb_stats = client.get_prediction_stats(days=days)
         leaderboard = _build_leaderboard_fallback(_lb_models, _lb_stats, lb_metric, days)
     except Exception:
