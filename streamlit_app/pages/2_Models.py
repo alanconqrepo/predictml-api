@@ -203,8 +203,8 @@ if is_admin:
                             train_filename=train_fname,
                         )
                         progress.progress(100, text="Terminé.")
-                        st.success(
-                            f"Modèle **{result['name']}** v{result['version']} uploadé avec succès."
+                        st.toast(
+                            f"Modèle {result['name']} v{result['version']} uploadé.", icon="✅"
                         )
                         reload()
                     except Exception as exc:
@@ -841,12 +841,13 @@ if is_admin:
         ):
             try:
                 client.update_model(selected["name"], selected["version"], {"is_production": True})
-                st.success(
-                    f"**{selected['name']} v{selected['version']}** est maintenant en production."
+                st.toast(
+                    f"{selected['name']} v{selected['version']} est maintenant en production.",
+                    icon="✅",
                 )
                 reload()
             except Exception as e:
-                st.error(f"Erreur : {e}")
+                st.toast(f"Erreur : {e}", icon="❌")
     else:
         col_p.info("🟢 Déjà en production")
 
@@ -868,13 +869,14 @@ if is_admin:
             with st.spinner("Chargement du modèle en cache…"):
                 try:
                     result = client.warmup_model(selected["name"], selected["version"])
-                    st.success(
+                    st.toast(
                         f"Modèle chargé en {result['load_time_ms']:.0f} ms "
-                        f"— clé cache : `{result['cache_key']}`"
+                        f"— clé cache : {result['cache_key']}",
+                        icon="✅",
                     )
                     reload()
                 except Exception as e:
-                    st.error(f"Erreur lors du préchauffage : {e}")
+                    st.toast(f"Erreur lors du préchauffage : {e}", icon="❌")
     else:
         col_w2.info("Le modèle est déjà en cache — aucun préchauffage nécessaire.")
 
@@ -891,11 +893,11 @@ if is_admin:
         if c1.button("Oui, supprimer", type="primary"):
             try:
                 client.delete_model_version(selected["name"], selected["version"])
-                st.success("Modèle supprimé.")
+                st.toast("Modèle supprimé.", icon="✅")
                 st.session_state.pop("confirm_delete_model", None)
                 reload()
             except Exception as e:
-                st.error(f"Erreur : {e}")
+                st.toast(f"Erreur : {e}", icon="❌")
         if c2.button("Annuler"):
             st.session_state.pop("confirm_delete_model", None)
             st.rerun()
@@ -948,10 +950,10 @@ if is_admin:
             if patch:
                 try:
                     client.update_model(selected["name"], selected["version"], patch)
-                    st.success("Métadonnées mises à jour.")
+                    st.toast("Métadonnées mises à jour.", icon="✅")
                     reload()
                 except Exception as e:
-                    st.error(f"Erreur : {e}")
+                    st.toast(f"Erreur : {e}", icon="❌")
             else:
                 st.info("Aucun changement détecté.")
 
@@ -1004,14 +1006,16 @@ if is_admin:
                             )
                             st.session_state.pop("show_retrain_form", None)
                             if result.get("success"):
-                                st.success(
+                                st.toast(
                                     f"Ré-entraînement réussi ! "
-                                    f"Nouvelle version : **{result['new_version']}**"
+                                    f"Nouvelle version : {result['new_version']}",
+                                    icon="✅",
                                 )
                             else:
-                                st.error(
+                                st.toast(
                                     f"Échec du ré-entraînement : "
-                                    f"{result.get('error', 'Erreur inconnue')}"
+                                    f"{result.get('error', 'Erreur inconnue')}",
+                                    icon="❌",
                                 )
                             with st.expander("📋 Logs stdout", expanded=not result.get("success")):
                                 st.code(result.get("stdout", "(vide)"), language="text")
@@ -1020,7 +1024,7 @@ if is_admin:
                             if result.get("success"):
                                 reload()
                         except Exception as e:
-                            st.error(f"Erreur lors du ré-entraînement : {e}")
+                            st.toast(f"Erreur lors du ré-entraînement : {e}", icon="❌")
 
     # Calcul du baseline depuis la production
     with st.expander("📐 Calculer le baseline depuis la production"):
@@ -1050,12 +1054,12 @@ if is_admin:
                     if baseline_dry_run:
                         st.info("Décochez **dry_run** pour sauvegarder le baseline.")
                     else:
-                        st.success(
-                            "Baseline sauvegardé — le drift est maintenant actif pour ce modèle."
+                        st.toast(
+                            "Baseline sauvegardé — drift actif pour ce modèle.", icon="✅"
                         )
                         st.cache_data.clear()
                 except Exception as e:
-                    st.error(f"Erreur : {e}")
+                    st.toast(f"Erreur : {e}", icon="❌")
 
     # Historique des modifications
     with st.expander("📜 Historique des modifications"):
@@ -1118,16 +1122,16 @@ if is_admin:
                 if c1.button("✅ Oui, restaurer", type="primary", key="confirm_rollback_yes"):
                     try:
                         result = client.rollback_model(confirm_model, confirm_version, confirm_id)
-                        st.success(
-                            f"Rollback effectué. Nouvelle entrée d'historique "
-                            f"**#{result['new_history_id']}** créée."
+                        st.toast(
+                            f"Rollback effectué — entrée #{result['new_history_id']} créée.",
+                            icon="✅",
                         )
                         st.session_state.pop("confirm_rollback_id", None)
                         st.session_state.pop("confirm_rollback_model", None)
                         st.session_state.pop("confirm_rollback_version", None)
                         reload()
                     except Exception as e:
-                        st.error(f"Erreur lors du rollback : {e}")
+                        st.toast(f"Erreur lors du rollback : {e}", icon="❌")
                 if c2.button("❌ Annuler", key="confirm_rollback_no"):
                     st.session_state.pop("confirm_rollback_id", None)
                     st.session_state.pop("confirm_rollback_model", None)
