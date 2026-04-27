@@ -69,7 +69,9 @@ with tab_history:
                     filename=uploaded_file.name,
                     model_name=model_name_override.strip() or None,
                 )
-                st.success(f"{result['upserted']} résultats importés depuis **{result['filename']}**")
+                st.success(
+                    f"{result['upserted']} résultats importés depuis **{result['filename']}**"
+                )
                 if result.get("skipped_rows", 0) > 0:
                     st.warning(f"{result['skipped_rows']} ligne(s) ignorée(s)")
                     errors = result.get("parse_errors", [])
@@ -202,12 +204,42 @@ with tab_history:
             df = pd.DataFrame(rows)
             st.dataframe(df, use_container_width=True, hide_index=True)
 
-            st.download_button(
-                label="⬇️ Télécharger en CSV",
-                data=df.to_csv(index=False),
-                file_name="predictions.csv",
-                mime="text/csv",
-            )
+            with st.expander("⬇️ Exporter toutes les prédictions (serveur)", expanded=False):
+                st.caption(
+                    "L'export serveur inclut **toutes** les prédictions correspondant aux filtres, "
+                    "pas seulement la page courante."
+                )
+                col_exp1, col_exp2 = st.columns(2)
+                export_fmt = col_exp1.selectbox(
+                    "Format", ["csv", "jsonl", "parquet"], key="pred_export_fmt"
+                )
+                export_status = col_exp2.selectbox(
+                    "Statut", ["(tous)", "success", "error"], key="pred_export_status"
+                )
+                if st.button("Préparer l'export", key="pred_export_btn"):
+                    with st.spinner("Préparation de l'export en cours…"):
+                        try:
+                            content = client.export_predictions(
+                                start=start_iso,
+                                end=end_iso,
+                                model_name=model_name,
+                                export_format=export_fmt,
+                                status=None if export_status == "(tous)" else export_status,
+                            )
+                            mime_map = {
+                                "csv": "text/csv",
+                                "jsonl": "application/x-ndjson",
+                                "parquet": "application/octet-stream",
+                            }
+                            st.download_button(
+                                label=f"⬇️ Télécharger predictions_export.{export_fmt}",
+                                data=content,
+                                file_name=f"predictions_export.{export_fmt}",
+                                mime=mime_map[export_fmt],
+                                key="pred_export_download",
+                            )
+                        except Exception as exc:
+                            st.error(f"Erreur lors de l'export : {exc}")
 
             # Détail features
             with st.expander("🔍 Voir les features d'une prédiction"):
@@ -234,9 +266,13 @@ with tab_history:
             with st.expander("🧠 Explication SHAP d'une prédiction"):
                 import plotly.graph_objects as go
 
-                shap_pred_ids = {str(p["id"]): p for p in predictions if p.get("status") == "success"}
+                shap_pred_ids = {
+                    str(p["id"]): p for p in predictions if p.get("status") == "success"
+                }
                 if not shap_pred_ids:
-                    st.info("Aucune prédiction réussie sur cette page — sélectionnez une autre plage de dates.")
+                    st.info(
+                        "Aucune prédiction réussie sur cette page — sélectionnez une autre plage de dates."
+                    )
                 else:
                     shap_sel_id = st.selectbox(
                         "Prédiction ID",
@@ -295,7 +331,9 @@ with tab_history:
                                 if len(shap_values) > 10:
                                     with st.expander("Voir toutes les features"):
                                         all_sorted = sorted(
-                                            shap_values.items(), key=lambda x: abs(x[1]), reverse=True
+                                            shap_values.items(),
+                                            key=lambda x: abs(x[1]),
+                                            reverse=True,
                                         )
                                         st.dataframe(
                                             pd.DataFrame(all_sorted, columns=["Feature", "SHAP"]),
@@ -429,16 +467,14 @@ with tab_batch:
 
     # --- Format attendu ---
     with st.expander("ℹ️ Format attendu du fichier", expanded=False):
-        st.markdown(
-            """
+        st.markdown("""
 Le fichier doit contenir **une colonne par feature** attendue par le modèle.
 Les colonnes doivent correspondre exactement aux noms des features du modèle (casse incluse).
 
 Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique.
 
 **Exemple pour un modèle Iris :**
-"""
-        )
+""")
         example_df = pd.DataFrame(
             {
                 "id_obs": ["obs-001", "obs-002", "obs-003"],
@@ -477,9 +513,7 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
         {m["version"] for m in all_models if m["name"] == batch_model},
         reverse=True,
     )
-    batch_version_sel = col_b2.selectbox(
-        "Version", batch_versions, key="batch_version_sel"
-    )
+    batch_version_sel = col_b2.selectbox("Version", batch_versions, key="batch_version_sel")
     batch_version = None if batch_version_sel == "(production / auto)" else batch_version_sel
 
     # --- Upload fichier ---
@@ -502,7 +536,9 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
             st.error(f"Impossible de lire le fichier : {exc}")
             st.stop()
 
-        st.caption(f"Fichier chargé : **{batch_file.name}** — {len(df_input):,} lignes, {len(df_input.columns)} colonnes")
+        st.caption(
+            f"Fichier chargé : **{batch_file.name}** — {len(df_input):,} lignes, {len(df_input.columns)} colonnes"
+        )
         st.dataframe(df_input.head(10), use_container_width=True, hide_index=True)
 
         if st.button("🚀 Lancer le scoring", type="primary", key="batch_run"):
@@ -544,6 +580,7 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
                     detail = str(exc)
                     try:
                         import json as _json
+
                         body = _json.loads(str(exc).split(" - ", 1)[-1])
                         detail = body.get("detail", detail)
                     except Exception:
@@ -571,8 +608,7 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
                 n_classes = len(first_proba)
                 for i in range(n_classes):
                     df_result[f"proba_class_{i}"] = [
-                        (p.get("probability") or [None] * n_classes)[i]
-                        for p in predictions_out
+                        (p.get("probability") or [None] * n_classes)[i] for p in predictions_out
                     ]
 
             # Colonne low_confidence si disponible
