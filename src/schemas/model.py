@@ -550,6 +550,24 @@ class CalibrationResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Rapport de performance consolidé
+# ---------------------------------------------------------------------------
+
+
+class PerformanceReportResponse(BaseModel):
+    """Réponse de GET /models/{name}/performance-report"""
+
+    model_name: str
+    generated_at: datetime
+    period_days: int
+    performance: Optional[ModelPerformanceResponse] = None
+    drift: Optional[DriftReportResponse] = None
+    feature_importance: Optional[FeatureImportanceResponse] = None
+    calibration: Optional[CalibrationResponse] = None
+    ab_comparison: Optional[ABCompareResponse] = None
+
+
+# ---------------------------------------------------------------------------
 # Calcul du baseline depuis la production
 # ---------------------------------------------------------------------------
 
