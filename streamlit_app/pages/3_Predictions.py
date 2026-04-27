@@ -69,9 +69,7 @@ with tab_history:
                     filename=uploaded_file.name,
                     model_name=model_name_override.strip() or None,
                 )
-                st.success(
-                    f"{result['upserted']} résultats importés depuis **{result['filename']}**"
-                )
+                st.toast(f"{result['upserted']} résultats importés depuis {result['filename']}.", icon="✅")
                 if result.get("skipped_rows", 0) > 0:
                     st.warning(f"{result['skipped_rows']} ligne(s) ignorée(s)")
                     errors = result.get("parse_errors", [])
@@ -439,7 +437,7 @@ with tab_history:
                             model_name=purge_model_name,
                             dry_run=False,
                         )
-                        st.success(f"✅ {result['deleted_count']} prédiction(s) supprimée(s).")
+                        st.toast(f"{result['deleted_count']} prédiction(s) supprimée(s).", icon="✅")
                         if result.get("linked_observed_results_count", 0) > 0:
                             st.warning(
                                 f"{result['linked_observed_results_count']} résultat(s) observé(s) "
@@ -447,7 +445,7 @@ with tab_history:
                             )
                         st.rerun()
                     except Exception as exc:
-                        st.error(f"Erreur lors de la purge : {exc}")
+                        st.toast(f"Erreur lors de la purge : {exc}", icon="❌")
 
             if col_purge.button(
                 "⚠️ Confirmer la purge",
@@ -597,9 +595,10 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
             predictions_out = result.get("predictions", [])
             used_version = result.get("model_version", "—")
 
-            st.success(
-                f"✅ {len(predictions_out):,} prédictions générées — "
-                f"modèle **{batch_model}** v{used_version}"
+            st.toast(
+                f"{len(predictions_out):,} prédictions générées — "
+                f"modèle {batch_model} v{used_version}",
+                icon="✅",
             )
 
             # Construire le DataFrame résultat : colonnes originales + prediction + probabilities

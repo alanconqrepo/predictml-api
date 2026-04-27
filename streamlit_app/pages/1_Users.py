@@ -102,12 +102,12 @@ with st.expander("➕ Créer un nouvel utilisateur", expanded=False):
                         "rate_limit": rate_limit,
                     }
                 )
-                st.success(f"Utilisateur **{result['username']}** créé avec succès.")
+                st.toast(f"Utilisateur {result['username']} créé.", icon="✅")
                 st.info("Conservez ce token — il ne sera plus affiché !")
                 show_token_with_copy(result["api_token"])
                 reload()
             except Exception as e:
-                st.error(f"Erreur : {e}")
+                st.toast(f"Erreur : {e}", icon="❌")
 
 st.divider()
 
@@ -155,20 +155,20 @@ toggle_label = "Désactiver" if current_active else "Activer"
 if col_a.button(f"{'🔴' if current_active else '🟢'} {toggle_label}", use_container_width=True):
     try:
         client.update_user(selected["id"], {"is_active": not current_active})
-        st.success(f"Utilisateur {'désactivé' if current_active else 'activé'}.")
+        st.toast(f"Utilisateur {'désactivé' if current_active else 'activé'}.", icon="✅")
         reload()
     except Exception as e:
-        st.error(f"Erreur : {e}")
+        st.toast(f"Erreur : {e}", icon="❌")
 
 # Renouveler token
 if col_b.button("🔄 Renouveler token", use_container_width=True):
     try:
         result = client.update_user(selected["id"], {"regenerate_token": True})
-        st.success("Nouveau token généré. Conservez-le !")
+        st.toast("Nouveau token généré.", icon="✅")
         show_token_with_copy(result["api_token"])
         reload()
     except Exception as e:
-        st.error(f"Erreur : {e}")
+        st.toast(f"Erreur : {e}", icon="❌")
 
 # Modifier rôle
 new_roles = [r for r in ["user", "admin", "readonly"] if r != selected["role"]]
@@ -176,10 +176,10 @@ new_role = col_c.selectbox("Changer rôle", new_roles, key="role_select")
 if col_c.button("✏️ Appliquer rôle", use_container_width=True):
     try:
         client.update_user(selected["id"], {"role": new_role})
-        st.success(f"Rôle mis à jour → {new_role}")
+        st.toast(f"Rôle mis à jour → {new_role}", icon="✅")
         reload()
     except Exception as e:
-        st.error(f"Erreur : {e}")
+        st.toast(f"Erreur : {e}", icon="❌")
 
 # Supprimer
 with col_d:
@@ -194,11 +194,11 @@ if st.session_state.get("confirm_delete_user") == selected["id"]:
     if c1.button("Oui, supprimer", type="primary"):
         try:
             client.delete_user(selected["id"])
-            st.success("Utilisateur supprimé.")
+            st.toast("Utilisateur supprimé.", icon="✅")
             st.session_state.pop("confirm_delete_user", None)
             reload()
         except Exception as e:
-            st.error(f"Erreur : {e}")
+            st.toast(f"Erreur : {e}", icon="❌")
     if c2.button("Annuler"):
         st.session_state.pop("confirm_delete_user", None)
         st.rerun()

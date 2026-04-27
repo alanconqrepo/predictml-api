@@ -137,9 +137,9 @@ if is_admin:
 
             if errors:
                 for err in errors:
-                    st.error(err)
+                    st.toast(err, icon="❌")
             if updated:
-                st.success(f"{updated} version(s) mise(s) à jour.")
+                st.toast(f"{updated} version(s) mise(s) à jour.", icon="✅")
                 st.cache_data.clear()
                 st.rerun()
 

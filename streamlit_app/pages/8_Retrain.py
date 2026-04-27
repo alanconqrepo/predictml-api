@@ -161,9 +161,10 @@ with tab_manual:
                             set_production=set_prod,
                         )
                         if result.get("success"):
-                            st.success(
+                            st.toast(
                                 f"Ré-entraînement réussi ! "
-                                f"Nouvelle version : **{result['new_version']}**"
+                                f"Nouvelle version : {result['new_version']}",
+                                icon="✅",
                             )
                             auto_promoted = result.get("auto_promoted")
                             if auto_promoted is True:
@@ -177,9 +178,10 @@ with tab_manual:
                                     f"{result.get('auto_promote_reason') or '—'}"
                                 )
                         else:
-                            st.error(
+                            st.toast(
                                 f"Échec du ré-entraînement : "
-                                f"{result.get('error', 'Erreur inconnue')}"
+                                f"{result.get('error', 'Erreur inconnue')}",
+                                icon="❌",
                             )
                         with st.expander("📋 Logs stdout", expanded=not result.get("success")):
                             st.code(result.get("stdout", "(vide)"), language="text")
@@ -188,7 +190,7 @@ with tab_manual:
                         if result.get("success"):
                             reload()
                     except Exception as e:
-                        st.error(f"Erreur lors du ré-entraînement : {e}")
+                        st.toast(f"Erreur lors du ré-entraînement : {e}", icon="❌")
 
 # ─── Onglet 3 — Planning cron ─────────────────────────────────────────────
 
@@ -268,15 +270,16 @@ Format : `minute heure jour-du-mois mois jour-de-la-semaine`
                     auto_promote=auto_promote_sched,
                     enabled=enabled_sched,
                 )
-                st.success(
-                    f"Planning sauvegardé pour " f"**{sched_sel['name']} v{sched_sel['version']}**."
+                st.toast(
+                    f"Planning sauvegardé pour {sched_sel['name']} v{sched_sel['version']}.",
+                    icon="✅",
                 )
                 saved_sched = result.get("retrain_schedule") or {}
                 if saved_sched.get("next_run_at"):
                     st.info(f"Prochain déclenchement prévu : `{saved_sched['next_run_at']}`")
                 reload()
             except Exception as e:
-                st.error(f"Erreur lors de la sauvegarde du planning : {e}")
+                st.toast(f"Erreur lors de la sauvegarde du planning : {e}", icon="❌")
 
 # ─── Onglet 4 — Politique d'auto-promotion ───────────────────────────────
 
@@ -371,13 +374,14 @@ with tab_policy:
                 auto_promote=auto_promote_policy,
             )
             updated = result.get("updated_versions", 0)
-            st.success(
-                f"Politique enregistrée pour **{policy_name}** "
-                f"({updated} version(s) mise(s) à jour)."
+            st.toast(
+                f"Politique enregistrée pour {policy_name} "
+                f"({updated} version(s) mise(s) à jour).",
+                icon="✅",
             )
             reload()
         except Exception as e:
-            st.error(f"Erreur lors de la sauvegarde de la politique : {e}")
+            st.toast(f"Erreur lors de la sauvegarde de la politique : {e}", icon="❌")
 
 # ─── Onglet 5 — Historique des retrains ──────────────────────────────────
 
