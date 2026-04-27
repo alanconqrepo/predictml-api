@@ -543,6 +543,28 @@ class APIClient:
         r.raise_for_status()
         return r.content
 
+    def export_predictions(
+        self,
+        start: str,
+        end: str,
+        model_name: Optional[str] = None,
+        export_format: str = "csv",
+        status: Optional[str] = None,
+    ) -> bytes:
+        params: dict = {"start": start, "end": end, "format": export_format}
+        if model_name:
+            params["model_name"] = model_name
+        if status:
+            params["status"] = status
+        r = requests.get(
+            f"{self.base_url}/predictions/export",
+            headers=self._headers(),
+            params=params,
+            timeout=120,
+        )
+        r.raise_for_status()
+        return r.content
+
     def purge_predictions(
         self,
         older_than_days: int,
