@@ -112,8 +112,10 @@ with tab_manual:
         )
     else:
         model_opts = {f"{m['name']} v{m['version']}": m for m in trainable}
+        retrain_search = st.text_input("Filtrer par nom", key="retrain_search", placeholder="Rechercher un modèle…")
+        retrain_keys = [k for k in model_opts if retrain_search.lower() in k.lower()] if retrain_search else list(model_opts.keys())
         selected_label = st.selectbox(
-            "Modèle à ré-entraîner", list(model_opts.keys()), key="retrain_select"
+            "Modèle à ré-entraîner", retrain_keys or list(model_opts.keys()), key="retrain_select"
         )
         sel = model_opts[selected_label]
 
@@ -213,8 +215,10 @@ Format : `minute heure jour-du-mois mois jour-de-la-semaine`
 """)
 
         sched_opts = {f"{m['name']} v{m['version']}": m for m in trainable_sched}
+        sched_search = st.text_input("Filtrer par nom", key="sched_search", placeholder="Rechercher un modèle…")
+        sched_keys = [k for k in sched_opts if sched_search.lower() in k.lower()] if sched_search else list(sched_opts.keys())
         sched_label = st.selectbox(
-            "Modèle à planifier", list(sched_opts.keys()), key="sched_select"
+            "Modèle à planifier", sched_keys or list(sched_opts.keys()), key="sched_select"
         )
         sched_sel = sched_opts[sched_label]
         existing_sched = sched_sel.get("retrain_schedule") or {}
@@ -281,7 +285,9 @@ with tab_policy:
     st.caption("La politique s'applique à toutes les versions actives du modèle sélectionné.")
 
     model_names = sorted({m["name"] for m in models})
-    policy_name = st.selectbox("Modèle", model_names, key="policy_model_select")
+    policy_search = st.text_input("Filtrer par nom", key="policy_model_search", placeholder="Rechercher un modèle…")
+    policy_filtered = [n for n in model_names if policy_search.lower() in n.lower()] if policy_search else model_names
+    policy_name = st.selectbox("Modèle", policy_filtered or model_names, key="policy_model_select")
 
     matching = [m for m in models if m["name"] == policy_name]
     current_policy: dict = {}
@@ -379,7 +385,9 @@ with tab_history:
     st.subheader("Historique des ré-entraînements")
 
     model_names_hist = sorted({m["name"] for m in models})
-    hist_model_name = st.selectbox("Modèle", model_names_hist, key="hist_model_select")
+    hist_search = st.text_input("Filtrer par nom", key="hist_model_search", placeholder="Rechercher un modèle…")
+    hist_filtered = [n for n in model_names_hist if hist_search.lower() in n.lower()] if hist_search else model_names_hist
+    hist_model_name = st.selectbox("Modèle", hist_filtered or model_names_hist, key="hist_model_select")
 
     try:
         raw_history = client.get_model_history(name=hist_model_name, limit=200)
