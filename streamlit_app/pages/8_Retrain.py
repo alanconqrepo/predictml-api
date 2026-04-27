@@ -42,8 +42,8 @@ if not models:
     st.info("Aucun modèle disponible.")
     st.stop()
 
-tab_overview, tab_manual, tab_schedule, tab_policy = st.tabs(
-    ["📅 Schedules", "🚀 Retrain manuel", "⏰ Planning cron", "🏆 Auto-promotion"]
+tab_overview, tab_manual, tab_schedule, tab_policy, tab_history = st.tabs(
+    ["📅 Schedules", "🚀 Retrain manuel", "⏰ Planning cron", "🏆 Auto-promotion", "📜 Historique"]
 )
 
 # ─── Onglet 1 — Vue d'ensemble des schedules ──────────────────────────────
@@ -372,3 +372,70 @@ with tab_policy:
             reload()
         except Exception as e:
             st.error(f"Erreur lors de la sauvegarde de la politique : {e}")
+
+# ─── Onglet 5 — Historique des retrains ──────────────────────────────────
+
+with tab_history:
+    st.subheader("Historique des ré-entraînements")
+
+    model_names_hist = sorted({m["name"] for m in models})
+    hist_model_name = st.selectbox("Modèle", model_names_hist, key="hist_model_select")
+
+    try:
+        raw_history = client.get_model_history(name=hist_model_name, limit=200)
+    except Exception as e:
+        st.error(f"Impossible de charger l'historique : {e}")
+        raw_history = {"entries": [], "total": 0}
+
+    all_entries = raw_history.get("entries", [])
+
+    # Versions promues en production (SET_PRODUCTION avec is_production=True)
+    promoted_versions: set = {
+        e["model_version"]
+        for e in all_entries
+        if e["action"] == "set_production" and e["snapshot"].get("is_production")
+    }
+
+    # Entrées de retrain : action=created + snapshot.parent_version non nul
+    retrain_entries = [
+        e
+        for e in all_entries
+        if e["action"] == "created" and e["snapshot"].get("parent_version")
+    ]
+
+    if not retrain_entries:
+        st.info(
+            "Aucun ré-entraînement enregistré pour ce modèle. "
+            "Les retrains apparaissent ici après leur première exécution."
+        )
+    else:
+        rows = []
+        for e in retrain_entries:
+            snap = e["snapshot"]
+            trained_by = snap.get("trained_by") or e.get("changed_by_username") or "—"
+            accuracy = snap.get("accuracy")
+            f1 = snap.get("f1_score")
+            promoted = e["model_version"] in promoted_versions
+            rows.append(
+                {
+                    "Date": pd.to_datetime(e["timestamp"]).strftime("%Y-%m-%d %H:%M"),
+                    "Version créée": e["model_version"],
+                    "Trained by": trained_by,
+                    "Version source": snap.get("parent_version") or "—",
+                    "Accuracy": round(accuracy, 4) if accuracy is not None else None,
+                    "F1 Score": round(f1, 4) if f1 is not None else None,
+                    "En production": "✅" if promoted else "❌",
+                }
+            )
+
+        df_hist = pd.DataFrame(rows)
+        st.dataframe(df_hist, use_container_width=True, hide_index=True)
+        st.caption(f"{len(retrain_entries)} ré-entraînement(s) au total.")
+
+        # Graphique de progression de l'accuracy
+        chart_df = df_hist[df_hist["Accuracy"].notna()].copy()
+        if not chart_df.empty:
+            st.markdown("#### Progression de l'accuracy")
+            chart_df = chart_df.sort_values("Date")
+            chart_df = chart_df.rename(columns={"Date": "index"}).set_index("index")
+            st.line_chart(chart_df[["Accuracy", "F1 Score"]].dropna(how="all"))
