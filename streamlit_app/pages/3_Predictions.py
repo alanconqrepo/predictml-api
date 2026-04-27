@@ -7,12 +7,17 @@ from datetime import date, datetime, timedelta
 
 import pandas as pd
 import streamlit as st
+from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
 
 st.set_page_config(page_title="Predictions — PredictML", page_icon="📊", layout="wide")
 require_auth()
 
-st.title("📊 Prédictions")
+col_title, col_refresh = st.columns([8, 1])
+col_title.title("📊 Prédictions")
+if col_refresh.button("🔄 Rafraîchir", key="pred_refresh", use_container_width=True):
+    st.cache_data.clear()
+    st.rerun()
 
 client = get_client()
 
@@ -120,7 +125,9 @@ with tab_history:
 
         # Liste des modèles disponibles
         try:
-            models = client.list_models()
+            models = get_models_cached(
+                st.session_state.get("api_url"), st.session_state.get("api_token")
+            )
             model_names = sorted({m["name"] for m in models})
         except Exception:
             model_names = []
@@ -496,7 +503,9 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
 
     # --- Sélection modèle + version ---
     try:
-        all_models = client.list_models()
+        all_models = get_models_cached(
+            st.session_state.get("api_url"), st.session_state.get("api_token")
+        )
         model_names_batch = sorted({m["name"] for m in all_models})
     except Exception:
         all_models = []

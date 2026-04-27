@@ -9,12 +9,17 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
 
 st.set_page_config(page_title="A/B Testing — PredictML", page_icon="🧪", layout="wide")
 require_auth()
 
-st.title("🧪 A/B Testing & Shadow Deployment")
+col_title, col_refresh = st.columns([8, 1])
+col_title.title("🧪 A/B Testing & Shadow Deployment")
+if col_refresh.button("🔄 Rafraîchir", key="ab_refresh", use_container_width=True):
+    st.cache_data.clear()
+    st.rerun()
 st.caption(
     "Configurez des splits de trafic entre versions d'un même modèle et comparez leurs métriques en temps réel."
 )
@@ -24,7 +29,9 @@ is_admin = st.session_state.get("is_admin", False)
 
 # --- Charger la liste des modèles ---
 try:
-    all_models = client.list_models()
+    all_models = get_models_cached(
+        st.session_state.get("api_url"), st.session_state.get("api_token")
+    )
 except Exception as e:
     st.error(f"Impossible de charger les modèles : {e}")
     st.stop()
