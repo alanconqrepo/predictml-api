@@ -10,6 +10,39 @@ import streamlit.components.v1 as components
 from utils.auth import get_client, require_admin, require_auth
 
 
+def show_quota_progress(used: int, limit: int) -> None:
+    if limit <= 0:
+        st.info("Quota illimité.")
+        return
+    pct = used / limit
+    pct_clamped = min(pct * 100, 100)
+    remaining = max(limit - used, 0)
+
+    if pct < 0.70:
+        bar_color = "#21c354"
+    elif pct < 0.90:
+        bar_color = "#ff9f0a"
+    else:
+        bar_color = "#ff3b30"
+
+    tooltip = f"{used} / {limit} prédictions utilisées aujourd'hui — reset à minuit UTC"
+    st.markdown(
+        f"""<div title="{tooltip}" style="margin-bottom:6px">
+  <div style="background:#e0e0e0;border-radius:6px;height:18px;width:100%;overflow:hidden">
+    <div style="background:{bar_color};width:{pct_clamped:.1f}%;height:100%;border-radius:6px;transition:width .3s"></div>
+  </div>
+</div>""",
+        unsafe_allow_html=True,
+    )
+    caption = f"{used} / {limit} prédictions utilisées aujourd'hui — {remaining} restante{'s' if remaining != 1 else ''} — reset à minuit UTC"
+    if pct >= 0.90:
+        st.error(caption)
+    elif pct >= 0.70:
+        st.warning(caption)
+    else:
+        st.success(caption)
+
+
 def show_token_with_copy(token: str) -> None:
     """Display a token with a one-click copy button."""
     st.code(token, language=None)
@@ -49,11 +82,7 @@ if not st.session_state.get("is_admin"):
             st.markdown("**Quota journalier :**")
             used = quota["used_today"]
             limit = quota["rate_limit_per_day"]
-            remaining = quota["remaining_today"]
-            st.progress(used / limit if limit > 0 else 0)
-            st.caption(f"{used} / {limit} aujourd'hui — {remaining} restantes")
-            if remaining == 0:
-                st.warning("Quota épuisé pour aujourd'hui.")
+            show_quota_progress(used, limit)
         except Exception as e:
             st.error(f"Impossible de charger le profil : {e}")
     st.stop()
@@ -222,6 +251,7 @@ with st.expander(
             delta=f"{today_calls} / {daily_limit} appels",
             delta_color="off",
         )
+        show_quota_progress(today_calls, daily_limit)
 
         col_left, col_right = st.columns(2)
 
