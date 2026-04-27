@@ -48,10 +48,10 @@ async def run_alert_check() -> None:
     """
     Vérification toutes les 6h des indicateurs de supervision sur les 24 dernières heures.
     Envoie des alertes e-mail si ENABLE_EMAIL_ALERTS=true.
-    Déclenche les webhooks configurés sur les modèles indépendamment des e-mails :
-      - error_rate_threshold : taux d'erreur > seuil
-      - drift_critical       : drift de features critique détecté
     """
+    if not settings.ENABLE_EMAIL_ALERTS:
+        return
+
     logger.info("Vérification des alertes de supervision")
 
     try:
