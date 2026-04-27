@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
+from utils.metrics_help import METRIC_HELP
 
 st.set_page_config(page_title="Stats — PredictML", page_icon="📈", layout="wide")
 require_auth()
@@ -224,8 +225,8 @@ n_models_used = df["model_name"].nunique()
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Total prédictions", f"{total:,}")
-col2.metric("Taux d'erreur", f"{error_rate:.1f}%")
-col3.metric("Temps de réponse médian", f"{median_rt:.1f} ms")
+col2.metric("Taux d'erreur", f"{error_rate:.1f}%", help=METRIC_HELP["taux_erreur"])
+col3.metric("Temps de réponse médian", f"{median_rt:.1f} ms", help=METRIC_HELP["latence_mediane"])
 col4.metric("Modèles utilisés", n_models_used)
 
 st.divider()
@@ -377,10 +378,12 @@ else:
         matched_total = int(drift_df["matched_count"].sum())
 
         m1, m2, m3 = st.columns(3)
+        _perf_help = METRIC_HELP["accuracy"] if model_type == "classification" else METRIC_HELP["mae"]
         m1.metric(
             f"{metric_label} (dernier jour)",
             f"{last_val:.1%}" if model_type == "classification" else f"{last_val:.4f}",
             delta=f"{delta:+.1%}" if model_type == "classification" else f"{delta:+.4f}",
+            help=_perf_help,
         )
         m2.metric(
             "Moyenne mobile 7j",
@@ -389,6 +392,7 @@ else:
                 if model_type == "classification"
                 else f"{drift_df['rolling_7d'].iloc[-1]:.4f}"
             ),
+            help=_perf_help,
         )
         m3.metric("Prédictions avec résultat observé (30j)", f"{matched_total:,}")
 

@@ -11,6 +11,7 @@ import streamlit as st
 from utils.api_client import get_model_detail as get_model_detail_cached
 from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
+from utils.metrics_help import METRIC_HELP
 
 # --- Helpers historique ---
 
@@ -539,33 +540,37 @@ with st.expander("📈 Métriques de performance", expanded=False):
             )
         elif model_type != "classification":
             col_mae, col_rmse, col_r2 = st.columns(3)
-            col_mae.metric("MAE", f"{perf['mae']:.4f}" if perf.get("mae") is not None else "—")
+            col_mae.metric("MAE", f"{perf['mae']:.4f}" if perf.get("mae") is not None else "—", help=METRIC_HELP["mae"])
             col_rmse.metric(
-                "RMSE", f"{perf['rmse']:.4f}" if perf.get("rmse") is not None else "—"
+                "RMSE", f"{perf['rmse']:.4f}" if perf.get("rmse") is not None else "—", help=METRIC_HELP["rmse"]
             )
-            col_r2.metric("R²", f"{perf['r2']:.4f}" if perf.get("r2") is not None else "—")
+            col_r2.metric("R²", f"{perf['r2']:.4f}" if perf.get("r2") is not None else "—", help=METRIC_HELP["r2"])
             st.caption(f"{matched} prédictions appariées")
         else:
             col_acc, col_prec, col_rec, col_f1 = st.columns(4)
             col_acc.metric(
                 "Accuracy",
                 f"{perf['accuracy']:.3f}" if perf.get("accuracy") is not None else "—",
+                help=METRIC_HELP["accuracy"],
             )
             col_prec.metric(
                 "Precision (w.)",
                 f"{perf['precision_weighted']:.3f}"
                 if perf.get("precision_weighted") is not None
                 else "—",
+                help=METRIC_HELP["precision"],
             )
             col_rec.metric(
                 "Recall (w.)",
                 f"{perf['recall_weighted']:.3f}"
                 if perf.get("recall_weighted") is not None
                 else "—",
+                help=METRIC_HELP["recall"],
             )
             col_f1.metric(
                 "F1 (w.)",
                 f"{perf['f1_weighted']:.3f}" if perf.get("f1_weighted") is not None else "—",
+                help=METRIC_HELP["f1"],
             )
             st.caption(f"{matched} prédictions appariées")
 
