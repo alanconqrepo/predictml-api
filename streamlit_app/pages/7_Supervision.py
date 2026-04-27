@@ -12,6 +12,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from utils.auth import get_client, require_auth
+from utils.metrics_help import METRIC_HELP
 
 st.set_page_config(
     page_title="Supervision — PredictML",
@@ -67,10 +68,12 @@ k2.metric(
     "Taux d'erreur",
     f"{gs.get('error_rate', 0) * 100:.1f} %",
     delta=None,
+    help=METRIC_HELP["taux_erreur"],
 )
 k3.metric(
     "Latence moy.",
     f"{gs.get('avg_latency_ms') or '—'} ms" if gs.get("avg_latency_ms") else "—",
+    help=METRIC_HELP["latence_avg"],
 )
 k4.metric("Modèles actifs", gs.get("active_models", 0))
 
@@ -356,6 +359,7 @@ with col_perf:
                     drift_label,
                     delta=f"{-drop:.1%} (1re vs 2e moitié)",
                     delta_color="inverse",
+                    help=METRIC_HELP["tendance_performance"],
                 )
         else:
             st.info("Aucune observation liée (id_obs) dans la période.")
@@ -451,9 +455,10 @@ if conf_trend is not None:
             f"{mean_conf:.2%}",
             delta=delta_str,
             delta_color="normal",
+            help=METRIC_HELP["confiance_moyenne"],
         )
-        ct2.metric("P25", f"{overall.get('p25_confidence', 0):.2%}")
-        ct3.metric("P75", f"{overall.get('p75_confidence', 0):.2%}")
+        ct2.metric("P25", f"{overall.get('p25_confidence', 0):.2%}", help=METRIC_HELP["p25_confiance"])
+        ct3.metric("P75", f"{overall.get('p75_confidence', 0):.2%}", help=METRIC_HELP["p75_confiance"])
 
         # Graphique : ligne mean + bande IQR + seuil
         fig_conf = go.Figure()
@@ -540,12 +545,13 @@ if calib:
         cc1, cc2, cc3 = st.columns(3)
         brier = calib.get("brier_score")
         gap = calib.get("overconfidence_gap")
-        cc1.metric("Brier score", f"{brier:.4f}" if brier is not None else "—")
+        cc1.metric("Brier score", f"{brier:.4f}" if brier is not None else "—", help=METRIC_HELP["brier_score"])
         cc2.metric(
             "Gap confiance/précision",
             f"{gap:+.2%}" if gap is not None else "—",
+            help=METRIC_HELP["gap_confiance"],
         )
-        cc3.metric("Statut", label_status)
+        cc3.metric("Statut", label_status, help=METRIC_HELP["statut_calibration"])
 
         reliability = calib.get("reliability", [])
         if reliability:

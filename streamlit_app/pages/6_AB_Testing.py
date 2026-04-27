@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
+from utils.metrics_help import METRIC_HELP
 
 st.set_page_config(page_title="A/B Testing — PredictML", page_icon="🧪", layout="wide")
 require_auth()
@@ -196,14 +197,14 @@ else:
             st.metric("Prédictions (prod)", vs["total_predictions"])
             st.metric("Shadow", vs["shadow_predictions"])
             err_rate = vs.get("error_rate", 0)
-            st.metric("Taux d'erreur", f"{err_rate:.1%}")
+            st.metric("Taux d'erreur", f"{err_rate:.1%}", help=METRIC_HELP["taux_erreur"])
             avg_rt = vs.get("avg_response_time_ms")
             p95_rt = vs.get("p95_response_time_ms")
-            st.metric("Latence avg (ms)", f"{avg_rt:.1f}" if avg_rt is not None else "—")
-            st.metric("Latence p95 (ms)", f"{p95_rt:.1f}" if p95_rt is not None else "—")
+            st.metric("Latence avg (ms)", f"{avg_rt:.1f}" if avg_rt is not None else "—", help=METRIC_HELP["latence_avg"])
+            st.metric("Latence p95 (ms)", f"{p95_rt:.1f}" if p95_rt is not None else "—", help=METRIC_HELP["latence_p95"])
             agree = vs.get("agreement_rate")
             if agree is not None:
-                st.metric("Concordance shadow", f"{agree:.1%}")
+                st.metric("Concordance shadow", f"{agree:.1%}", help=METRIC_HELP["concordance_shadow"])
 
     # ===========================================================================
     # Bloc significativité statistique
@@ -253,15 +254,16 @@ else:
             metric, metric
         )
 
-        sig_cols[0].metric("Test statistique", test_label)
-        sig_cols[1].metric("Métrique analysée", metric_label)
+        sig_cols[0].metric("Test statistique", test_label, help=METRIC_HELP["test_statistique"])
+        sig_cols[1].metric("Métrique analysée", metric_label, help=METRIC_HELP["metrique_analysee"])
         sig_cols[2].metric(
             "p-value",
             f"{p_value:.4f}",
             delta=f"seuil {1 - confidence:.2f}",
             delta_color="off",
+            help=METRIC_HELP["p_value"],
         )
-        sig_cols[3].metric("Niveau de confiance", f"{confidence:.0%}")
+        sig_cols[3].metric("Niveau de confiance", f"{confidence:.0%}", help=METRIC_HELP["niveau_confiance"])
 
         # --- Jauge p-value ---
         threshold = 1.0 - confidence
