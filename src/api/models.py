@@ -70,6 +70,7 @@ from src.schemas.model import (
     ModelUpdateInput,
     ModelVersionSummary,
     PerClassMetrics,
+    PerformanceReportResponse,
     PerformanceTimelineResponse,
     PeriodPerformance,
     PolicyUpdateResponse,
@@ -1548,6 +1549,378 @@ async def get_model_calibration(
         mean_accuracy=round(mean_accuracy, 4),
         overconfidence_gap=round(gap, 4),
         reliability=reliability,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rapport de performance consolidé — helpers privés
+# ---------------------------------------------------------------------------
+
+
+def _build_performance_section(
+    name: str,
+    metadata: ModelMetadata,
+    total: int,
+    pairs: list,
+) -> Optional[ModelPerformanceResponse]:
+    try:
+        matched = len(pairs)
+        model_type = _detect_model_type(metadata, pairs)
+        if matched == 0:
+            return ModelPerformanceResponse(
+                model_name=name,
+                model_version=metadata.version,
+                period_start=None,
+                period_end=None,
+                total_predictions=total,
+                matched_predictions=0,
+                model_type=model_type,
+            )
+        y_true = [row.observed_result for row in pairs]
+        y_pred = [row.prediction_result for row in pairs]
+        response = ModelPerformanceResponse(
+            model_name=name,
+            model_version=metadata.version,
+            period_start=None,
+            period_end=None,
+            total_predictions=total,
+            matched_predictions=matched,
+            model_type=model_type,
+        )
+        if model_type == "classification":
+            acc, prec, rec, f1, cm, classes, per_class = _compute_classification_metrics(
+                y_true, y_pred, metadata.classes
+            )
+            response.accuracy = round(acc, 4)
+            response.precision_weighted = round(float(prec), 4)
+            response.recall_weighted = round(float(rec), 4)
+            response.f1_weighted = round(float(f1), 4)
+            response.confusion_matrix = cm
+            response.classes = classes
+            response.per_class_metrics = per_class
+        else:
+            y_true_f = [float(v) for v in y_true]
+            y_pred_f = [float(v) for v in y_pred]
+            mae, mse, rmse, r2 = _compute_regression_metrics(y_true_f, y_pred_f)
+            response.mae = round(mae, 4)
+            response.mse = round(mse, 4)
+            response.rmse = round(rmse, 4)
+            response.r2 = round(r2, 4)
+        return response
+    except Exception:
+        return None
+
+
+def _build_drift_section(
+    name: str,
+    metadata: ModelMetadata,
+    days: int,
+    production_stats: dict,
+) -> Optional[DriftReportResponse]:
+    try:
+        total_predictions = sum(v.get("count", 0) for v in production_stats.values())
+        baseline = metadata.feature_baseline
+        baseline_available = bool(baseline)
+        if not baseline_available:
+            return DriftReportResponse(
+                model_name=name,
+                model_version=metadata.version,
+                period_days=days,
+                predictions_analyzed=total_predictions,
+                baseline_available=False,
+                drift_summary="no_baseline",
+                features={
+                    feat: FeatureDriftResult(
+                        production_mean=round(stats["mean"], 6),
+                        production_std=round(stats["std"], 6),
+                        production_count=stats["count"],
+                        null_rate_production=(
+                            round(stats["null_rate"], 6) if "null_rate" in stats else None
+                        ),
+                        drift_status="no_baseline",
+                    )
+                    for feat, stats in production_stats.items()
+                },
+            )
+        features = drift_service.compute_feature_drift(baseline, production_stats)
+        summary = drift_service.summarize_drift(features, baseline_available=True)
+        return DriftReportResponse(
+            model_name=name,
+            model_version=metadata.version,
+            period_days=days,
+            predictions_analyzed=total_predictions,
+            baseline_available=True,
+            drift_summary=summary,
+            features=features,
+        )
+    except Exception:
+        return None
+
+
+def _build_calibration_section(
+    name: str,
+    version: Optional[str],
+    pairs: list,
+    n_bins: int = 10,
+) -> Optional[CalibrationResponse]:
+    try:
+        if not pairs:
+            return CalibrationResponse(
+                model_name=name,
+                version=version,
+                sample_size=0,
+                brier_score=None,
+                calibration_status="insufficient_data",
+                mean_confidence=None,
+                mean_accuracy=None,
+                overconfidence_gap=None,
+                reliability=[],
+            )
+        valid = [
+            (row.prediction_result, row.observed_result, row.probabilities)
+            for row in pairs
+            if row.probabilities
+        ]
+        if not valid:
+            return None
+
+        def _max_prob(p) -> float:
+            return max(p.values()) if isinstance(p, dict) else max(p)
+
+        confidences = np.array([_max_prob(p) for _, _, p in valid], dtype=float)
+        corrects = np.array(
+            [1.0 if str(pred) == str(obs) else 0.0 for pred, obs, _ in valid],
+            dtype=float,
+        )
+        sample_size = len(valid)
+        if sample_size < 30:
+            return CalibrationResponse(
+                model_name=name,
+                version=version,
+                sample_size=sample_size,
+                brier_score=None,
+                calibration_status="insufficient_data",
+                mean_confidence=None,
+                mean_accuracy=None,
+                overconfidence_gap=None,
+                reliability=[],
+            )
+        brier_score = float(np.mean((confidences - corrects) ** 2))
+        mean_conf = float(np.mean(confidences))
+        mean_acc = float(np.mean(corrects))
+        gap = mean_conf - mean_acc
+        if abs(gap) < 0.05:
+            calibration_status = "ok"
+        elif gap > 0.05:
+            calibration_status = "overconfident"
+        else:
+            calibration_status = "underconfident"
+        bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+        reliability: List[ReliabilityBin] = []
+        for i in range(n_bins):
+            lo, hi = bin_edges[i], bin_edges[i + 1]
+            mask = (confidences >= lo) & (confidences < hi if i < n_bins - 1 else confidences <= hi)
+            count = int(mask.sum())
+            if count == 0:
+                continue
+            reliability.append(
+                ReliabilityBin(
+                    confidence_bin=f"{lo:.1f}–{hi:.1f}",
+                    predicted_rate=round(float(np.mean(confidences[mask])), 4),
+                    observed_rate=round(float(np.mean(corrects[mask])), 4),
+                    count=count,
+                )
+            )
+        return CalibrationResponse(
+            model_name=name,
+            version=version,
+            sample_size=sample_size,
+            brier_score=round(brier_score, 4),
+            calibration_status=calibration_status,
+            mean_confidence=round(mean_conf, 4),
+            mean_accuracy=round(mean_acc, 4),
+            overconfidence_gap=round(gap, 4),
+            reliability=reliability,
+        )
+    except Exception:
+        return None
+
+
+def _build_ab_comparison_section(
+    name: str,
+    days: int,
+    meta_by_version: Dict[str, Any],
+    raw_stats: list,
+    agreement_by_version: dict,
+    pairs: list,
+) -> Optional[ABCompareResponse]:
+    try:
+        if not raw_stats:
+            return None
+        for s in raw_stats:
+            s.setdefault("prediction_errors", [])
+        versions_out = []
+        for s in raw_stats:
+            ver = s["version"]
+            m = meta_by_version.get(ver)
+            versions_out.append(
+                ABVersionStats(
+                    version=ver,
+                    deployment_mode=m.deployment_mode if m else None,
+                    traffic_weight=m.traffic_weight if m else None,
+                    total_predictions=s["total_predictions"],
+                    shadow_predictions=s["shadow_predictions"],
+                    error_rate=s["error_rate"],
+                    avg_response_time_ms=s["avg_response_time_ms"],
+                    p95_response_time_ms=s["p95_response_time_ms"],
+                    prediction_distribution=s["prediction_distribution"],
+                    agreement_rate=agreement_by_version.get(ver),
+                )
+            )
+        significance_data = compute_ab_significance(raw_stats)
+        ab_significance = ABSignificance(**significance_data) if significance_data else None
+        return ABCompareResponse(
+            model_name=name,
+            period_days=days,
+            versions=versions_out,
+            ab_significance=ab_significance,
+        )
+    except Exception:
+        return None
+
+
+async def _build_feature_importance_section(
+    db: AsyncSession,
+    name: str,
+    metadata: ModelMetadata,
+    predictions: list,
+    last_n: int = 100,
+) -> Optional[FeatureImportanceResponse]:
+    try:
+        model_data = await model_service.load_model(db, name, metadata.version)
+        model = model_data["model"]
+        if not hasattr(model, "feature_names_in_"):
+            return None
+        feature_names = list(model.feature_names_in_)
+        feature_set = set(feature_names)
+        predictions = list(predictions)[:last_n]
+        if not predictions:
+            return FeatureImportanceResponse(
+                model_name=name,
+                version=metadata.version,
+                sample_size=0,
+                feature_importance={},
+            )
+        shap_accumulator: Dict[str, List[float]] = {f: [] for f in feature_names}
+        for pred in predictions:
+            input_features = pred.input_features
+            if not isinstance(input_features, dict):
+                continue
+            if not feature_set.issubset(set(input_features.keys())):
+                continue
+            try:
+                x = np.array([[input_features[f] for f in feature_names]], dtype=float)
+                explanation = compute_shap_explanation(
+                    model=model,
+                    feature_names=feature_names,
+                    x=x,
+                    prediction_result=pred.prediction_result,
+                    feature_baseline=metadata.feature_baseline,
+                )
+                for feat, val in explanation["shap_values"].items():
+                    if feat in shap_accumulator:
+                        shap_accumulator[feat].append(abs(val))
+            except Exception:
+                continue
+        processed = max((len(v) for v in shap_accumulator.values()), default=0)
+        mean_abs = {
+            feat: sum(vals) / len(vals) if vals else 0.0 for feat, vals in shap_accumulator.items()
+        }
+        ranked = sorted(mean_abs.items(), key=lambda kv: kv[1], reverse=True)
+        feature_importance = {
+            feat: FeatureImportanceItem(mean_abs_shap=round(val, 6), rank=rank + 1)
+            for rank, (feat, val) in enumerate(ranked)
+        }
+        return FeatureImportanceResponse(
+            model_name=name,
+            version=metadata.version,
+            sample_size=processed,
+            feature_importance=feature_importance,
+        )
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Rapport de performance consolidé — endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.get("/models/{name}/performance-report", response_model=PerformanceReportResponse)
+async def get_performance_report(
+    name: str,
+    days: int = Query(30, ge=1, le=365, description="Fenêtre d'analyse en jours"),
+    format: str = Query("json", description="Format de sortie (json ; html prévu en phase 2)"),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Rapport de performance consolidé pour un modèle.
+
+    Agrège en un seul appel : performance réelle, drift, feature importance (SHAP),
+    calibration des probabilités et comparaison A/B.
+    Chaque section est indépendamment nullable — une section manquante ne bloque pas les autres.
+    """
+    metadata = await DBService.get_model_metadata(db, name)
+    if not metadata:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' introuvable.",
+        )
+
+    version = metadata.version
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+
+    # All DB I/O in one parallel gather (same pattern as compare_model_versions)
+    (
+        total_count,
+        pairs,
+        production_stats,
+        raw_ab_stats,
+        agreement_by_version,
+        predictions_result,
+    ) = await asyncio.gather(
+        DBService.count_predictions(db, name, start, now, version),
+        DBService.get_performance_pairs(db, name, start, now, version),
+        DBService.get_feature_production_stats(db, name, version, days),
+        DBService.get_ab_comparison_stats(db, name, days=days),
+        DBService.get_shadow_agreement_rate(db, name, days=days),
+        DBService.get_predictions(
+            db, model_name=name, start=start, end=now, model_version=version, limit=100
+        ),
+    )
+
+    predictions, _ = predictions_result
+
+    all_metas_result = await db.execute(
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.is_active.is_(True))
+        )
+    )
+    meta_by_version = {m.version: m for m in all_metas_result.scalars().all()}
+
+    return PerformanceReportResponse(
+        model_name=name,
+        generated_at=now.replace(tzinfo=None),
+        period_days=days,
+        performance=_build_performance_section(name, metadata, total_count, pairs),
+        drift=_build_drift_section(name, metadata, days, production_stats),
+        calibration=_build_calibration_section(name, version, pairs),
+        ab_comparison=_build_ab_comparison_section(
+            name, days, meta_by_version, raw_ab_stats, agreement_by_version, pairs
+        ),
+        feature_importance=await _build_feature_importance_section(db, name, metadata, predictions),
     )
 
 
