@@ -42,6 +42,14 @@ if not models:
     st.info("Aucun modèle disponible.")
     st.stop()
 
+# Pre-select model from navigation link or ?model= query param
+_nav = st.session_state.pop("_nav_model", None) or st.query_params.get("model")
+if _nav:
+    _trainable = [m for m in models if m.get("train_script_object_key")]
+    _match = next((f"{m['name']} v{m['version']}" for m in _trainable if m["name"] == _nav), None)
+    if _match:
+        st.session_state["retrain_select"] = _match
+
 tab_overview, tab_manual, tab_schedule, tab_policy, tab_history = st.tabs(
     ["📅 Schedules", "🚀 Retrain manuel", "⏰ Planning cron", "🏆 Auto-promotion", "📜 Historique"]
 )

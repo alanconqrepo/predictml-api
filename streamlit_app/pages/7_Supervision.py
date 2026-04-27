@@ -183,6 +183,16 @@ selected_model = st.selectbox("Sélectionner un modèle", sup_filtered or model_
 if not selected_model:
     st.stop()
 
+# Store for cross-page navigation (read by Models and Retrain pages)
+st.session_state["_nav_model"] = selected_model
+
+# Quick links to act on the selected model
+_lc1, _lc2, _ = st.columns([1.5, 1.5, 3])
+with _lc1:
+    st.page_link("pages/2_Models.py", label="🤖 Gérer dans Models", use_container_width=True)
+with _lc2:
+    st.page_link("pages/8_Retrain.py", label="🔄 Ré-entraîner", use_container_width=True)
+
 with st.spinner(f"Chargement du détail pour {selected_model}…"):
     try:
         detail = client.get_monitoring_model(name=selected_model, start=start_iso, end=end_iso)
