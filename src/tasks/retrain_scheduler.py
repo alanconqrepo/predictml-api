@@ -312,6 +312,7 @@ async def _do_retrain(name: str, version: str) -> None:
             user_id_creator=None,
             is_active=True,
             is_production=False,
+            parent_version=version,
             training_stats=training_stats,
         )
         db.add(new_metadata)
@@ -351,6 +352,14 @@ async def _do_retrain(name: str, version: str) -> None:
                 promoted=should_promote,
                 reason=reason,
             )
+
+        # Persist auto_promoted outcome in training_stats for retrain-history
+        if schedule.get("auto_promote") and source_model.promotion_policy:
+            new_metadata.training_stats = {
+                **(new_metadata.training_stats or {}),
+                "auto_promoted": _auto_promoted,
+                "auto_promote_reason": _auto_promote_reason,
+            }
 
         # 9. Mettre à jour last_run_at et next_run_at sur le modèle source
         cron_expr = schedule.get("cron", "")

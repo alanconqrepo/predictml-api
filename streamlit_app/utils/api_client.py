@@ -213,6 +213,15 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def get_retrain_history(self, name: str, limit: int = 50, offset: int = 0) -> dict:
+        """Retourne l'historique des ré-entraînements d'un modèle."""
+        r = self._get(
+            f"/models/{name}/retrain-history",
+            params={"limit": limit, "offset": offset},
+        )
+        r.raise_for_status()
+        return r.json()
+
     def rollback_model(self, name: str, version: str, history_id: int) -> dict:
         """Restaure les métadonnées d'un modèle à un état antérieur (admin requis)."""
         r = self._post(f"/models/{name}/{version}/rollback/{history_id}")

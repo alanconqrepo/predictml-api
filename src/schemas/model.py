@@ -375,6 +375,32 @@ class PolicyUpdateResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class RetrainHistoryEntry(BaseModel):
+    """Une entrée d'historique de ré-entraînement pour un modèle"""
+
+    timestamp: datetime
+    source_version: Optional[str]
+    new_version: str
+    trained_by: Optional[str]
+    accuracy: Optional[float]
+    f1_score: Optional[float]
+    auto_promoted: Optional[bool]
+    auto_promote_reason: Optional[str]
+    n_rows: Optional[int]
+    train_start_date: Optional[str]
+    train_end_date: Optional[str]
+
+    model_config = {"from_attributes": True}
+
+
+class RetrainHistoryResponse(BaseModel):
+    """Réponse de GET /models/{name}/retrain-history"""
+
+    model_name: str
+    history: List[RetrainHistoryEntry]
+    total: int
+
+
 # ---------------------------------------------------------------------------
 # Feature importance globale (SHAP agrégé)
 # ---------------------------------------------------------------------------

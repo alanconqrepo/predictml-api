@@ -81,6 +81,8 @@ from src.schemas.model import (
     ReadinessChecks,
     ReadinessResponse,
     ReliabilityBin,
+    RetrainHistoryEntry,
+    RetrainHistoryResponse,
     RetrainRequest,
     RetrainResponse,
     RetrainScheduleInput,
@@ -1374,6 +1376,14 @@ async def retrain_model(
             reason=reason,
         )
 
+    # Persist auto_promoted outcome in training_stats so retrain-history can surface it
+    if source_model.promotion_policy and not payload.set_production:
+        new_metadata.training_stats = {
+            **(new_metadata.training_stats or {}),
+            "auto_promoted": auto_promoted,
+            "auto_promote_reason": auto_promote_reason,
+        }
+
     await db.commit()
     await db.refresh(new_metadata)
 
@@ -1439,6 +1449,59 @@ async def retrain_model(
         auto_promote_reason=auto_promote_reason,
         training_stats=new_metadata.training_stats,
     )
+
+
+@router.get(
+    "/models/{name}/retrain-history",
+    response_model=RetrainHistoryResponse,
+)
+async def get_retrain_history(
+    name: str,
+    limit: int = Query(20, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retourne l'historique des ré-entraînements d'un modèle.
+
+    Chaque entrée correspond à une version créée par ré-entraînement (manuel ou planifié).
+    Les champs `accuracy`, `f1_score`, `auto_promoted` et `auto_promote_reason` reflètent
+    les valeurs au moment du ré-entraînement.
+
+    Réservé aux utilisateurs authentifiés.
+    """
+    versions_exist = await db.execute(
+        select(ModelMetadata).where(ModelMetadata.name == name).limit(1)
+    )
+    if not versions_exist.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' introuvable.",
+        )
+
+    records, total = await DBService.get_retrain_history(db, name, limit=limit, offset=offset)
+
+    history = []
+    for m in records:
+        stats = m.training_stats or {}
+        history.append(
+            RetrainHistoryEntry(
+                timestamp=m.created_at,
+                source_version=m.parent_version,
+                new_version=m.version,
+                trained_by=m.trained_by,
+                accuracy=m.accuracy,
+                f1_score=m.f1_score,
+                auto_promoted=stats.get("auto_promoted"),
+                auto_promote_reason=stats.get("auto_promote_reason"),
+                n_rows=stats.get("n_rows"),
+                train_start_date=stats.get("train_start_date"),
+                train_end_date=stats.get("train_end_date"),
+            )
+        )
+
+    return RetrainHistoryResponse(model_name=name, history=history, total=total)
 
 
 @router.patch(
