@@ -425,6 +425,8 @@ with st.expander("📋 Détails complets", expanded=True):
         )
         classes = selected.get("classes")
         st.markdown(f"**Classes :** {classes if classes else '—'}")
+        ct = selected.get("confidence_threshold")
+        st.markdown(f"**Confidence threshold :** {f'{ct:.2f}' if ct is not None else '—'}")
 
     if selected.get("training_params"):
         st.markdown("**Hyperparamètres :**")
@@ -930,6 +932,16 @@ if is_admin:
             placeholder="production, finance, v2",
         )
 
+        _cur_ct = selected.get("confidence_threshold")
+        new_confidence_threshold = st.slider(
+            "Confidence threshold",
+            min_value=0.0,
+            max_value=1.0,
+            value=float(_cur_ct) if _cur_ct is not None else 0.5,
+            step=0.01,
+            help="Seuil en dessous duquel la prédiction est marquée `low_confidence=True` dans la réponse.",
+        )
+
         st.markdown("**Déploiement A/B / Shadow**")
         deploy_options = ["(inchangé)", "ab_test", "shadow", "production"]
         new_deploy_mode = st.selectbox(
@@ -958,6 +970,9 @@ if is_admin:
             new_tags = [t.strip() for t in new_tags_raw.split(",") if t.strip()]
             if new_tags != (selected.get("tags") or []):
                 patch["tags"] = new_tags if new_tags else None
+            _stored_ct = float(_cur_ct) if _cur_ct is not None else 0.5
+            if abs(new_confidence_threshold - _stored_ct) > 1e-9:
+                patch["confidence_threshold"] = new_confidence_threshold
             if new_deploy_mode != "(inchangé)":
                 patch["deployment_mode"] = new_deploy_mode
                 if new_deploy_mode == "ab_test" and new_traffic_weight is not None:
