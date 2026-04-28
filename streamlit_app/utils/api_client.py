@@ -2,7 +2,7 @@
 Client HTTP pour l'API predictml
 """
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import requests
 import streamlit as st
@@ -680,3 +680,13 @@ class APIClient:
         r = self._get(f"/models/{name}/readiness", params={"version": version})
         r.raise_for_status()
         return r.json()
+
+    def get_model_card(self, name: str, version: str, format: str = "json") -> Union[dict, str]:
+        accept = "text/markdown" if format == "markdown" else "application/json"
+        r = requests.get(
+            f"{self.base_url}/models/{name}/{version}/card",
+            headers={**self._headers(), "Accept": accept},
+            timeout=30,
+        )
+        r.raise_for_status()
+        return r.text if format == "markdown" else r.json()

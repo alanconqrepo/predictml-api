@@ -523,6 +523,19 @@ with st.expander("📋 Détails complets", expanded=True):
             except Exception as e:
                 st.error(f"Erreur lors du téléchargement : {e}")
 
+# Model card export — accessible to all authenticated users
+try:
+    md_content = client.get_model_card(selected["name"], selected["version"], format="markdown")
+    st.download_button(
+        label="📄 Exporter la model card",
+        data=md_content,
+        file_name=f"{selected['name']}_{selected['version']}_model_card.md",
+        mime="text/markdown",
+        key="dl_model_card",
+    )
+except Exception as e:
+    st.warning(f"Model card indisponible : {e}")
+
 # Importance des features (SHAP agrégé)
 with st.expander("📊 Importance des features (SHAP)", expanded=False):
     fi_col1, fi_col2 = st.columns(2)
