@@ -1,6 +1,7 @@
 """
 Tests pour l'endpoint POST /models
 """
+
 import asyncio
 import io
 import pickle
@@ -47,6 +48,7 @@ asyncio.run(_setup_user())
 # Auth
 # ---------------------------------------------------------------------------
 
+
 def test_create_model_without_auth():
     """POST /models sans header Authorization → 401/403"""
     response = client.post(
@@ -71,6 +73,7 @@ def test_create_model_with_invalid_token():
 # ---------------------------------------------------------------------------
 # Cas nominaux
 # ---------------------------------------------------------------------------
+
 
 def test_create_model_success():
     """POST /models avec token valide + fichier pkl → 201 + champs attendus"""
@@ -144,6 +147,7 @@ def test_create_model_with_classes_and_training_params():
 # ---------------------------------------------------------------------------
 # Cas d'erreur
 # ---------------------------------------------------------------------------
+
 
 def test_create_model_duplicate_name():
     """POST /models avec un nom déjà existant → 409"""
@@ -227,3 +231,38 @@ def test_create_model_with_mlflow_run_id_only():
     assert data["mlflow_run_id"] == run_id
     assert data["minio_object_key"] is None
     assert data["minio_bucket"] is None
+
+
+# ---------------------------------------------------------------------------
+# auto_baseline
+# ---------------------------------------------------------------------------
+
+
+def test_create_model_auto_baseline_no_predictions():
+    """auto_baseline=True sans prédictions → 201, feature_baseline reste null."""
+    response = client.post(
+        "/models",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        data={
+            "name": f"{TEST_MODEL_NAME}_auto_bl",
+            "version": "1.0.0",
+            "auto_baseline": "true",
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()
+    # No predictions in test DB → baseline cannot be computed → stays null
+    assert data["feature_baseline"] is None
+
+
+def test_create_model_auto_baseline_false():
+    """auto_baseline absent (défaut False) → 201, feature_baseline null."""
+    response = client.post(
+        "/models",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        data={"name": f"{TEST_MODEL_NAME}_no_auto_bl", "version": "1.0.0"},
+    )
+    assert response.status_code == 201
+    assert response.json()["feature_baseline"] is None

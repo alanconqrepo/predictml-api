@@ -164,6 +164,23 @@ if is_admin:
                 placeholder="ex : production, finance, v2",
             )
 
+            st.markdown("##### Baseline automatique")
+            col_bl1, col_bl2 = st.columns([3, 1])
+            with col_bl1:
+                compute_baseline_auto = st.checkbox(
+                    "Calculer la baseline depuis les données de production",
+                    value=True,
+                    help=(
+                        "Après l'upload, calcule les statistiques de distribution "
+                        "(mean, std, min, max) depuis les prédictions récentes. "
+                        "Nécessite au moins 100 prédictions pour ce nom de modèle."
+                    ),
+                )
+            with col_bl2:
+                baseline_days = st.number_input(
+                    "Fenêtre (jours)", min_value=1, max_value=180, value=30
+                )
+
             submitted = st.form_submit_button("⬆️ Uploader le modèle", type="primary")
 
         if submitted:
@@ -209,6 +226,26 @@ if is_admin:
                         st.toast(
                             f"Modèle {result['name']} v{result['version']} uploadé.", icon="✅"
                         )
+                        if compute_baseline_auto:
+                            try:
+                                bl = client.compute_baseline(
+                                    up_name.strip(),
+                                    up_version.strip(),
+                                    days=int(baseline_days),
+                                    dry_run=False,
+                                )
+                                st.info(
+                                    f"Baseline calculée : {len(bl['baseline'])} features, "
+                                    f"{bl['predictions_used']} prédictions utilisées."
+                                )
+                            except Exception as bl_exc:
+                                _bl_detail = ""
+                                try:
+                                    if hasattr(bl_exc, "response") and bl_exc.response is not None:
+                                        _bl_detail = bl_exc.response.json().get("detail", "")
+                                except Exception:
+                                    pass
+                                st.warning(f"Baseline non calculée : {_bl_detail or bl_exc}")
                         reload()
                     except Exception as exc:
                         progress.empty()
