@@ -246,6 +246,44 @@ else:
                 f"(p = {p_value:.4f}, seuil = {1 - confidence:.2f})"
             )
 
+        # --- Bandeau de promotion du gagnant (admin uniquement) ---
+        if is_significant and winner and is_admin:
+            with st.container(border=True):
+                promo_col1, promo_col2 = st.columns([3, 1])
+                promo_col1.markdown(
+                    f"🟢 **Gagnant identifié : `{winner}`** — "
+                    f"p-value = **{p_value:.4f}** · confiance {confidence:.0%}"
+                )
+                if promo_col2.button(
+                    "🏆 Promouvoir en production",
+                    type="primary",
+                    key="ab_promote_winner",
+                    use_container_width=True,
+                ):
+                    errors_promo = []
+                    try:
+                        client.update_model(selected_model, winner, {"is_production": True})
+                    except Exception as e:
+                        errors_promo.append(f"Promotion `{winner}` : {e}")
+                    for v in versions_for_model:
+                        if v["version"] == winner:
+                            continue
+                        try:
+                            client.update_model(
+                                selected_model,
+                                v["version"],
+                                {"deployment_mode": "production", "traffic_weight": 1.0},
+                            )
+                        except Exception as e:
+                            errors_promo.append(f"Version `{v['version']}` : {e}")
+                    if errors_promo:
+                        for err in errors_promo:
+                            st.error(err)
+                    else:
+                        st.success(f"✅ `{winner}` promu en production avec succès.")
+                        st.cache_data.clear()
+                        st.rerun()
+
         # --- KPI de significativité ---
         sig_cols = st.columns(4)
 
