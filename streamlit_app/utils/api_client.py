@@ -517,6 +517,7 @@ class APIClient:
         end: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
+        id_obs: Optional[str] = None,
     ) -> dict:
         r = self._get(
             "/observed-results",
@@ -526,8 +527,32 @@ class APIClient:
                 "end": end,
                 "limit": limit,
                 "offset": offset,
+                "id_obs": id_obs,
             },
         )
+        r.raise_for_status()
+        return r.json()
+
+    def submit_observed_result(
+        self,
+        id_obs: str,
+        model_name: str,
+        observed_result,
+    ) -> dict:
+        """Soumet un résultat observé unique via POST /observed-results."""
+        from datetime import datetime
+
+        payload = {
+            "data": [
+                {
+                    "id_obs": id_obs,
+                    "model_name": model_name,
+                    "date_time": datetime.utcnow().isoformat(),
+                    "observed_result": observed_result,
+                }
+            ]
+        }
+        r = self._post("/observed-results", json=payload)
         r.raise_for_status()
         return r.json()
 
