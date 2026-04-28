@@ -894,6 +894,204 @@ with st.expander("🧪 Tester le modèle", expanded=False):
                     except Exception as e:
                         st.error(f"Erreur lors de la validation : {e}")
 
+# Explorateur What-if
+with st.expander("🔮 Explorateur What-if", expanded=False):
+    _wif_api_url = st.session_state.get("api_url")
+    _wif_api_token = st.session_state.get("api_token")
+
+    wif_baseline = selected.get("feature_baseline") or {}
+    wif_classes = selected.get("classes") or []
+    if not wif_baseline:
+        try:
+            _wif_detail = fetch_model_detail(
+                _wif_api_url, _wif_api_token, selected["name"], selected["version"]
+            )
+            wif_baseline = _wif_detail.get("feature_baseline") or {}
+        except Exception:
+            pass
+
+    if not wif_baseline:
+        st.info(
+            "⚠️ Ce modèle n'a pas de baseline de features. "
+            "Calculez-en une dans **Actions admin → Calculer le baseline** "
+            "pour activer l'explorateur What-if."
+        )
+    else:
+        _wif_key = f"whatif_history_{selected['name']}_{selected['version']}"
+        if _wif_key not in st.session_state:
+            st.session_state[_wif_key] = []
+
+        st.caption(f"{len(wif_baseline)} features — ajustez les sliders puis cliquez **Prédire**.")
+
+        _wif_cols = st.columns(2)
+        wif_feature_values: dict = {}
+        for _wif_i, (_wif_feat, _wif_stats) in enumerate(wif_baseline.items()):
+            with _wif_cols[_wif_i % 2]:
+                _wif_min = float(_wif_stats.get("min") or 0.0)
+                _wif_max = float(_wif_stats.get("max") or 1.0)
+                _wif_mean = float(_wif_stats.get("mean") or (_wif_min + _wif_max) / 2)
+                if _wif_min == _wif_max:
+                    st.metric(_wif_feat, _wif_mean)
+                    wif_feature_values[_wif_feat] = _wif_mean
+                else:
+                    _wif_range = _wif_max - _wif_min
+                    _wif_is_int = (
+                        _wif_min == int(_wif_min) and _wif_max == int(_wif_max) and _wif_range <= 50
+                    )
+                    if _wif_is_int:
+                        _wif_step = 1.0
+                        _wif_default = float(round(_wif_mean))
+                    else:
+                        _wif_step = max(0.001, round(_wif_range / 100, 4))
+                        _wif_default = _wif_mean
+                    wif_feature_values[_wif_feat] = st.slider(
+                        _wif_feat,
+                        min_value=_wif_min,
+                        max_value=_wif_max,
+                        value=_wif_default,
+                        step=_wif_step,
+                        key=f"whatif_slider_{selected['name']}_{selected['version']}_{_wif_feat}",
+                    )
+
+        wif_use_shap = st.checkbox(
+            "Afficher les contributions SHAP",
+            value=True,
+            key=f"whatif_shap_{selected['name']}_{selected['version']}",
+        )
+
+        if st.button(
+            "🔮 Prédire",
+            key=f"whatif_btn_{selected['name']}_{selected['version']}",
+            type="primary",
+        ):
+            with st.spinner("Prédiction en cours…"):
+                try:
+                    wif_result = client.predict(
+                        model_name=selected["name"],
+                        model_version=selected["version"],
+                        features=wif_feature_values,
+                        explain=wif_use_shap,
+                    )
+                    st.session_state[_wif_key].append(
+                        {
+                            "features": wif_feature_values.copy(),
+                            "prediction": wif_result.get("prediction"),
+                            "probability": wif_result.get("probability"),
+                            "low_confidence": wif_result.get("low_confidence"),
+                            "shap_values": wif_result.get("shap_values"),
+                        }
+                    )
+
+                    _wc1, _wc2, _wc3 = st.columns(3)
+                    _wc1.metric("Prédiction", str(wif_result.get("prediction", "—")))
+                    _wif_probs = wif_result.get("probability")
+                    if _wif_probs:
+                        _wc2.metric("Probabilité max", f"{max(_wif_probs):.2%}")
+                    if wif_result.get("low_confidence"):
+                        _wc3.warning("⚠️ Confiance faible")
+
+                    if _wif_probs:
+                        st.markdown("**Probabilités par classe :**")
+                        if wif_classes and len(wif_classes) == len(_wif_probs):
+                            _wif_prob_rows = [
+                                {"Classe": str(c), "Probabilité": f"{p:.4f}"}
+                                for c, p in zip(wif_classes, _wif_probs)
+                            ]
+                        else:
+                            _wif_prob_rows = [
+                                {"Classe": f"Classe {i}", "Probabilité": f"{p:.4f}"}
+                                for i, p in enumerate(_wif_probs)
+                            ]
+                        st.dataframe(
+                            pd.DataFrame(_wif_prob_rows),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                    _wif_shap = wif_result.get("shap_values")
+                    if wif_use_shap and _wif_shap:
+                        st.markdown("**Contributions SHAP :**")
+                        try:
+                            import plotly.express as px
+
+                            _wif_shap_df = pd.DataFrame(
+                                [
+                                    {
+                                        "Feature": f,
+                                        "Contribution": v,
+                                        "Signe": "Positif" if v >= 0 else "Négatif",
+                                    }
+                                    for f, v in _wif_shap.items()
+                                ]
+                            ).sort_values("Contribution")
+                            _wif_shap_fig = px.bar(
+                                _wif_shap_df,
+                                x="Contribution",
+                                y="Feature",
+                                orientation="h",
+                                color="Signe",
+                                color_discrete_map={
+                                    "Positif": "#e74c3c",
+                                    "Négatif": "#3498db",
+                                },
+                            )
+                            _wif_shap_fig.update_layout(
+                                yaxis_title="",
+                                margin={"l": 10, "r": 10, "t": 10, "b": 10},
+                                showlegend=False,
+                            )
+                            st.plotly_chart(_wif_shap_fig, use_container_width=True)
+                        except ImportError:
+                            st.bar_chart(pd.DataFrame({"SHAP": _wif_shap}))
+                    elif wif_use_shap:
+                        st.info("Les valeurs SHAP ne sont pas disponibles pour ce type de modèle.")
+
+                except Exception as e:
+                    st.error(f"Erreur lors de la prédiction : {e}")
+
+        if st.session_state[_wif_key]:
+            st.divider()
+            st.markdown("**Historique des combinaisons testées**")
+            _wif_feat_options = list(wif_baseline.keys())
+            _wif_sel_feat = st.selectbox(
+                "Feature à analyser",
+                _wif_feat_options,
+                key=f"whatif_feat_sel_{selected['name']}_{selected['version']}",
+            )
+            _wif_chart_rows = []
+            for _wif_entry in st.session_state[_wif_key]:
+                _wif_x = _wif_entry["features"].get(_wif_sel_feat)
+                _wif_entry_probs = _wif_entry.get("probability")
+                _wif_y = max(_wif_entry_probs) if _wif_entry_probs else _wif_entry.get("prediction")
+                if _wif_x is not None and _wif_y is not None:
+                    _wif_chart_rows.append({"x": _wif_x, "y": _wif_y})
+
+            if _wif_chart_rows:
+                _wif_chart_df = pd.DataFrame(_wif_chart_rows).sort_values("x")
+                _wif_has_probs = st.session_state[_wif_key][-1].get("probability")
+                _wif_y_label = "Probabilité max" if _wif_has_probs else "Prédiction"
+                try:
+                    import plotly.express as px
+
+                    _wif_evo_fig = px.line(
+                        _wif_chart_df,
+                        x="x",
+                        y="y",
+                        markers=True,
+                        labels={"x": _wif_sel_feat, "y": _wif_y_label},
+                        title=f"Évolution vs {_wif_sel_feat}",
+                    )
+                    st.plotly_chart(_wif_evo_fig, use_container_width=True)
+                except ImportError:
+                    st.line_chart(_wif_chart_df.set_index("x")["y"])
+
+            if st.button(
+                "🗑️ Effacer l'historique",
+                key=f"whatif_clear_{selected['name']}_{selected['version']}",
+            ):
+                st.session_state[_wif_key] = []
+                st.rerun()
+
 # Actions
 if is_admin:
     st.subheader("Actions admin")
