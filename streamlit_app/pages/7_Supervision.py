@@ -210,6 +210,20 @@ feature_drift = detail.get("feature_drift", {})
 ab_comparison = detail.get("ab_comparison")
 recent_errors = detail.get("recent_errors", [])
 
+# Load alert thresholds from production (or first) version for chart overlays
+_threshold_ver = next(
+    (v["version"] for v in per_version if v.get("deployment_mode") == "production"),
+    per_version[0]["version"] if per_version else None,
+)
+_overlay_thresholds: dict = {}
+if _threshold_ver:
+    try:
+        _overlay_thresholds = client.get_model(selected_model, _threshold_ver).get("alert_thresholds") or {}
+    except Exception:
+        pass
+_err_max: float | None = _overlay_thresholds.get("error_rate_max")
+_acc_min: float | None = _overlay_thresholds.get("accuracy_min")
+
 # --- Stats par version ---
 if per_version:
     st.markdown("#### 📋 Statistiques par version")
@@ -232,6 +246,87 @@ if per_version:
         ]
     )
     st.dataframe(df_ver, use_container_width=True, hide_index=True)
+
+# --- Seuils d'alerte ---
+st.divider()
+with st.expander("🔔 Seuils d'alerte", expanded=bool(_overlay_thresholds)):
+    if not per_version:
+        st.info("Aucune version disponible pour configurer les seuils.")
+    else:
+        _ver_options = [v["version"] for v in per_version]
+        _default_ver = next(
+            (v["version"] for v in per_version if v.get("deployment_mode") == "production"),
+            _ver_options[0],
+        )
+        _sel_ver = st.selectbox(
+            "Version à configurer",
+            _ver_options,
+            index=_ver_options.index(_default_ver),
+            key="alert_version_select",
+        )
+        try:
+            _full = client.get_model(selected_model, _sel_ver)
+            _cur = _full.get("alert_thresholds") or {}
+        except Exception:
+            _cur = {}
+
+        _err_val = _cur.get("error_rate_max")
+        _acc_val = _cur.get("accuracy_min")
+        _drift_val = _cur.get("drift_auto_alert") or False
+
+        if _cur:
+            _ci1, _ci2, _ci3 = st.columns(3)
+            _ci1.metric(
+                "Taux d'erreur max",
+                f"{_err_val * 100:.1f} %" if _err_val is not None else "—",
+            )
+            _ci2.metric(
+                "Accuracy min",
+                f"{_acc_val:.0%}" if _acc_val is not None else "—",
+            )
+            _ci3.metric(
+                "Alerte drift",
+                "✅ Activée" if _drift_val else "⬜ Désactivée",
+            )
+
+        with st.form("alert_thresholds_form"):
+            _col1, _col2 = st.columns(2)
+            new_error_rate_pct = _col1.number_input(
+                "Taux d'erreur max (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=round(_err_val * 100, 2) if _err_val is not None else 10.0,
+                step=0.5,
+                help="Déclenche une alerte si le taux d'erreur dépasse ce seuil.",
+            )
+            new_accuracy_min = _col2.number_input(
+                "Accuracy minimale",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(_acc_val) if _acc_val is not None else 0.80,
+                step=0.01,
+                format="%.2f",
+                help="Déclenche une alerte si l'accuracy tombe sous ce seuil.",
+            )
+            new_drift_auto = st.checkbox(
+                "Alerte automatique sur drift de features",
+                value=bool(_drift_val),
+            )
+            _submitted = st.form_submit_button("💾 Enregistrer les seuils", type="primary")
+            if _submitted:
+                _payload = {
+                    "alert_thresholds": {
+                        "error_rate_max": new_error_rate_pct / 100,
+                        "accuracy_min": new_accuracy_min,
+                        "drift_auto_alert": new_drift_auto,
+                    }
+                }
+                try:
+                    client.update_model(selected_model, _sel_ver, _payload)
+                    st.success(f"✅ Seuils mis à jour pour {selected_model} v{_sel_ver}.")
+                    st.cache_data.clear()
+                except Exception as _exc:
+                    st.error(f"Erreur lors de la mise à jour : {_exc}")
 
 # --- Série temporelle ---
 if timeseries:
@@ -304,8 +399,16 @@ if timeseries:
         labels={"date": "Date", "error_rate": "Taux d'erreur"},
         color_discrete_sequence=["#e74c3c"],
     )
-    fig_err_ts.add_hline(y=0.05, line_dash="dash", line_color="#e67e22", annotation_text="5%")
-    fig_err_ts.add_hline(y=0.10, line_dash="dash", line_color="#c0392b", annotation_text="10%")
+    if _err_max is not None:
+        fig_err_ts.add_hline(
+            y=_err_max,
+            line_dash="dash",
+            line_color="#c0392b",
+            annotation_text=f"Seuil {_err_max * 100:.1f}%",
+        )
+    else:
+        fig_err_ts.add_hline(y=0.05, line_dash="dash", line_color="#e67e22", annotation_text="5%")
+        fig_err_ts.add_hline(y=0.10, line_dash="dash", line_color="#c0392b", annotation_text="10%")
     fig_err_ts.update_yaxes(tickformat=".1%")
     st.plotly_chart(fig_err_ts, use_container_width=True)
 
@@ -351,6 +454,14 @@ with col_perf:
                 hovermode="x unified",
                 legend=dict(orientation="h", y=1.02),
             )
+            if _acc_min is not None:
+                fig_perf.add_hline(
+                    y=_acc_min,
+                    line_dash="dash",
+                    line_color="#c0392b",
+                    annotation_text=f"Min {_acc_min:.0%}",
+                    annotation_position="bottom right",
+                )
             st.plotly_chart(fig_perf, use_container_width=True)
 
             # Indicateur de drift
