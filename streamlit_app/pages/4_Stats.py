@@ -134,30 +134,179 @@ except Exception:
     except Exception:
         leaderboard = []
 
-if leaderboard:
-    df_lb = pd.DataFrame(leaderboard)
-    df_display = df_lb.rename(
-        columns={
-            "rank": "Rang",
-            "name": "Modèle",
-            "version": "Version",
-            "accuracy": "Accuracy",
-            "f1_score": "F1 Score",
-            "latency_p95_ms": "Latence p95 (ms)",
-            "drift_status": "Drift",
-            "predictions_count": f"Prédictions ({days}j)",
-        }
-    )
-    df_display["Drift"] = df_display["Drift"].map(lambda x: _DRIFT_EMOJI.get(x, x))
-    df_display["Accuracy"] = df_display["Accuracy"].round(4)
-    df_display["F1 Score"] = df_display["F1 Score"].round(4)
-    df_display["Latence p95 (ms)"] = df_display["Latence p95 (ms)"].apply(
-        lambda x: f"{x:.0f} ms" if pd.notna(x) and x is not None else "—"
-    )
-    styled = df_display.style.map(_bg_accuracy, subset=["Accuracy"]).hide(axis="index")
-    st.dataframe(styled, use_container_width=True)
-else:
-    st.info("Aucun modèle en production trouvé.")
+_DRIFT_COLOR = {
+    "ok": "#2ECC71",
+    "warning": "#F39C12",
+    "critical": "#E74C3C",
+    "no_baseline": "#95A5A6",
+    "no_data": "#95A5A6",
+    "insufficient_data": "#95A5A6",
+    "unknown": "#95A5A6",
+}
+
+tab_table, tab_scatter = st.tabs(["Tableau", "Comparaison"])
+
+with tab_table:
+    if leaderboard:
+        df_lb = pd.DataFrame(leaderboard)
+        df_display = df_lb.rename(
+            columns={
+                "rank": "Rang",
+                "name": "Modèle",
+                "version": "Version",
+                "accuracy": "Accuracy",
+                "f1_score": "F1 Score",
+                "latency_p95_ms": "Latence p95 (ms)",
+                "drift_status": "Drift",
+                "predictions_count": f"Prédictions ({days}j)",
+            }
+        )
+        df_display["Drift"] = df_display["Drift"].map(lambda x: _DRIFT_EMOJI.get(x, x))
+        df_display["Accuracy"] = df_display["Accuracy"].round(4)
+        df_display["F1 Score"] = df_display["F1 Score"].round(4)
+        df_display["Latence p95 (ms)"] = df_display["Latence p95 (ms)"].apply(
+            lambda x: f"{x:.0f} ms" if pd.notna(x) and x is not None else "—"
+        )
+        styled = df_display.style.map(_bg_accuracy, subset=["Accuracy"]).hide(axis="index")
+        st.dataframe(styled, use_container_width=True)
+    else:
+        st.info("Aucun modèle en production trouvé.")
+
+with tab_scatter:
+    if not leaderboard:
+        st.info("Aucun modèle en production trouvé.")
+    else:
+        df_scatter = pd.DataFrame([
+            {
+                "name": e["name"],
+                "version": e["version"],
+                "accuracy": e["accuracy"],
+                "f1_score": e["f1_score"],
+                "latency_p95_ms": e["latency_p95_ms"],
+                "drift_status": e["drift_status"],
+                "predictions_count": e["predictions_count"],
+            }
+            for e in leaderboard
+        ])
+
+        scatter_col_metric, scatter_col_sla, scatter_col_acc = st.columns([2, 2, 2])
+        scatter_y_metric = scatter_col_metric.selectbox(
+            "Métrique Y",
+            options=["accuracy", "f1_score"],
+            format_func=lambda x: {"accuracy": "Accuracy", "f1_score": "F1 Score"}.get(x, x),
+            key="scatter_y_metric",
+        )
+        sla_latency = scatter_col_sla.number_input(
+            "SLA latence (ms)",
+            min_value=0,
+            max_value=10000,
+            value=0,
+            step=10,
+            help="Affiche une ligne verticale de seuil. 0 = désactivé.",
+            key="scatter_sla_latency",
+        )
+        min_accuracy = scatter_col_acc.number_input(
+            "Accuracy minimum",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.0,
+            step=0.05,
+            format="%.2f",
+            help="Affiche une ligne horizontale de seuil. 0 = désactivé.",
+            key="scatter_min_accuracy",
+        )
+
+        y_label = "Accuracy" if scatter_y_metric == "accuracy" else "F1 Score"
+
+        df_plot = df_scatter.dropna(subset=["latency_p95_ms", scatter_y_metric]).copy()
+        df_plot["bubble_size"] = df_plot["predictions_count"].clip(lower=1)
+        df_plot["color"] = df_plot["drift_status"].map(
+            lambda s: _DRIFT_COLOR.get(s, _DRIFT_COLOR["unknown"])
+        )
+        df_plot["drift_label"] = df_plot["drift_status"].map(
+            lambda s: _DRIFT_EMOJI.get(s, s)
+        )
+        df_plot["label"] = df_plot["name"] + " v" + df_plot["version"]
+
+        if df_plot.empty:
+            st.info(
+                "Données insuffisantes pour le scatter plot : les modèles doivent avoir "
+                "une latence p95 et une accuracy renseignées."
+            )
+        else:
+            fig = go.Figure()
+
+            for _, row in df_plot.iterrows():
+                acc_val = row[scatter_y_metric]
+                lat_val = row["latency_p95_ms"]
+                count = int(row["predictions_count"])
+                bubble = max(10, min(60, count ** 0.5))
+
+                acc_str = f"{row['accuracy']:.4f}" if row["accuracy"] is not None else "—"
+                f1_str = f"{row['f1_score']:.4f}" if row["f1_score"] is not None else "—"
+                hover_text = (
+                    f"<b>{row['label']}</b><br>"
+                    f"Accuracy : {acc_str}<br>"
+                    f"F1 Score : {f1_str}<br>"
+                    f"Latence p95 : {lat_val:.0f} ms<br>"
+                    f"Prédictions : {count:,}<br>"
+                    f"Drift : {row['drift_label']}"
+                )
+
+                fig.add_trace(go.Scatter(
+                    x=[lat_val],
+                    y=[acc_val],
+                    mode="markers+text",
+                    marker=dict(
+                        size=bubble,
+                        color=row["color"],
+                        opacity=0.75,
+                        line=dict(width=1, color="white"),
+                    ),
+                    text=[row["name"]],
+                    textposition="top center",
+                    textfont=dict(size=11),
+                    name=row["label"],
+                    hovertemplate=hover_text + "<extra></extra>",
+                    showlegend=False,
+                ))
+
+            if sla_latency > 0:
+                fig.add_vline(
+                    x=sla_latency,
+                    line_dash="dash",
+                    line_color="#E74C3C",
+                    annotation_text=f"SLA {sla_latency} ms",
+                    annotation_position="top right",
+                    annotation_font_color="#E74C3C",
+                )
+            if min_accuracy > 0:
+                fig.add_hline(
+                    y=min_accuracy,
+                    line_dash="dash",
+                    line_color="#E74C3C",
+                    annotation_text=f"Min {y_label} {min_accuracy:.0%}",
+                    annotation_position="bottom right",
+                    annotation_font_color="#E74C3C",
+                )
+
+            fig.update_layout(
+                xaxis_title="Latence p95 (ms)",
+                yaxis_title=y_label,
+                yaxis_range=[0, 1.05],
+                yaxis_tickformat=".0%",
+                margin=dict(t=40, b=40),
+                hovermode="closest",
+                plot_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(gridcolor="#EEEEEE"),
+                yaxis=dict(gridcolor="#EEEEEE"),
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(
+                "Taille des bulles proportionnelle au volume de prédictions. "
+                "Couleur : 🟢 ok · 🟡 warning · 🔴 critique · ⚪ pas de baseline / données."
+            )
 
 st.divider()
 
