@@ -35,15 +35,29 @@ async def _test_session_cm():
 
 class TestRunAlertCheck:
     def test_run_alert_check_skips_when_disabled(self):
-        """ENABLE_EMAIL_ALERTS=False (défaut) → fonction retourne immédiatement."""
+        """ENABLE_EMAIL_ALERTS=False → aucun e-mail envoyé (webhooks peuvent toujours partir)."""
         from src.tasks.supervision_reporter import run_alert_check
         from src.core.config import settings
 
-        with patch.object(settings, "ENABLE_EMAIL_ALERTS", False):
-            # Ne doit pas lever d'exception et ne doit pas contacter la DB
-            with patch("src.db.database.AsyncSessionLocal") as mock_sess:
-                asyncio.run(run_alert_check())
-                mock_sess.assert_not_called()
+        with (
+            patch.object(settings, "ENABLE_EMAIL_ALERTS", False),
+            patch("src.db.database.AsyncSessionLocal", new=_test_session_cm),
+            patch(
+                "src.services.db_service.DBService.get_global_monitoring_stats",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
+                "src.services.db_service.DBService.get_all_active_models",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch("src.services.email_service.email_service") as mock_email,
+        ):
+            asyncio.run(run_alert_check())
+            mock_email.send_error_spike_alert.assert_not_called()
+            mock_email.send_performance_alert.assert_not_called()
+            mock_email.send_drift_alert.assert_not_called()
 
     def test_run_alert_check_sends_error_spike_when_threshold_exceeded(self):
         """Taux d'erreur > seuil → send_error_spike_alert est appelé."""
