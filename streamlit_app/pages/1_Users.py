@@ -28,7 +28,7 @@ def show_quota_progress(used: int, limit: int) -> None:
     tooltip = f"{used} / {limit} prédictions utilisées aujourd'hui — reset à minuit UTC"
     st.markdown(
         f"""<div title="{tooltip}" style="margin-bottom:6px">
-  <div style="background:#e0e0e0;border-radius:6px;height:18px;width:100%;overflow:hidden">
+  <div style="background:rgba(255,255,255,0.15);border-radius:6px;height:18px;width:100%;overflow:hidden">
     <div style="background:{bar_color};width:{pct_clamped:.1f}%;height:100%;border-radius:6px;transition:width .3s"></div>
   </div>
 </div>""",
