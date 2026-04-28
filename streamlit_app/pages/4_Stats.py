@@ -84,10 +84,10 @@ def _bg_accuracy(val):
     except (TypeError, ValueError):
         return ""
     if v >= 0.90:
-        return "background-color: #d4edda"
+        return "background-color: rgba(39, 174, 96, 0.25)"
     if v >= 0.70:
-        return "background-color: #fff3cd"
-    return "background-color: #f8d7da"
+        return "background-color: rgba(241, 196, 15, 0.25)"
+    return "background-color: rgba(231, 76, 60, 0.25)"
 
 
 def _build_leaderboard_fallback(models_list, stats_list, metric, n_days):
@@ -298,8 +298,8 @@ with tab_scatter:
                 margin=dict(t=40, b=40),
                 hovermode="closest",
                 plot_bgcolor="rgba(0,0,0,0)",
-                xaxis=dict(gridcolor="#EEEEEE"),
-                yaxis=dict(gridcolor="#EEEEEE"),
+                xaxis=dict(gridcolor="rgba(255,255,255,0.1)"),
+                yaxis=dict(gridcolor="rgba(255,255,255,0.1)"),
             )
 
             st.plotly_chart(fig, use_container_width=True)
