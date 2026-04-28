@@ -74,7 +74,10 @@ with tab_history:
                     filename=uploaded_file.name,
                     model_name=model_name_override.strip() or None,
                 )
-                st.toast(f"{result['upserted']} résultats importés depuis {result['filename']}.", icon="✅")
+                st.toast(
+                    f"{result['upserted']} résultats importés depuis {result['filename']}.",
+                    icon="✅",
+                )
                 if result.get("skipped_rows", 0) > 0:
                     st.warning(f"{result['skipped_rows']} ligne(s) ignorée(s)")
                     errors = result.get("parse_errors", [])
@@ -133,8 +136,14 @@ with tab_history:
             model_names = []
 
         with col1:
-            hist_search = st.text_input("Filtrer par nom", key="hist_model_search", placeholder="Rechercher…")
-            hist_filtered = [n for n in model_names if hist_search.lower() in n.lower()] if hist_search else model_names
+            hist_search = st.text_input(
+                "Filtrer par nom", key="hist_model_search", placeholder="Rechercher…"
+            )
+            hist_filtered = (
+                [n for n in model_names if hist_search.lower() in n.lower()]
+                if hist_search
+                else model_names
+            )
             model_name = st.selectbox("Modèle", ["(tous)"] + (hist_filtered or model_names))
         if model_name == "(tous)":
             model_name = model_names[0] if model_names else None
@@ -269,6 +278,67 @@ with tab_history:
                         )
                         if p.get("error_message"):
                             st.error(f"Erreur : {p['error_message']}")
+
+                    st.divider()
+                    st.markdown("**── Résultat observé ──**")
+                    id_obs_val = p.get("id_obs")
+                    if not id_obs_val or id_obs_val == "—":
+                        st.caption(
+                            "Cette prédiction n'a pas d'identifiant d'observation (`id_obs`). "
+                            "Impossible de soumettre un résultat observé."
+                        )
+                    else:
+                        obs_cache_key = f"obs_result_{selected_id}"
+                        if obs_cache_key not in st.session_state:
+                            try:
+                                resp = client.get_observed_results(
+                                    model_name=p.get("model_name"),
+                                    id_obs=id_obs_val,
+                                    limit=1,
+                                )
+                                results = resp.get("results", [])
+                                st.session_state[obs_cache_key] = results[0] if results else None
+                            except Exception:
+                                st.session_state[obs_cache_key] = None
+
+                        existing = st.session_state.get(obs_cache_key)
+
+                        if existing is not None:
+                            st.success(
+                                f"✅ Résultat déjà enregistré : **{existing['observed_result']}**"
+                            )
+                        else:
+                            obs_input_val = st.text_input(
+                                "Valeur observée",
+                                key=f"obs_input_{selected_id}",
+                                placeholder="Ex: 0, 1.5, setosa…",
+                            )
+                            if st.button(
+                                "Enregistrer le résultat réel",
+                                key=f"obs_btn_{selected_id}",
+                            ):
+                                if not obs_input_val.strip():
+                                    st.warning("Veuillez saisir une valeur.")
+                                else:
+                                    try:
+                                        parsed_val = int(obs_input_val)
+                                    except ValueError:
+                                        try:
+                                            parsed_val = float(obs_input_val)
+                                        except ValueError:
+                                            parsed_val = obs_input_val
+                                    try:
+                                        client.submit_observed_result(
+                                            id_obs=id_obs_val,
+                                            model_name=p.get("model_name"),
+                                            observed_result=parsed_val,
+                                        )
+                                        st.session_state[obs_cache_key] = {
+                                            "observed_result": parsed_val
+                                        }
+                                        st.rerun()
+                                    except Exception as exc:
+                                        st.error(f"Erreur lors de l'enregistrement : {exc}")
 
             # Explication SHAP par prédiction
             with st.expander("🧠 Explication SHAP d'une prédiction"):
@@ -444,7 +514,9 @@ with tab_history:
                             model_name=purge_model_name,
                             dry_run=False,
                         )
-                        st.toast(f"{result['deleted_count']} prédiction(s) supprimée(s).", icon="✅")
+                        st.toast(
+                            f"{result['deleted_count']} prédiction(s) supprimée(s).", icon="✅"
+                        )
                         if result.get("linked_observed_results_count", 0) > 0:
                             st.warning(
                                 f"{result['linked_observed_results_count']} résultat(s) observé(s) "
@@ -517,9 +589,17 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
 
     col_b1, col_b2 = st.columns(2)
     with col_b1:
-        batch_search = st.text_input("Filtrer par nom", key="batch_model_search", placeholder="Rechercher…")
-        batch_filtered = [n for n in model_names_batch if batch_search.lower() in n.lower()] if batch_search else model_names_batch
-        batch_model = st.selectbox("Modèle cible", batch_filtered or model_names_batch, key="batch_model_sel")
+        batch_search = st.text_input(
+            "Filtrer par nom", key="batch_model_search", placeholder="Rechercher…"
+        )
+        batch_filtered = (
+            [n for n in model_names_batch if batch_search.lower() in n.lower()]
+            if batch_search
+            else model_names_batch
+        )
+        batch_model = st.selectbox(
+            "Modèle cible", batch_filtered or model_names_batch, key="batch_model_sel"
+        )
 
     # Versions disponibles pour le modèle sélectionné
     batch_versions = ["(production / auto)"] + sorted(
