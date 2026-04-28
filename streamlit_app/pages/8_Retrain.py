@@ -427,24 +427,13 @@ with tab_history:
     )
 
     try:
-        raw_history = client.get_model_history(name=hist_model_name, limit=200)
+        retrain_data = client.get_retrain_history(name=hist_model_name, limit=100)
     except Exception as e:
         st.error(f"Impossible de charger l'historique : {e}")
-        raw_history = {"entries": [], "total": 0}
+        retrain_data = {"history": [], "total": 0}
 
-    all_entries = raw_history.get("entries", [])
-
-    # Versions promues en production (SET_PRODUCTION avec is_production=True)
-    promoted_versions: set = {
-        e["model_version"]
-        for e in all_entries
-        if e["action"] == "set_production" and e["snapshot"].get("is_production")
-    }
-
-    # Entrées de retrain : action=created + snapshot.parent_version non nul
-    retrain_entries = [
-        e for e in all_entries if e["action"] == "created" and e["snapshot"].get("parent_version")
-    ]
+    retrain_entries = retrain_data.get("history", [])
+    total_retrains = retrain_data.get("total", 0)
 
     if not retrain_entries:
         st.info(
@@ -454,26 +443,34 @@ with tab_history:
     else:
         rows = []
         for e in retrain_entries:
-            snap = e["snapshot"]
-            trained_by = snap.get("trained_by") or e.get("changed_by_username") or "—"
-            accuracy = snap.get("accuracy")
-            f1 = snap.get("f1_score")
-            promoted = e["model_version"] in promoted_versions
+            accuracy = e.get("accuracy")
+            f1 = e.get("f1_score")
+            auto_promoted = e.get("auto_promoted")
+            if auto_promoted is True:
+                promo_badge = "✅ Auto"
+            elif e.get("trained_by") and auto_promoted is None:
+                promo_badge = "—"
+            else:
+                promo_badge = "❌"
             rows.append(
                 {
                     "Date": pd.to_datetime(e["timestamp"]).strftime("%Y-%m-%d %H:%M"),
-                    "Version créée": e["model_version"],
-                    "Trained by": trained_by,
-                    "Version source": snap.get("parent_version") or "—",
+                    "Version créée": e.get("new_version", "—"),
+                    "Trained by": e.get("trained_by") or "—",
+                    "Version source": e.get("source_version") or "—",
                     "Accuracy": round(accuracy, 4) if accuracy is not None else None,
                     "F1 Score": round(f1, 4) if f1 is not None else None,
-                    "En production": "✅" if promoted else "❌",
+                    "Auto-promotion": promo_badge,
+                    "Raison": e.get("auto_promote_reason") or "—",
+                    "n_rows": e.get("n_rows"),
+                    "Train start": e.get("train_start_date") or "—",
+                    "Train end": e.get("train_end_date") or "—",
                 }
             )
 
         df_hist = pd.DataFrame(rows)
         st.dataframe(df_hist, use_container_width=True, hide_index=True)
-        st.caption(f"{len(retrain_entries)} ré-entraînement(s) au total.")
+        st.caption(f"{total_retrains} ré-entraînement(s) au total.")
 
         # Graphique de progression de l'accuracy
         chart_df = df_hist[df_hist["Accuracy"].notna()].copy()
@@ -492,7 +489,7 @@ with tab_history:
         )
 
         retrain_options = {
-            f"{e['model_version']} ← {e['snapshot'].get('parent_version', '—')} "
+            f"{e.get('new_version', '—')} ← {e.get('source_version', '—')} "
             f"({pd.to_datetime(e['timestamp']).strftime('%Y-%m-%d %H:%M')})": e
             for e in retrain_entries
         }
@@ -503,8 +500,8 @@ with tab_history:
             key="hist_fi_select",
         )
         selected_event = retrain_options[selected_retrain_label]
-        source_version = selected_event["snapshot"].get("parent_version")
-        new_version = selected_event["model_version"]
+        source_version = selected_event.get("source_version")
+        new_version = selected_event.get("new_version")
 
         fi_baseline = None
         fi_new = None

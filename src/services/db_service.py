@@ -1301,6 +1301,36 @@ class DBService:
         return list(result.scalars().all()), total
 
     @staticmethod
+    async def get_retrain_history(
+        db: AsyncSession,
+        model_name: str,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple:
+        """Retourne l'historique des ré-entraînements d'un modèle.
+
+        Une entrée correspond à toute version dont parent_version IS NOT NULL,
+        triée par created_at DESC (retrain le plus récent en premier).
+
+        Returns:
+            Tuple (liste de ModelMetadata, total sans pagination)
+        """
+        filters = [
+            ModelMetadata.name == model_name,
+            ModelMetadata.parent_version.isnot(None),
+        ]
+
+        base_query = select(ModelMetadata).where(and_(*filters))
+
+        total_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
+        total = total_result.scalar() or 0
+
+        result = await db.execute(
+            base_query.order_by(ModelMetadata.created_at.desc()).limit(limit).offset(offset)
+        )
+        return list(result.scalars().all()), total
+
+    @staticmethod
     async def get_history_entry_by_id(
         db: AsyncSession,
         history_id: int,
