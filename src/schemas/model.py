@@ -594,6 +594,82 @@ class PerformanceReportResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Model Card Export
+# ---------------------------------------------------------------------------
+
+
+class ModelCardPerformanceSummary(BaseModel):
+    model_type: str
+    matched_predictions: int
+    total_predictions: int
+    accuracy: Optional[float] = None
+    f1_weighted: Optional[float] = None
+    mae: Optional[float] = None
+    rmse: Optional[float] = None
+
+
+class ModelCardDriftSummary(BaseModel):
+    drift_summary: str
+    baseline_available: bool
+    predictions_analyzed: int
+    top_drifting_features: Optional[List[str]] = None
+    last_check_at: Optional[datetime] = None
+
+
+class ModelCardCalibrationSummary(BaseModel):
+    calibration_status: str
+    brier_score: Optional[float] = None
+    sample_size: int
+
+
+class ModelCardTopFeature(BaseModel):
+    feature: str
+    mean_abs_shap: float
+
+
+class ModelCardFeatureImportanceSummary(BaseModel):
+    top_features: List[ModelCardTopFeature]
+    sample_size: int
+
+
+class ModelCardRetrainInfo(BaseModel):
+    last_retrain_date: Optional[datetime] = None
+    trained_by: Optional[str] = None
+    n_rows_trained: Optional[int] = None
+    next_run_at: Optional[datetime] = None
+
+
+class ModelCardCoverage(BaseModel):
+    coverage_rate: float
+    labeled_count: int
+    total_predictions: int
+
+
+class ModelCardResponse(BaseModel):
+    """Réponse de GET /models/{name}/{version}/card"""
+
+    model_name: str
+    version: str
+    generated_at: datetime
+    algorithm: Optional[str] = None
+    accuracy: Optional[float] = None
+    f1_score: Optional[float] = None
+    tags: Optional[List[Any]] = None
+    classes: Optional[List[Any]] = None
+    features_count: Optional[int] = None
+    trained_by: Optional[str] = None
+    training_dataset: Optional[str] = None
+    created_at: Optional[datetime] = None
+    is_production: bool
+    performance: Optional[ModelCardPerformanceSummary] = None
+    drift: Optional[ModelCardDriftSummary] = None
+    calibration: Optional[ModelCardCalibrationSummary] = None
+    feature_importance: Optional[ModelCardFeatureImportanceSummary] = None
+    retrain: Optional[ModelCardRetrainInfo] = None
+    coverage: Optional[ModelCardCoverage] = None
+
+
+# ---------------------------------------------------------------------------
 # Calcul du baseline depuis la production
 # ---------------------------------------------------------------------------
 

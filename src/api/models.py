@@ -21,6 +21,7 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
+    Request,
     Response,
     UploadFile,
     status,
@@ -62,6 +63,14 @@ from src.schemas.model import (
     FeatureImportanceResponse,
     FeatureStats,
     LeaderboardEntry,
+    ModelCardCalibrationSummary,
+    ModelCardCoverage,
+    ModelCardDriftSummary,
+    ModelCardFeatureImportanceSummary,
+    ModelCardPerformanceSummary,
+    ModelCardResponse,
+    ModelCardRetrainInfo,
+    ModelCardTopFeature,
     ModelCompareResponse,
     ModelCreateResponse,
     ModelDeleteResponse,
@@ -2413,6 +2422,277 @@ async def compare_model_versions(
         compared_at=datetime.now(timezone.utc).replace(tzinfo=None),
         versions=version_summaries,
     )
+
+
+# ---------------------------------------------------------------------------
+# Model Card Export — helpers + endpoint
+# ---------------------------------------------------------------------------
+
+_DRIFT_EMOJI = {
+    "ok": "✅",
+    "warning": "⚠️",
+    "critical": "❌",
+    "no_baseline": "ℹ️",
+    "insufficient_data": "ℹ️",
+}
+
+
+def _build_model_card_markdown(card: ModelCardResponse) -> str:
+    lines: List[str] = [
+        f"# Model Card — {card.model_name} v{card.version}",
+        "",
+        f"**Algorithme** : {card.algorithm or '—'}",
+    ]
+    # Performance metrics — prefer live section, fall back to training-time metadata
+    if card.performance and card.performance.matched_predictions > 0:
+        p = card.performance
+        if p.accuracy is not None:
+            lines.append(f"**Accuracy** : {p.accuracy} | **F1** : {p.f1_weighted}")
+        elif p.mae is not None:
+            lines.append(f"**MAE** : {p.mae} | **RMSE** : {p.rmse}")
+    elif card.accuracy is not None:
+        lines.append(f"**Accuracy** : {card.accuracy} | **F1** : {card.f1_score}")
+
+    lines.append(f"**Production** : {'✅ Oui' if card.is_production else '❌ Non'}")
+    if card.created_at:
+        lines.append(f"**Créé le** : {card.created_at.strftime('%Y-%m-%d')}")
+    if card.trained_by:
+        lines.append(f"**Entraîné par** : {card.trained_by}")
+    if card.training_dataset:
+        lines.append(f"**Dataset** : {card.training_dataset}")
+    if card.tags:
+        lines.append(f"**Tags** : {', '.join(str(t) for t in card.tags)}")
+    if card.classes:
+        lines.append(f"**Classes** : {', '.join(str(c) for c in card.classes)}")
+    if card.features_count:
+        lines.append(f"**Nb features** : {card.features_count}")
+
+    lines += ["", "---", ""]
+
+    if card.drift:
+        d = card.drift
+        emoji = _DRIFT_EMOJI.get(d.drift_summary, "❓")
+        last = d.last_check_at.strftime("%Y-%m-%d") if d.last_check_at else "—"
+        lines.append(f"**Drift** : {emoji} {d.drift_summary.capitalize()} (last check {last})")
+        if d.top_drifting_features:
+            lines.append(f"  Features concernées : {', '.join(d.top_drifting_features)}")
+
+    if card.retrain:
+        r = card.retrain
+        trained_by = f" ({r.trained_by})" if r.trained_by else ""
+        date_str = r.last_retrain_date.strftime("%Y-%m-%d") if r.last_retrain_date else "—"
+        lines.append(f"**Dernier retrain** : {date_str}{trained_by}")
+        if r.n_rows_trained:
+            lines.append(f"**Données entraînement** : {r.n_rows_trained:,} lignes")
+        if r.next_run_at:
+            lines.append(f"**Prochain retrain** : {r.next_run_at.strftime('%Y-%m-%d %H:%M')} UTC")
+
+    if card.feature_importance and card.feature_importance.top_features:
+        parts = [
+            f"{f.feature} ({f.mean_abs_shap:.2f})" for f in card.feature_importance.top_features
+        ]
+        lines.append(f"**Features clés** : {', '.join(parts)}")
+
+    if card.calibration and card.calibration.brier_score is not None:
+        lines.append(
+            f"**Calibration** : {card.calibration.calibration_status}"
+            f" (Brier : {card.calibration.brier_score:.4f})"
+        )
+
+    if card.coverage:
+        cov = card.coverage
+        pct = round(cov.coverage_rate * 100, 1)
+        lines.append(f"**Couverture** : {pct}% ({cov.labeled_count}/{cov.total_predictions})")
+
+    lines += ["", "---", f"_Généré le {card.generated_at.strftime('%Y-%m-%d %H:%M')} UTC_"]
+    return "\n".join(lines)
+
+
+@router.get("/models/{name}/{version}/card")
+async def get_model_card(
+    name: str,
+    version: str,
+    request: Request,
+    days: int = Query(30, ge=1, le=365, description="Fenêtre d'analyse en jours"),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Model Card — résumé structuré d'une version de modèle.
+
+    Agrège en un seul appel : métadonnées, performance, drift, calibration,
+    top-5 features SHAP, infos de retrain et couverture ground truth.
+
+    Accept: application/json  → JSON (ModelCardResponse)
+    Accept: text/markdown     → Markdown téléchargeable
+    """
+    metadata = await DBService.get_model_metadata(db, name, version)
+    if not metadata:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' version '{version}' introuvable.",
+        )
+
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+    now_naive = now.replace(tzinfo=None)
+
+    (
+        total_count,
+        pairs,
+        production_stats,
+        coverage_stats,
+        predictions_result,
+    ) = await asyncio.gather(
+        DBService.count_predictions(db, name, start, now, version),
+        DBService.get_performance_pairs(db, name, start, now, version),
+        DBService.get_feature_production_stats(db, name, version, days),
+        DBService.get_observed_results_stats(db, model_name=name),
+        DBService.get_predictions(
+            db, model_name=name, start=start, end=now, model_version=version, limit=50
+        ),
+    )
+    predictions, _ = predictions_result
+
+    # Performance
+    performance_section: Optional[ModelCardPerformanceSummary] = None
+    try:
+        raw_perf = _build_performance_section(name, metadata, total_count, pairs)
+        if raw_perf:
+            performance_section = ModelCardPerformanceSummary(
+                model_type=raw_perf.model_type,
+                matched_predictions=raw_perf.matched_predictions,
+                total_predictions=raw_perf.total_predictions,
+                accuracy=raw_perf.accuracy,
+                f1_weighted=raw_perf.f1_weighted,
+                mae=raw_perf.mae,
+                rmse=raw_perf.rmse,
+            )
+    except Exception:
+        pass
+
+    # Drift
+    drift_section: Optional[ModelCardDriftSummary] = None
+    try:
+        raw_drift = _build_drift_section(name, metadata, days, production_stats)
+        if raw_drift:
+            top_drifting: Optional[List[str]] = None
+            if raw_drift.drift_summary in ("warning", "critical"):
+                sorted_feats = sorted(
+                    [
+                        (feat, info.drift_status)
+                        for feat, info in raw_drift.features.items()
+                        if info.drift_status in ("warning", "critical")
+                    ],
+                    key=lambda x: (0 if x[1] == "critical" else 1),
+                )
+                top_drifting = [f for f, _ in sorted_feats[:3]] or None
+            drift_section = ModelCardDriftSummary(
+                drift_summary=raw_drift.drift_summary,
+                baseline_available=raw_drift.baseline_available,
+                predictions_analyzed=raw_drift.predictions_analyzed,
+                top_drifting_features=top_drifting,
+                last_check_at=now_naive,
+            )
+    except Exception:
+        pass
+
+    # Calibration
+    calibration_section: Optional[ModelCardCalibrationSummary] = None
+    try:
+        raw_cal = _build_calibration_section(name, version, pairs)
+        if raw_cal:
+            calibration_section = ModelCardCalibrationSummary(
+                calibration_status=raw_cal.calibration_status,
+                brier_score=raw_cal.brier_score,
+                sample_size=raw_cal.sample_size,
+            )
+    except Exception:
+        pass
+
+    # Feature importance (SHAP — limited to last_n=50 for speed)
+    feature_importance_section: Optional[ModelCardFeatureImportanceSummary] = None
+    try:
+        raw_fi = await _build_feature_importance_section(db, name, metadata, predictions, last_n=50)
+        if raw_fi and raw_fi.feature_importance:
+            ranked = sorted(raw_fi.feature_importance.items(), key=lambda kv: kv[1].rank)[:5]
+            feature_importance_section = ModelCardFeatureImportanceSummary(
+                top_features=[
+                    ModelCardTopFeature(feature=feat, mean_abs_shap=item.mean_abs_shap)
+                    for feat, item in ranked
+                ],
+                sample_size=raw_fi.sample_size,
+            )
+    except Exception:
+        pass
+
+    # Retrain info
+    retrain_section: Optional[ModelCardRetrainInfo] = None
+    try:
+        ts = metadata.training_stats or {}
+        last_retrain: Any = ts.get("trained_at") or metadata.training_date
+        if isinstance(last_retrain, str):
+            last_retrain = datetime.fromisoformat(last_retrain.replace("Z", "+00:00"))
+        schedule = metadata.retrain_schedule or {}
+        next_run_raw = schedule.get("next_run_at")
+        next_run: Optional[datetime] = None
+        if next_run_raw:
+            if isinstance(next_run_raw, str):
+                next_run = datetime.fromisoformat(next_run_raw.replace("Z", "+00:00"))
+            elif isinstance(next_run_raw, datetime):
+                next_run = next_run_raw
+        retrain_section = ModelCardRetrainInfo(
+            last_retrain_date=last_retrain,
+            trained_by=metadata.trained_by,
+            n_rows_trained=ts.get("n_rows"),
+            next_run_at=next_run,
+        )
+    except Exception:
+        pass
+
+    # Coverage
+    coverage_section: Optional[ModelCardCoverage] = None
+    try:
+        coverage_section = ModelCardCoverage(
+            coverage_rate=coverage_stats["coverage_rate"],
+            labeled_count=coverage_stats["labeled_count"],
+            total_predictions=coverage_stats["total_predictions"],
+        )
+    except Exception:
+        pass
+
+    card = ModelCardResponse(
+        model_name=name,
+        version=version,
+        generated_at=now_naive,
+        algorithm=metadata.algorithm,
+        accuracy=metadata.accuracy,
+        f1_score=metadata.f1_score,
+        tags=metadata.tags,
+        classes=metadata.classes,
+        features_count=metadata.features_count,
+        trained_by=metadata.trained_by,
+        training_dataset=metadata.training_dataset,
+        created_at=metadata.created_at,
+        is_production=metadata.is_production,
+        performance=performance_section,
+        drift=drift_section,
+        calibration=calibration_section,
+        feature_importance=feature_importance_section,
+        retrain=retrain_section,
+        coverage=coverage_section,
+    )
+
+    accept = request.headers.get("accept", "application/json")
+    if "text/markdown" in accept:
+        md_content = _build_model_card_markdown(card)
+        filename = f"{name}_{version}_model_card.md"
+        return Response(
+            content=md_content,
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    return Response(content=card.model_dump_json(), media_type="application/json")
 
 
 @router.get("/models/{name}/{version}", response_model=ModelGetResponse)
