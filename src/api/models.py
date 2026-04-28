@@ -2494,6 +2494,14 @@ async def create_model(
         None,
         description="Version parente dont ce modèle est dérivé (traçabilité de lignée).",
     ),
+    auto_baseline: bool = Form(
+        False,
+        description=(
+            "Si True, calcule et sauvegarde automatiquement la baseline de features "
+            "depuis les prédictions existantes pour ce nom de modèle (fenêtre 30 jours). "
+            "Silencieusement ignoré si moins de 100 prédictions sont disponibles."
+        ),
+    ),
     user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2624,6 +2632,44 @@ async def create_model(
     )
     await db.commit()
     await db.refresh(metadata)
+
+    if auto_baseline:
+        try:
+            production_stats = await DBService.get_feature_production_stats(
+                db, name, model_version=None, days=30
+            )
+            predictions_used = min((v["count"] for v in production_stats.values()), default=0)
+            if predictions_used >= 100:
+                computed_baseline = {
+                    feat: {
+                        "mean": round(s["mean"], 6),
+                        "std": round(s["std"], 6),
+                        "min": round(s["min"], 6),
+                        "max": round(s["max"], 6),
+                        "null_rate": round(s.get("null_rate", 0.0), 6),
+                    }
+                    for feat, s in production_stats.items()
+                }
+                metadata.feature_baseline = computed_baseline
+                await DBService.log_model_history(
+                    db,
+                    metadata,
+                    HistoryActionType.UPDATED,
+                    user.id,
+                    user.username,
+                    ["feature_baseline"],
+                )
+                await db.commit()
+                await db.refresh(metadata)
+                logger.info(
+                    "Baseline auto-calculé à l'upload",
+                    model=name,
+                    version=version,
+                    features=list(computed_baseline.keys()),
+                    predictions_used=predictions_used,
+                )
+        except Exception:
+            logger.warning("Auto-baseline échoué à l'upload", model=name, version=version)
 
     return ModelCreateResponse(
         **{c.name: getattr(metadata, c.name) for c in metadata.__table__.columns},

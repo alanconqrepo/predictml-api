@@ -164,6 +164,23 @@ if is_admin:
                 placeholder="ex : production, finance, v2",
             )
 
+            st.markdown("##### Baseline automatique")
+            col_bl1, col_bl2 = st.columns([3, 1])
+            with col_bl1:
+                compute_baseline_auto = st.checkbox(
+                    "Calculer la baseline depuis les données de production",
+                    value=True,
+                    help=(
+                        "Après l'upload, calcule les statistiques de distribution "
+                        "(mean, std, min, max) depuis les prédictions récentes. "
+                        "Nécessite au moins 100 prédictions pour ce nom de modèle."
+                    ),
+                )
+            with col_bl2:
+                baseline_days = st.number_input(
+                    "Fenêtre (jours)", min_value=1, max_value=180, value=30
+                )
+
             submitted = st.form_submit_button("⬆️ Uploader le modèle", type="primary")
 
         if submitted:
@@ -209,6 +226,26 @@ if is_admin:
                         st.toast(
                             f"Modèle {result['name']} v{result['version']} uploadé.", icon="✅"
                         )
+                        if compute_baseline_auto:
+                            try:
+                                bl = client.compute_baseline(
+                                    up_name.strip(),
+                                    up_version.strip(),
+                                    days=int(baseline_days),
+                                    dry_run=False,
+                                )
+                                st.info(
+                                    f"Baseline calculée : {len(bl['baseline'])} features, "
+                                    f"{bl['predictions_used']} prédictions utilisées."
+                                )
+                            except Exception as bl_exc:
+                                _bl_detail = ""
+                                try:
+                                    if hasattr(bl_exc, "response") and bl_exc.response is not None:
+                                        _bl_detail = bl_exc.response.json().get("detail", "")
+                                except Exception:
+                                    pass
+                                st.warning(f"Baseline non calculée : {_bl_detail or bl_exc}")
                         reload()
                     except Exception as exc:
                         progress.empty()
@@ -300,9 +337,17 @@ st.divider()
 st.subheader("📊 Comparaison multi-versions")
 
 model_names = sorted({m["name"] for m in models})
-compare_search = st.text_input("Filtrer par nom", key="compare_search", placeholder="Rechercher un modèle…")
-compare_filtered = [n for n in model_names if compare_search.lower() in n.lower()] if compare_search else model_names
-compare_name = st.selectbox("Modèle à comparer", compare_filtered or model_names, key="compare_model_name")
+compare_search = st.text_input(
+    "Filtrer par nom", key="compare_search", placeholder="Rechercher un modèle…"
+)
+compare_filtered = (
+    [n for n in model_names if compare_search.lower() in n.lower()]
+    if compare_search
+    else model_names
+)
+compare_name = st.selectbox(
+    "Modèle à comparer", compare_filtered or model_names, key="compare_model_name"
+)
 
 versions_for_model = [m["version"] for m in models if m["name"] == compare_name]
 all_versions_label = f"Toutes ({len(versions_for_model)})"
@@ -383,8 +428,14 @@ st.divider()
 st.subheader("Détail et actions")
 
 model_options = {f"{m['name']} v{m['version']}": m for m in models}
-detail_search = st.text_input("Filtrer par nom", key="detail_search", placeholder="Rechercher un modèle…")
-filtered_keys = [k for k in model_options if detail_search.lower() in k.lower()] if detail_search else list(model_options.keys())
+detail_search = st.text_input(
+    "Filtrer par nom", key="detail_search", placeholder="Rechercher un modèle…"
+)
+filtered_keys = (
+    [k for k in model_options if detail_search.lower() in k.lower()]
+    if detail_search
+    else list(model_options.keys())
+)
 
 _preselect = st.session_state.pop("_nav_model", None) or st.query_params.get("model")
 _detail_keys = filtered_keys or list(model_options.keys())
@@ -542,11 +593,21 @@ with st.expander("📈 Métriques de performance", expanded=False):
             )
         elif model_type != "classification":
             col_mae, col_rmse, col_r2 = st.columns(3)
-            col_mae.metric("MAE", f"{perf['mae']:.4f}" if perf.get("mae") is not None else "—", help=METRIC_HELP["mae"])
-            col_rmse.metric(
-                "RMSE", f"{perf['rmse']:.4f}" if perf.get("rmse") is not None else "—", help=METRIC_HELP["rmse"]
+            col_mae.metric(
+                "MAE",
+                f"{perf['mae']:.4f}" if perf.get("mae") is not None else "—",
+                help=METRIC_HELP["mae"],
             )
-            col_r2.metric("R²", f"{perf['r2']:.4f}" if perf.get("r2") is not None else "—", help=METRIC_HELP["r2"])
+            col_rmse.metric(
+                "RMSE",
+                f"{perf['rmse']:.4f}" if perf.get("rmse") is not None else "—",
+                help=METRIC_HELP["rmse"],
+            )
+            col_r2.metric(
+                "R²",
+                f"{perf['r2']:.4f}" if perf.get("r2") is not None else "—",
+                help=METRIC_HELP["r2"],
+            )
             st.caption(f"{matched} prédictions appariées")
         else:
             col_acc, col_prec, col_rec, col_f1 = st.columns(4)
@@ -557,16 +618,20 @@ with st.expander("📈 Métriques de performance", expanded=False):
             )
             col_prec.metric(
                 "Precision (w.)",
-                f"{perf['precision_weighted']:.3f}"
-                if perf.get("precision_weighted") is not None
-                else "—",
+                (
+                    f"{perf['precision_weighted']:.3f}"
+                    if perf.get("precision_weighted") is not None
+                    else "—"
+                ),
                 help=METRIC_HELP["precision"],
             )
             col_rec.metric(
                 "Recall (w.)",
-                f"{perf['recall_weighted']:.3f}"
-                if perf.get("recall_weighted") is not None
-                else "—",
+                (
+                    f"{perf['recall_weighted']:.3f}"
+                    if perf.get("recall_weighted") is not None
+                    else "—"
+                ),
                 help=METRIC_HELP["recall"],
             )
             col_f1.metric(
@@ -746,8 +811,7 @@ with st.expander("🧪 Tester le modèle", expanded=False):
         # Build example JSON from feature_baseline or feature_names_list
         if feature_baseline:
             example_payload = {
-                feat: float(info.get("mean") or 0.0)
-                for feat, info in feature_baseline.items()
+                feat: float(info.get("mean") or 0.0) for feat, info in feature_baseline.items()
             }
         elif feature_names_list:
             example_payload = {feat: 0.0 for feat in feature_names_list}
@@ -804,17 +868,14 @@ with st.expander("🧪 Tester le modèle", expanded=False):
                             to_t = warn.get("to_type", "")
                             if wtype == "type_coercion":
                                 st.markdown(
-                                    f"⚠️ **Coercition de type** : `{feat}` "
-                                    f"({from_t} → {to_t})"
+                                    f"⚠️ **Coercition de type** : `{feat}` " f"({from_t} → {to_t})"
                                 )
                             else:
                                 st.markdown(f"⚠️ `{feat}` — {wtype}")
 
                         if expected:
                             st.markdown("**Features attendues :**")
-                            st.markdown(
-                                " ".join(f"`{f}`" for f in expected)
-                            )
+                            st.markdown(" ".join(f"`{f}`" for f in expected))
 
                     except Exception as e:
                         st.error(f"Erreur lors de la validation : {e}")
@@ -1084,9 +1145,7 @@ if is_admin:
                     if baseline_dry_run:
                         st.info("Décochez **dry_run** pour sauvegarder le baseline.")
                     else:
-                        st.toast(
-                            "Baseline sauvegardé — drift actif pour ce modèle.", icon="✅"
-                        )
+                        st.toast("Baseline sauvegardé — drift actif pour ce modèle.", icon="✅")
                         st.cache_data.clear()
                 except Exception as e:
                     st.toast(f"Erreur : {e}", icon="❌")
