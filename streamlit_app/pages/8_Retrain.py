@@ -119,8 +119,14 @@ with tab_manual:
         )
     else:
         model_opts = {f"{m['name']} v{m['version']}": m for m in trainable}
-        retrain_search = st.text_input("Filtrer par nom", key="retrain_search", placeholder="Rechercher un modèle…")
-        retrain_keys = [k for k in model_opts if retrain_search.lower() in k.lower()] if retrain_search else list(model_opts.keys())
+        retrain_search = st.text_input(
+            "Filtrer par nom", key="retrain_search", placeholder="Rechercher un modèle…"
+        )
+        retrain_keys = (
+            [k for k in model_opts if retrain_search.lower() in k.lower()]
+            if retrain_search
+            else list(model_opts.keys())
+        )
         selected_label = st.selectbox(
             "Modèle à ré-entraîner", retrain_keys or list(model_opts.keys()), key="retrain_select"
         )
@@ -224,8 +230,14 @@ Format : `minute heure jour-du-mois mois jour-de-la-semaine`
 """)
 
         sched_opts = {f"{m['name']} v{m['version']}": m for m in trainable_sched}
-        sched_search = st.text_input("Filtrer par nom", key="sched_search", placeholder="Rechercher un modèle…")
-        sched_keys = [k for k in sched_opts if sched_search.lower() in k.lower()] if sched_search else list(sched_opts.keys())
+        sched_search = st.text_input(
+            "Filtrer par nom", key="sched_search", placeholder="Rechercher un modèle…"
+        )
+        sched_keys = (
+            [k for k in sched_opts if sched_search.lower() in k.lower()]
+            if sched_search
+            else list(sched_opts.keys())
+        )
         sched_label = st.selectbox(
             "Modèle à planifier", sched_keys or list(sched_opts.keys()), key="sched_select"
         )
@@ -295,8 +307,14 @@ with tab_policy:
     st.caption("La politique s'applique à toutes les versions actives du modèle sélectionné.")
 
     model_names = sorted({m["name"] for m in models})
-    policy_search = st.text_input("Filtrer par nom", key="policy_model_search", placeholder="Rechercher un modèle…")
-    policy_filtered = [n for n in model_names if policy_search.lower() in n.lower()] if policy_search else model_names
+    policy_search = st.text_input(
+        "Filtrer par nom", key="policy_model_search", placeholder="Rechercher un modèle…"
+    )
+    policy_filtered = (
+        [n for n in model_names if policy_search.lower() in n.lower()]
+        if policy_search
+        else model_names
+    )
     policy_name = st.selectbox("Modèle", policy_filtered or model_names, key="policy_model_select")
 
     matching = [m for m in models if m["name"] == policy_name]
@@ -396,9 +414,17 @@ with tab_history:
     st.subheader("Historique des ré-entraînements")
 
     model_names_hist = sorted({m["name"] for m in models})
-    hist_search = st.text_input("Filtrer par nom", key="hist_model_search", placeholder="Rechercher un modèle…")
-    hist_filtered = [n for n in model_names_hist if hist_search.lower() in n.lower()] if hist_search else model_names_hist
-    hist_model_name = st.selectbox("Modèle", hist_filtered or model_names_hist, key="hist_model_select")
+    hist_search = st.text_input(
+        "Filtrer par nom", key="hist_model_search", placeholder="Rechercher un modèle…"
+    )
+    hist_filtered = (
+        [n for n in model_names_hist if hist_search.lower() in n.lower()]
+        if hist_search
+        else model_names_hist
+    )
+    hist_model_name = st.selectbox(
+        "Modèle", hist_filtered or model_names_hist, key="hist_model_select"
+    )
 
     try:
         raw_history = client.get_model_history(name=hist_model_name, limit=200)
@@ -417,9 +443,7 @@ with tab_history:
 
     # Entrées de retrain : action=created + snapshot.parent_version non nul
     retrain_entries = [
-        e
-        for e in all_entries
-        if e["action"] == "created" and e["snapshot"].get("parent_version")
+        e for e in all_entries if e["action"] == "created" and e["snapshot"].get("parent_version")
     ]
 
     if not retrain_entries:
@@ -458,3 +482,166 @@ with tab_history:
             chart_df = chart_df.sort_values("Date")
             chart_df = chart_df.rename(columns={"Date": "index"}).set_index("index")
             st.line_chart(chart_df[["Accuracy", "F1 Score"]].dropna(how="all"))
+
+        # ─── Delta d'importance des features ─────────────────────────────
+        st.markdown("---")
+        st.markdown("#### Delta d'importance des features")
+        st.caption(
+            "Comparez l'importance SHAP des features avant et après un retrain. "
+            "Les barres 🟠 orange (>15%) et 🔴 rouge (>30%) signalent des changements significatifs."
+        )
+
+        retrain_options = {
+            f"{e['model_version']} ← {e['snapshot'].get('parent_version', '—')} "
+            f"({pd.to_datetime(e['timestamp']).strftime('%Y-%m-%d %H:%M')})": e
+            for e in retrain_entries
+        }
+
+        selected_retrain_label = st.selectbox(
+            "Événement de retrain à analyser",
+            list(retrain_options.keys()),
+            key="hist_fi_select",
+        )
+        selected_event = retrain_options[selected_retrain_label]
+        source_version = selected_event["snapshot"].get("parent_version")
+        new_version = selected_event["model_version"]
+
+        fi_baseline = None
+        fi_new = None
+        fi_error_baseline = None
+        fi_error_new = None
+
+        with st.spinner("Chargement des importances de features…"):
+            try:
+                fi_baseline = client.get_feature_importance(hist_model_name, version=source_version)
+            except Exception as exc:
+                fi_error_baseline = str(exc)
+            try:
+                fi_new = client.get_feature_importance(hist_model_name, version=new_version)
+            except Exception as exc:
+                fi_error_new = str(exc)
+
+        if fi_error_baseline:
+            st.warning(
+                f"Impossible de charger l'importance pour la version source "
+                f"({source_version}) : {fi_error_baseline}"
+            )
+        if fi_error_new:
+            st.warning(
+                f"Impossible de charger l'importance pour la nouvelle version "
+                f"({new_version}) : {fi_error_new}"
+            )
+
+        if fi_baseline and fi_new:
+            import plotly.graph_objects as go
+
+            baseline_fi = fi_baseline.get("feature_importance") or {}
+            new_fi = fi_new.get("feature_importance") or {}
+            baseline_sample = fi_baseline.get("sample_size", 0)
+            new_sample = fi_new.get("sample_size", 0)
+
+            all_features = set(baseline_fi.keys()) | set(new_fi.keys())
+
+            if not all_features:
+                st.info(
+                    "Aucune importance de feature disponible pour ces versions "
+                    "(aucune prédiction dans la fenêtre d'analyse, ou modèle non compatible SHAP)."
+                )
+            else:
+                comparison = []
+                for feature in all_features:
+                    base_val = (baseline_fi.get(feature) or {}).get("mean_abs_shap", 0.0)
+                    new_val = (new_fi.get(feature) or {}).get("mean_abs_shap", 0.0)
+                    delta = new_val - base_val
+                    if base_val > 0:
+                        delta_pct = abs(delta) / base_val * 100
+                    elif new_val > 0:
+                        delta_pct = 100.0
+                    else:
+                        delta_pct = 0.0
+                    comparison.append(
+                        {
+                            "feature": feature,
+                            "baseline": base_val,
+                            "new": new_val,
+                            "delta": delta,
+                            "delta_pct": delta_pct,
+                        }
+                    )
+
+                comparison.sort(key=lambda x: max(x["baseline"], x["new"]), reverse=True)
+                top10 = comparison[:10]
+
+                total_features = len(comparison)
+                stable_count = sum(1 for c in comparison if c["delta_pct"] < 10)
+                stability_pct = round(stable_count / total_features * 100) if total_features else 0
+
+                col_m1, col_m2, col_m3 = st.columns(3)
+                col_m1.metric(
+                    "Stabilité de l'importance",
+                    f"{stability_pct}%",
+                    help="% de features ayant varié de moins de 10% en valeur absolue SHAP",
+                )
+                col_m2.metric(f"Échantillon v{source_version}", baseline_sample)
+                col_m3.metric(f"Échantillon v{new_version}", new_sample)
+
+                features_names = [c["feature"] for c in top10]
+                baseline_vals = [c["baseline"] for c in top10]
+                new_vals = [c["new"] for c in top10]
+                delta_pcts = [c["delta_pct"] for c in top10]
+
+                bar_colors_new = [
+                    "#EF553B" if dp > 30 else ("#FF7F0E" if dp > 15 else "#00CC96")
+                    for dp in delta_pcts
+                ]
+
+                fig = go.Figure()
+                fig.add_trace(
+                    go.Bar(
+                        name=f"v{source_version} (baseline)",
+                        x=features_names,
+                        y=baseline_vals,
+                        marker_color="#636EFA",
+                    )
+                )
+                fig.add_trace(
+                    go.Bar(
+                        name=f"v{new_version} (après retrain)",
+                        x=features_names,
+                        y=new_vals,
+                        marker_color=bar_colors_new,
+                    )
+                )
+                fig.update_layout(
+                    barmode="group",
+                    title=f"Top-10 features — importance avant/après retrain ({hist_model_name})",
+                    xaxis_title="Feature",
+                    yaxis_title="Importance SHAP moyenne (|valeur|)",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    height=420,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                with st.expander("Voir le détail par feature"):
+                    detail_rows = sorted(comparison, key=lambda x: x["delta_pct"], reverse=True)
+                    st.dataframe(
+                        pd.DataFrame(
+                            [
+                                {
+                                    "Feature": c["feature"],
+                                    f"v{source_version}": round(c["baseline"], 5),
+                                    f"v{new_version}": round(c["new"], 5),
+                                    "Δ": round(c["delta"], 5),
+                                    "Δ%": f"{c['delta_pct']:.1f}%",
+                                    "Alerte": (
+                                        "🔴 >30%"
+                                        if c["delta_pct"] > 30
+                                        else ("🟠 >15%" if c["delta_pct"] > 15 else "✅ <15%")
+                                    ),
+                                }
+                                for c in detail_rows
+                            ]
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
