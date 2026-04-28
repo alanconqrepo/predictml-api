@@ -148,7 +148,11 @@ _CSV_COLUMNS = [
 async def monitoring_overview(
     start: datetime = Query(..., description="Début de la période (ISO 8601)"),
     end: datetime = Query(..., description="Fin de la période (ISO 8601)"),
-    format: str = Query(default="json", pattern="^(json|csv)$", description="Format de sortie : json (défaut) ou csv"),
+    format: str = Query(
+        default="json",
+        pattern="^(json|csv)$",
+        description="Format de sortie : json (défaut) ou csv",
+    ),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(verify_token),
 ) -> Union[GlobalDashboard, StreamingResponse]:
@@ -296,7 +300,9 @@ async def monitoring_overview(
                     "predictions_7d": m.total_predictions,
                     "error_rate": round(m.error_rate, 4),
                     "latency_p95": m.p95_latency_ms if m.p95_latency_ms is not None else "",
-                    "drift_status": _worst_health(m.feature_drift_status, m.performance_drift_status),
+                    "drift_status": _worst_health(
+                        m.feature_drift_status, m.performance_drift_status
+                    ),
                     "accuracy_7d": "",
                     "last_retrain": "",
                     "coverage_pct": "",
