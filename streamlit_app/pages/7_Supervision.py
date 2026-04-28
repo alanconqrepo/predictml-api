@@ -57,6 +57,116 @@ gs = overview.get("global_stats", {})
 models_data = overview.get("models", [])
 
 # ---------------------------------------------------------------------------
+# Boutons d'export
+# ---------------------------------------------------------------------------
+if models_data:
+    _STATUS_SEVERITY = {
+        "ok": 0,
+        "no_data": 0,
+        "no_baseline": 0,
+        "insufficient_data": 0,
+        "warning": 1,
+        "critical": 2,
+    }
+
+    def _worst_drift(s1: str, s2: str) -> str:
+        return s1 if _STATUS_SEVERITY.get(s1, 0) >= _STATUS_SEVERITY.get(s2, 0) else s2
+
+    _csv_rows = [
+        {
+            "model_name": m["model_name"],
+            "status": m.get("health_status", ""),
+            "predictions_7d": m.get("total_predictions", 0),
+            "error_rate": round(m.get("error_rate", 0), 4),
+            "latency_p95": m.get("p95_latency_ms") if m.get("p95_latency_ms") is not None else "",
+            "drift_status": _worst_drift(
+                m.get("feature_drift_status", "no_data"),
+                m.get("performance_drift_status", "no_data"),
+            ),
+            "accuracy_7d": "",
+            "last_retrain": "",
+            "coverage_pct": "",
+        }
+        for m in models_data
+    ]
+    _csv_bytes = pd.DataFrame(_csv_rows).to_csv(index=False).encode("utf-8")
+
+    _alert_models = sorted(
+        [m for m in models_data if m.get("health_status") in ("critical", "warning")],
+        key=lambda m: (m.get("health_status") != "critical", m["model_name"]),
+    )
+    _ok_models = sorted(
+        [m for m in models_data if m.get("health_status") == "ok"],
+        key=lambda m: m["model_name"],
+    )
+    _md_lines = [
+        f"# Rapport de supervision — {start_date} → {end_date}",
+        "",
+        "## Résumé global",
+        "",
+        f"- **Prédictions** : {gs.get('total_predictions', 0):,}",
+        f"- **Taux d'erreur** : {gs.get('error_rate', 0) * 100:.1f} %",
+        f"- **Latence moyenne** : {gs.get('avg_latency_ms') or '—'} ms",
+        f"- **Modèles actifs** : {gs.get('active_models', 0)}",
+        f"- **Alertes** : 🔴 {gs.get('models_critical', 0)} critique(s) · 🟡 {gs.get('models_warning', 0)} avertissement(s)",
+        "",
+    ]
+    if _alert_models:
+        _md_lines += ["## Modèles en alerte", ""]
+        for _m in _alert_models:
+            _icon_md = "🔴" if _m.get("health_status") == "critical" else "🟡"
+            _md_lines += [
+                f"### {_icon_md} {_m['model_name']}",
+                "",
+                f"- **Statut** : {_m.get('health_status', '—')}",
+                f"- **Prédictions (période)** : {_m.get('total_predictions', 0):,}",
+                f"- **Taux d'erreur** : {_m.get('error_rate', 0) * 100:.1f} %",
+            ]
+            if _m.get("p95_latency_ms") is not None:
+                _md_lines.append(f"- **Latence p95** : {_m['p95_latency_ms']} ms")
+            _md_lines += [
+                f"- **Drift features** : {_m.get('feature_drift_status', '—')}",
+                f"- **Drift performance** : {_m.get('performance_drift_status', '—')}",
+            ]
+            _actions = []
+            if _m.get("error_rate", 0) >= 0.10:
+                _actions.append("Taux d'erreur critique — analyser les logs et les données d'entrée.")
+            elif _m.get("error_rate", 0) >= 0.05:
+                _actions.append("Taux d'erreur élevé — surveiller l'évolution.")
+            if _m.get("feature_drift_status") in ("warning", "critical"):
+                _actions.append("Drift de features détecté — recalculer le baseline ou ré-entraîner.")
+            if _m.get("performance_drift_status") in ("warning", "critical"):
+                _actions.append("Drift de performance détecté — envisager un ré-entraînement.")
+            if _actions:
+                _md_lines += ["", "**Actions recommandées :**"]
+                _md_lines += [f"- {_a}" for _a in _actions]
+            _md_lines.append("")
+    if _ok_models:
+        _md_lines += [
+            "## Modèles en bonne santé",
+            "",
+            ", ".join(f"`{_m['model_name']}`" for _m in _ok_models),
+            "",
+        ]
+    _md_bytes = "\n".join(_md_lines).encode("utf-8")
+
+    _exp_col1, _exp_col2, _ = st.columns([2, 2, 4])
+    _exp_col1.download_button(
+        label="📥 Exporter CSV",
+        data=_csv_bytes,
+        file_name=f"supervision_{start_date}_{end_date}.csv",
+        mime="text/csv",
+        help="Télécharger les métriques de supervision au format CSV",
+    )
+    _exp_col2.download_button(
+        label="📄 Exporter Markdown",
+        data=_md_bytes,
+        file_name=f"supervision_{start_date}_{end_date}.md",
+        mime="text/markdown",
+        help="Télécharger un résumé narratif des alertes et recommandations",
+    )
+
+# ---------------------------------------------------------------------------
 # Section 1 — KPIs globaux
 # ---------------------------------------------------------------------------
 st.divider()

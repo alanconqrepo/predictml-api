@@ -6,11 +6,14 @@ Deux routes :
   GET /monitoring/model/{name}      — détail complet pour un modèle
 """
 
+import csv
+import io
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import verify_token
@@ -128,13 +131,27 @@ async def _compute_feature_drift_status(
 # ---------------------------------------------------------------------------
 
 
+_CSV_COLUMNS = [
+    "model_name",
+    "status",
+    "predictions_7d",
+    "error_rate",
+    "latency_p95",
+    "drift_status",
+    "accuracy_7d",
+    "last_retrain",
+    "coverage_pct",
+]
+
+
 @router.get("/overview", response_model=GlobalDashboard)
 async def monitoring_overview(
     start: datetime = Query(..., description="Début de la période (ISO 8601)"),
     end: datetime = Query(..., description="Fin de la période (ISO 8601)"),
+    format: str = Query(default="json", pattern="^(json|csv)$", description="Format de sortie : json (défaut) ou csv"),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(verify_token),
-):
+) -> Union[GlobalDashboard, StreamingResponse]:
     """
     Vue d'ensemble de la santé de tous les modèles sur une plage calendaire.
 
@@ -156,6 +173,15 @@ async def monitoring_overview(
     raw_stats = await DBService.get_global_monitoring_stats(db, start, end)
 
     if not raw_stats:
+        if format == "csv":
+            buf = io.StringIO()
+            csv.DictWriter(buf, fieldnames=_CSV_COLUMNS).writeheader()
+            filename = f"supervision_{start.strftime('%Y%m%d')}_{end.strftime('%Y%m%d')}.csv"
+            return StreamingResponse(
+                iter([buf.getvalue()]),
+                media_type="text/csv",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
         return GlobalDashboard(
             period=MonitoringPeriod(start=start, end=end),
             global_stats=GlobalStats(
@@ -256,10 +282,37 @@ async def monitoring_overview(
         models_ok=models_ok,
     )
 
+    sorted_summaries = sorted(model_summaries, key=lambda m: m.model_name)
+
+    if format == "csv":
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=_CSV_COLUMNS)
+        writer.writeheader()
+        for m in sorted_summaries:
+            writer.writerow(
+                {
+                    "model_name": m.model_name,
+                    "status": m.health_status,
+                    "predictions_7d": m.total_predictions,
+                    "error_rate": round(m.error_rate, 4),
+                    "latency_p95": m.p95_latency_ms if m.p95_latency_ms is not None else "",
+                    "drift_status": _worst_health(m.feature_drift_status, m.performance_drift_status),
+                    "accuracy_7d": "",
+                    "last_retrain": "",
+                    "coverage_pct": "",
+                }
+            )
+        filename = f"supervision_{start.strftime('%Y%m%d')}_{end.strftime('%Y%m%d')}.csv"
+        return StreamingResponse(
+            iter([buf.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     return GlobalDashboard(
         period=MonitoringPeriod(start=start, end=end),
         global_stats=global_stats,
-        models=sorted(model_summaries, key=lambda m: m.model_name),
+        models=sorted_summaries,
     )
 
 
