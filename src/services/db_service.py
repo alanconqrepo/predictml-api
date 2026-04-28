@@ -9,7 +9,7 @@ from typing import Any, List, Optional
 
 from sklearn.metrics import accuracy_score, mean_absolute_error
 from sklearn.metrics import f1_score as sklearn_f1_score
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -912,6 +912,7 @@ class DBService:
         algorithm: Optional[str] = None,
         min_accuracy: Optional[float] = None,
         deployment_mode: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> List[ModelMetadata]:
         """Récupère tous les modèles actifs avec leur créateur"""
         query = (
@@ -928,6 +929,14 @@ class DBService:
             query = query.where(ModelMetadata.accuracy >= min_accuracy)
         if deployment_mode:
             query = query.where(ModelMetadata.deployment_mode == deployment_mode)
+        if search:
+            pattern = f"%{search}%"
+            query = query.where(
+                or_(
+                    ModelMetadata.name.ilike(pattern),
+                    ModelMetadata.description.ilike(pattern),
+                )
+            )
         result = await db.execute(query)
         return result.scalars().all()
 

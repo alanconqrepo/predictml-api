@@ -170,6 +170,9 @@ async def list_models(
     deployment_mode: Optional[Literal["production", "ab_test", "shadow"]] = Query(
         None, description="Mode de déploiement : production | ab_test | shadow"
     ),
+    search: Optional[str] = Query(
+        None, description="Recherche textuelle sur le nom et la description (insensible à la casse)"
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -181,6 +184,7 @@ async def list_models(
     - **algorithm** : filtre exact sur l'algorithme
     - **min_accuracy** : accuracy minimale (>= valeur)
     - **deployment_mode** : mode de déploiement (`production`, `ab_test`, `shadow`)
+    - **search** : recherche textuelle sur name et description (ILIKE)
 
     Returns:
         Liste des modèles actifs avec leurs métadonnées
@@ -191,6 +195,7 @@ async def list_models(
         algorithm=algorithm,
         min_accuracy=min_accuracy,
         deployment_mode=deployment_mode,
+        search=search,
     )
     if tag:
         models = [m for m in models if m.get("tags") and tag in m["tags"]]

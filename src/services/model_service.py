@@ -42,6 +42,7 @@ class ModelService:
         algorithm: Optional[str] = None,
         min_accuracy: Optional[float] = None,
         deployment_mode: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Retourne la liste des modèles disponibles depuis la base de données
@@ -52,6 +53,7 @@ class ModelService:
             algorithm: filtre exact sur l'algorithme
             min_accuracy: filtre accuracy >= valeur
             deployment_mode: filtre sur le mode de déploiement
+            search: recherche textuelle sur name et description (ILIKE)
 
         Returns:
             Liste des modèles actifs avec leurs métadonnées
@@ -62,6 +64,7 @@ class ModelService:
             algorithm=algorithm,
             min_accuracy=min_accuracy,
             deployment_mode=deployment_mode,
+            search=search,
         )
         last_seen_map = await DBService.get_models_last_seen(db)
         return [
