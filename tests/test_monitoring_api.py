@@ -382,3 +382,137 @@ class TestMonitoringModelDetail:
         assert "performance_by_day" in data
         assert "feature_drift" in data
         assert "recent_errors" in data
+
+
+# ---------------------------------------------------------------------------
+# GET /monitoring/overview?format=csv
+# ---------------------------------------------------------------------------
+
+
+class TestMonitoringOverviewCSV:
+    def _params(self, extra: dict | None = None) -> dict:
+        now = datetime.utcnow()
+        p = {
+            "start": (now - timedelta(hours=1)).isoformat(),
+            "end": (now + timedelta(hours=1)).isoformat(),
+            "format": "csv",
+        }
+        if extra:
+            p.update(extra)
+        return p
+
+    def test_csv_format_returns_text_csv_content_type(self):
+        """format=csv → Content-Type text/csv."""
+        r = client.get(
+            "/monitoring/overview",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            params=self._params(),
+        )
+        assert r.status_code == 200
+        assert "text/csv" in r.headers.get("content-type", "")
+
+    def test_csv_format_has_content_disposition_attachment(self):
+        """format=csv → Content-Disposition avec attachment et filename .csv."""
+        r = client.get(
+            "/monitoring/overview",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            params=self._params(),
+        )
+        assert r.status_code == 200
+        cd = r.headers.get("content-disposition", "")
+        assert "attachment" in cd
+        assert ".csv" in cd
+
+    def test_csv_format_header_contains_required_columns(self):
+        """CSV retourné contient les colonnes spécifiées."""
+        r = client.get(
+            "/monitoring/overview",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            params=self._params(),
+        )
+        assert r.status_code == 200
+        header = r.text.strip().splitlines()[0].split(",")
+        for col in ("model_name", "status", "predictions_7d", "error_rate", "latency_p95", "drift_status"):
+            assert col in header, f"colonne manquante : {col}"
+
+    def test_csv_empty_period_returns_header_only(self):
+        """Période sans prédictions → CSV avec uniquement la ligne d'en-tête."""
+        future = datetime.utcnow() + timedelta(days=700)
+        r = client.get(
+            "/monitoring/overview",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            params={
+                "start": future.isoformat(),
+                "end": (future + timedelta(days=1)).isoformat(),
+                "format": "csv",
+            },
+        )
+        assert r.status_code == 200
+        lines = [ln for ln in r.text.strip().splitlines() if ln]
+        assert len(lines) == 1  # uniquement le header
+
+    def test_csv_contains_model_row_after_prediction(self):
+        """Après une prédiction → le modèle apparaît dans le CSV."""
+        model = f"{MODEL_NAME}_csv"
+        _create_model(model)
+        _predict(model)
+
+        now = datetime.utcnow()
+        r = client.get(
+            "/monitoring/overview",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            params={
+                "start": (now - timedelta(hours=1)).isoformat(),
+                "end": (now + timedelta(hours=1)).isoformat(),
+                "format": "csv",
+            },
+        )
+        assert r.status_code == 200
+        assert model in r.text
+
+    def test_csv_model_row_has_correct_values(self):
+        """La ligne du modèle dans le CSV contient un taux d'erreur et statut cohérents."""
+        model = f"{MODEL_NAME}_csv2"
+        _create_model(model)
+        _predict(model)
+
+        now = datetime.utcnow()
+        r = client.get(
+            "/monitoring/overview",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            params={
+                "start": (now - timedelta(hours=1)).isoformat(),
+                "end": (now + timedelta(hours=1)).isoformat(),
+                "format": "csv",
+            },
+        )
+        assert r.status_code == 200
+        import csv as csv_mod
+
+        reader = csv_mod.DictReader(r.text.splitlines())
+        rows = {row["model_name"]: row for row in reader}
+        assert model in rows
+        row = rows[model]
+        assert row["status"] in ("ok", "warning", "critical", "no_data")
+        assert int(row["predictions_7d"]) >= 1
+        assert float(row["error_rate"]) >= 0.0
+
+    def test_csv_invalid_format_returns_422(self):
+        """format=xml → 422 (valeur non autorisée)."""
+        r = client.get(
+            "/monitoring/overview",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            params={
+                **self._params(),
+                "format": "xml",
+            },
+        )
+        assert r.status_code == 422
+
+    def test_csv_requires_auth(self):
+        """Sans token → 401 ou 403, même avec format=csv."""
+        r = client.get(
+            "/monitoring/overview",
+            params=self._params(),
+        )
+        assert r.status_code in (401, 403)
