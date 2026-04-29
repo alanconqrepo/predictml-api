@@ -714,3 +714,34 @@ class APIClient:
         )
         r.raise_for_status()
         return r.text if format == "markdown" else r.json()
+
+    # --- Golden Test Set ---
+
+    def list_golden_tests(self, name: str) -> list:
+        r = self._get(f"/models/{name}/golden-tests")
+        r.raise_for_status()
+        return r.json()
+
+    def create_golden_test(self, name: str, payload: dict) -> dict:
+        r = self._post(f"/models/{name}/golden-tests", json=payload)
+        r.raise_for_status()
+        return r.json()
+
+    def upload_golden_tests_csv(self, name: str, file_bytes: bytes, filename: str) -> dict:
+        r = requests.post(
+            f"{self.base_url}/models/{name}/golden-tests/upload-csv",
+            headers=self._headers(),
+            files={"file": (filename, file_bytes, "text/csv")},
+            timeout=60,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def delete_golden_test(self, name: str, test_id: int) -> bool:
+        r = self._delete(f"/models/{name}/golden-tests/{test_id}")
+        return r.status_code == 204
+
+    def run_golden_tests(self, name: str, version: str) -> dict:
+        r = self._post(f"/models/{name}/{version}/golden-tests/run")
+        r.raise_for_status()
+        return r.json()

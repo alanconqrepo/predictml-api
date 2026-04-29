@@ -907,6 +907,114 @@ with st.expander("🧪 Tester le modèle", expanded=False):
                     except Exception as e:
                         st.error(f"Erreur lors de la validation : {e}")
 
+# Tests de régression (Golden Test Set)
+with st.expander("🧪 Tests de régression", expanded=False):
+    is_admin_gt = st.session_state.get("is_admin", False)
+    gt_model_name = selected["name"]
+    gt_version = selected["version"]
+
+    try:
+        golden_tests = client.list_golden_tests(gt_model_name)
+    except Exception:
+        golden_tests = []
+
+    # --- Liste des cas existants ---
+    if golden_tests:
+        st.markdown(f"**{len(golden_tests)} cas enregistrés**")
+        for t in golden_tests:
+            col_info, col_del = st.columns([5, 1])
+            desc = t.get("description") or "—"
+            col_info.markdown(
+                f"**#{t['id']}** `→ {t['expected_output']}` &nbsp; {desc}"
+            )
+            if is_admin_gt:
+                if col_del.button("🗑", key=f"del_gt_{t['id']}"):
+                    try:
+                        client.delete_golden_test(gt_model_name, t["id"])
+                        st.success(f"Test #{t['id']} supprimé.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erreur : {e}")
+    else:
+        st.info("Aucun cas de test golden enregistré pour ce modèle.")
+
+    if is_admin_gt:
+        st.divider()
+
+        # --- Ajouter un cas ---
+        with st.form("add_golden_test_form", clear_on_submit=True):
+            st.markdown("**Ajouter un cas de test**")
+            raw_features_gt = st.text_area(
+                "Features (JSON)",
+                value='{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}',
+                height=90,
+                key="gt_features_input",
+            )
+            expected_gt = st.text_input("Expected output", placeholder="setosa", key="gt_expected")
+            desc_gt = st.text_input("Description (optionnel)", value="", key="gt_desc")
+            submitted_gt = st.form_submit_button("Ajouter")
+
+        if submitted_gt:
+            try:
+                import json as _json
+
+                features_gt = _json.loads(raw_features_gt)
+                client.create_golden_test(
+                    gt_model_name,
+                    {
+                        "input_features": features_gt,
+                        "expected_output": expected_gt.strip(),
+                        "description": desc_gt.strip() or None,
+                    },
+                )
+                st.success("Cas de test ajouté.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erreur : {e}")
+
+        # --- Upload CSV ---
+        st.markdown("**Importer depuis un CSV**")
+        st.caption(
+            "Format : colonnes features + `expected_output` (requis) + `description` (optionnel). "
+            "Exemple : `sepal_length,sepal_width,petal_length,petal_width,expected_output,description`"
+        )
+        csv_file_gt = st.file_uploader("Choisir un fichier CSV", type=["csv"], key="gt_csv_upload")
+        if csv_file_gt and st.button("Importer", key="import_gt_csv"):
+            try:
+                result_csv = client.upload_golden_tests_csv(
+                    gt_model_name, csv_file_gt.read(), csv_file_gt.name
+                )
+                st.success(f"{result_csv.get('created', 0)} cas importés.")
+                if result_csv.get("errors"):
+                    st.warning(f"Erreurs : {result_csv['errors']}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erreur lors de l'import : {e}")
+
+    st.divider()
+
+    # --- Lancer les tests ---
+    if st.button("▶️ Lancer les tests", key="run_golden_tests", type="primary"):
+        try:
+            gt_result = client.run_golden_tests(gt_model_name, gt_version)
+            col_p, col_f, col_r = st.columns(3)
+            col_p.metric("✅ Passés", gt_result["passed"])
+            col_f.metric("❌ Échoués", gt_result["failed"])
+            col_r.metric("Taux", f"{gt_result['pass_rate']:.1%}")
+
+            if gt_result["total_tests"] == 0:
+                st.info("Aucun cas de test enregistré.")
+            else:
+                for d in gt_result["details"]:
+                    icon = "✅" if d["passed"] else "❌"
+                    desc_str = f" — {d['description']}" if d.get("description") else ""
+                    st.markdown(
+                        f"{icon} **#{d['test_id']}**{desc_str} &nbsp; "
+                        f"attendu : `{d['expected']}` / obtenu : `{d['actual']}`"
+                    )
+        except Exception as e:
+            st.error(f"Erreur lors de l'exécution des tests : {e}")
+
 # Explorateur What-if
 with st.expander("🔮 Explorateur What-if", expanded=False):
     _wif_api_url = st.session_state.get("api_url")

@@ -1,5 +1,6 @@
 """Database models"""
 
+from src.db.models.golden_test import GoldenTest
 from src.db.models.model_history import HistoryActionType, ModelHistory
 from src.db.models.model_metadata import DeploymentMode, ModelMetadata, ModelStatus
 from src.db.models.observed_result import ObservedResult
@@ -16,4 +17,5 @@ __all__ = [
     "ObservedResult",
     "ModelHistory",
     "HistoryActionType",
+    "GoldenTest",
 ]

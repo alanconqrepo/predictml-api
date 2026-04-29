@@ -360,6 +360,7 @@ class PromotionPolicy(BaseModel):
     max_latency_p95_ms: Optional[float] = Field(None, gt=0.0)
     min_sample_validation: int = Field(10, ge=1)
     auto_promote: bool = False
+    min_golden_test_pass_rate: Optional[float] = Field(None, ge=0.0, le=1.0)
 
 
 class PolicyUpdateResponse(BaseModel):
