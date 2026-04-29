@@ -18,3 +18,8 @@ a partir des de deniers PR (une semaine) et de la documentation
 2.ajouter les tests d'intégration nécessaire pour valider le bon fonctionnement global du produit
 ajouter les tests end to end e2e pour valider le bon fonctionnement globale du produit
 détermine quel est le taux de recouvrement des tests avant et après ton plan
+
+
+
+
+crée une page streamlit d'aide avec chat llm pour aider l'utilisateur d'un point de vue code : génération de script train avec sklearn mlflow..., d'appel api vers la solution, d'aide à l'utilisation de l'App streamlit, explication des différents indicateurs etc... se baser sur la documentation et skills du projet pour répondre, si besoin ajouter de la documentation. possibilité de visualiser directement la doc .md
