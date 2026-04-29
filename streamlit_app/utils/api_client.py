@@ -521,6 +521,26 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def get_predictions_anomalies(
+        self,
+        model_name: str,
+        days: int = 7,
+        z_threshold: float = 3.0,
+        limit: int = 200,
+    ) -> dict:
+        """Prédictions avec features aberrantes (z-score ≥ seuil)."""
+        r = self._get(
+            "/predictions/anomalies",
+            params={
+                "model_name": model_name,
+                "days": days,
+                "z_threshold": z_threshold,
+                "limit": limit,
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
     # --- Observed Results ---
 
     def get_observed_results(
