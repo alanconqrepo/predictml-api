@@ -1781,6 +1781,697 @@ data = response.json()
 
 ---
 
+## Modèles — Endpoints complémentaires
+
+### `GET /models/leaderboard` — Classement des modèles
+
+Classe les modèles en production par métrique sur une fenêtre glissante. Résultat mis en cache (TTL configurable).
+
+**Auth non requise**
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `metric` | str | `accuracy` | Métrique de classement : `accuracy`, `f1_score`, `latency_p95_ms`, `predictions_count` |
+| `days` | int | 30 | Fenêtre temporelle |
+| `top_n` | int | 10 | Nombre de modèles retournés |
+
+```python
+response = requests.get(
+    f"{BASE_URL}/models/leaderboard",
+    params={"metric": "accuracy", "days": 30, "top_n": 5}
+)
+leaderboard = response.json()
+
+for i, entry in enumerate(leaderboard["entries"], 1):
+    print(f"#{i} {entry['model_name']} v{entry['version']} — "
+          f"accuracy={entry.get('accuracy')}, p95={entry.get('latency_p95_ms')}ms")
+```
+
+**Schéma `LeaderboardResponse`**
+
+```json
+{
+  "metric": "accuracy",
+  "days": 30,
+  "entries": [
+    {
+      "model_name": "iris_model",
+      "version": "2.0.0",
+      "is_production": true,
+      "accuracy": 0.97,
+      "f1_score": 0.96,
+      "latency_p95_ms": 14.2,
+      "predictions_count": 8450,
+      "last_prediction_at": "2026-04-27T18:32:00"
+    }
+  ]
+}
+```
+
+---
+
+### `GET /models/{name}/performance-timeline` — Timeline de performance
+
+Évolution des métriques de performance version par version, triée par date de déploiement.
+
+**Auth requise**
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `days` | int | 90 | Fenêtre temporelle |
+
+```python
+response = requests.get(
+    f"{BASE_URL}/models/iris_model/performance-timeline",
+    headers=headers,
+    params={"days": 90}
+)
+timeline = response.json()
+
+for entry in timeline["versions"]:
+    print(f"v{entry['version']} déployée le {entry['deployed_at']} — "
+          f"accuracy={entry.get('accuracy')}, MAE={entry.get('mae')}")
+```
+
+**Schéma**
+
+```json
+{
+  "model_name": "iris_model",
+  "period_days": 90,
+  "versions": [
+    {
+      "version": "1.0.0",
+      "deployed_at": "2026-01-15T00:00:00",
+      "accuracy": 0.94,
+      "f1_score": 0.93,
+      "mae": null,
+      "predictions_count": 4200
+    },
+    {
+      "version": "2.0.0",
+      "deployed_at": "2026-03-01T00:00:00",
+      "accuracy": 0.97,
+      "f1_score": 0.96,
+      "mae": null,
+      "predictions_count": 8450
+    }
+  ]
+}
+```
+
+---
+
+### `GET /models/{name}/calibration` — Calibration des probabilités
+
+Mesure la qualité de calibration des probabilités prédites : un modèle parfaitement calibré retourne 70% de confiance quand il a raison 70% du temps.
+
+**Auth requise**
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `days` | int | 30 | Fenêtre temporelle |
+| `version` | str | production | Version cible |
+| `bins` | int | 10 | Nombre de bins pour la courbe de reliability |
+
+```python
+response = requests.get(
+    f"{BASE_URL}/models/iris_model/calibration",
+    headers=headers,
+    params={"days": 30, "version": "2.0.0"}
+)
+cal = response.json()
+
+print(f"Brier score: {cal['brier_score']:.4f}")  # 0 = parfait, 1 = pire
+print(f"Gap de surconfiance: {cal['overconfidence_gap']:+.3f}")
+# Positif = modèle trop confiant, négatif = pas assez confiant
+
+for b in cal["reliability_diagram"]:
+    print(f"  conf={b['bin_center']:.1f} → réalité={b['fraction_positive']:.2f} "
+          f"(n={b['count']})")
+```
+
+**Schéma `CalibrationResponse`**
+
+```json
+{
+  "model_name": "iris_model",
+  "version": "2.0.0",
+  "period_days": 30,
+  "sample_size": 920,
+  "brier_score": 0.042,
+  "overconfidence_gap": 0.031,
+  "reliability_diagram": [
+    {"bin_center": 0.05, "mean_predicted": 0.04, "fraction_positive": 0.02, "count": 48},
+    {"bin_center": 0.15, "mean_predicted": 0.14, "fraction_positive": 0.11, "count": 72},
+    {"bin_center": 0.85, "mean_predicted": 0.86, "fraction_positive": 0.91, "count": 235},
+    {"bin_center": 0.95, "mean_predicted": 0.96, "fraction_positive": 0.94, "count": 187}
+  ]
+}
+```
+
+> **Interprétation :** Un `brier_score` < 0.1 est bon pour la classification. Un `overconfidence_gap` > 0.05 signale que le modèle surestime sa certitude — à surveiller avant un déploiement haute-criticité.
+
+---
+
+### `GET /models/{name}/confidence-distribution` — Distribution de confiance
+
+Histogramme du niveau de confiance (`max(probabilities)`) sur les prédictions récentes. Permet d'identifier la proportion de prédictions incertaines.
+
+**Auth requise**
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `days` | int | 7 | Fenêtre temporelle |
+| `version` | str | production | Version cible |
+| `bins` | int | 10 | Résolution de l'histogramme |
+| `high_threshold` | float | 0.9 | Seuil confiance haute |
+| `uncertain_threshold` | float | 0.6 | Seuil incertitude |
+
+```python
+response = requests.get(
+    f"{BASE_URL}/models/iris_model/confidence-distribution",
+    headers=headers,
+    params={"days": 7, "uncertain_threshold": 0.7}
+)
+dist = response.json()
+
+print(f"Prédictions très confiantes (>{dist['high_threshold']}) : "
+      f"{dist['high_confidence_pct']:.1%}")
+print(f"Prédictions incertaines (<{dist['uncertain_threshold']}) : "
+      f"{dist['uncertain_pct']:.1%}")
+```
+
+**Schéma `ConfidenceDistributionResponse`**
+
+```json
+{
+  "model_name": "iris_model",
+  "version": "2.0.0",
+  "period_days": 7,
+  "total_predictions": 1240,
+  "high_threshold": 0.9,
+  "uncertain_threshold": 0.6,
+  "high_confidence_pct": 0.82,
+  "uncertain_pct": 0.04,
+  "bins": [
+    {"lower": 0.0, "upper": 0.1, "count": 3, "pct": 0.002},
+    {"lower": 0.9, "upper": 1.0, "count": 1018, "pct": 0.821}
+  ]
+}
+```
+
+---
+
+### `GET /models/{name}/performance-report` — Rapport consolidé
+
+Agrège en un seul appel : performance, drift, feature importance, calibration, et comparaison A/B.
+Idéal pour des scripts de monitoring automatique ou des alertes programmatiques.
+
+**Auth requise**
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `days` | int | 30 | Fenêtre temporelle commune à toutes les composantes |
+
+```python
+response = requests.get(
+    f"{BASE_URL}/models/iris_model/performance-report",
+    headers=headers,
+    params={"days": 30}
+)
+report = response.json()
+
+# Vérification globale en une ligne
+if (report["drift"]["drift_summary"] == "critical" or
+        report["performance"].get("accuracy", 1.0) < 0.85):
+    print("⚠️  Action requise sur iris_model")
+```
+
+**Schéma `PerformanceReportResponse`**
+
+```json
+{
+  "model_name": "iris_model",
+  "generated_at": "2026-04-28T10:00:00",
+  "period_days": 30,
+  "performance": {"accuracy": 0.97, "f1_score": 0.96, "matched_predictions": 920},
+  "drift": {"drift_summary": "ok", "features": {}},
+  "feature_importance": {"petal length (cm)": {"mean_abs_shap": 0.42, "rank": 1}},
+  "calibration": {"brier_score": 0.042, "overconfidence_gap": 0.031},
+  "ab_compare": null
+}
+```
+
+---
+
+### `GET /models/{name}/readiness` — Vérification de disponibilité
+
+Vérifie qu'un modèle satisfait tous les prérequis avant d'être passé en production.
+
+**Auth requise**
+
+```python
+response = requests.get(
+    f"{BASE_URL}/models/iris_model/readiness",
+    headers=headers
+)
+check = response.json()
+
+if check["ready"]:
+    print("✅ Modèle prêt pour la production")
+else:
+    for name, ok in check["checks"].items():
+        if not ok:
+            print(f"❌ {name} : non satisfait")
+```
+
+**Schéma `ReadinessResponse`**
+
+```json
+{
+  "model_name": "iris_model",
+  "ready": false,
+  "checks": {
+    "is_production": false,
+    "file_accessible": true,
+    "baseline_computed": false,
+    "no_critical_drift": true
+  }
+}
+```
+
+| Check | Description |
+|---|---|
+| `is_production` | `is_production=True` sur au moins une version |
+| `file_accessible` | Fichier `.pkl` accessible dans MinIO |
+| `baseline_computed` | `feature_baseline` calculée (nécessaire pour le drift) |
+| `no_critical_drift` | Aucun drift critique détecté dans la fenêtre récente |
+
+---
+
+### `GET /models/{name}/retrain-history` — Historique des ré-entraînements
+
+Journal structuré de tous les événements de retrain pour un modèle : manuel ou planifié.
+
+**Auth requise**
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `limit` | int | 20 | Nombre d'entrées |
+| `offset` | int | 0 | Pagination |
+
+```python
+response = requests.get(
+    f"{BASE_URL}/models/iris_model/retrain-history",
+    headers=headers,
+    params={"limit": 10}
+)
+history = response.json()
+
+print(f"Total retrains : {history['total']}")
+for entry in history["history"]:
+    promoted = "✅" if entry["auto_promoted"] else "⏭️"
+    print(f"{promoted} {entry['timestamp'][:10]} "
+          f"v{entry['source_version']} → v{entry['new_version']} "
+          f"(accuracy={entry.get('accuracy')}, by={entry['trained_by']})")
+```
+
+**Schéma `RetrainHistoryResponse`**
+
+```json
+{
+  "model_name": "iris_model",
+  "total": 8,
+  "history": [
+    {
+      "timestamp": "2026-04-01T03:00:00",
+      "source_version": "1.0.0",
+      "new_version": "1.1.0",
+      "trained_by": "scheduler",
+      "accuracy": 0.95,
+      "f1_score": 0.94,
+      "auto_promoted": true,
+      "auto_promote_reason": "all criteria met",
+      "n_rows": 12450,
+      "train_start_date": "2026-03-01",
+      "train_end_date": "2026-04-01"
+    }
+  ]
+}
+```
+
+---
+
+### `PATCH /models/{name}/{version}/deprecate` — Déprécier une version
+
+Marque une version comme dépréciée. Les nouvelles prédictions sur cette version retournent **HTTP 410 Gone**.
+
+**Auth requise : admin**
+
+```python
+response = requests.patch(
+    f"{BASE_URL}/models/iris_model/1.0.0/deprecate",
+    headers=headers
+)
+print(response.json())
+# {"model_name": "iris_model", "version": "1.0.0",
+#  "deprecated_at": "2026-04-28T10:00:00",
+#  "message": "Version dépréciée. Les nouvelles prédictions sont bloquées."}
+```
+
+> **Note :** La dépréciation est irréversible via cet endpoint. Pour restaurer une version, utiliser `POST /models/{name}/{version}/rollback/{history_id}`.
+
+---
+
+### `PATCH /models/{name}/policy` — Politique d'auto-promotion post-retrain
+
+Définit les critères que doit satisfaire un modèle retrained pour être promu automatiquement en production.
+
+**Auth requise : admin**
+
+**Corps de la requête**
+
+```json
+{
+  "min_accuracy": 0.90,
+  "max_latency_p95_ms": 200.0,
+  "min_sample_validation": 50,
+  "auto_promote": true
+}
+```
+
+| Champ | Type | Défaut | Description |
+|---|---|---|---|
+| `min_accuracy` | float [0–1] | null | Précision minimale (sur les observed_results récents) |
+| `max_latency_p95_ms` | float > 0 | null | Latence P95 maximale en ms |
+| `min_sample_validation` | int ≥ 1 | 10 | Nb minimal de paires (prédiction, résultat) pour évaluer |
+| `auto_promote` | bool | false | Activer l'auto-promotion |
+
+```python
+response = requests.patch(
+    f"{BASE_URL}/models/iris_model/policy",
+    headers=headers,
+    json={
+        "min_accuracy": 0.90,
+        "max_latency_p95_ms": 200,
+        "min_sample_validation": 50,
+        "auto_promote": True
+    }
+)
+print(f"Politique activée : {response.json()['auto_promote']}")
+```
+
+> La politique est évaluée automatiquement à la fin de chaque ré-entraînement. Le résultat est retourné dans la réponse de `POST /models/{name}/{version}/retrain` via les champs `auto_promoted` et `auto_promote_reason`.
+
+---
+
+### `GET /models/{name}/{version}/download` — Télécharger le fichier .pkl
+
+Télécharge le fichier modèle sérialisé depuis MinIO.
+
+**Auth requise**
+
+```python
+import pathlib
+
+response = requests.get(
+    f"{BASE_URL}/models/iris_model/2.0.0/download",
+    headers=headers,
+    stream=True
+)
+response.raise_for_status()
+
+output_path = pathlib.Path("iris_model_v2.0.0.pkl")
+with open(output_path, "wb") as f:
+    for chunk in response.iter_content(chunk_size=8192):
+        f.write(chunk)
+
+print(f"Modèle téléchargé : {output_path} ({output_path.stat().st_size / 1024:.1f} Ko)")
+```
+
+La réponse est un flux binaire (`Content-Type: application/octet-stream`) avec en-tête `Content-Disposition: attachment; filename=iris_model_2.0.0.pkl`.
+
+---
+
+## Prédictions — Endpoints complémentaires
+
+### `GET /predictions/export` — Export streaming
+
+Exporte l'historique des prédictions en CSV, JSONL, ou Parquet. Utilise une pagination curseur en interne pour gérer les grands volumes sans surcharger la mémoire.
+
+**Auth requise : admin**
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `format` | str | `csv` | Format : `csv`, `jsonl`, `parquet` |
+| `model_name` | str | — | Filtre par modèle (optionnel) |
+| `start` | datetime | — | Début de la plage (ISO 8601) |
+| `end` | datetime | — | Fin de la plage (ISO 8601) |
+| `version` | str | — | Filtre par version (optionnel) |
+
+```python
+from datetime import datetime, timedelta
+
+response = requests.get(
+    f"{BASE_URL}/predictions/export",
+    headers=headers,
+    params={
+        "format": "csv",
+        "model_name": "iris_model",
+        "start": (datetime.now() - timedelta(days=30)).isoformat(),
+        "end": datetime.now().isoformat()
+    },
+    stream=True
+)
+response.raise_for_status()
+
+with open("predictions_export.csv", "wb") as f:
+    for chunk in response.iter_content(chunk_size=8192):
+        f.write(chunk)
+
+# Pour Parquet (binaire, compatible pandas/polars)
+response_parquet = requests.get(
+    f"{BASE_URL}/predictions/export",
+    headers=headers,
+    params={"format": "parquet", "model_name": "iris_model"},
+    stream=True
+)
+with open("predictions.parquet", "wb") as f:
+    for chunk in response_parquet.iter_content(chunk_size=8192):
+        f.write(chunk)
+
+import pandas as pd
+df = pd.read_parquet("predictions.parquet")
+print(df.head())
+```
+
+---
+
+## Utilisateurs — Endpoints complémentaires
+
+### `GET /users/me` — Profil de l'utilisateur courant
+
+Retourne le profil de l'utilisateur propriétaire du token Bearer utilisé.
+
+**Auth requise**
+
+```python
+response = requests.get(f"{BASE_URL}/users/me", headers=headers)
+me = response.json()
+print(f"Connecté en tant que {me['username']} (rôle : {me['role']})")
+```
+
+**Schéma**
+
+```json
+{
+  "id": 3,
+  "username": "alice",
+  "email": "alice@example.com",
+  "role": "user",
+  "is_active": true,
+  "rate_limit_per_day": 5000,
+  "created_at": "2026-01-10T09:00:00",
+  "last_login": "2026-04-28T08:12:00"
+}
+```
+
+---
+
+### `GET /users/me/quota` — Quota journalier
+
+Retourne la consommation de quota de l'utilisateur courant pour la journée en cours.
+
+**Auth requise**
+
+```python
+response = requests.get(f"{BASE_URL}/users/me/quota", headers=headers)
+quota = response.json()
+
+print(f"Quota : {quota['used_today']} / {quota['rate_limit_per_day']} prédictions")
+print(f"Restant : {quota['remaining']} — Réinitialisation à {quota['reset_at']}")
+```
+
+**Schéma `QuotaResponse`**
+
+```json
+{
+  "rate_limit_per_day": 5000,
+  "used_today": 342,
+  "remaining": 4658,
+  "reset_at": "2026-04-29T00:00:00"
+}
+```
+
+---
+
+### `GET /users/{user_id}/usage` — Statistiques d'utilisation
+
+Statistiques de consommation d'un utilisateur : volume par modèle et par jour. Accessible par l'utilisateur lui-même ou par un admin.
+
+**Auth requise (self ou admin)**
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `days` | int | 30 | Fenêtre temporelle |
+
+```python
+response = requests.get(
+    f"{BASE_URL}/users/3/usage",
+    headers=headers,
+    params={"days": 30}
+)
+usage = response.json()
+
+print(f"Total 30j : {usage['total_predictions']} prédictions")
+for model in usage["by_model"]:
+    print(f"  {model['model_name']}: {model['predictions']} pred, "
+          f"{model['errors']} erreurs")
+```
+
+**Schéma `UserUsageResponse`**
+
+```json
+{
+  "user_id": 3,
+  "username": "alice",
+  "period_days": 30,
+  "total_predictions": 8420,
+  "by_model": [
+    {"model_name": "iris_model", "predictions": 6200, "errors": 12},
+    {"model_name": "fraud_detector", "predictions": 2220, "errors": 3}
+  ],
+  "by_day": [
+    {"date": "2026-04-28", "predictions": 342},
+    {"date": "2026-04-27", "predictions": 489}
+  ]
+}
+```
+
+---
+
+## Infrastructure
+
+### `GET /health/dependencies` — Santé détaillée des dépendances
+
+Vérifie la connectivité et la latence de chaque service dépendant. Utile pour le diagnostic en production et les health checks orchestrateurs (K8s readiness probe).
+
+**Auth non requise**
+
+```python
+response = requests.get(f"{BASE_URL}/health/dependencies")
+health = response.json()
+
+print(f"Statut global : {health['status']}")
+for service, info in health["dependencies"].items():
+    status_icon = "✅" if info["status"] == "ok" else "❌"
+    latency = f" ({info.get('latency_ms', '?')}ms)" if "latency_ms" in info else ""
+    print(f"  {status_icon} {service}{latency}")
+```
+
+**Schéma `DependencyHealthResponse`**
+
+```json
+{
+  "status": "ok",
+  "dependencies": {
+    "database": {"status": "ok", "latency_ms": 2.1},
+    "redis":    {"status": "ok", "latency_ms": 0.4},
+    "minio":    {"status": "ok", "latency_ms": 5.8},
+    "mlflow":   {"status": "degraded", "latency_ms": null, "error": "Connection timeout"}
+  }
+}
+```
+
+| Statut | Signification |
+|---|---|
+| `ok` | Service joignable et fonctionnel |
+| `degraded` | Service joignable mais lent ou erreur partielle |
+| `unavailable` | Service inaccessible |
+
+---
+
+### `GET /metrics` — Métriques Prometheus
+
+Expose les métriques de l'API au format texte Prometheus. Scraped automatiquement par Grafana LGTM via le dashboard `http://localhost:3000`.
+
+**Auth optionnelle** — si `METRICS_TOKEN` est défini dans les variables d'environnement, le token Bearer est requis.
+
+```python
+# Sans token (si METRICS_TOKEN non configuré)
+response = requests.get(f"{BASE_URL}/metrics")
+print(response.text[:500])  # format texte Prometheus
+
+# Avec token
+response = requests.get(
+    f"{BASE_URL}/metrics",
+    headers={"Authorization": "Bearer <METRICS_TOKEN>"}
+)
+```
+
+**Métriques exposées (exemples)**
+
+```
+# HELP http_requests_total Total HTTP requests
+# TYPE http_requests_total counter
+http_requests_total{method="POST",endpoint="/predict",status="200"} 18420
+
+# HELP http_request_duration_seconds HTTP request duration
+# TYPE http_request_duration_seconds histogram
+http_request_duration_seconds_bucket{le="0.05",endpoint="/predict"} 17832
+
+# HELP predictions_total Total predictions by model
+# TYPE predictions_total counter
+predictions_total{model="iris_model",version="2.0.0"} 12540
+```
+
+> Pour configurer le scraping Grafana, ajouter l'endpoint dans `prometheus.yml` :
+> ```yaml
+> - job_name: predictml
+>   static_configs:
+>     - targets: ['api:8000']
+>   metrics_path: /metrics
+> ```
+
+---
+
 ## Client Python complet
 
 ```python

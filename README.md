@@ -168,6 +168,27 @@ curl http://localhost:8000/health
 - Nouvelle version enregistrée automatiquement dans MinIO
 - Verrou Redis pour éviter les exécutions simultanées en multi-réplicas
 
+### Leaderboard & Comparaison multi-modèles
+- `GET /models/leaderboard` : classement des modèles en production par métrique (`accuracy`, `f1_score`, `latency_p95_ms`, `predictions_count`) sur une fenêtre configurable, résultat mis en cache (TTL)
+- Visualisé dans la page Stats du dashboard : onglet Leaderboard + scatter plot accuracy vs latency P95
+
+### Calibration des probabilités
+- `GET /models/{name}/calibration` : mesure si les probabilités prédites sont fiables (Brier score, courbe de reliability)
+- Un modèle avec `brier_score < 0.1` est bien calibré ; un gap de surconfiance positif signale que le modèle surestime sa certitude
+
+### Distribution de confiance
+- `GET /models/{name}/confidence-distribution` : histogramme du niveau de confiance (`max(probabilities)`) sur les prédictions récentes
+- Permet d'identifier la proportion de prédictions incertaines avant d'affiner le seuil `confidence_threshold`
+
+### Rapport de performance consolidé
+- `GET /models/{name}/performance-report` : agrège en un seul appel performance réelle + drift + feature importance + calibration + A/B
+- Idéal pour les scripts de monitoring automatique, les alertes programmatiques, ou les intégrations Grafana
+
+### Dépréciation & Cycle de vie complet
+- `PATCH /models/{name}/{version}/deprecate` : marque une version comme dépréciée — les nouvelles prédictions retournent HTTP 410 Gone
+- `GET /models/{name}/readiness` : vérifie qu'un modèle satisfait tous les prérequis avant production (fichier MinIO accessible, baseline calculée, pas de drift critique)
+- `GET /models/{name}/retrain-history` : journal structuré de tous les retrains (version source → nouvelle version, accuracy, auto_promoted, trained_by, fenêtre d'entraînement)
+
 ### Historique & Rollback
 - `GET /models/{name}/history` : journal de tous les changements
 - `POST /models/{name}/{version}/rollback/{history_id}` : restaurer un état précédent
@@ -212,6 +233,16 @@ curl http://localhost:8000/health
 | POST | `/models/{name}/{version}/retrain` | Admin | Ré-entraîner avec train.py |
 | PATCH | `/models/{name}/{version}/schedule` | Admin | Configurer le planning cron de ré-entraînement |
 | PATCH | `/models/{name}/policy` | Admin | Définir la politique d'auto-promotion post-retrain |
+| GET | `/models/leaderboard` | Non | Classement des modèles en production par métrique |
+| GET | `/models/{name}/performance-timeline` | Oui | Timeline de performance par version déployée |
+| GET | `/models/{name}/calibration` | Oui | Calibration des probabilités (Brier score, reliability diagram) |
+| GET | `/models/{name}/confidence-distribution` | Oui | Distribution de confiance (histogramme par bins) |
+| GET | `/models/{name}/performance-report` | Oui | Rapport consolidé : performance + drift + SHAP + calibration |
+| GET | `/models/{name}/readiness` | Oui | Vérification de disponibilité avant passage en production |
+| GET | `/models/{name}/retrain-history` | Oui | Historique des événements de ré-entraînement |
+| PATCH | `/models/{name}/{version}/deprecate` | Admin | Déprécier une version (bloque les prédictions avec HTTP 410) |
+| POST | `/models/{name}/{version}/validate-input` | Oui | Valider le schéma de features sans consommer de quota |
+| GET | `/models/{name}/{version}/download` | Oui | Télécharger le fichier .pkl depuis MinIO |
 | GET | `/models/{name}/ab-compare` | Oui | Rapport de comparaison A/B |
 | GET | `/models/{name}/confidence-trend` | Oui | Tendance de confiance dans le temps |
 | POST | `/models/{name}/{version}/warmup` | Oui | Préchauffer le modèle dans le cache Redis |
@@ -223,6 +254,7 @@ curl http://localhost:8000/health
 | GET | `/predictions/{id}` | Oui | Consulter une prédiction par son ID |
 | GET | `/predictions/{id}/explain` | Oui | Explication SHAP post-hoc d'une prédiction existante |
 | GET | `/predictions/stats` | Oui | Statistiques agrégées par modèle |
+| GET | `/predictions/export` | Admin | Export streaming CSV / JSONL / Parquet |
 | DELETE | `/predictions/purge` | Admin | Purge RGPD des prédictions anciennes (`dry_run` par défaut) |
 | **Résultats observés** | | | |
 | POST | `/observed-results` | Oui | Enregistrer des résultats réels |
@@ -231,6 +263,9 @@ curl http://localhost:8000/health
 | GET | `/observed-results/stats` | Oui | Statistiques de couverture ground truth |
 | POST | `/observed-results/upload-csv` | Oui | Import en lot depuis un fichier CSV |
 | **Utilisateurs** | | | |
+| GET | `/users/me` | Oui | Profil de l'utilisateur courant |
+| GET | `/users/me/quota` | Oui | Quota journalier (utilisé, restant, heure de reset) |
+| GET | `/users/{id}/usage` | Oui | Statistiques d'utilisation par modèle et par jour |
 | POST | `/users` | Admin | Créer un utilisateur |
 | GET | `/users` | Admin | Lister tous les utilisateurs |
 | GET | `/users/{id}` | Oui | Détail d'un utilisateur |
@@ -239,6 +274,8 @@ curl http://localhost:8000/health
 | **Monitoring** | | | |
 | GET | `/monitoring/overview` | Oui | Tableau de bord global |
 | GET | `/monitoring/model/{name}` | Oui | Détail monitoring d'un modèle |
+| GET | `/health/dependencies` | Non | Santé détaillée de chaque dépendance (DB, Redis, MinIO, MLflow) |
+| GET | `/metrics` | Optionnel | Métriques Prometheus (scraped par Grafana LGTM) |
 
 ---
 
