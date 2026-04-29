@@ -585,14 +585,14 @@ Ouvrez **http://localhost:8501** et connectez-vous avec le token admin.
 | Page | Fonctionnalités |
 |---|---|
 | Accueil | Vue d'ensemble, liens vers les services |
-| Utilisateurs | Créer/désactiver des comptes, renouveler les tokens |
-| Modèles | Détails, passer en production, lien MLflow |
-| Prédictions | Historique filtrable par modèle, date, version |
-| Stats | Graphiques : volume, temps de réponse, distribution |
-| Code Example | Exemples Python générés pour MLflow + API |
-| A/B Testing | Shadow mode, comparaison statistique, décision de promotion |
-| Supervision | Monitoring global, drift, alertes, tendances de performance |
-| Retrain | Planifier, déclencher et suivre les ré-entraînements |
+| Utilisateurs | Créer/désactiver des comptes, renouveler les tokens, analytics d'utilisation par modèle |
+| Modèles | Détails, passer en production, What-if Explorer (sliders → prédiction live), confusion matrix, importance des features SHAP, validation de schéma, téléchargement .pkl, seuil de confiance, lien MLflow |
+| Prédictions | Historique filtrable par modèle, date, version ; soumission inline de résultat observé ; export CSV/JSONL/Parquet ; purge RGPD |
+| Stats | Graphiques volume, temps de réponse, distribution ; leaderboard ; scatter plot accuracy vs latency P95 |
+| Code Example | Exemples Python, curl/bash et JavaScript générés dynamiquement |
+| A/B Testing | Shadow mode, comparaison statistique, promotion du gagnant en un clic |
+| Supervision | Monitoring global, drift, alertes, configuration des seuils par modèle, export rapport CSV/Markdown |
+| Retrain | Planifier, déclencher et suivre les ré-entraînements ; historique avec métriques ; delta d'importance des features avant/après retrain |
 
 ---
 
