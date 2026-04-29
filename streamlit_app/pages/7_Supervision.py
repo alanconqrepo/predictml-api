@@ -80,8 +80,11 @@ if models_data:
             "error_rate": round(m.get("error_rate", 0), 4),
             "latency_p95": m.get("p95_latency_ms") if m.get("p95_latency_ms") is not None else "",
             "drift_status": _worst_drift(
-                m.get("feature_drift_status", "no_data"),
-                m.get("performance_drift_status", "no_data"),
+                _worst_drift(
+                    m.get("feature_drift_status", "no_data"),
+                    m.get("performance_drift_status", "no_data"),
+                ),
+                m.get("output_drift_status", "no_data"),
             ),
             "accuracy_7d": "",
             "last_retrain": "",
@@ -127,6 +130,7 @@ if models_data:
             _md_lines += [
                 f"- **Drift features** : {_m.get('feature_drift_status', '—')}",
                 f"- **Drift performance** : {_m.get('performance_drift_status', '—')}",
+                f"- **Drift sortie** : {_m.get('output_drift_status', '—')}",
             ]
             _actions = []
             if _m.get("error_rate", 0) >= 0.10:
@@ -137,6 +141,8 @@ if models_data:
                 _actions.append("Drift de features détecté — recalculer le baseline ou ré-entraîner.")
             if _m.get("performance_drift_status") in ("warning", "critical"):
                 _actions.append("Drift de performance détecté — envisager un ré-entraînement.")
+            if _m.get("output_drift_status") in ("warning", "critical"):
+                _actions.append("Drift de sortie (label shift) détecté — vérifier la distribution des prédictions.")
             if _actions:
                 _md_lines += ["", "**Actions recommandées :**"]
                 _md_lines += [f"- {_a}" for _a in _actions]
@@ -234,6 +240,7 @@ for m in models_data:
             "p95": f"{m['p95_latency_ms']} ms" if m.get("p95_latency_ms") else "—",
             "Drift features": _icon(m.get("feature_drift_status", "no_data")),
             "Drift perf.": _icon(m.get("performance_drift_status", "no_data")),
+            "Drift sortie": _icon(m.get("output_drift_status", "no_data")),
             "Statut": _icon(m.get("health_status", "no_data")),
         }
     )

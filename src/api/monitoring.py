@@ -126,6 +126,23 @@ async def _compute_feature_drift_status(
     return drift_service.summarize_drift(features, baseline_available=True)
 
 
+async def _compute_output_drift_status(
+    db: AsyncSession,
+    model_name: str,
+    model_version: Optional[str],
+    period_days: int,
+) -> str:
+    """Retourne le statut de drift de sortie (ok/warning/critical/no_baseline/insufficient_data)."""
+    report = await drift_service.compute_output_drift(
+        model_name=model_name,
+        period_days=period_days,
+        db=db,
+        model_version=model_version,
+        min_predictions=10,
+    )
+    return report.status
+
+
 # ---------------------------------------------------------------------------
 # GET /monitoring/overview
 # ---------------------------------------------------------------------------
@@ -231,6 +248,14 @@ async def monitoring_overview(
             prod_meta.feature_baseline if prod_meta else None,
         )
 
+        # Output drift status
+        output_drift_status = await _compute_output_drift_status(
+            db,
+            model_name,
+            prod_meta.version if prod_meta else None,
+            period_days,
+        )
+
         # Performance drift status
         perf_by_day = await DBService.get_accuracy_drift(db, model_name, start, end)
         perf_drift_status = _performance_drift_status(perf_by_day)
@@ -239,7 +264,9 @@ async def monitoring_overview(
         err_status = _error_rate_status(raw["error_rate"])
 
         # Santé globale = pire indicateur
-        health = _worst_health(err_status, feature_drift_status, perf_drift_status)
+        health = _worst_health(
+            err_status, feature_drift_status, perf_drift_status, output_drift_status
+        )
 
         model_summaries.append(
             ModelHealthSummary(
@@ -255,6 +282,7 @@ async def monitoring_overview(
                 p95_latency_ms=raw["p95_latency_ms"],
                 feature_drift_status=feature_drift_status,
                 performance_drift_status=perf_drift_status,
+                output_drift_status=output_drift_status,
                 last_prediction=raw["last_prediction"],
                 health_status=health,
             )

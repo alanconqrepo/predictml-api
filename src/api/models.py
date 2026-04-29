@@ -81,6 +81,7 @@ from src.schemas.model import (
     ModelPerformanceResponse,
     ModelUpdateInput,
     ModelVersionSummary,
+    OutputDriftResponse,
     PerClassMetrics,
     PerformanceReportResponse,
     PerformanceTimelineResponse,
@@ -576,6 +577,44 @@ async def get_model_drift(
         baseline_available=True,
         drift_summary=summary,
         features=features,
+    )
+
+
+@router.get("/models/{name}/output-drift", response_model=OutputDriftResponse)
+async def get_model_output_drift(
+    name: str,
+    period_days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours"),
+    model_version: Optional[str] = Query(
+        None, description="Version du modèle (défaut : production/dernière)"
+    ),
+    min_predictions: int = Query(
+        30, ge=5, description="Nombre minimum de prédictions pour calculer le drift"
+    ),
+    user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Rapport de drift de distribution des sorties (label shift) pour un modèle.
+
+    Compare la distribution récente des `prediction_result` (sur `period_days` jours)
+    à la distribution d'entraînement stockée dans `training_stats.label_distribution`.
+
+    - **PSI** : ok < 0.1 | warning 0.1–0.2 | critical ≥ 0.2
+    - Retourne `status = "no_baseline"` si `label_distribution` absent de `training_stats`.
+    """
+    metadata = await DBService.get_model_metadata(db, name, model_version)
+    if not metadata:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' introuvable.",
+        )
+
+    return await drift_service.compute_output_drift(
+        model_name=name,
+        period_days=period_days,
+        db=db,
+        model_version=metadata.version,
+        min_predictions=min_predictions,
     )
 
 

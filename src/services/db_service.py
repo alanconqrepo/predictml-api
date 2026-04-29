@@ -768,6 +768,35 @@ class DBService:
         return stats
 
     @staticmethod
+    async def get_prediction_label_distribution(
+        db: AsyncSession,
+        model_name: str,
+        model_version: Optional[str] = None,
+        days: int = 7,
+    ) -> tuple[dict[str, int], int]:
+        """Returns ({label: count}, total) for successful predictions in the last N days."""
+        cutoff = _utcnow() - timedelta(days=days)
+        filters = [
+            Prediction.model_name == model_name,
+            Prediction.status == "success",
+            Prediction.timestamp >= cutoff,
+            Prediction.prediction_result.is_not(None),
+        ]
+        if model_version:
+            filters.append(Prediction.model_version == model_version)
+
+        stmt = select(Prediction.prediction_result).where(and_(*filters))
+        result = await db.execute(stmt)
+        rows = result.scalars().all()
+
+        counts: dict[str, int] = {}
+        for val in rows:
+            key = str(val)
+            counts[key] = counts.get(key, 0) + 1
+
+        return counts, len(rows)
+
+    @staticmethod
     async def get_prediction_stats(
         db: AsyncSession,
         days: int = 30,

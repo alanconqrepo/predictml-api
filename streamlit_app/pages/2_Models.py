@@ -65,6 +65,20 @@ def fetch_model_performance(api_url, token, name, version):
     return c.get_model_performance(name, version=version)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_output_drift(api_url, token, name, version, period_days):
+    import requests
+
+    r = requests.get(
+        f"{api_url}/models/{name}/output-drift",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"model_version": version, "period_days": period_days},
+        timeout=10,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
 @st.cache_data(ttl=10, show_spinner=False)
 def fetch_cached_models(api_url, token):
     """Retourne la liste des clés 'name:version' actuellement en cache Redis."""
@@ -706,6 +720,95 @@ with st.expander("📈 Métriques de performance", expanded=False):
 
     except Exception as e:
         st.warning(f"Impossible de charger les métriques de performance : {e}")
+
+# Drift de sortie (label shift)
+with st.expander("📊 Drift de sortie (label shift)", expanded=False):
+    try:
+        import plotly.express as px
+
+        _od_days = st.slider(
+            "Fenêtre d'analyse (jours)",
+            min_value=1,
+            max_value=30,
+            value=7,
+            key=f"od_days_{selected['name']}_{selected['version']}",
+        )
+        od = fetch_output_drift(
+            st.session_state.get("api_url"),
+            st.session_state.get("api_token"),
+            selected["name"],
+            selected["version"],
+            _od_days,
+        )
+        od_status = od.get("status", "no_baseline")
+        _OD_BADGE = {
+            "ok": "🟢 ok",
+            "warning": "🟡 warning",
+            "critical": "🔴 critical",
+            "no_baseline": "⬜ pas de baseline",
+            "insufficient_data": "⬜ données insuffisantes",
+        }
+        st.markdown(f"**Statut :** {_OD_BADGE.get(od_status, od_status)}")
+
+        if od_status in ("no_baseline", "insufficient_data"):
+            if od_status == "no_baseline":
+                st.info(
+                    "Aucune distribution de labels d'entraînement disponible. "
+                    "Assurez-vous que le script `train.py` imprime un JSON avec `label_distribution`."
+                )
+            else:
+                st.info(
+                    f"Données insuffisantes ({od.get('predictions_analyzed', 0)} prédictions "
+                    f"sur la fenêtre de {_od_days} j — minimum : 30)."
+                )
+        else:
+            col_psi, col_n = st.columns(2)
+            psi_val = od.get("psi")
+            col_psi.metric(
+                "PSI",
+                f"{psi_val:.4f}" if psi_val is not None else "—",
+                help="Population Stability Index : ok < 0.1 | warning 0.1–0.2 | critical ≥ 0.2",
+            )
+            col_n.metric("Prédictions analysées", od.get("predictions_analyzed", 0))
+
+            by_class = od.get("by_class") or []
+            if by_class:
+                st.markdown("**Distribution par classe**")
+                bc_rows = [
+                    {
+                        "Classe": row["label"],
+                        "Baseline": f"{row['baseline_ratio']:.3f}",
+                        "Actuel": f"{row['current_ratio']:.3f}",
+                        "Δ": f"{row['delta']:+.3f}",
+                    }
+                    for row in by_class
+                ]
+                st.dataframe(pd.DataFrame(bc_rows), use_container_width=True, hide_index=True)
+
+                baseline_dist = od.get("baseline_distribution") or {}
+                current_dist = od.get("current_distribution") or {}
+                labels = [row["label"] for row in by_class]
+                df_bar = pd.DataFrame(
+                    {
+                        "Classe": labels + labels,
+                        "Ratio": [baseline_dist.get(l, 0.0) for l in labels]
+                        + [current_dist.get(l, 0.0) for l in labels],
+                        "Source": ["Baseline"] * len(labels) + ["Actuel"] * len(labels),
+                    }
+                )
+                fig_od = px.bar(
+                    df_bar,
+                    x="Classe",
+                    y="Ratio",
+                    color="Source",
+                    barmode="group",
+                    title="Distribution baseline vs actuelle",
+                    color_discrete_map={"Baseline": "#636EFA", "Actuel": "#EF553B"},
+                )
+                fig_od.update_layout(yaxis_tickformat=".0%", yaxis_title="Proportion")
+                st.plotly_chart(fig_od, use_container_width=True)
+    except Exception as e:
+        st.warning(f"Impossible de calculer le drift de sortie : {e}")
 
 # Test interactif de prédiction
 with st.expander("🧪 Tester le modèle", expanded=False):
