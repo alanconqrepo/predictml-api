@@ -352,18 +352,22 @@ class APIClient:
         version: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
+        min_confidence: Optional[float] = None,
+        max_confidence: Optional[float] = None,
     ) -> dict:
-        r = self._get(
-            "/predictions",
-            params={
-                "name": model_name,
-                "start": start,
-                "end": end,
-                "version": version,
-                "limit": limit,
-                "offset": offset,
-            },
-        )
+        params: dict = {
+            "name": model_name,
+            "start": start,
+            "end": end,
+            "version": version,
+            "limit": limit,
+            "offset": offset,
+        }
+        if min_confidence is not None:
+            params["min_confidence"] = min_confidence
+        if max_confidence is not None:
+            params["max_confidence"] = max_confidence
+        r = self._get("/predictions", params=params)
         r.raise_for_status()
         return r.json()
 

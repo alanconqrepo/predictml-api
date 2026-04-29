@@ -186,6 +186,7 @@ class DBService:
         error_message: Optional[str] = None,
         id_obs: Optional[str] = None,
         is_shadow: bool = False,
+        max_confidence: Optional[float] = None,
     ) -> Prediction:
         """Enregistre une prédiction"""
         prediction = Prediction(
@@ -202,6 +203,7 @@ class DBService:
             status=status,
             error_message=error_message,
             is_shadow=is_shadow,
+            max_confidence=max_confidence,
         )
         db.add(prediction)
         await db.commit()
@@ -232,6 +234,8 @@ class DBService:
         id_obs: Optional[str] = None,
         limit: int = 100,
         cursor: Optional[int] = None,
+        min_confidence: Optional[float] = None,
+        max_confidence: Optional[float] = None,
     ) -> tuple[List[Prediction], int]:
         """
         Récupère l'historique des prédictions avec filtres (pagination par curseur).
@@ -255,6 +259,10 @@ class DBService:
             filters.append(Prediction.id_obs == id_obs)
         if cursor is not None:
             filters.append(Prediction.id < cursor)
+        if min_confidence is not None:
+            filters.append(Prediction.max_confidence >= min_confidence)
+        if max_confidence is not None:
+            filters.append(Prediction.max_confidence <= max_confidence)
 
         base_query = (
             select(Prediction).join(User, Prediction.user_id == User.id).where(and_(*filters))
