@@ -487,9 +487,148 @@ else:
 st.divider()
 
 # ===========================================================================
-# SECTION 3 — Log des prédictions shadow récentes
+# SECTION 3 — Analyse shadow enrichie
 # ===========================================================================
-st.subheader("🔮 Prédictions shadow récentes")
+st.subheader("🔮 Analyse shadow enrichie")
+st.caption(
+    "Métriques différentielles entre la version shadow et la version production "
+    "sur les prédictions avec `id_obs` commun."
+)
+
+try:
+    shadow_data = client.get_shadow_comparison(selected_model, period_days=days)
+    shadow_available = True
+except Exception:
+    shadow_data = None
+    shadow_available = False
+
+if not shadow_available or shadow_data is None:
+    st.info("Impossible de charger les données shadow.")
+elif shadow_data.get("shadow_version") is None:
+    st.info("Aucune version en mode shadow pour ce modèle.")
+else:
+    sv = shadow_data["shadow_version"]
+    pv = shadow_data["production_version"]
+    n_comparable = shadow_data["n_comparable"]
+    agreement_rate = shadow_data.get("agreement_rate")
+    conf_delta = shadow_data.get("shadow_confidence_delta")
+    lat_delta = shadow_data.get("shadow_latency_delta_ms")
+    shadow_acc = shadow_data.get("shadow_accuracy")
+    prod_acc = shadow_data.get("production_accuracy")
+    accuracy_available = shadow_data.get("accuracy_available", False)
+    recommendation = shadow_data.get("recommendation", "insufficient_data")
+
+    _rec_badge = {
+        "shadow_better": ("🟢", "Le shadow semble meilleur"),
+        "production_better": ("🔴", "La production reste meilleure"),
+        "equivalent": ("🟡", "Performances équivalentes"),
+        "insufficient_data": ("⚪", "Données insuffisantes pour conclure"),
+    }.get(recommendation, ("⚪", recommendation))
+
+    st.markdown(
+        f"**Shadow `{sv}`** vs **Production `{pv}`** — "
+        f"{_rec_badge[0]} *{_rec_badge[1]}*"
+    )
+
+    _cols = st.columns(5)
+    _cols[0].metric("Paires comparables", n_comparable)
+    _cols[1].metric(
+        "Accord des prédictions",
+        f"{agreement_rate:.1%}" if agreement_rate is not None else "—",
+        help="Fraction des id_obs où shadow et production prédisent la même valeur.",
+    )
+    _cols[2].metric(
+        "Δ Confiance",
+        f"{conf_delta:+.3f}" if conf_delta is not None else "—",
+        delta_color="normal" if conf_delta is not None else "off",
+        delta=f"{conf_delta:+.3f}" if conf_delta is not None else None,
+        help="max_confidence shadow − max_confidence production (positif = shadow plus confiant).",
+    )
+    _cols[3].metric(
+        "Δ Latence (ms)",
+        f"{lat_delta:+.1f}" if lat_delta is not None else "—",
+        delta=f"{lat_delta:+.1f}" if lat_delta is not None else None,
+        delta_color="inverse" if lat_delta is not None else "off",
+        help="Latence moyenne shadow − latence moyenne production (négatif = shadow plus rapide).",
+    )
+
+    if accuracy_available and shadow_acc is not None and prod_acc is not None:
+        _cols[4].metric(
+            "Accuracy shadow vs prod",
+            f"{shadow_acc:.1%} / {prod_acc:.1%}",
+            help="Accuracy calculée sur les paires ayant un observed_result.",
+        )
+    else:
+        _cols[4].metric(
+            "Accuracy",
+            "—",
+            help="Non disponible : aucun observed_result pour les id_obs comparés.",
+        )
+
+    if agreement_rate is not None and n_comparable > 0:
+        fig_agree_gauge = go.Figure(
+            go.Indicator(
+                mode="gauge+number",
+                value=agreement_rate * 100,
+                number={"valueformat": ".1f", "suffix": "%"},
+                gauge={
+                    "axis": {"range": [0, 100]},
+                    "bar": {
+                        "color": (
+                            "#16a34a"
+                            if agreement_rate >= 0.9
+                            else "#f59e0b" if agreement_rate >= 0.7 else "#dc2626"
+                        )
+                    },
+                    "steps": [
+                        {"range": [0, 70], "color": "#fee2e2"},
+                        {"range": [70, 90], "color": "#fef3c7"},
+                        {"range": [90, 100], "color": "#dcfce7"},
+                    ],
+                    "threshold": {
+                        "line": {"color": "#7c3aed", "width": 3},
+                        "thickness": 0.85,
+                        "value": 90,
+                    },
+                },
+                title={"text": "Accord shadow / production (%)"},
+            )
+        )
+        fig_agree_gauge.update_layout(height=240, margin=dict(t=40, b=10, l=20, r=20))
+        st.plotly_chart(fig_agree_gauge, use_container_width=True)
+
+    if recommendation == "shadow_better" and is_admin:
+        with st.container(border=True):
+            promo_col1, promo_col2 = st.columns([3, 1])
+            promo_col1.markdown(
+                f"🟢 **Le shadow `{sv}` semble meilleur que la production `{pv}`** — "
+                "promouvoir pour qu'il devienne la version active ?"
+            )
+            if promo_col2.button(
+                "🚀 Promouvoir le shadow",
+                type="primary",
+                key="shadow_promote_btn",
+                use_container_width=True,
+            ):
+                errors_shadow_promo = []
+                try:
+                    client.update_model(selected_model, sv, {"is_production": True})
+                except Exception as exc:
+                    errors_shadow_promo.append(f"Promotion `{sv}` : {exc}")
+                if errors_shadow_promo:
+                    for err in errors_shadow_promo:
+                        st.error(err)
+                else:
+                    st.success(f"✅ `{sv}` promu en production avec succès.")
+                    st.cache_data.clear()
+                    st.rerun()
+
+st.divider()
+
+# ===========================================================================
+# SECTION 4 — Log des prédictions shadow récentes
+# ===========================================================================
+st.subheader("📋 Prédictions shadow récentes")
 
 end_dt = datetime.utcnow()
 start_dt = end_dt - timedelta(days=days)

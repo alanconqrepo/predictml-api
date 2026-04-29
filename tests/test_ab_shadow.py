@@ -433,3 +433,164 @@ def test_legacy_fallback_uses_production_version():
         assert r.json()["model_version"] == V1
     finally:
         asyncio.run(model_service.clear_cache(key))
+
+
+# ---------------------------------------------------------------------------
+# Test 11 — GET /models/{name}/shadow-compare : structure de réponse
+# ---------------------------------------------------------------------------
+
+
+def test_get_shadow_compare_structure():
+    """GET /models/{name}/shadow-compare → ShadowCompareResponse avec champs attendus."""
+    r = client.get(
+        f"/models/{SHADOW_MODEL}/shadow-compare",
+        headers=_headers(),
+        params={"period_days": 30},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["model_name"] == SHADOW_MODEL
+    assert "period_days" in data
+    assert data["period_days"] == 30
+    assert "n_comparable" in data
+    assert isinstance(data["n_comparable"], int)
+    assert "agreement_rate" in data
+    assert "shadow_confidence_delta" in data
+    assert "shadow_latency_delta_ms" in data
+    assert "shadow_accuracy" in data
+    assert "production_accuracy" in data
+    assert "accuracy_available" in data
+    assert isinstance(data["accuracy_available"], bool)
+    assert "recommendation" in data
+    assert data["recommendation"] in (
+        "shadow_better",
+        "production_better",
+        "equivalent",
+        "insufficient_data",
+    )
+    assert data["shadow_version"] == V2
+    assert data["production_version"] == V1
+
+
+# ---------------------------------------------------------------------------
+# Test 12 — GET /models/{name}/shadow-compare : modèle inexistant → 404
+# ---------------------------------------------------------------------------
+
+
+def test_get_shadow_compare_unknown_model_returns_404():
+    """GET /models/{name}/shadow-compare pour un modèle inexistant → 404."""
+    r = client.get(
+        "/models/nonexistent_shadow_model_xyz/shadow-compare",
+        headers=_headers(),
+    )
+    assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Test 13 — GET /models/{name}/shadow-compare : sans version shadow → n_comparable=0
+# ---------------------------------------------------------------------------
+
+
+def test_get_shadow_compare_no_shadow_version():
+    """Modèle sans version shadow → shadow_version=None, n_comparable=0, insufficient_data."""
+    r = client.get(
+        f"/models/{AB_MODEL}/shadow-compare",
+        headers=_headers(),
+        params={"period_days": 30},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["shadow_version"] is None
+    assert data["n_comparable"] == 0
+    assert data["agreement_rate"] is None
+    assert data["recommendation"] == "insufficient_data"
+
+
+# ---------------------------------------------------------------------------
+# Test 14 — GET /models/{name}/shadow-compare : avec paires en DB → métriques calculées
+# ---------------------------------------------------------------------------
+
+
+SHADOW_PAIRS_MODEL = "shadow_pairs_test_model"
+
+
+async def _setup_shadow_pairs_model():
+    """Crée un modèle dédié avec version shadow + production pour le test de paires."""
+    async with _TestSessionLocal() as db:
+        for ver, mode, is_prod in [
+            (V1, None, True),
+            (V2, "shadow", False),
+        ]:
+            if not await DBService.get_model_metadata(db, SHADOW_PAIRS_MODEL, ver):
+                await DBService.create_model_metadata(
+                    db,
+                    name=SHADOW_PAIRS_MODEL,
+                    version=ver,
+                    minio_bucket="models",
+                    minio_object_key=f"{SHADOW_PAIRS_MODEL}/v{ver}.pkl",
+                    is_active=True,
+                    is_production=is_prod,
+                    deployment_mode=mode,
+                    traffic_weight=None,
+                )
+
+        user = await DBService.get_user_by_token(db, TEST_TOKEN)
+        for i in range(15):
+            id_obs = f"sc-pairs-{i:04d}"
+            await DBService.create_prediction(
+                db,
+                user_id=user.id,
+                model_name=SHADOW_PAIRS_MODEL,
+                model_version=V1,
+                input_features={"f1": float(i), "f2": float(i + 1)},
+                prediction_result=0,
+                probabilities=[0.75, 0.25],
+                response_time_ms=10.0,
+                id_obs=id_obs,
+                is_shadow=False,
+                max_confidence=0.75,
+            )
+            await DBService.create_prediction(
+                db,
+                user_id=user.id,
+                model_name=SHADOW_PAIRS_MODEL,
+                model_version=V2,
+                input_features={"f1": float(i), "f2": float(i + 1)},
+                prediction_result=0,
+                probabilities=[0.90, 0.10],
+                response_time_ms=8.0,
+                id_obs=id_obs,
+                is_shadow=True,
+                max_confidence=0.90,
+            )
+
+
+asyncio.run(_setup_shadow_pairs_model())
+
+
+def test_get_shadow_compare_with_pairs():
+    """Avec 15 paires en DB → n_comparable=15, agreement_rate calculé, recommendation."""
+    r = client.get(
+        f"/models/{SHADOW_PAIRS_MODEL}/shadow-compare",
+        headers=_headers(),
+        params={"period_days": 30},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["n_comparable"] == 15
+    assert data["agreement_rate"] is not None
+    assert 0.0 <= data["agreement_rate"] <= 1.0
+    # Les deux prédisent 0 → accord = 100 %
+    assert data["agreement_rate"] == 1.0
+    # shadow_confidence_delta = 0.90 - 0.75 = +0.15
+    assert data["shadow_confidence_delta"] is not None
+    assert abs(data["shadow_confidence_delta"] - 0.15) < 0.01
+    # shadow_latency_delta_ms = 8 - 10 = -2.0
+    assert data["shadow_latency_delta_ms"] is not None
+    assert abs(data["shadow_latency_delta_ms"] - (-2.0)) < 0.5
+    # Pas d'observed_results → accuracy_available=False
+    assert data["accuracy_available"] is False
+    assert data["shadow_accuracy"] is None
+    assert data["production_accuracy"] is None
+    # recommendation : confidence_delta = 0.15 > 0.05 → shadow_better
+    assert data["recommendation"] == "shadow_better"
