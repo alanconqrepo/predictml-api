@@ -375,6 +375,23 @@ class ABCompareResponse(BaseModel):
     ab_significance: Optional[ABSignificance] = None
 
 
+class ShadowCompareResponse(BaseModel):
+    """Réponse de GET /models/{name}/shadow-compare"""
+
+    model_name: str
+    shadow_version: Optional[str] = None
+    production_version: Optional[str] = None
+    period_days: int
+    n_comparable: int
+    agreement_rate: Optional[float] = None
+    shadow_confidence_delta: Optional[float] = None
+    shadow_latency_delta_ms: Optional[float] = None
+    shadow_accuracy: Optional[float] = None
+    production_accuracy: Optional[float] = None
+    accuracy_available: bool
+    recommendation: str
+
+
 # ---------------------------------------------------------------------------
 # Politique d'auto-promotion post-retrain
 # ---------------------------------------------------------------------------

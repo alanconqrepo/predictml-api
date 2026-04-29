@@ -1546,6 +1546,145 @@ class DBService:
             if matches
         }
 
+    @staticmethod
+    async def get_shadow_comparison_stats(
+        db: AsyncSession,
+        model_name: str,
+        period_days: int = 30,
+    ) -> dict:
+        """
+        Calcule les métriques comparatives entre la version shadow et la version production
+        sur les paires id_obs communs dans la fenêtre glissante.
+
+        Retourne un dict avec : shadow_version, production_version, n_comparable,
+        agreement_rate, shadow_confidence_delta, shadow_latency_delta_ms,
+        shadow_accuracy, production_accuracy, accuracy_available.
+        """
+        from sqlalchemy.orm import aliased
+
+        cutoff = _utcnow() - timedelta(days=period_days)
+
+        meta_result = await db.execute(
+            select(ModelMetadata).where(
+                and_(ModelMetadata.name == model_name, ModelMetadata.is_active.is_(True))
+            )
+        )
+        metas = meta_result.scalars().all()
+
+        shadow_meta = next((m for m in metas if m.deployment_mode == "shadow"), None)
+        prod_meta = next((m for m in metas if m.is_production), None)
+
+        base = {
+            "shadow_version": shadow_meta.version if shadow_meta else None,
+            "production_version": prod_meta.version if prod_meta else None,
+            "n_comparable": 0,
+            "agreement_rate": None,
+            "shadow_confidence_delta": None,
+            "shadow_latency_delta_ms": None,
+            "shadow_accuracy": None,
+            "production_accuracy": None,
+            "accuracy_available": False,
+        }
+
+        if not shadow_meta or not prod_meta:
+            return base
+
+        prod_p = aliased(Prediction)
+        shadow_p = aliased(Prediction)
+
+        stmt = (
+            select(
+                shadow_p.prediction_result.label("shadow_pred"),
+                prod_p.prediction_result.label("prod_pred"),
+                shadow_p.max_confidence.label("shadow_conf"),
+                prod_p.max_confidence.label("prod_conf"),
+                shadow_p.response_time_ms.label("shadow_rt"),
+                prod_p.response_time_ms.label("prod_rt"),
+                shadow_p.id_obs.label("id_obs"),
+            )
+            .join(
+                prod_p,
+                and_(
+                    shadow_p.id_obs == prod_p.id_obs,
+                    shadow_p.model_name == prod_p.model_name,
+                    prod_p.is_shadow.is_(False),
+                    prod_p.status == "success",
+                    prod_p.model_version == prod_meta.version,
+                ),
+            )
+            .where(
+                and_(
+                    shadow_p.model_name == model_name,
+                    shadow_p.is_shadow.is_(True),
+                    shadow_p.status == "success",
+                    shadow_p.model_version == shadow_meta.version,
+                    shadow_p.timestamp >= cutoff,
+                    shadow_p.id_obs.isnot(None),
+                )
+            )
+        )
+
+        result = await db.execute(stmt)
+        rows = result.all()
+        n_comparable = len(rows)
+        base["n_comparable"] = n_comparable
+
+        if n_comparable == 0:
+            return base
+
+        matches = [str(r.shadow_pred) == str(r.prod_pred) for r in rows]
+        base["agreement_rate"] = round(sum(matches) / n_comparable, 4)
+
+        conf_pairs = [
+            (r.shadow_conf, r.prod_conf)
+            for r in rows
+            if r.shadow_conf is not None and r.prod_conf is not None
+        ]
+        if conf_pairs:
+            base["shadow_confidence_delta"] = round(
+                sum(s - p for s, p in conf_pairs) / len(conf_pairs), 4
+            )
+
+        rt_pairs = [
+            (r.shadow_rt, r.prod_rt)
+            for r in rows
+            if r.shadow_rt is not None and r.prod_rt is not None
+        ]
+        if rt_pairs:
+            base["shadow_latency_delta_ms"] = round(
+                sum(s - p for s, p in rt_pairs) / len(rt_pairs), 2
+            )
+
+        observed_ids = list({r.id_obs for r in rows})
+        obs_result = await db.execute(
+            select(ObservedResult.id_obs, ObservedResult.observed_result).where(
+                and_(
+                    ObservedResult.model_name == model_name,
+                    ObservedResult.id_obs.in_(observed_ids),
+                )
+            )
+        )
+        obs_by_id = {r.id_obs: r.observed_result for r in obs_result.all()}
+
+        base["accuracy_available"] = bool(obs_by_id)
+
+        if obs_by_id:
+            shadow_correct = prod_correct = count_with_obs = 0
+            for r in rows:
+                obs = obs_by_id.get(r.id_obs)
+                if obs is None:
+                    continue
+                count_with_obs += 1
+                if str(r.shadow_pred) == str(obs):
+                    shadow_correct += 1
+                if str(r.prod_pred) == str(obs):
+                    prod_correct += 1
+            if count_with_obs > 0:
+                base["shadow_accuracy"] = round(shadow_correct / count_with_obs, 4)
+                base["production_accuracy"] = round(prod_correct / count_with_obs, 4)
+
+        return base
+
     # === Monitoring / Supervision Dashboard ===
 
     @staticmethod

@@ -99,6 +99,7 @@ from src.schemas.model import (
     RetrainScheduleInput,
     RollbackResponse,
     ScheduleUpdateResponse,
+    ShadowCompareResponse,
     ValidateInputResponse,
     VersionTimelineEntry,
     WarmupResponse,
@@ -1724,6 +1725,87 @@ async def get_ab_comparison(
         period_days=days,
         versions=versions_out,
         ab_significance=ab_significance,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Shadow Deployment — comparaison enrichie
+# ---------------------------------------------------------------------------
+
+
+def _shadow_recommendation(
+    n_comparable: int,
+    shadow_accuracy: Optional[float],
+    production_accuracy: Optional[float],
+    shadow_confidence_delta: Optional[float],
+) -> str:
+    if n_comparable < 10:
+        return "insufficient_data"
+    if shadow_accuracy is not None and production_accuracy is not None:
+        diff = shadow_accuracy - production_accuracy
+        if diff > 0.02:
+            return "shadow_better"
+        if diff < -0.02:
+            return "production_better"
+        return "equivalent"
+    if shadow_confidence_delta is not None:
+        if shadow_confidence_delta >= 0.05:
+            return "shadow_better"
+        if shadow_confidence_delta <= -0.05:
+            return "production_better"
+    return "equivalent"
+
+
+@router.get("/models/{name}/shadow-compare", response_model=ShadowCompareResponse)
+async def get_shadow_comparison(
+    name: str,
+    period_days: int = Query(30, ge=1, le=90, description="Fenêtre d'analyse en jours (max 90)"),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Comparaison enrichie entre la version shadow et la version production d'un modèle.
+
+    Retourne : accord des prédictions, delta de confiance, delta de latence,
+    et accuracy shadow vs production si des observed_results sont disponibles.
+    La recommandation (shadow_better / production_better / equivalent / insufficient_data)
+    est calculée automatiquement.
+
+    Nécessite un token Bearer valide.
+    """
+    all_metas_result = await db.execute(
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.is_active.is_(True))
+        )
+    )
+    all_metas = all_metas_result.scalars().all()
+    if not all_metas:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' introuvable ou inactif.",
+        )
+
+    stats = await DBService.get_shadow_comparison_stats(db, name, period_days=period_days)
+    recommendation = _shadow_recommendation(
+        n_comparable=stats["n_comparable"],
+        shadow_accuracy=stats["shadow_accuracy"],
+        production_accuracy=stats["production_accuracy"],
+        shadow_confidence_delta=stats["shadow_confidence_delta"],
+    )
+
+    return ShadowCompareResponse(
+        model_name=name,
+        shadow_version=stats["shadow_version"],
+        production_version=stats["production_version"],
+        period_days=period_days,
+        n_comparable=stats["n_comparable"],
+        agreement_rate=stats["agreement_rate"],
+        shadow_confidence_delta=stats["shadow_confidence_delta"],
+        shadow_latency_delta_ms=stats["shadow_latency_delta_ms"],
+        shadow_accuracy=stats["shadow_accuracy"],
+        production_accuracy=stats["production_accuracy"],
+        accuracy_available=stats["accuracy_available"],
+        recommendation=recommendation,
     )
 
 

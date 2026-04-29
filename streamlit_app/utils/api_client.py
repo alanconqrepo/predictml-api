@@ -447,6 +447,14 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def get_shadow_comparison(self, model_name: str, period_days: int = 30) -> dict:
+        """Retourne les métriques enrichies shadow vs production pour un modèle."""
+        r = self._get(
+            f"/models/{model_name}/shadow-compare", params={"period_days": period_days}
+        )
+        r.raise_for_status()
+        return r.json()
+
     def compare_model_versions(
         self,
         model_name: str,
