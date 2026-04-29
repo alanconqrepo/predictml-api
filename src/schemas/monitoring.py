@@ -26,6 +26,7 @@ class ModelHealthSummary(BaseModel):
     p95_latency_ms: Optional[float]
     feature_drift_status: str  # ok / warning / critical / no_baseline / no_data
     performance_drift_status: str  # ok / warning / critical / no_data
+    output_drift_status: str  # ok / warning / critical / no_baseline / no_data
     last_prediction: Optional[datetime]
     health_status: str  # worst-of: ok / warning / critical
 

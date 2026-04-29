@@ -192,6 +192,43 @@ async def run_alert_check() -> None:
                                         )
                                     )
 
+                # Alerte drift de sortie (label shift)
+                if prod_meta:
+                    drift_enabled = (
+                        thresholds.get("drift_auto_alert", True) if thresholds is not None else True
+                    )
+                    if drift_enabled:
+                        output_report = await drift_service.compute_output_drift(
+                            model_name=model_name,
+                            period_days=1,
+                            db=db,
+                            model_version=prod_meta.version,
+                            min_predictions=10,
+                        )
+                        if output_report.status == "critical":
+                            logger.warning(
+                                "Drift de sortie critique (label shift)",
+                                model=model_name,
+                                psi=output_report.psi,
+                            )
+                            if prod_meta.webhook_url:
+                                asyncio.create_task(
+                                    send_webhook(
+                                        prod_meta.webhook_url,
+                                        {
+                                            "model_name": model_name,
+                                            "version": prod_meta.version,
+                                            "timestamp": end.isoformat() + "Z",
+                                            "details": {
+                                                "psi": output_report.psi,
+                                                "status": output_report.status,
+                                                "predictions_analyzed": output_report.predictions_analyzed,
+                                            },
+                                        },
+                                        event_type="output_drift_critical",
+                                    )
+                                )
+
     except Exception as exc:
         logger.error("Erreur lors de la vérification des alertes", error=str(exc))
 

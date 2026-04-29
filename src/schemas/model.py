@@ -254,6 +254,34 @@ class DriftReportResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Output drift (label shift monitoring)
+# ---------------------------------------------------------------------------
+
+
+class OutputDriftClassResult(BaseModel):
+    """Distribution par classe pour le drift de sortie"""
+
+    label: str
+    baseline_ratio: float
+    current_ratio: float
+    delta: float
+
+
+class OutputDriftResponse(BaseModel):
+    """Rapport de drift de distribution de sortie (label shift)"""
+
+    model_name: str
+    model_version: Optional[str]
+    period_days: int
+    predictions_analyzed: int
+    status: str  # "ok" | "warning" | "critical" | "no_baseline" | "insufficient_data"
+    psi: Optional[float] = None
+    baseline_distribution: Optional[Dict[str, float]] = None
+    current_distribution: Optional[Dict[str, float]] = None
+    by_class: Optional[List[OutputDriftClassResult]] = None
+
+
+# ---------------------------------------------------------------------------
 # Historique et rollback
 # ---------------------------------------------------------------------------
 

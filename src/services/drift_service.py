@@ -15,12 +15,17 @@ Statut final = pire des trois statuts.
 """
 
 import math
-from typing import Dict, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
 import numpy as np
 from scipy import stats
 
 from src.schemas.model import FeatureDriftResult
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from src.schemas.model import OutputDriftResponse
 
 _N_BINS = 10
 _EPS = 1e-6  # évite log(0)
@@ -242,3 +247,100 @@ def summarize_drift(features: Dict[str, FeatureDriftResult], baseline_available:
 def is_nan_safe(value: float) -> bool:
     """Vérifie si une valeur float est NaN ou infinie."""
     return math.isnan(value) or math.isinf(value)
+
+
+_OUTPUT_DRIFT_EPS = 1e-6
+
+
+async def compute_output_drift(
+    model_name: str,
+    period_days: int,
+    db: "AsyncSession",
+    model_version: Optional[str] = None,
+    min_predictions: int = 30,
+) -> "OutputDriftResponse":
+    """
+    Calcule le drift de distribution des sorties (label shift).
+
+    Compare la distribution récente de prediction_result à la distribution
+    d'entraînement stockée dans training_stats.label_distribution.
+
+    PSI < 0.1 → ok | 0.1–0.2 → warning | ≥ 0.2 → critical
+    Retourne status="no_baseline" si label_distribution absent.
+    """
+    from src.schemas.model import OutputDriftClassResult, OutputDriftResponse
+    from src.services.db_service import DBService
+
+    metadata = await DBService.get_model_metadata(db, model_name, model_version)
+    if not metadata:
+        return OutputDriftResponse(
+            model_name=model_name,
+            model_version=model_version,
+            period_days=period_days,
+            predictions_analyzed=0,
+            status="no_baseline",
+        )
+
+    training_stats = metadata.training_stats or {}
+    baseline_distribution = training_stats.get("label_distribution")
+
+    if not baseline_distribution:
+        return OutputDriftResponse(
+            model_name=model_name,
+            model_version=metadata.version,
+            period_days=period_days,
+            predictions_analyzed=0,
+            status="no_baseline",
+        )
+
+    label_counts, total = await DBService.get_prediction_label_distribution(
+        db, model_name, metadata.version, days=period_days
+    )
+
+    if total < min_predictions:
+        return OutputDriftResponse(
+            model_name=model_name,
+            model_version=metadata.version,
+            period_days=period_days,
+            predictions_analyzed=total,
+            status="insufficient_data",
+        )
+
+    current_distribution = {label: count / total for label, count in label_counts.items()}
+
+    all_labels = sorted(set(baseline_distribution.keys()) | set(current_distribution.keys()))
+
+    psi = 0.0
+    for label in all_labels:
+        bl = max(float(baseline_distribution.get(label, 0.0)), _OUTPUT_DRIFT_EPS)
+        cur = max(current_distribution.get(label, 0.0), _OUTPUT_DRIFT_EPS)
+        psi += (cur - bl) * math.log(cur / bl)
+    psi = round(psi, 6)
+
+    drift_status = _status_from_psi(psi)
+
+    by_class = [
+        OutputDriftClassResult(
+            label=label,
+            baseline_ratio=round(float(baseline_distribution.get(label, 0.0)), 4),
+            current_ratio=round(current_distribution.get(label, 0.0), 4),
+            delta=round(
+                current_distribution.get(label, 0.0)
+                - float(baseline_distribution.get(label, 0.0)),
+                4,
+            ),
+        )
+        for label in all_labels
+    ]
+
+    return OutputDriftResponse(
+        model_name=model_name,
+        model_version=metadata.version,
+        period_days=period_days,
+        predictions_analyzed=total,
+        status=drift_status,
+        psi=psi,
+        baseline_distribution={k: round(float(v), 4) for k, v in baseline_distribution.items()},
+        current_distribution={k: round(v, 4) for k, v in current_distribution.items()},
+        by_class=by_class,
+    )

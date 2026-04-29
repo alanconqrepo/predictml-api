@@ -526,3 +526,255 @@ def test_summarize_drift_null_rate_none_no_change():
         "f1": FeatureDriftResult(production_count=100, drift_status="ok", null_rate_status=None),
     }
     assert summarize_drift(features, baseline_available=True) == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Tests output drift — compute_output_drift (logique via endpoint)
+# ---------------------------------------------------------------------------
+
+
+def _fake_output_metadata(training_stats=None, version="1.0.0"):
+    return SimpleNamespace(
+        name="iris",
+        version=version,
+        training_stats=training_stats,
+    )
+
+
+def _make_output_drift_mocks(label_distribution, label_counts, total):
+    """Retourne les patches nécessaires pour tester compute_output_drift."""
+    meta = _fake_output_metadata(
+        training_stats={"label_distribution": label_distribution}
+    )
+    return meta, label_counts, total
+
+
+# ---------------------------------------------------------------------------
+# Tests endpoint GET /models/{name}/output-drift
+# ---------------------------------------------------------------------------
+
+
+def test_output_drift_no_baseline():
+    """Modèle sans training_stats.label_distribution → status=no_baseline."""
+    meta = _fake_output_metadata(training_stats=None)
+
+    with _patch_auth(), patch(
+        "src.services.db_service.DBService.get_model_metadata", new=AsyncMock(return_value=meta)
+    ), patch(
+        "src.services.db_service.DBService.get_prediction_label_distribution",
+        new=AsyncMock(return_value=({}, 0)),
+    ):
+        resp = client.get(
+            "/models/iris/output-drift",
+            headers=AUTH_HEADERS,
+            params={"period_days": 7},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "no_baseline"
+    assert data["psi"] is None
+    assert data["by_class"] is None
+
+
+def test_output_drift_empty_label_distribution():
+    """label_distribution vide dans training_stats → status=no_baseline."""
+    meta = _fake_output_metadata(training_stats={"label_distribution": {}})
+
+    with _patch_auth(), patch(
+        "src.services.db_service.DBService.get_model_metadata", new=AsyncMock(return_value=meta)
+    ), patch(
+        "src.services.db_service.DBService.get_prediction_label_distribution",
+        new=AsyncMock(return_value=({}, 0)),
+    ):
+        resp = client.get(
+            "/models/iris/output-drift",
+            headers=AUTH_HEADERS,
+            params={"period_days": 7},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "no_baseline"
+
+
+def test_output_drift_insufficient_data():
+    """Moins de 30 prédictions → status=insufficient_data."""
+    label_distribution = {"setosa": 0.33, "versicolor": 0.34, "virginica": 0.33}
+    meta = _fake_output_metadata(training_stats={"label_distribution": label_distribution})
+
+    with _patch_auth(), patch(
+        "src.services.db_service.DBService.get_model_metadata", new=AsyncMock(return_value=meta)
+    ), patch(
+        "src.services.db_service.DBService.get_prediction_label_distribution",
+        new=AsyncMock(return_value=({"setosa": 5}, 5)),
+    ):
+        resp = client.get(
+            "/models/iris/output-drift",
+            headers=AUTH_HEADERS,
+            params={"period_days": 7},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "insufficient_data"
+    assert data["predictions_analyzed"] == 5
+
+
+def test_output_drift_ok():
+    """Distribution actuelle proche du baseline → status=ok, PSI < 0.1."""
+    label_distribution = {"setosa": 0.33, "versicolor": 0.34, "virginica": 0.33}
+    # Counts proportionnels à la baseline → PSI ≈ 0
+    label_counts = {"setosa": 33, "versicolor": 34, "virginica": 33}
+    total = 100
+
+    meta = _fake_output_metadata(training_stats={"label_distribution": label_distribution})
+
+    with _patch_auth(), patch(
+        "src.services.db_service.DBService.get_model_metadata", new=AsyncMock(return_value=meta)
+    ), patch(
+        "src.services.db_service.DBService.get_prediction_label_distribution",
+        new=AsyncMock(return_value=(label_counts, total)),
+    ):
+        resp = client.get(
+            "/models/iris/output-drift",
+            headers=AUTH_HEADERS,
+            params={"period_days": 7},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert data["psi"] is not None
+    assert data["psi"] < 0.1
+    assert data["predictions_analyzed"] == 100
+    assert len(data["by_class"]) == 3
+
+
+def test_output_drift_warning():
+    """Distribution modérément décalée → status=warning, 0.1 ≤ PSI < 0.2."""
+    label_distribution = {"setosa": 0.33, "versicolor": 0.34, "virginica": 0.33}
+    # Déséquilibre modéré
+    label_counts = {"setosa": 50, "versicolor": 30, "virginica": 20}
+    total = 100
+
+    meta = _fake_output_metadata(training_stats={"label_distribution": label_distribution})
+
+    with _patch_auth(), patch(
+        "src.services.db_service.DBService.get_model_metadata", new=AsyncMock(return_value=meta)
+    ), patch(
+        "src.services.db_service.DBService.get_prediction_label_distribution",
+        new=AsyncMock(return_value=(label_counts, total)),
+    ):
+        resp = client.get(
+            "/models/iris/output-drift",
+            headers=AUTH_HEADERS,
+            params={"period_days": 7},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] in ("warning", "critical")
+    assert data["psi"] is not None
+    assert data["psi"] >= 0.1
+    assert data["baseline_distribution"] is not None
+    assert data["current_distribution"] is not None
+
+
+def test_output_drift_critical():
+    """Distribution fortement déséquilibrée → status=critical, PSI ≥ 0.2."""
+    label_distribution = {"setosa": 0.33, "versicolor": 0.34, "virginica": 0.33}
+    # Déséquilibre fort : 90% setosa
+    label_counts = {"setosa": 90, "versicolor": 5, "virginica": 5}
+    total = 100
+
+    meta = _fake_output_metadata(training_stats={"label_distribution": label_distribution})
+
+    with _patch_auth(), patch(
+        "src.services.db_service.DBService.get_model_metadata", new=AsyncMock(return_value=meta)
+    ), patch(
+        "src.services.db_service.DBService.get_prediction_label_distribution",
+        new=AsyncMock(return_value=(label_counts, total)),
+    ):
+        resp = client.get(
+            "/models/iris/output-drift",
+            headers=AUTH_HEADERS,
+            params={"period_days": 7},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "critical"
+    assert data["psi"] >= 0.2
+    # by_class doit contenir le delta pour setosa
+    setosa_class = next(c for c in data["by_class"] if c["label"] == "setosa")
+    assert setosa_class["delta"] > 0.5
+
+
+def test_output_drift_by_class_structure():
+    """Vérifie la structure complète de by_class."""
+    label_distribution = {"A": 0.5, "B": 0.5}
+    label_counts = {"A": 40, "B": 60}
+    total = 100
+
+    meta = _fake_output_metadata(training_stats={"label_distribution": label_distribution})
+
+    with _patch_auth(), patch(
+        "src.services.db_service.DBService.get_model_metadata", new=AsyncMock(return_value=meta)
+    ), patch(
+        "src.services.db_service.DBService.get_prediction_label_distribution",
+        new=AsyncMock(return_value=(label_counts, total)),
+    ):
+        resp = client.get(
+            "/models/iris/output-drift",
+            headers=AUTH_HEADERS,
+            params={"period_days": 7},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    by_class = data["by_class"]
+    assert len(by_class) == 2
+    for entry in by_class:
+        assert "label" in entry
+        assert "baseline_ratio" in entry
+        assert "current_ratio" in entry
+        assert "delta" in entry
+    # A a moins que baseline → delta négatif
+    a_entry = next(c for c in by_class if c["label"] == "A")
+    assert a_entry["delta"] < 0
+
+
+def test_output_drift_404_unknown_model():
+    """Modèle inexistant → 404."""
+    with _patch_auth(), patch(
+        "src.services.db_service.DBService.get_model_metadata", new=AsyncMock(return_value=None)
+    ):
+        resp = client.get(
+            "/models/unknown_model/output-drift",
+            headers=AUTH_HEADERS,
+        )
+    assert resp.status_code == 404
+
+
+def test_output_drift_auth_required():
+    """Sans token → 401/403."""
+    resp = client.get("/models/iris/output-drift")
+    assert resp.status_code in (401, 403)
+
+
+def test_output_drift_model_version_in_response():
+    """La version du modèle est bien retournée dans la réponse."""
+    label_distribution = {"cat": 0.5, "dog": 0.5}
+    label_counts = {"cat": 50, "dog": 50}
+    meta = _fake_output_metadata(
+        training_stats={"label_distribution": label_distribution}, version="2.0.0"
+    )
+
+    with _patch_auth(), patch(
+        "src.services.db_service.DBService.get_model_metadata", new=AsyncMock(return_value=meta)
+    ), patch(
+        "src.services.db_service.DBService.get_prediction_label_distribution",
+        new=AsyncMock(return_value=(label_counts, 100)),
+    ):
+        resp = client.get(
+            "/models/iris/output-drift",
+            headers=AUTH_HEADERS,
+            params={"model_version": "2.0.0"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["model_version"] == "2.0.0"
+    assert data["model_name"] == "iris"
