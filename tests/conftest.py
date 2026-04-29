@@ -39,7 +39,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.pool import StaticPool
 
 from src.db.database import get_db, Base
-from src.db.models import User, Prediction, ModelMetadata, ObservedResult  # noqa: F401 — enregistre les modèles dans Base
+from src.db.models import GoldenTest, User, Prediction, ModelMetadata, ObservedResult  # noqa: F401 — enregistre les modèles dans Base
 from src.main import app
 
 

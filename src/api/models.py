@@ -45,6 +45,7 @@ from src.core.security import require_admin, verify_token
 from src.db.database import get_db
 from src.db.models import HistoryActionType, ModelMetadata, User
 from src.db.models.model_metadata import DeploymentMode
+from src.schemas.golden_test import GoldenTestCreate, GoldenTestResponse, GoldenTestRunResponse
 from src.schemas.model import (
     ABCompareResponse,
     ABSignificance,
@@ -105,6 +106,7 @@ from src.services import drift_service
 from src.services.ab_significance_service import compute_ab_significance
 from src.services.auto_promotion_service import evaluate_auto_promotion
 from src.services.db_service import _ROLLBACK_FIELDS, DBService, _build_snapshot
+from src.services.golden_test_service import GoldenTestService
 from src.services.input_validation_service import resolve_expected_features, validate_input_features
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
@@ -1343,7 +1345,7 @@ async def retrain_model(
     elif source_model.promotion_policy and source_model.promotion_policy.get("auto_promote"):
         # 10b. Auto-promotion selon la politique configurée
         should_promote, reason = await evaluate_auto_promotion(
-            db, name, source_model.promotion_policy
+            db, name, source_model.promotion_policy, version=new_version
         )
         auto_promote_reason = reason
         if should_promote:
@@ -2695,6 +2697,31 @@ async def get_model_card(
     return Response(content=card.model_dump_json(), media_type="application/json")
 
 
+@router.get(
+    "/models/{name}/golden-tests",
+    response_model=List[GoldenTestResponse],
+)
+async def list_golden_tests(
+    name: str,
+    _user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Liste les cas de test golden enregistrés pour un modèle."""
+    tests = await GoldenTestService.get_tests(db, name)
+    return [
+        GoldenTestResponse(
+            id=t.id,
+            model_name=t.model_name,
+            input_features=t.input_features,
+            expected_output=t.expected_output,
+            description=t.description,
+            created_at=t.created_at,
+            created_by_user_id=t.created_by_user_id,
+        )
+        for t in tests
+    ]
+
+
 @router.get("/models/{name}/{version}", response_model=ModelGetResponse)
 async def get_model(
     name: str,
@@ -3492,3 +3519,123 @@ async def delete_model_all_versions(
         mlflow_runs_deleted=mlflow_runs_deleted,
         minio_objects_deleted=minio_objects_deleted,
     )
+
+
+# ---------------------------------------------------------------------------
+# Golden Test Set
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/models/{name}/golden-tests/upload-csv",
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_golden_tests_csv(
+    name: str,
+    file: UploadFile = File(...),
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Importe un lot de cas de test golden depuis un CSV (admin uniquement).
+
+    Format CSV attendu : colonnes features + ``expected_output`` (requis) + ``description`` (optionnel).
+    Exemple : ``sepal_length,sepal_width,petal_length,petal_width,expected_output,description``
+    """
+    content = await file.read()
+    try:
+        rows = GoldenTestService.parse_csv(content)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        )
+
+    created = 0
+    errors = []
+    for i, row in enumerate(rows):
+        try:
+            await GoldenTestService.create_test(
+                db,
+                model_name=name,
+                input_features=row["input_features"],
+                expected_output=row["expected_output"],
+                description=row.get("description"),
+                user_id=user.id,
+            )
+            created += 1
+        except Exception as exc:
+            errors.append({"row": i + 2, "error": str(exc)})
+
+    await db.commit()
+    return {"created": created, "errors": errors}
+
+
+@router.post(
+    "/models/{name}/golden-tests",
+    response_model=GoldenTestResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_golden_test(
+    name: str,
+    payload: GoldenTestCreate,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Crée un cas de test golden pour un modèle (admin uniquement)."""
+    gt = await GoldenTestService.create_test(
+        db,
+        model_name=name,
+        input_features=payload.input_features,
+        expected_output=payload.expected_output,
+        description=payload.description,
+        user_id=user.id,
+    )
+    await db.commit()
+    return GoldenTestResponse(
+        id=gt.id,
+        model_name=gt.model_name,
+        input_features=gt.input_features,
+        expected_output=gt.expected_output,
+        description=gt.description,
+        created_at=gt.created_at,
+        created_by_user_id=gt.created_by_user_id,
+    )
+
+
+@router.delete(
+    "/models/{name}/golden-tests/{test_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_golden_test(
+    name: str,
+    test_id: int,
+    _user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Supprime un cas de test golden (admin uniquement)."""
+    deleted = await GoldenTestService.delete_test(db, test_id, name)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Cas de test {test_id} non trouvé pour le modèle '{name}'.",
+        )
+    await db.commit()
+
+
+@router.post(
+    "/models/{name}/{version}/golden-tests/run",
+    response_model=GoldenTestRunResponse,
+)
+async def run_golden_tests(
+    name: str,
+    version: str,
+    _user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Exécute tous les golden tests enregistrés pour un modèle et une version donnés (admin uniquement).
+
+    Charge le modèle, prédit chaque cas de test et compare au résultat attendu.
+    """
+    return await GoldenTestService.run_tests(db, name, version)

@@ -35,6 +35,7 @@ async def evaluate_auto_promotion(
     db: AsyncSession,
     model_name: str,
     policy: dict,
+    version: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """
     Évalue si le modèle ``model_name`` doit être promu automatiquement
@@ -116,5 +117,21 @@ async def evaluate_auto_promotion(
                         f"> {max_latency_p95_ms:.1f}ms max."
                     ),
                 )
+
+    # --- Vérification des golden tests ---
+    min_golden_test_pass_rate: Optional[float] = policy.get("min_golden_test_pass_rate")
+    if min_golden_test_pass_rate is not None and version is not None:
+        from src.services.golden_test_service import GoldenTestService
+
+        result = await GoldenTestService.run_tests(db, model_name, version)
+        if result.total_tests > 0 and result.pass_rate < min_golden_test_pass_rate:
+            return (
+                False,
+                (
+                    f"Tests de régression insuffisants : {result.pass_rate:.2%} "
+                    f"< {min_golden_test_pass_rate:.2%} requis "
+                    f"({result.failed}/{result.total_tests} échecs)."
+                ),
+            )
 
     return True, "Tous les critères de promotion sont satisfaits."
