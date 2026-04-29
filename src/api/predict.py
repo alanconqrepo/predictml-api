@@ -96,6 +96,7 @@ async def _run_shadow_prediction(
                 status="success",
                 id_obs=id_obs,
                 is_shadow=True,
+                max_confidence=max(proba) if proba else None,
             )
 
             logger.info(
@@ -153,6 +154,18 @@ async def get_predictions(
     cursor: Optional[int] = Query(
         None, ge=1, description="Curseur de pagination (id de la dernière prédiction vue)"
     ),
+    min_confidence: Optional[float] = Query(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Confiance minimale (max des probabilités) — optionnel, classifieurs uniquement",
+    ),
+    max_confidence: Optional[float] = Query(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Confiance maximale (max des probabilités) — optionnel, classifieurs uniquement",
+    ),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -166,6 +179,8 @@ async def get_predictions(
     - **id_obs** : identifiant de l'observation — optionnel
     - **limit** : nombre max de résultats (défaut : 100, max : 1000)
     - **cursor** : id de la dernière prédiction vue (pour la page suivante, utiliser `next_cursor` de la réponse précédente)
+    - **min_confidence** : filtre sur la confiance minimale (max des probabilités), 0.0–1.0 — optionnel
+    - **max_confidence** : filtre sur la confiance maximale (max des probabilités), 0.0–1.0 — optionnel
 
     Nécessite un token Bearer valide.
     """
@@ -185,6 +200,8 @@ async def get_predictions(
         id_obs=id_obs,
         limit=limit,
         cursor=cursor,
+        min_confidence=min_confidence,
+        max_confidence=max_confidence,
     )
 
     has_more = len(rows) > limit
@@ -204,6 +221,7 @@ async def get_predictions(
                 input_features=p.input_features,
                 prediction_result=p.prediction_result,
                 probabilities=p.probabilities,
+                max_confidence=p.max_confidence,
                 response_time_ms=p.response_time_ms,
                 timestamp=p.timestamp,
                 status=p.status,
@@ -484,6 +502,7 @@ async def get_prediction_by_id(
         input_features=prediction.input_features,
         prediction_result=prediction.prediction_result,
         probabilities=prediction.probabilities,
+        max_confidence=prediction.max_confidence,
         response_time_ms=prediction.response_time_ms,
         timestamp=prediction.timestamp,
         status=prediction.status,
@@ -715,6 +734,7 @@ async def predict(
             user_agent=request.headers.get("user-agent"),
             status="success",
             id_obs=input_data.id_obs,
+            max_confidence=max(probability) if probability else None,
         )
 
         # --- Dispatch shadow en background (si une version shadow est active) ---
@@ -917,6 +937,7 @@ async def predict_batch(
                     client_ip=client_ip,
                     user_agent=user_agent,
                     status="success",
+                    max_confidence=max(probability) if probability else None,
                 )
             )
             results.append(

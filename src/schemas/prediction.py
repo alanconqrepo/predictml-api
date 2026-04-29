@@ -119,6 +119,7 @@ class PredictionResponse(BaseModel):
     input_features: Any
     prediction_result: Any
     probabilities: Optional[List[float]]
+    max_confidence: Optional[float] = None
     response_time_ms: float
     timestamp: datetime
     status: str

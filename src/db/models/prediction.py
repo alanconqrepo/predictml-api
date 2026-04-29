@@ -2,7 +2,7 @@
 Modèle Prediction pour logger toutes les prédictions
 """
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from src.core.utils import _utcnow
@@ -30,6 +30,9 @@ class Prediction(Base):
     input_features = Column(JSON, nullable=False)  # Liste ou dict des features
     prediction_result = Column(JSON, nullable=False)  # Résultat de la prédiction
     probabilities = Column(JSON, nullable=True)  # Probabilités par classe (si disponible)
+
+    # Confidence (max des probabilités pour les classifieurs, None pour la régression)
+    max_confidence = Column(Float, nullable=True, index=True)
 
     # Performance
     response_time_ms = Column(Float, nullable=False)  # Temps de réponse en ms

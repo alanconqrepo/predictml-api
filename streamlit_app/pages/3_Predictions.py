@@ -133,6 +133,7 @@ with tab_history:
             )
             model_names = sorted({m["name"] for m in models})
         except Exception:
+            models = []
             model_names = []
 
         with col1:
@@ -154,6 +155,39 @@ with tab_history:
         status_filter = col4.selectbox("Statut", ["Tous", "success", "error"])
         limit = col5.selectbox("Limite", [50, 100, 500], index=1)
 
+        # Confidence sliders — désactivés pour les régresseurs (pas de classes)
+        is_classifier = any(
+            m.get("name") == model_name and m.get("classes")
+            for m in models
+        ) if model_name else False
+
+        col_conf1, col_conf2 = st.columns(2)
+        conf_min = col_conf1.slider(
+            "Confiance min",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.0,
+            step=0.05,
+            format="%.2f",
+            key="hist_conf_min",
+            disabled=not is_classifier,
+            help="Filtrer les prédictions avec une confiance ≥ à ce seuil (classifieurs uniquement)",
+        )
+        conf_max = col_conf2.slider(
+            "Confiance max",
+            min_value=0.0,
+            max_value=1.0,
+            value=1.0,
+            step=0.05,
+            format="%.2f",
+            key="hist_conf_max",
+            disabled=not is_classifier,
+            help="Filtrer les prédictions avec une confiance ≤ à ce seuil (classifieurs uniquement)",
+        )
+        # N'envoyer les filtres que si le modèle est un classifieur et les valeurs non-défaut
+        filter_min_conf = conf_min if (is_classifier and conf_min > 0.0) else None
+        filter_max_conf = conf_max if (is_classifier and conf_max < 1.0) else None
+
     if not model_name:
         st.warning("Aucun modèle disponible. Créez d'abord un modèle via l'API.")
     elif start_date > end_date:
@@ -174,6 +208,8 @@ with tab_history:
                 end=end_iso,
                 limit=limit,
                 offset=st.session_state["pred_offset"],
+                min_confidence=filter_min_conf,
+                max_confidence=filter_max_conf,
             )
         except Exception as e:
             st.error(f"Erreur lors du chargement : {e}")
@@ -195,6 +231,7 @@ with tab_history:
         else:
             rows = []
             for p in predictions:
+                mc = p.get("max_confidence")
                 rows.append(
                     {
                         "ID": p.get("id"),
@@ -207,6 +244,7 @@ with tab_history:
                         "Version": p.get("model_version") or "—",
                         "id_obs": p.get("id_obs") or "—",
                         "Résultat": str(p.get("prediction_result", "")),
+                        "Confiance": f"{mc:.2%}" if mc is not None else "—",
                         "Temps (ms)": (
                             f"{p['response_time_ms']:.1f}"
                             if p.get("response_time_ms") is not None
