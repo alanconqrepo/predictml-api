@@ -264,7 +264,9 @@ async def monitoring_overview(
         err_status = _error_rate_status(raw["error_rate"])
 
         # Santé globale = pire indicateur
-        health = _worst_health(err_status, feature_drift_status, perf_drift_status, output_drift_status)
+        health = _worst_health(
+            err_status, feature_drift_status, perf_drift_status, output_drift_status
+        )
 
         model_summaries.append(
             ModelHealthSummary(

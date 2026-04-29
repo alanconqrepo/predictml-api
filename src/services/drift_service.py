@@ -325,8 +325,7 @@ async def compute_output_drift(
             baseline_ratio=round(float(baseline_distribution.get(label, 0.0)), 4),
             current_ratio=round(current_distribution.get(label, 0.0), 4),
             delta=round(
-                current_distribution.get(label, 0.0)
-                - float(baseline_distribution.get(label, 0.0)),
+                current_distribution.get(label, 0.0) - float(baseline_distribution.get(label, 0.0)),
                 4,
             ),
         )
