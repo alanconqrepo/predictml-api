@@ -292,3 +292,42 @@ class PurgeResponse(BaseModel):
             "Avertissement si > 0 : des données de performance historiques seront perdues."
         ),
     )
+
+
+class AnomalyFeatureDetail(BaseModel):
+    """Détail d'une feature aberrante dans une prédiction"""
+
+    value: float = Field(..., description="Valeur observée de la feature")
+    z_score: float = Field(..., description="Z-score : |value - baseline_mean| / baseline_std")
+    baseline_mean: float = Field(..., description="Moyenne de la baseline")
+    baseline_std: float = Field(..., description="Écart-type de la baseline")
+
+
+class AnomalyPredictionEntry(BaseModel):
+    """Une prédiction contenant au moins une feature aberrante"""
+
+    prediction_id: int = Field(..., description="Identifiant de la prédiction")
+    timestamp: datetime = Field(..., description="Horodatage de la prédiction")
+    prediction_result: Any = Field(..., description="Résultat de la prédiction")
+    max_confidence: Optional[float] = Field(None, description="Probabilité max (si disponible)")
+    anomalous_features: Dict[str, AnomalyFeatureDetail] = Field(
+        ..., description="Features dont le z-score dépasse le seuil"
+    )
+
+
+class AnomaliesResponse(BaseModel):
+    """Réponse de GET /predictions/anomalies"""
+
+    model_name: str = Field(..., description="Nom du modèle analysé")
+    period_days: int = Field(..., description="Fenêtre temporelle analysée (jours)")
+    z_threshold: float = Field(..., description="Seuil z-score utilisé")
+    total_checked: int = Field(..., description="Nombre de prédictions analysées")
+    anomalous_count: int = Field(..., description="Nombre de prédictions avec features aberrantes")
+    anomaly_rate: float = Field(..., description="Taux de prédictions anomales (anomalous / total)")
+    predictions: List[AnomalyPredictionEntry] = Field(
+        ..., description="Prédictions avec features aberrantes"
+    )
+    error: Optional[str] = Field(
+        None,
+        description="Code d'erreur si l'analyse est impossible (ex : 'no_baseline')",
+    )

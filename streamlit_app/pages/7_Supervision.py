@@ -913,3 +913,113 @@ if recent_errors:
     with st.expander(f"⚠️ Dernières erreurs ({len(recent_errors)})", expanded=False):
         for i, err in enumerate(recent_errors, 1):
             st.markdown(f"`{i}.` {err}")
+
+# --- Prédictions anomales ---
+st.divider()
+st.markdown("#### 🚨 Prédictions anomales")
+
+_anom_col1, _anom_col2 = st.columns([1, 2])
+_anom_days = _anom_col1.number_input(
+    "Fenêtre (jours)",
+    min_value=1,
+    max_value=90,
+    value=min(max(period_days, 1), 90),
+    step=1,
+    key="anom_days",
+)
+_anom_z = _anom_col2.slider(
+    "Seuil z-score",
+    min_value=1.0,
+    max_value=6.0,
+    value=3.0,
+    step=0.1,
+    format="%.1f",
+    key="anom_z_threshold",
+    help="Features dont |z| ≥ seuil sont considérées aberrantes.",
+)
+
+try:
+    _anom_data = client.get_predictions_anomalies(
+        model_name=selected_model,
+        days=int(_anom_days),
+        z_threshold=float(_anom_z),
+        limit=200,
+    )
+except Exception as _exc:
+    _anom_data = None
+    st.info(f"Prédictions anomales non disponibles : {_exc}")
+
+if _anom_data is not None:
+    _anom_error = _anom_data.get("error")
+    if _anom_error == "no_baseline":
+        st.info(
+            "Pas de baseline de features enregistrée pour ce modèle — "
+            "impossible de calculer les z-scores. Fournissez `feature_baseline` à l'upload."
+        )
+    else:
+        _total = _anom_data.get("total_checked", 0)
+        _count = _anom_data.get("anomalous_count", 0)
+        _rate = _anom_data.get("anomaly_rate", 0.0)
+        _preds = _anom_data.get("predictions", [])
+
+        _mc1, _mc2, _mc3 = st.columns(3)
+        _mc1.metric("Prédictions analysées", _total)
+        _mc2.metric("Prédictions anomales", _count)
+        _mc3.metric(
+            "Taux d'anomalie",
+            f"{_rate:.1%}",
+            help="anomalous_count / total_checked",
+        )
+
+        if not _preds:
+            st.success(
+                f"Aucune prédiction anomale détectée (z ≥ {_anom_z:.1f}) sur {_total} prédiction(s)."
+            )
+        else:
+            _rows_anom = []
+            for _p in _preds:
+                _feats = _p.get("anomalous_features", {})
+                _worst_z = max((_f["z_score"] for _f in _feats.values()), default=0.0)
+                _feat_names = ", ".join(
+                    f"{_fn} (z={_fd['z_score']:.2f})" for _fn, _fd in _feats.items()
+                )
+                _rows_anom.append(
+                    {
+                        "ID": _p["prediction_id"],
+                        "Timestamp": _p["timestamp"],
+                        "Résultat": str(_p.get("prediction_result", "")),
+                        "Confiance": (
+                            f"{_p['max_confidence']:.2%}"
+                            if _p.get("max_confidence") is not None
+                            else "—"
+                        ),
+                        "Z-score max": round(_worst_z, 2),
+                        "Features aberrantes": _feat_names,
+                    }
+                )
+
+            _df_anom = pd.DataFrame(_rows_anom).sort_values("Z-score max", ascending=False)
+            st.dataframe(_df_anom, use_container_width=True, hide_index=True)
+
+            with st.expander("Détail des features par prédiction", expanded=False):
+                for _p in sorted(
+                    _preds,
+                    key=lambda x: -max(f["z_score"] for f in x["anomalous_features"].values()),
+                ):
+                    _feats = _p.get("anomalous_features", {})
+                    st.markdown(
+                        f"**Prédiction #{_p['prediction_id']}** — {_p['timestamp'][:19]}  "
+                        f"résultat : `{_p.get('prediction_result')}`"
+                    )
+                    _feat_rows = [
+                        {
+                            "Feature": _fn,
+                            "Valeur": round(_fd["value"], 4),
+                            "Z-score": round(_fd["z_score"], 4),
+                            "Baseline μ": round(_fd["baseline_mean"], 4),
+                            "Baseline σ": round(_fd["baseline_std"], 4),
+                        }
+                        for _fn, _fd in sorted(_feats.items(), key=lambda x: -x[1]["z_score"])
+                    ]
+                    st.dataframe(pd.DataFrame(_feat_rows), use_container_width=True, hide_index=True)
+                    st.divider()

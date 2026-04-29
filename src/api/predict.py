@@ -21,6 +21,9 @@ from src.db.database import AsyncSessionLocal, get_db
 from src.db.models import Prediction, User
 from src.db.models.user import UserRole
 from src.schemas.prediction import (
+    AnomaliesResponse,
+    AnomalyFeatureDetail,
+    AnomalyPredictionEntry,
     BatchPredictionInput,
     BatchPredictionOutput,
     BatchPredictionResultItem,
@@ -410,6 +413,125 @@ async def export_predictions(
         _generate(),
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/predictions/anomalies", response_model=AnomaliesResponse)
+async def get_anomalous_predictions(
+    model_name: str = Query(..., description="Nom du modèle (requis)"),
+    days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours (défaut : 7)"),
+    z_threshold: float = Query(
+        3.0, ge=0.0, description="Seuil z-score pour détection (défaut : 3.0)"
+    ),
+    limit: int = Query(
+        200, ge=1, le=1000, description="Max prédictions à analyser (défaut : 200, max : 1000)"
+    ),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Prédictions avec features aberrantes (z-score ≥ seuil).
+
+    Pour chaque prédiction dans la fenêtre temporelle, calcule le z-score par feature
+    en comparant à la baseline du modèle : z = |value - baseline_mean| / baseline_std.
+    Retourne uniquement les prédictions où au moins une feature dépasse z_threshold.
+
+    - **model_name** : nom du modèle — obligatoire
+    - **days** : fenêtre temporelle en jours (défaut : 7, max : 90)
+    - **z_threshold** : seuil de détection (défaut : 3.0)
+    - **limit** : max prédictions à analyser (défaut : 200, max : 1000)
+
+    Retourne `error: "no_baseline"` si le modèle n'a pas de baseline de features.
+
+    Nécessite un token Bearer valide.
+    """
+    metadata = await DBService.get_model_metadata(db, model_name)
+    if metadata is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{model_name}' introuvable.",
+        )
+
+    baseline = metadata.feature_baseline
+    if not baseline:
+        return AnomaliesResponse(
+            model_name=model_name,
+            period_days=days,
+            z_threshold=z_threshold,
+            total_checked=0,
+            anomalous_count=0,
+            anomaly_rate=0.0,
+            predictions=[],
+            error="no_baseline",
+        )
+
+    predictions = await DBService.get_predictions_with_features(
+        db=db,
+        model_name=model_name,
+        days=days,
+        limit=limit,
+    )
+
+    total_checked = len(predictions)
+    anomalous: list[AnomalyPredictionEntry] = []
+
+    for pred in predictions:
+        features = pred.input_features
+        if not isinstance(features, dict):
+            continue
+
+        anomalous_features: dict[str, AnomalyFeatureDetail] = {}
+
+        for feat_name, feat_value in features.items():
+            if not isinstance(feat_value, (int, float)) or isinstance(feat_value, bool):
+                continue
+
+            bl = baseline.get(feat_name)
+            if bl is None:
+                continue
+
+            bl_mean = float(bl.get("mean", 0))
+            bl_std = float(bl.get("std", 0))
+
+            if bl_std <= 0:
+                continue
+
+            z = abs(float(feat_value) - bl_mean) / bl_std
+
+            if z >= z_threshold:
+                anomalous_features[feat_name] = AnomalyFeatureDetail(
+                    value=float(feat_value),
+                    z_score=round(z, 4),
+                    baseline_mean=bl_mean,
+                    baseline_std=bl_std,
+                )
+
+        if anomalous_features:
+            max_confidence = None
+            if pred.probabilities:
+                max_confidence = round(max(pred.probabilities), 4)
+
+            anomalous.append(
+                AnomalyPredictionEntry(
+                    prediction_id=pred.id,
+                    timestamp=pred.timestamp,
+                    prediction_result=pred.prediction_result,
+                    max_confidence=max_confidence,
+                    anomalous_features=anomalous_features,
+                )
+            )
+
+    anomalous_count = len(anomalous)
+    anomaly_rate = round(anomalous_count / total_checked, 4) if total_checked > 0 else 0.0
+
+    return AnomaliesResponse(
+        model_name=model_name,
+        period_days=days,
+        z_threshold=z_threshold,
+        total_checked=total_checked,
+        anomalous_count=anomalous_count,
+        anomaly_rate=anomaly_rate,
+        predictions=anomalous,
     )
 
 
