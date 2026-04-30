@@ -32,9 +32,7 @@ def reload():
 # ─── Chargement des modèles ───────────────────────────────────────────────────
 
 try:
-    models = get_models_cached(
-        st.session_state.get("api_url"), st.session_state.get("api_token")
-    )
+    models = get_models_cached(st.session_state.get("api_url"), st.session_state.get("api_token"))
 except Exception as e:
     st.error(f"Impossible de charger les modèles : {e}")
     st.stop()
@@ -86,6 +84,11 @@ else:
                 "Description": t.get("description") or "—",
                 "Input features": json.dumps(t.get("input_features", {})),
                 "Expected output": str(t.get("expected_output", "—")),
+                "Created by": (
+                    f"user #{t['created_by_user_id']}"
+                    if t.get("created_by_user_id") is not None
+                    else "—"
+                ),
                 "Date": (
                     pd.to_datetime(t["created_at"]).strftime("%Y-%m-%d %H:%M")
                     if t.get("created_at")
@@ -254,9 +257,7 @@ description,input_features,expected_output
 
 Colonnes : `description` (optionnel), `input_features` (JSON stringifié), `expected_output`.
 """)
-        uploaded_csv = st.file_uploader(
-            "Fichier CSV", type=["csv"], key="gt_csv_upload"
-        )
+        uploaded_csv = st.file_uploader("Fichier CSV", type=["csv"], key="gt_csv_upload")
         if uploaded_csv is not None:
             if st.button("📤 Importer", type="primary", key="gt_csv_import_btn"):
                 try:
