@@ -165,7 +165,9 @@ async def run_alert_check() -> None:
                             prod_meta.feature_baseline, production_stats, min_count=10
                         )
                         for feat_name, feat_result in features.items():
-                            if _DRIFT_LEVEL.get(feat_result.drift_status, 0) > _DRIFT_LEVEL.get(_max_input_drift, 0):
+                            if _DRIFT_LEVEL.get(feat_result.drift_status, 0) > _DRIFT_LEVEL.get(
+                                _max_input_drift, 0
+                            ):
                                 _max_input_drift = feat_result.drift_status
                             if feat_result.drift_status == "critical":
                                 logger.warning(
@@ -256,7 +258,11 @@ async def run_alert_check() -> None:
                 # Retrain déclenché par drift
                 if prod_meta:
                     sched = prod_meta.retrain_schedule
-                    if sched and sched.get("trigger_on_drift") and prod_meta.train_script_object_key:
+                    if (
+                        sched
+                        and sched.get("trigger_on_drift")
+                        and prod_meta.train_script_object_key
+                    ):
                         threshold_level = _DRIFT_LEVEL.get(sched["trigger_on_drift"], 999)
                         detected_level = max(
                             _DRIFT_LEVEL.get(_max_input_drift, 0),
@@ -267,7 +273,8 @@ async def run_alert_check() -> None:
                             last_run_str = sched.get("last_run_at")
                             cooldown_ok = last_run_str is None or (
                                 datetime.utcnow()
-                                >= datetime.fromisoformat(last_run_str) + timedelta(hours=cooldown_hours)
+                                >= datetime.fromisoformat(last_run_str)
+                                + timedelta(hours=cooldown_hours)
                             )
                             if cooldown_ok:
                                 from src.tasks.retrain_scheduler import _run_retrain_job
