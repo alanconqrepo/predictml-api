@@ -7,7 +7,7 @@ si tu as quand même des propositions explique en détails le pourquoi et le com
 
 en mode plan:
 a partir de l'historique des git mettre à jour là documentation présents dans les .md y compris le readme.md pour intégrer les nouvelles fonctionnalités. expliquer aussi comment cloner le projet et lancer docker compose. une doc pour expliquer comment utiliser l'outil pour un débutant avec exemple de code python etc
-si certains documents.md de la documentation so t déjà complets et parfait pas nécessité de les modifier 
+si certains documents.md de la documentation so t déjà complets et parfait pas nécessité de les modifier . ajouter dans docker compose Anthropic_api_key
 
 ------------------------------------
 
