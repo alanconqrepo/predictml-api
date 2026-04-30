@@ -20,6 +20,12 @@ def get_model_detail(api_url: str, token: str, name: str, version: str) -> dict:
     return APIClient(api_url, token).get_model(name, version)
 
 
+@st.cache_data(ttl=10, show_spinner=False)
+def get_golden_tests(api_url: str, token: str, model_name: str) -> list:
+    """Liste les golden tests d'un modèle — résultat mis en cache 10 secondes."""
+    return APIClient(api_url, token).list_golden_tests(model_name)
+
+
 class APIClient:
     def __init__(self, base_url: str, token: str = ""):
         self.base_url = base_url.rstrip("/")
