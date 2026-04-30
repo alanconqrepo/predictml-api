@@ -1,18 +1,31 @@
 """
-Service d'auto-promotion post-retrain.
+Service d'auto-promotion post-retrain et circuit breaker d'auto-demotion.
 
 Évalue si un modèle récemment entraîné satisfait la politique de promotion
 configurée. L'évaluation repose sur les paires (prédiction, résultat observé)
 historiques du modèle et sur les temps de réponse enregistrés en production.
+
+Le circuit breaker d'auto-demotion évalue périodiquement si un modèle en
+production doit être retiré sur la base du drift ou d'une chute d'accuracy.
 """
 
+import asyncio
+from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
-from sqlalchemy import and_, select
+import structlog
+from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.config import settings
 from src.db.models import Prediction
+from src.db.models.model_history import HistoryActionType, ModelHistory
+from src.db.models.model_metadata import ModelMetadata
+from src.services import drift_service
 from src.services.db_service import DBService
+from src.services.email_service import email_service
+
+logger = structlog.get_logger(__name__)
 
 
 def _is_regression_pairs(pairs: list) -> bool:
@@ -135,3 +148,190 @@ async def evaluate_auto_promotion(
             )
 
     return True, "Tous les critères de promotion sont satisfaits."
+
+
+# ---------------------------------------------------------------------------
+# Circuit breaker — auto-demotion
+# ---------------------------------------------------------------------------
+
+_DRIFT_ORDER = {"ok": 0, "warning": 1, "critical": 2, "insufficient_data": -1, "no_baseline": -1}
+
+
+def _utcnow() -> datetime:
+    return datetime.utcnow()
+
+
+async def evaluate_auto_demotion(
+    db: AsyncSession,
+    model_name: str,
+    policy: dict,
+) -> Tuple[bool, str]:
+    """
+    Évalue si le modèle ``model_name`` en production doit être automatiquement
+    retiré selon la politique ``policy``.
+
+    Garde-fous :
+    - N'agit que si au moins une autre version active (non-production) existe.
+    - Respecte le cooldown pour éviter les oscillations.
+
+    Retourne ``(demoted, reason)``.
+    """
+    from src.services.webhook_service import send_webhook
+
+    auto_demote: bool = policy.get("auto_demote", False)
+    if not auto_demote:
+        return False, "Auto-demotion désactivée."
+
+    demote_on_drift: str = policy.get("demote_on_drift", "critical")
+    demote_on_accuracy_below: Optional[float] = policy.get("demote_on_accuracy_below")
+    demote_cooldown_hours: int = int(policy.get("demote_cooldown_hours", 24))
+    min_sample_validation: int = int(policy.get("min_sample_validation", 10))
+
+    # --- Trouver le modèle en production ---
+    prod_result = await db.execute(
+        select(ModelMetadata).where(
+            and_(
+                ModelMetadata.name == model_name,
+                ModelMetadata.is_production.is_(True),
+                ModelMetadata.is_active.is_(True),
+            )
+        )
+    )
+    prod_meta = prod_result.scalars().first()
+    if prod_meta is None:
+        return False, "Aucune version en production."
+
+    # --- Garde-fou : version de fallback ---
+    fallback_result = await db.execute(
+        select(ModelMetadata).where(
+            and_(
+                ModelMetadata.name == model_name,
+                ModelMetadata.is_production.is_(False),
+                ModelMetadata.is_active.is_(True),
+                ModelMetadata.status != "archived",
+            )
+        )
+    )
+    fallback_versions = fallback_result.scalars().all()
+    if not fallback_versions:
+        logger.critical(
+            "Auto-demotion impossible : aucun fallback disponible",
+            model=model_name,
+            version=prod_meta.version,
+        )
+        if settings.ENABLE_EMAIL_ALERTS:
+            email_service.send_auto_demotion_alert(
+                model_name, prod_meta.version, "Drift ou dégradation détectée", no_fallback=True
+            )
+        return False, "Aucune version de fallback disponible — demotion annulée."
+
+    # --- Garde-fou : cooldown ---
+    if demote_cooldown_hours > 0:
+        cooldown_since = _utcnow() - timedelta(hours=demote_cooldown_hours)
+        recent_demote_result = await db.execute(
+            select(ModelHistory)
+            .where(
+                and_(
+                    ModelHistory.model_name == model_name,
+                    ModelHistory.action == HistoryActionType.AUTO_DEMOTE,
+                    ModelHistory.timestamp >= cooldown_since,
+                )
+            )
+            .order_by(desc(ModelHistory.timestamp))
+            .limit(1)
+        )
+        recent_demote = recent_demote_result.scalars().first()
+        if recent_demote is not None:
+            until = recent_demote.timestamp + timedelta(hours=demote_cooldown_hours)
+            return (
+                False,
+                f"Cooldown actif jusqu'à {until.strftime('%Y-%m-%dT%H:%M')} UTC.",
+            )
+
+    # --- Collecter les raisons de demotion ---
+    reasons: list[str] = []
+
+    # Vérification du drift (features + output)
+    if prod_meta.feature_baseline:
+        production_stats = await DBService.get_feature_production_stats(
+            db, model_name, prod_meta.version, days=1
+        )
+        features = drift_service.compute_feature_drift(
+            prod_meta.feature_baseline, production_stats, min_count=10
+        )
+        feature_summary = drift_service.summarize_drift(features, baseline_available=True)
+        output_report = await drift_service.compute_output_drift(
+            model_name=model_name,
+            period_days=1,
+            db=db,
+            model_version=prod_meta.version,
+            min_predictions=10,
+        )
+        output_status = output_report.status
+
+        trigger_level = _DRIFT_ORDER.get(demote_on_drift, 2)
+        feature_level = _DRIFT_ORDER.get(feature_summary, -1)
+        output_level = _DRIFT_ORDER.get(output_status, -1)
+
+        if feature_level >= trigger_level > 0:
+            reasons.append(f"Drift features {feature_summary} détecté.")
+        if output_level >= trigger_level > 0:
+            reasons.append(f"Drift de sortie {output_status} détecté.")
+
+    # Vérification de l'accuracy
+    if demote_on_accuracy_below is not None:
+        pairs = await DBService.get_performance_pairs(db, model_name)
+        if len(pairs) >= min_sample_validation:
+            recent = pairs[-min_sample_validation:]
+            is_regression = _is_regression_pairs(recent)
+            if not is_regression:
+                correct = sum(1 for pred, obs, _, _ in recent if str(pred) == str(obs))
+                accuracy = correct / len(recent)
+                if accuracy < demote_on_accuracy_below:
+                    reasons.append(
+                        f"Accuracy insuffisante : {accuracy:.4f} < {demote_on_accuracy_below:.4f}."
+                    )
+
+    if not reasons:
+        return False, "Aucun critère de demotion déclenché."
+
+    # --- Demotion ---
+    combined_reason = " ".join(reasons)
+    prod_meta.is_production = False
+
+    entry = await DBService.log_model_history(
+        db,
+        prod_meta,
+        HistoryActionType.AUTO_DEMOTE,
+        user_id=None,
+        username="scheduler",
+        changed_fields=["is_production"],
+    )
+    entry.snapshot["auto_demote_reason"] = combined_reason
+    await db.commit()
+
+    logger.warning(
+        "Modèle auto-démis",
+        model=model_name,
+        version=prod_meta.version,
+        reason=combined_reason,
+    )
+
+    if settings.ENABLE_EMAIL_ALERTS:
+        email_service.send_auto_demotion_alert(model_name, prod_meta.version, combined_reason)
+
+    if prod_meta.webhook_url:
+        asyncio.create_task(
+            send_webhook(
+                prod_meta.webhook_url,
+                {
+                    "model_name": model_name,
+                    "version": prod_meta.version,
+                    "timestamp": _utcnow().isoformat() + "Z",
+                    "details": {"reason": combined_reason},
+                },
+                event_type="auto_demote",
+            )
+        )
+
+    return True, combined_reason

@@ -3,7 +3,7 @@ Schémas Pydantic pour la création et la réponse de modèles
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -389,6 +389,12 @@ class PromotionPolicy(BaseModel):
     min_sample_validation: int = Field(10, ge=1)
     auto_promote: bool = False
     min_golden_test_pass_rate: Optional[float] = Field(None, ge=0.0, le=1.0)
+
+    # Circuit breaker — auto-demotion du modèle en production
+    auto_demote: bool = False
+    demote_on_drift: Literal["warning", "critical"] = "critical"
+    demote_on_accuracy_below: Optional[float] = Field(None, ge=0.0, le=1.0)
+    demote_cooldown_hours: int = Field(24, ge=0)
 
 
 class PolicyUpdateResponse(BaseModel):

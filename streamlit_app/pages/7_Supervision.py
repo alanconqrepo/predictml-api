@@ -445,6 +445,72 @@ with st.expander("🔔 Seuils d'alerte", expanded=bool(_overlay_thresholds)):
                 except Exception as _exc:
                     st.error(f"Erreur lors de la mise à jour : {_exc}")
 
+# --- Circuit breaker auto-demotion ---
+st.divider()
+_prod_ver_for_policy = next(
+    (v["version"] for v in per_version if v.get("deployment_mode") == "production"),
+    per_version[0]["version"] if per_version else None,
+)
+if _prod_ver_for_policy:
+    try:
+        _policy_full = client.get_model(selected_model, _prod_ver_for_policy)
+        _policy = _policy_full.get("promotion_policy") or {}
+    except Exception:
+        _policy = {}
+
+    _auto_demote_on = _policy.get("auto_demote", False)
+    with st.expander(
+        f"⚡ Circuit breaker (auto-demotion) {'🔴 Activé' if _auto_demote_on else '⬜ Inactif'}",
+        expanded=_auto_demote_on,
+    ):
+        if not _auto_demote_on:
+            st.info(
+                "L'auto-demotion est désactivée. Configurez-la via "
+                "`PATCH /models/{name}/policy` avec `auto_demote: true`."
+            )
+        else:
+            _cd1, _cd2, _cd3 = st.columns(3)
+            _cd1.metric(
+                "Niveau de drift déclencheur",
+                _policy.get("demote_on_drift", "critical").capitalize(),
+            )
+            _acc_thr = _policy.get("demote_on_accuracy_below")
+            _cd2.metric(
+                "Accuracy minimale",
+                f"{_acc_thr:.0%}" if _acc_thr is not None else "—",
+            )
+            _cd3.metric(
+                "Cooldown",
+                f"{_policy.get('demote_cooldown_hours', 24)} h",
+            )
+
+        # Dernière auto-demotion dans l'historique
+        try:
+            _history_data = client.get_model_history(selected_model)
+            _history_entries = _history_data.get("history", [])
+            _last_demote = next(
+                (
+                    e
+                    for e in _history_entries
+                    if e.get("action") == "auto_demote"
+                ),
+                None,
+            )
+        except Exception:
+            _last_demote = None
+
+        if _last_demote:
+            _demote_ts = _last_demote.get("timestamp", "")[:16].replace("T", " ")
+            _demote_reason = (_last_demote.get("snapshot") or {}).get(
+                "auto_demote_reason", "—"
+            )
+            st.error(
+                f"🔴 **Auto-démis le {_demote_ts} UTC** — {_demote_reason}",
+                icon="🚨",
+            )
+        elif _auto_demote_on:
+            st.success("🟢 Aucune auto-demotion récente détectée.")
+
 # --- Série temporelle ---
 if timeseries:
     df_ts = pd.DataFrame(timeseries)
