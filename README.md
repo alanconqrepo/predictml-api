@@ -122,6 +122,7 @@ curl http://localhost:8000/health
 - `traffic_weight` : fraction du trafic routée vers une version (0.0 – 1.0)
 - Mode shadow : prédictions exécutées en arrière-plan sans impact client
 - `GET /models/{name}/ab-compare` : rapport de comparaison côte à côte avec **test de significativité statistique** automatique (Chi-² sur le taux d'erreur, Mann-Whitney U sur la latence) — inclut `p_value`, `winner`, et `min_samples_needed` pour éviter de promouvoir du bruit
+- `GET /models/{name}/shadow-compare` : rapport enrichi comparant le modèle shadow et le modèle de production — accuracy comparée, delta de confiance, delta de latence, taux de désaccord et recommandation de promotion automatique
 
 ### Explicabilité SHAP
 - `POST /explain` : valeurs SHAP locales pour une observation
@@ -131,11 +132,11 @@ curl http://localhost:8000/health
 - Support des modèles arborescents (TreeExplainer) et linéaires (LinearExplainer)
 - Interprétation : contribution de chaque feature à la prédiction
 
-### Dérive des données
-- `GET /models/{name}/drift` : rapport de dérive par feature (Z-score + PSI)
+### Dérive des données (input + output)
+- `GET /models/{name}/drift` : rapport de dérive par feature (Z-score + PSI + null rate)
+- `GET /models/{name}/output-drift` : dérive de la distribution des sorties (**label shift**) via PSI — compare la distribution récente des prédictions à la distribution de référence issue de `training_stats`
 - Statuts : `ok`, `warning`, `critical`, `no_baseline`, `insufficient_data`
-- Basé sur la `feature_baseline` enregistrée à l'upload du modèle
-- **4 dimensions de monitoring** : dérive de distribution, dérive de performance, dérive de taux d'erreur, et **null rate** (taux de valeurs nulles par feature)
+- **5 dimensions de monitoring** : dérive de distribution par feature, dérive de performance (accuracy/MAE), dérive de taux d'erreur, null rate par feature, et label shift en sortie
 
 ### Seuils d'alerte par modèle
 
@@ -164,9 +165,30 @@ curl http://localhost:8000/health
 - Upload d'un `train.py` à l'enregistrement du modèle
 - `POST /models/{name}/{version}/retrain` : déclenche l'entraînement sur une plage de dates
 - `PATCH /models/{name}/{version}/schedule` : planifie un retrain automatique via une expression cron (ex : `"0 3 * * 1"` = chaque lundi à 3h UTC)
+- **Retrain déclenché par drift** : configurer `trigger_on_drift: "critical"` (ou `"warning"`) dans le schedule pour qu'un retrain se lance automatiquement dès que le drift détecté atteint le seuil — `drift_retrain_cooldown_hours` évite les boucles de retrain
 - Logs complets stdout/stderr retournés dans la réponse
 - Nouvelle version enregistrée automatiquement dans MinIO
 - Verrou Redis pour éviter les exécutions simultanées en multi-réplicas
+
+### Auto-promotion & Auto-demotion (circuit breaker)
+- `PATCH /models/{name}/policy` : définir la politique d'auto-promotion post-retrain (`min_accuracy`, `max_latency_p95_ms`, `min_sample_validation`, `auto_promote`, `min_golden_test_pass_rate`)
+- **Auto-demotion** : configurer `auto_demote: true` avec `demote_on_drift` (`"warning"` ou `"critical"`) et/ou `demote_on_accuracy_below` (seuil flottant) — si les critères sont franchis, le modèle de production est automatiquement ramené à un statut inactif par le superviseur (toutes les 6h)
+- `demote_cooldown_hours` : délai minimal entre deux démotions automatiques
+
+### Model Card
+- `GET /models/{name}/{version}/card` : fiche récapitulative d'un modèle en un seul appel — métadonnées, métriques de performance réelle, état du drift, calibration, top-5 features SHAP, infos de retrain et couverture ground truth
+- Accepte `Accept: text/markdown` pour retourner un fichier `.md` prêt à être partagé
+
+### Tests de régression (Golden Tests)
+- CRUD de cas de test par modèle : `POST /models/{name}/golden-tests`, `GET /models/{name}/golden-tests`, `DELETE /models/{name}/golden-tests/{id}`
+- Import en lot depuis un CSV : `POST /models/{name}/golden-tests/upload-csv`
+- `POST /models/{name}/{version}/run-golden-tests` : exécuter tous les cas de test sur une version — retourne PASS/FAIL par cas avec le diff attendu/reçu
+- Intégré dans la politique d'auto-promotion via `min_golden_test_pass_rate`
+- Interface complète dans la **page 9 du dashboard Streamlit**
+
+### Détection d'anomalies
+- `GET /predictions/anomalies` : prédictions récentes dont au moins une feature présente un z-score anormal par rapport à la baseline (`z_threshold` configurable, défaut 3.0)
+- Paramètres : `model_name`, `days` (défaut 7), `z_threshold`, `limit`
 
 ### Leaderboard & Comparaison multi-modèles
 - `GET /models/leaderboard` : classement des modèles en production par métrique (`accuracy`, `f1_score`, `latency_p95_ms`, `predictions_count`) sur une fenêtre configurable, résultat mis en cache (TTL)
@@ -243,9 +265,17 @@ curl http://localhost:8000/health
 | PATCH | `/models/{name}/{version}/deprecate` | Admin | Déprécier une version (bloque les prédictions avec HTTP 410) |
 | POST | `/models/{name}/{version}/validate-input` | Oui | Valider le schéma de features sans consommer de quota |
 | GET | `/models/{name}/{version}/download` | Oui | Télécharger le fichier .pkl depuis MinIO |
-| GET | `/models/{name}/ab-compare` | Oui | Rapport de comparaison A/B |
+| GET | `/models/{name}/ab-compare` | Oui | Rapport de comparaison A/B avec significativité statistique |
+| GET | `/models/{name}/shadow-compare` | Oui | Rapport enrichi shadow vs production (accuracy, latence, désaccord) |
+| GET | `/models/{name}/output-drift` | Oui | Drift de distribution des sorties (label shift via PSI) |
+| GET | `/models/{name}/{version}/card` | Oui | Model card consolidée (JSON ou Markdown) |
 | GET | `/models/{name}/confidence-trend` | Oui | Tendance de confiance dans le temps |
 | POST | `/models/{name}/{version}/warmup` | Oui | Préchauffer le modèle dans le cache Redis |
+| GET | `/models/{name}/golden-tests` | Oui | Liste des cas de test golden |
+| POST | `/models/{name}/golden-tests` | Oui | Créer un cas de test golden |
+| DELETE | `/models/{name}/golden-tests/{id}` | Admin | Supprimer un cas de test golden |
+| POST | `/models/{name}/golden-tests/upload-csv` | Admin | Import en lot de cas de test depuis CSV |
+| POST | `/models/{name}/{version}/run-golden-tests` | Oui | Exécuter les golden tests sur une version |
 | **Prédictions** | | | |
 | POST | `/predict` | Oui | Prédiction unitaire (`?explain=true` pour SHAP inline) |
 | POST | `/predict-batch` | Oui | Prédictions en lot |
@@ -254,6 +284,7 @@ curl http://localhost:8000/health
 | GET | `/predictions/{id}` | Oui | Consulter une prédiction par son ID |
 | GET | `/predictions/{id}/explain` | Oui | Explication SHAP post-hoc d'une prédiction existante |
 | GET | `/predictions/stats` | Oui | Statistiques agrégées par modèle |
+| GET | `/predictions/anomalies` | Oui | Prédictions avec features aberrantes (z-score vs baseline) |
 | GET | `/predictions/export` | Admin | Export streaming CSV / JSONL / Parquet |
 | DELETE | `/predictions/purge` | Admin | Purge RGPD des prédictions anciennes (`dry_run` par défaut) |
 | **Résultats observés** | | | |
@@ -372,18 +403,19 @@ src/
 │   ├── db_service.py               # Toutes les requêtes DB
 │   ├── model_service.py            # Chargement, cache Redis, routage A/B/shadow
 │   ├── minio_service.py            # Upload/download MinIO
-│   ├── drift_service.py            # Calcul dérive Z-score + PSI + null rate
+│   ├── drift_service.py            # Calcul dérive Z-score + PSI + null rate (input + output)
 │   ├── shap_service.py             # Explications SHAP locales
 │   ├── ab_significance_service.py  # Tests statistiques A/B (Chi-², Mann-Whitney U)
-│   ├── auto_promotion_service.py   # Évaluation politique d'auto-promotion post-retrain
+│   ├── auto_promotion_service.py   # Auto-promotion + auto-demotion (circuit breaker)
+│   ├── golden_test_service.py      # Tests de régression golden (CRUD + run)
 │   ├── input_validation_service.py # Validation schéma de features d'entrée
-│   ├── supervision_reporter.py     # Rapports de supervision et alertes par modèle
+│   ├── supervision_reporter.py     # Supervision 6h : drift, alertes, retrain réactif
 │   ├── email_service.py            # Alertes email & rapports hebdomadaires
 │   └── webhook_service.py          # Webhooks HTTP post-prédiction
 ├── schemas/                # Schémas Pydantic (validation I/O)
 └── main.py
 
-streamlit_app/              # Dashboard admin multipage (8 pages : Users, Models, Predictions, Stats, Code, A/B, Supervision, Retrain)
+streamlit_app/              # Dashboard admin multipage (9 pages : Users, Models, Predictions, Stats, Code, A/B, Supervision, Retrain, Golden Tests)
 tests/                      # Tests automatisés (pytest)
 smoke-tests/                # Tests manuels contre Docker live
 init_data/                  # Scripts d'initialisation one-shot

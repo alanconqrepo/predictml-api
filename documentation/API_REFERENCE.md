@@ -452,6 +452,66 @@ Le rapport couvre **4 dimensions de monitoring** :
 3. **Dérive de taux d'erreur** (HTTP 500 et erreurs de prédiction)
 4. **Null rate** — taux de valeurs nulles par feature (`null_rate_current` vs `null_rate_baseline`)
 
+Voir aussi `GET /models/{name}/output-drift` pour la dérive de distribution des sorties (label shift).
+
+---
+
+### `GET /models/{name}/output-drift` — Drift de distribution des sorties
+
+Détecte le **label shift** : compare la distribution récente des prédictions à la distribution de référence (`training_stats.label_distribution`).
+
+**Auth requise**
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `period_days` | int | 7 | Fenêtre d'analyse (max 90) |
+| `model_version` | str | production | Version cible |
+| `min_predictions` | int | 30 | Nb minimal de prédictions pour calculer (sinon `insufficient_data`) |
+
+```python
+response = requests.get(
+    f"{BASE_URL}/models/iris_model/output-drift",
+    headers=headers,
+    params={"period_days": 7, "min_predictions": 50}
+)
+drift = response.json()
+
+print(f"Statut : {drift['status']}")  # ok | warning | critical | insufficient_data | no_reference
+print(f"PSI : {drift['psi']:.4f}")
+for cls, data in drift["class_distribution"].items():
+    print(f"  {cls}: référence={data['reference']:.2%}, récent={data['recent']:.2%}")
+```
+
+**Schéma `OutputDriftResponse`**
+
+```json
+{
+  "model_name": "iris_model",
+  "model_version": "2.0.0",
+  "period_days": 7,
+  "predictions_analyzed": 420,
+  "status": "ok",
+  "psi": 0.045,
+  "class_distribution": {
+    "setosa":     {"reference": 0.33, "recent": 0.35, "delta": 0.02},
+    "versicolor": {"reference": 0.34, "recent": 0.32, "delta": -0.02},
+    "virginica":  {"reference": 0.33, "recent": 0.33, "delta": 0.00}
+  }
+}
+```
+
+**Seuils PSI**
+
+| PSI | Statut |
+|---|---|
+| < 0.1 | `ok` |
+| 0.1 – 0.2 | `warning` |
+| ≥ 0.2 | `critical` |
+
+> Un `status: critical` déclenche une alerte webhook (`output_drift_critical`) et peut déclencher un retrain si `trigger_on_drift` est configuré dans le schedule.
+
 **Statuts de dérive**
 
 | Statut | Signification |
@@ -696,6 +756,8 @@ print(f"Prochain déclenchement : {data['retrain_schedule']['next_run_at']}")
 | `lookback_days` | int ≥ 1 | 30 | Fenêtre d'historique passée au script (jours) |
 | `auto_promote` | bool | false | Évaluer la `promotion_policy` après chaque retrain |
 | `enabled` | bool | true | `false` = pause sans effacer le planning |
+| `trigger_on_drift` | `"warning"` \| `"critical"` \| null | null | Niveau de drift déclenchant un retrain réactif (sans attendre le cron) |
+| `drift_retrain_cooldown_hours` | int ≥ 1 | 24 | Cooldown minimal entre deux retrains drift-triggered (évite les boucles) |
 
 **Schéma `ScheduleUpdateResponse`**
 
@@ -820,6 +882,131 @@ if sig:
 > Chi-² si au moins une erreur est observée dans l'un des groupes (tableau de contingence succès/erreur).  
 > Fallback Mann-Whitney U sur les temps de réponse si aucune erreur n'est présente.  
 > `ab_significance: null` si moins de 2 versions actives ou données insuffisantes.
+
+---
+
+### `GET /models/{name}/shadow-compare` — Rapport shadow vs production
+
+Comparaison enrichie entre le modèle shadow et le modèle de production : accuracy, latence, taux de désaccord et recommandation de promotion.
+
+**Auth requise**
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `days` | int | 7 | Fenêtre d'analyse |
+| `shadow_version` | str | auto | Version shadow cible (sinon la première version `shadow` active) |
+
+```python
+response = requests.get(
+    f"{BASE_URL}/models/iris_model/shadow-compare",
+    headers=headers,
+    params={"days": 14}
+)
+cmp = response.json()
+
+print(f"Production v{cmp['production_version']}: accuracy={cmp['production_accuracy']:.2%}")
+print(f"Shadow v{cmp['shadow_version']}: accuracy={cmp['shadow_accuracy']:.2%}")
+print(f"Delta accuracy: {cmp['accuracy_delta']:+.2%}")
+print(f"Taux de désaccord: {cmp['disagreement_rate']:.2%}")
+print(f"Recommandation: {cmp['recommendation']}")
+```
+
+**Schéma `ShadowCompareResponse`**
+
+```json
+{
+  "model_name": "iris_model",
+  "period_days": 14,
+  "production_version": "1.0.0",
+  "shadow_version": "2.0.0",
+  "predictions_analyzed": 1240,
+  "production_accuracy": 0.94,
+  "shadow_accuracy": 0.97,
+  "accuracy_delta": 0.03,
+  "production_avg_latency_ms": 14.2,
+  "shadow_avg_latency_ms": 12.8,
+  "latency_delta_ms": -1.4,
+  "confidence_delta": 0.02,
+  "disagreement_rate": 0.08,
+  "recommendation": "promote"
+}
+```
+
+| `recommendation` | Signification |
+|---|---|
+| `promote` | Le shadow est meilleur sur toutes les métriques — promouvoir en production |
+| `keep_shadow` | Métriques mitigées ou données insuffisantes — continuer l'observation |
+| `no_shadow` | Aucun modèle shadow actif |
+
+---
+
+### `GET /models/{name}/{version}/card` — Model Card
+
+Fiche récapitulative d'un modèle en un seul appel : métadonnées, performance réelle, drift, calibration, top features SHAP, info retrain et couverture ground truth.
+
+**Auth requise**
+
+```python
+# JSON (défaut)
+response = requests.get(
+    f"{BASE_URL}/models/iris_model/2.0.0/card",
+    headers=headers
+)
+card = response.json()
+print(f"Modèle : {card['name']} v{card['version']}")
+print(f"Accuracy réelle : {card['performance']['accuracy']:.2%}")
+print(f"Drift : {card['drift']['summary']}")
+print(f"Top feature : {card['feature_importance'][0]['feature']}")
+
+# Markdown — prêt à partager ou insérer dans une PR
+response_md = requests.get(
+    f"{BASE_URL}/models/iris_model/2.0.0/card",
+    headers={"Authorization": f"Bearer {TOKEN}", "Accept": "text/markdown"}
+)
+with open("model_card.md", "w") as f:
+    f.write(response_md.text)
+```
+
+**Schéma `ModelCardResponse`**
+
+```json
+{
+  "name": "iris_model",
+  "version": "2.0.0",
+  "description": "Classifieur Iris — 3 espèces",
+  "algorithm": "RandomForestClassifier",
+  "trained_by": "alice",
+  "training_date": "2026-03-01T03:00:00",
+  "parent_version": "1.0.0",
+  "performance": {
+    "accuracy": 0.97,
+    "f1_score": 0.96,
+    "matched_predictions": 920,
+    "total_predictions": 1240
+  },
+  "drift": {
+    "summary": "ok",
+    "features_in_warning": [],
+    "features_in_critical": []
+  },
+  "calibration": {
+    "brier_score": 0.042,
+    "overconfidence_gap": 0.031
+  },
+  "feature_importance": [
+    {"feature": "petal length (cm)", "mean_abs_shap": 0.42, "rank": 1},
+    {"feature": "petal width (cm)",  "mean_abs_shap": 0.31, "rank": 2}
+  ],
+  "retrain": {
+    "last_retrain_at": "2026-04-01T03:00:00",
+    "trained_by": "scheduler",
+    "n_rows": 12450
+  },
+  "ground_truth_coverage": 0.74
+}
+```
 
 ---
 
@@ -1220,6 +1407,9 @@ if data["next_cursor"]:
 | `end` | datetime | Oui | Date de fin (ISO 8601) |
 | `version` | str | Non | Filtre sur la version |
 | `user` | str | Non | Filtre sur le username |
+| `id_obs` | str | Non | Filtre par identifiant d'observation |
+| `min_confidence` | float (0–1) | Non | Confiance minimale (max des probabilités) |
+| `max_confidence` | float (0–1) | Non | Confiance maximale (max des probabilités) |
 | `limit` | int | Non | Max résultats (1-1000, défaut 100) |
 | `cursor` | int | Non | ID de la dernière prédiction vue (pagination curseur) |
 
@@ -1338,6 +1528,70 @@ for stat in data["stats"]:
 
 ---
 
+### `GET /predictions/anomalies` — Détection d'anomalies
+
+Retourne les prédictions récentes dont au moins une feature présente un z-score anormal par rapport à la baseline du modèle.
+
+**Auth requise**
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|---|---|---|---|
+| `model_name` | str | Oui | Nom du modèle |
+| `days` | int | 7 | Fenêtre d'analyse (max 90) |
+| `z_threshold` | float | 3.0 | Seuil z-score au-dessus duquel une feature est considérée aberrante |
+| `limit` | int | 200 | Nombre max de résultats (max 1000) |
+
+```python
+response = requests.get(
+    f"{BASE_URL}/predictions/anomalies",
+    headers=headers,
+    params={"model_name": "iris_model", "days": 7, "z_threshold": 3.0}
+)
+data = response.json()
+
+print(f"{data['anomaly_count']} prédictions anormales sur {data['total_analyzed']} analysées")
+for pred in data["anomalies"]:
+    print(f"  ID {pred['prediction_id']} ({pred['timestamp'][:10]}):")
+    for feat in pred["anomalous_features"]:
+        print(f"    {feat['feature']}: z={feat['z_score']:.1f} "
+              f"(valeur={feat['value']}, baseline_mean={feat['baseline_mean']:.2f})")
+```
+
+**Schéma `AnomaliesResponse`**
+
+```json
+{
+  "model_name": "iris_model",
+  "period_days": 7,
+  "z_threshold": 3.0,
+  "total_analyzed": 840,
+  "anomaly_count": 5,
+  "anomalies": [
+    {
+      "prediction_id": 1082,
+      "timestamp": "2026-04-25T14:32:00",
+      "model_version": "2.0.0",
+      "prediction_result": 1,
+      "anomalous_features": [
+        {
+          "feature": "sepal length (cm)",
+          "value": 12.4,
+          "z_score": 7.8,
+          "baseline_mean": 5.84,
+          "baseline_std": 0.83
+        }
+      ]
+    }
+  ]
+}
+```
+
+> Retourne `{"error": "no_baseline"}` si `feature_baseline` n'est pas configurée pour ce modèle.
+
+---
+
 ### `DELETE /predictions/purge` — Purge RGPD
 
 Supprime les prédictions antérieures à N jours. `dry_run=true` par défaut — aucune suppression sans confirmation explicite.
@@ -1384,6 +1638,192 @@ response = requests.delete(
 ```
 
 > `linked_observed_results_count > 0` indique que des prédictions liées à des `observed_results` seront supprimées — perte de données de performance historiques.
+
+---
+
+## Golden Tests
+
+Tests de régression pour valider qu'un modèle produit toujours les sorties attendues sur des cas de référence. Particulièrement utile après un ré-entraînement.
+
+### `GET /models/{name}/golden-tests` — Lister les cas de test
+
+**Auth requise**
+
+```python
+response = requests.get(
+    f"{BASE_URL}/models/iris_model/golden-tests",
+    headers=headers
+)
+tests = response.json()
+
+for t in tests:
+    print(f"#{t['id']} [{t.get('description', '—')}] "
+          f"→ attendu: {t['expected_output']}")
+```
+
+**Schéma `GoldenTestResponse`**
+
+```json
+[
+  {
+    "id": 1,
+    "model_name": "iris_model",
+    "description": "Iris setosa typique",
+    "input_features": {"sepal length (cm)": 5.1, "sepal width (cm)": 3.5,
+                       "petal length (cm)": 1.4, "petal width (cm)": 0.2},
+    "expected_output": "setosa",
+    "created_at": "2026-04-01T10:00:00",
+    "created_by": "alice"
+  }
+]
+```
+
+---
+
+### `POST /models/{name}/golden-tests` — Créer un cas de test
+
+**Auth requise**
+
+```python
+response = requests.post(
+    f"{BASE_URL}/models/iris_model/golden-tests",
+    headers=headers,
+    json={
+        "input_features": {
+            "sepal length (cm)": 5.1,
+            "sepal width (cm)": 3.5,
+            "petal length (cm)": 1.4,
+            "petal width (cm)": 0.2
+        },
+        "expected_output": "setosa",
+        "description": "Iris setosa typique — toutes features nominales"
+    }
+)
+print(response.json()["id"])  # id du nouveau cas
+```
+
+| Champ | Type | Requis | Description |
+|---|---|---|---|
+| `input_features` | dict | Oui | Features d'entrée du cas |
+| `expected_output` | str/int/float | Oui | Sortie attendue du modèle |
+| `description` | str | Non | Description du cas de test |
+
+---
+
+### `DELETE /models/{name}/golden-tests/{test_id}` — Supprimer un cas
+
+**Auth requise : admin**
+
+```python
+response = requests.delete(
+    f"{BASE_URL}/models/iris_model/golden-tests/1",
+    headers=headers
+)
+assert response.status_code == 204
+```
+
+---
+
+### `POST /models/{name}/golden-tests/upload-csv` — Import en lot depuis CSV
+
+**Auth requise : admin**
+
+**Format du CSV**
+
+```
+description,input_features,expected_output
+"Iris setosa typique","{""sepal length (cm)"": 5.1, ""sepal width (cm)"": 3.5, ""petal length (cm)"": 1.4, ""petal width (cm)"": 0.2}",setosa
+"Iris virginica robuste","{""sepal length (cm)"": 6.7, ""sepal width (cm)"": 3.0, ""petal length (cm)"": 5.2, ""petal width (cm)"": 2.3}",virginica
+```
+
+```python
+import io, csv
+
+rows = [
+    {"description": "Iris setosa",
+     "input_features": '{"sepal length (cm)": 5.1, "sepal width (cm)": 3.5, "petal length (cm)": 1.4, "petal width (cm)": 0.2}',
+     "expected_output": "setosa"},
+    {"description": "Iris virginica",
+     "input_features": '{"sepal length (cm)": 6.7, "sepal width (cm)": 3.0, "petal length (cm)": 5.2, "petal width (cm)": 2.3}',
+     "expected_output": "virginica"},
+]
+
+buf = io.StringIO()
+writer = csv.DictWriter(buf, fieldnames=["description", "input_features", "expected_output"])
+writer.writeheader()
+writer.writerows(rows)
+buf.seek(0)
+
+response = requests.post(
+    f"{BASE_URL}/models/iris_model/golden-tests/upload-csv",
+    headers=headers,
+    files={"file": ("tests.csv", buf, "text/csv")}
+)
+result = response.json()
+print(f"{result['imported']} cas importés")
+if result.get("errors"):
+    for err in result["errors"]:
+        print(f"  ❌ Ligne {err['row']}: {err['reason']}")
+```
+
+---
+
+### `POST /models/{name}/{version}/run-golden-tests` — Exécuter les tests
+
+Exécute tous les cas de test enregistrés pour un modèle sur une version donnée.
+
+**Auth requise**
+
+```python
+response = requests.post(
+    f"{BASE_URL}/models/iris_model/2.0.0/run-golden-tests",
+    headers=headers
+)
+result = response.json()
+
+print(f"✅ {result['passed']} / {result['total_tests']} tests passés "
+      f"({result['pass_rate']:.1%})")
+
+for detail in result["details"]:
+    icon = "✅" if detail["passed"] else "❌"
+    desc = detail.get("description", f"Test #{detail['test_id']}")
+    print(f"  {icon} {desc}")
+    if not detail["passed"]:
+        print(f"      attendu: {detail['expected']!r} | reçu: {detail['actual']!r}")
+```
+
+**Schéma `GoldenTestRunResponse`**
+
+```json
+{
+  "model_name": "iris_model",
+  "version": "2.0.0",
+  "total_tests": 5,
+  "passed": 4,
+  "failed": 1,
+  "pass_rate": 0.8,
+  "details": [
+    {
+      "test_id": 1,
+      "description": "Iris setosa typique",
+      "input": {"sepal length (cm)": 5.1},
+      "expected": "setosa",
+      "actual": "setosa",
+      "passed": true
+    },
+    {
+      "test_id": 3,
+      "description": "Cas limite versicolor",
+      "input": {"sepal length (cm)": 6.0},
+      "expected": "versicolor",
+      "actual": "virginica",
+      "passed": false
+    }
+  ]
+}
+```
+
+> L'intégration avec `promotion_policy.min_golden_test_pass_rate` permet de bloquer l'auto-promotion si le taux de réussite est insuffisant.
 
 ---
 
@@ -2178,9 +2618,15 @@ Définit les critères que doit satisfaire un modèle retrained pour être promu
 | `min_accuracy` | float [0–1] | null | Précision minimale (sur les observed_results récents) |
 | `max_latency_p95_ms` | float > 0 | null | Latence P95 maximale en ms |
 | `min_sample_validation` | int ≥ 1 | 10 | Nb minimal de paires (prédiction, résultat) pour évaluer |
-| `auto_promote` | bool | false | Activer l'auto-promotion |
+| `auto_promote` | bool | false | Activer l'auto-promotion post-retrain |
+| `min_golden_test_pass_rate` | float [0–1] | null | Taux de réussite minimal des golden tests avant promotion |
+| `auto_demote` | bool | false | Activer l'auto-demotion (circuit breaker) |
+| `demote_on_drift` | `"warning"` \| `"critical"` \| null | null | Niveau de drift déclenchant la demotion automatique |
+| `demote_on_accuracy_below` | float [0–1] | null | Accuracy minimale sous laquelle le modèle est démis |
+| `demote_cooldown_hours` | int ≥ 1 | 24 | Délai minimal entre deux demotions automatiques |
 
 ```python
+# Auto-promotion post-retrain
 response = requests.patch(
     f"{BASE_URL}/models/iris_model/policy",
     headers=headers,
@@ -2188,13 +2634,26 @@ response = requests.patch(
         "min_accuracy": 0.90,
         "max_latency_p95_ms": 200,
         "min_sample_validation": 50,
+        "min_golden_test_pass_rate": 0.95,
         "auto_promote": True
+    }
+)
+
+# Circuit breaker — auto-demotion si drift critique ou accuracy trop basse
+response = requests.patch(
+    f"{BASE_URL}/models/iris_model/policy",
+    headers=headers,
+    json={
+        "auto_demote": True,
+        "demote_on_drift": "critical",
+        "demote_on_accuracy_below": 0.80,
+        "demote_cooldown_hours": 48
     }
 )
 print(f"Politique activée : {response.json()['auto_promote']}")
 ```
 
-> La politique est évaluée automatiquement à la fin de chaque ré-entraînement. Le résultat est retourné dans la réponse de `POST /models/{name}/{version}/retrain` via les champs `auto_promoted` et `auto_promote_reason`.
+> La politique est évaluée automatiquement à la fin de chaque ré-entraînement (auto-promotion) et lors de chaque cycle de supervision toutes les 6h (auto-demotion). Le résultat est retourné dans la réponse de `POST /models/{name}/{version}/retrain` via les champs `auto_promoted` et `auto_promote_reason`.
 
 ---
 
@@ -2567,12 +3026,47 @@ class PredictMLClient:
     def get_ab_compare(self, name: str, days: int = 7) -> dict:
         return self._get(f"/models/{name}/ab-compare", params={"days": days})
 
+    def get_shadow_compare(self, name: str, days: int = 7,
+                           shadow_version: Optional[str] = None) -> dict:
+        return self._get(f"/models/{name}/shadow-compare",
+                         params={"days": days, "shadow_version": shadow_version})
+
+    def get_output_drift(self, name: str, period_days: int = 7,
+                         model_version: Optional[str] = None) -> dict:
+        return self._get(f"/models/{name}/output-drift",
+                         params={"period_days": period_days, "model_version": model_version})
+
+    def get_model_card(self, name: str, version: str) -> dict:
+        return self._get(f"/models/{name}/{version}/card")
+
+    def get_anomalies(self, model_name: str, days: int = 7,
+                      z_threshold: float = 3.0, limit: int = 200) -> dict:
+        return self._get("/predictions/anomalies",
+                         params={"model_name": model_name, "days": days,
+                                 "z_threshold": z_threshold, "limit": limit})
+
     def retrain(self, name: str, version: str, start_date: str, end_date: str,
                 new_version: Optional[str] = None, set_production: bool = False) -> dict:
         return self._post(f"/models/{name}/{version}/retrain", json={
             "start_date": start_date, "end_date": end_date,
             "new_version": new_version, "set_production": set_production,
         })
+
+    # ── Golden Tests ──────────────────────────────────────────────────────────
+
+    def list_golden_tests(self, model_name: str) -> list:
+        return self._get(f"/models/{model_name}/golden-tests")
+
+    def create_golden_test(self, model_name: str, input_features: Dict[str, Any],
+                           expected_output, description: Optional[str] = None) -> dict:
+        return self._post(f"/models/{model_name}/golden-tests", json={
+            "input_features": input_features,
+            "expected_output": expected_output,
+            "description": description,
+        })
+
+    def run_golden_tests(self, model_name: str, version: str) -> dict:
+        return self._post(f"/models/{model_name}/{version}/run-golden-tests")
 
     # ── Résultats observés ────────────────────────────────────────────────────
 

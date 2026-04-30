@@ -312,6 +312,58 @@ CREATE INDEX ix_observed_results_date_time  ON observed_results (date_time);
 
 ---
 
+### Table `golden_tests`
+
+Cas de test de régression (golden set) pour valider qu'un modèle produit toujours les sorties attendues.
+
+```sql
+CREATE TABLE golden_tests (
+    id              SERIAL PRIMARY KEY,
+    model_name      VARCHAR(100) NOT NULL,
+    input_features  JSONB        NOT NULL,
+    expected_output JSONB        NOT NULL,
+    description     TEXT,
+    created_at      TIMESTAMP    NOT NULL DEFAULT NOW(),
+    created_by_user_id INTEGER   REFERENCES users(id)
+);
+
+CREATE INDEX ix_golden_tests_id         ON golden_tests (id);
+CREATE INDEX ix_golden_tests_model_name ON golden_tests (model_name);
+```
+
+**Colonnes**
+
+| Colonne | Type | Description |
+|---|---|---|
+| `id` | SERIAL PK | Identifiant unique |
+| `model_name` | VARCHAR(100) | Modèle ciblé |
+| `input_features` | JSONB | Features d'entrée du cas de test |
+| `expected_output` | JSONB | Sortie attendue (classe, valeur, etc.) |
+| `description` | TEXT | Description optionnelle du cas |
+| `created_at` | TIMESTAMP | Date de création |
+| `created_by_user_id` | INTEGER FK | Auteur du cas de test |
+
+**Exemple — créer et lister des cas**
+
+```sql
+-- Cas de test pour le modèle iris
+INSERT INTO golden_tests (model_name, input_features, expected_output, description)
+VALUES (
+    'iris_model',
+    '{"sepal length (cm)": 5.1, "sepal width (cm)": 3.5, "petal length (cm)": 1.4, "petal width (cm)": 0.2}',
+    '"setosa"',
+    'Iris setosa typique — toutes features nominales'
+);
+
+-- Lister tous les cas d'un modèle
+SELECT id, description, expected_output, created_at
+FROM golden_tests
+WHERE model_name = 'iris_model'
+ORDER BY created_at DESC;
+```
+
+---
+
 ## Diagramme des relations
 
 ```
@@ -319,7 +371,8 @@ users
   │
   ├──< predictions (user_id → users.id)
   ├──< model_metadata (user_id_creator → users.id)
-  └──< observed_results (user_id → users.id)
+  ├──< observed_results (user_id → users.id)
+  └──< golden_tests (created_by_user_id → users.id)
 
 predictions.id_obs ──── observed_results.id_obs  (jointure applicative)
 ```
