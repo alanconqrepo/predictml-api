@@ -42,6 +42,13 @@ class Settings:
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     REDIS_CACHE_TTL: int = int(os.getenv("REDIS_CACHE_TTL", "3600"))
 
+    # MLflow Experiment Tracking
+    MLFLOW_TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+    MLFLOW_EXPERIMENT_PREFIX: str = os.getenv("MLFLOW_EXPERIMENT_PREFIX", "predictml")
+    MLFLOW_S3_ENDPOINT_URL: str = os.getenv("MLFLOW_S3_ENDPOINT_URL", "")
+    MLFLOW_REGISTER_MODELS: bool = os.getenv("MLFLOW_REGISTER_MODELS", "true").lower() == "true"
+    MLFLOW_ENABLE: bool = os.getenv("MLFLOW_ENABLE", "true").lower() == "true"
+
     # Prometheus metrics — token optionnel pour protéger /metrics (vide = public)
     METRICS_TOKEN: str = os.getenv("METRICS_TOKEN", "")
 

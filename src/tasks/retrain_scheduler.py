@@ -122,11 +122,13 @@ async def _do_retrain(name: str, version: str) -> None:
     # Imports lazy pour éviter les effets de bord à l'import et faciliter le mock en tests
     from sqlalchemy import and_, select
 
+    from src.core.config import settings
     from src.db.database import AsyncSessionLocal
     from src.db.models import HistoryActionType, ModelMetadata
     from src.services.auto_promotion_service import evaluate_auto_promotion
     from src.services.db_service import DBService
     from src.services.minio_service import minio_service
+    from src.services.mlflow_service import mlflow_service
 
     logger.info("Démarrage du ré-entraînement planifié", model=name, version=version)
 
@@ -176,7 +178,7 @@ async def _do_retrain(name: str, version: str) -> None:
         # 4. Exécuter le subprocess (timeout 600 s — identique à l'endpoint manuel)
         timestamp = now_utc.strftime("%Y%m%d%H%M%S")
         new_version = f"{version}-sched-{timestamp}"
-        mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+        mlflow_uri = settings.MLFLOW_TRACKING_URI
         stdout_text = ""
         stderr_text = ""
         new_model_bytes: Optional[bytes] = None
@@ -276,6 +278,32 @@ async def _do_retrain(name: str, version: str) -> None:
             "label_distribution": parsed_metrics.get("label_distribution"),
         }
 
+        # 5b. Créer le run MLflow (dégradation gracieuse si MLflow indisponible)
+        _mlflow_run_id: Optional[str] = None
+        try:
+            _mlflow_run_id = mlflow_service.log_retrain_run(
+                model_name=name,
+                new_version=new_version,
+                source_version=version,
+                trigger="scheduler",
+                trained_by="scheduler",
+                train_start_date=start_date,
+                train_end_date=end_date,
+                accuracy=new_accuracy,
+                f1_score=new_f1,
+                n_rows=parsed_metrics.get("n_rows"),
+                feature_stats=parsed_metrics.get("feature_stats"),
+                label_distribution=parsed_metrics.get("label_distribution"),
+                algorithm=source_model.algorithm,
+                training_params=source_model.training_params,
+                auto_promoted=False,
+                auto_promote_reason=None,
+                model_bytes=new_model_bytes,
+                lookback_days=lookback_days,
+            )
+        except Exception as _exc:
+            logger.warning("MLflow logging échoué (scheduler)", error=str(_exc))
+
         # 6. Uploader le nouveau modèle et le script dans MinIO
         new_object_key = f"{name}/v{new_version}.pkl"
         upload_info = minio_service.upload_model_bytes(new_model_bytes, new_object_key)
@@ -293,7 +321,7 @@ async def _do_retrain(name: str, version: str) -> None:
             train_script_object_key=new_train_key,
             description=source_model.description,
             algorithm=source_model.algorithm,
-            mlflow_run_id=None,
+            mlflow_run_id=_mlflow_run_id,
             accuracy=new_accuracy,
             f1_score=new_f1,
             features_count=source_model.features_count,
@@ -360,6 +388,20 @@ async def _do_retrain(name: str, version: str) -> None:
                 "auto_promoted": _auto_promoted,
                 "auto_promote_reason": _auto_promote_reason,
             }
+
+        # Mettre à jour les tags MLflow avec le résultat final de promotion
+        if _mlflow_run_id:
+            try:
+                mlflow_service.update_run_tags(
+                    _mlflow_run_id,
+                    {
+                        "auto_promoted": str(_auto_promoted),
+                        "auto_promote_reason": _auto_promote_reason or "",
+                        "is_production": str(new_metadata.is_production),
+                    },
+                )
+            except Exception as _exc:
+                logger.warning("MLflow tag update échoué (scheduler)", error=str(_exc))
 
         # 9. Mettre à jour last_run_at et next_run_at sur le modèle source
         cron_expr = schedule.get("cron", "")

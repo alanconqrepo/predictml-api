@@ -13,17 +13,32 @@ CONTRAT D'INTERFACE — variables d'environnement OBLIGATOIRES
                       (ex: "/tmp/abc123/output_model.pkl")
 
 Variables d'environnement optionnelles injectées par l'API :
-  MLFLOW_TRACKING_URI : URI du serveur MLflow pour logguer les métriques
-  MODEL_NAME          : nom du modèle source (pour le contexte MLflow)
+  MLFLOW_TRACKING_URI : URI du serveur MLflow
+  MODEL_NAME          : nom du modèle source
+
+IMPORTANT — MLflow est géré automatiquement par l'API :
+  L'API crée elle-même le run MLflow après l'exécution de ce script.
+  Vous n'avez PAS besoin d'appeler mlflow.start_run() ici.
+  Pour enrichir le logging MLflow, ajoutez les clés optionnelles ci-dessous
+  dans la sortie JSON stdout (section 6).
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SORTIE ATTENDUE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   1. Le modèle DOIT être sauvegardé à OUTPUT_MODEL_PATH via pickle.dump().
-  2. Pour remonter les métriques à l'API, imprimer sur stdout un JSON sur la
-     DERNIÈRE ligne JSON de la sortie standard :
-       {"accuracy": 0.95, "f1_score": 0.94}
+  2. Imprimer sur stdout un JSON comme DERNIÈRE ligne JSON de la sortie :
+       {
+         "accuracy": 0.95,          # obligatoire pour mise à jour en DB
+         "f1_score": 0.94,          # obligatoire pour mise à jour en DB
+         "n_rows": 12450,           # optionnel — loggué dans MLflow
+         "feature_stats": {         # optionnel — loggué comme metrics MLflow
+           "sepal_length": {"mean": 5.8, "std": 0.83, "min": 4.3, "max": 7.9, "null_rate": 0.0}
+         },
+         "label_distribution": {    # optionnel — loggué comme metrics MLflow
+           "setosa": 0.33, "versicolor": 0.33, "virginica": 0.34
+         }
+       }
   3. Les logs de progression peuvent être imprimés sur stderr à volonté.
   4. Quitter avec code 0 si succès, code non-nul si échec.
 
@@ -131,8 +146,40 @@ with open(OUTPUT_MODEL_PATH, "wb") as f:
 print(f"[train.py] Modèle sauvegardé : {OUTPUT_MODEL_PATH}", file=sys.stderr)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 6. Métriques sur stdout (JSON — doit être la dernière ligne JSON de stdout)
+# 6. Métriques sur stdout (dernière ligne JSON — lue par l'API pour MLflow + DB)
 # ──────────────────────────────────────────────────────────────────────────────
-# L'API lit la dernière ligne JSON de stdout pour mettre à jour accuracy et f1_score.
-# Ne mettez rien après ce print.
-print(json.dumps({"accuracy": round(acc, 4), "f1_score": round(f1, 4)}))
+# L'API crée automatiquement un run MLflow avec toutes les clés ci-dessous.
+# accuracy et f1_score sont obligatoires. n_rows, feature_stats et
+# label_distribution sont optionnels mais enrichissent le run MLflow.
+# Ne mettez RIEN après ce print.
+
+feature_stats = {
+    name: {
+        "mean": round(float(np.mean(X_train[:, i])), 4),
+        "std": round(float(np.std(X_train[:, i])), 4),
+        "min": round(float(np.min(X_train[:, i])), 4),
+        "max": round(float(np.max(X_train[:, i])), 4),
+        "null_rate": 0.0,
+    }
+    for i, name in enumerate(iris.feature_names)
+}
+
+classes_arr = np.unique(y)
+total_train = len(y_train)
+label_distribution = {
+    iris.target_names[int(cls)]: round(float(np.sum(y_train == cls)) / total_train, 4)
+    for cls in classes_arr
+    if total_train > 0
+}
+
+print(
+    json.dumps(
+        {
+            "accuracy": round(acc, 4),
+            "f1_score": round(f1, 4),
+            "n_rows": len(X_train),
+            "feature_stats": feature_stats,
+            "label_distribution": label_distribution,
+        }
+    )
+)

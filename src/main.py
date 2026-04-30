@@ -244,7 +244,7 @@ async def _check_minio() -> DependencyDetail:
 
 async def _check_mlflow() -> DependencyDetail:
     start = time.monotonic()
-    mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+    mlflow_uri = settings.MLFLOW_TRACKING_URI
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(f"{mlflow_uri}/api/2.0/mlflow/experiments/list?max_results=1")

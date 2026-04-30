@@ -111,6 +111,7 @@ from src.services.db_service import _ROLLBACK_FIELDS, DBService, _build_snapshot
 from src.services.golden_test_service import GoldenTestService
 from src.services.input_validation_service import resolve_expected_features, validate_input_features
 from src.services.minio_service import minio_service
+from src.services.mlflow_service import mlflow_service
 from src.services.model_service import model_service
 from src.services.shap_service import compute_shap_explanation
 from src.services.webhook_service import send_webhook
@@ -1174,7 +1175,7 @@ async def retrain_model(
     stdout_text = ""
     stderr_text = ""
 
-    mlflow_tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+    mlflow_tracking_uri = settings.MLFLOW_TRACKING_URI
 
     with tempfile.TemporaryDirectory() as tmpdir:
         script_path = os.path.join(tmpdir, "train.py")
@@ -1301,6 +1302,31 @@ async def retrain_model(
         "label_distribution": parsed_metrics.get("label_distribution"),
     }
 
+    # 6b. Créer le run MLflow (dégradation gracieuse si MLflow indisponible)
+    _mlflow_run_id: Optional[str] = None
+    try:
+        _mlflow_run_id = mlflow_service.log_retrain_run(
+            model_name=name,
+            new_version=new_version,
+            source_version=version,
+            trigger="manual",
+            trained_by=user.username,
+            train_start_date=str(payload.start_date),
+            train_end_date=str(payload.end_date),
+            accuracy=new_accuracy,
+            f1_score=new_f1,
+            n_rows=parsed_metrics.get("n_rows"),
+            feature_stats=parsed_metrics.get("feature_stats"),
+            label_distribution=parsed_metrics.get("label_distribution"),
+            algorithm=source_model.algorithm,
+            training_params=source_model.training_params,
+            auto_promoted=False,
+            auto_promote_reason=None,
+            model_bytes=new_model_bytes,
+        )
+    except Exception as _exc:
+        logger.warning("MLflow logging échoué — ré-entraînement continue", error=str(_exc))
+
     # 7. Uploader le nouveau modèle dans MinIO
     new_object_key = f"{name}/v{new_version}.pkl"
     upload_info = minio_service.upload_model_bytes(new_model_bytes, new_object_key)
@@ -1319,7 +1345,7 @@ async def retrain_model(
         train_script_object_key=new_train_key,
         description=source_model.description,
         algorithm=source_model.algorithm,
-        mlflow_run_id=None,
+        mlflow_run_id=_mlflow_run_id,
         accuracy=new_accuracy,
         f1_score=new_f1,
         features_count=source_model.features_count,
@@ -1434,6 +1460,20 @@ async def retrain_model(
             "auto_promoted": auto_promoted,
             "auto_promote_reason": auto_promote_reason,
         }
+
+    # Mettre à jour les tags MLflow avec le résultat final de promotion
+    if _mlflow_run_id:
+        try:
+            mlflow_service.update_run_tags(
+                _mlflow_run_id,
+                {
+                    "auto_promoted": str(auto_promoted),
+                    "auto_promote_reason": auto_promote_reason or "",
+                    "is_production": str(new_metadata.is_production),
+                },
+            )
+        except Exception as _exc:
+            logger.warning("MLflow tag update échoué", error=str(_exc))
 
     await db.commit()
     await db.refresh(new_metadata)
@@ -3286,18 +3326,6 @@ async def update_model(
 # ---------------------------------------------------------------------------
 
 
-def _delete_mlflow_run(run_id: str) -> bool:
-    """Supprime le run MLflow. Retourne False si MLflow est indisponible."""
-    try:
-        from mlflow.tracking import MlflowClient
-
-        MlflowClient().delete_run(run_id)
-        return True
-    except Exception as e:
-        logger.warning("MLflow suppression impossible", run_id=run_id, error=str(e))
-        return False
-
-
 def _delete_minio_object(object_key: str) -> bool:
     """Supprime l'objet MinIO. Retourne False si MinIO est indisponible."""
     try:
@@ -3342,7 +3370,7 @@ async def delete_model_version(
         )
 
     if model.mlflow_run_id:
-        _delete_mlflow_run(model.mlflow_run_id)
+        mlflow_service.delete_run(model.mlflow_run_id)
 
     if model.minio_object_key:
         _delete_minio_object(model.minio_object_key)
@@ -3623,7 +3651,7 @@ async def delete_model_all_versions(
     for model in models:
         deleted_versions.append(model.version)
 
-        if model.mlflow_run_id and _delete_mlflow_run(model.mlflow_run_id):
+        if model.mlflow_run_id and mlflow_service.delete_run(model.mlflow_run_id):
             mlflow_runs_deleted.append(model.mlflow_run_id)
 
         if model.minio_object_key and _delete_minio_object(model.minio_object_key):
