@@ -621,3 +621,170 @@ class TestSchedulerLifecycle:
             stop_retrain_scheduler()
 
         mock_sched.shutdown.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests drift-triggered retrain
+# ---------------------------------------------------------------------------
+
+
+class TestDriftTriggeredRetrain:
+    """
+    Vérifie que run_alert_check() déclenche _run_retrain_job via asyncio.create_task
+    quand le drift atteint ou dépasse le seuil configuré dans retrain_schedule.
+    """
+
+    @staticmethod
+    def _make_prod_meta(
+        name: str,
+        trigger_on_drift: str | None,
+        cooldown_hours: int = 24,
+        last_run_at: str | None = None,
+        has_script: bool = True,
+    ):
+        m = MagicMock()
+        m.name = name
+        m.version = "1.0.0"
+        m.is_production = True
+        m.feature_baseline = {"sepal_length": {"mean": 5.8, "std": 0.83}}
+        m.alert_thresholds = None
+        m.webhook_url = None
+        m.promotion_policy = None
+        m.train_script_object_key = f"{name}/v1.0.0_train.py" if has_script else None
+        m.retrain_schedule = {
+            "cron": "0 3 * * 1",
+            "enabled": True,
+            "lookback_days": 30,
+            "auto_promote": False,
+            "trigger_on_drift": trigger_on_drift,
+            "drift_retrain_cooldown_hours": cooldown_hours,
+            "last_run_at": last_run_at,
+        }
+        return m
+
+    @staticmethod
+    def _feat_result(status: str):
+        r = MagicMock()
+        r.drift_status = status
+        r.z_score = 3.5
+        r.psi = 0.25
+        return r
+
+    @staticmethod
+    def _output_report(status: str):
+        r = MagicMock()
+        r.status = status
+        r.psi = 0.05
+        r.predictions_analyzed = 50
+        return r
+
+    def _run_check_with_mocks(self, prod_meta, feat_status: str, out_status: str):
+        """Exécute run_alert_check() avec toutes les dépendances mockées."""
+        from src.tasks.supervision_reporter import run_alert_check
+
+        model_stat = {
+            "model_name": prod_meta.name,
+            "error_rate": 0.0,
+            "total_predictions": 100,
+            "error_count": 0,
+            "avg_latency_ms": 50.0,
+            "shadow_predictions": 0,
+        }
+
+        mock_retrain_job = AsyncMock()
+
+        def _close_coro(coro, **_):
+            if hasattr(coro, "close"):
+                coro.close()
+            return MagicMock()
+
+        with (
+            patch("src.db.database.AsyncSessionLocal", new=_test_session_cm),
+            patch(
+                "src.services.db_service.DBService.get_global_monitoring_stats",
+                new_callable=AsyncMock,
+                return_value=[model_stat],
+            ),
+            patch(
+                "src.services.db_service.DBService.get_all_active_models",
+                new_callable=AsyncMock,
+                return_value=[prod_meta],
+            ),
+            patch(
+                "src.services.db_service.DBService.get_accuracy_drift",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
+                "src.services.db_service.DBService.get_feature_production_stats",
+                new_callable=AsyncMock,
+                return_value={"sepal_length": {"mean": 7.5, "std": 0.5, "count": 50}},
+            ),
+            patch(
+                "src.services.drift_service.compute_feature_drift",
+                return_value={"sepal_length": self._feat_result(feat_status)},
+            ),
+            patch(
+                "src.services.drift_service.compute_output_drift",
+                new_callable=AsyncMock,
+                return_value=self._output_report(out_status),
+            ),
+            patch("src.tasks.retrain_scheduler._run_retrain_job", mock_retrain_job),
+            patch("asyncio.create_task", side_effect=_close_coro),
+        ):
+            asyncio.run(run_alert_check())
+
+        return mock_retrain_job
+
+    def test_trigger_fires_on_critical_input_drift(self):
+        """Drift feature critique + threshold=critical + cooldown expiré → retrain déclenché."""
+        meta = self._make_prod_meta("drift_fire_input", trigger_on_drift="critical")
+        mock_job = self._run_check_with_mocks(meta, feat_status="critical", out_status="ok")
+        mock_job.assert_called_once_with(meta.name, "1.0.0")
+
+    def test_trigger_fires_on_critical_output_drift(self):
+        """Drift de sortie critique + threshold=critical + cooldown expiré → retrain déclenché."""
+        meta = self._make_prod_meta("drift_fire_output", trigger_on_drift="critical")
+        mock_job = self._run_check_with_mocks(meta, feat_status="ok", out_status="critical")
+        mock_job.assert_called_once_with(meta.name, "1.0.0")
+
+    def test_no_trigger_if_warning_with_critical_threshold(self):
+        """Drift feature warning + threshold=critical → pas de retrain."""
+        meta = self._make_prod_meta("drift_no_fire_warn", trigger_on_drift="critical")
+        mock_job = self._run_check_with_mocks(meta, feat_status="warning", out_status="ok")
+        mock_job.assert_not_called()
+
+    def test_trigger_fires_when_threshold_is_warning(self):
+        """Drift feature warning + threshold=warning → retrain déclenché."""
+        meta = self._make_prod_meta("drift_fire_warn_thresh", trigger_on_drift="warning")
+        mock_job = self._run_check_with_mocks(meta, feat_status="warning", out_status="ok")
+        mock_job.assert_called_once_with(meta.name, "1.0.0")
+
+    def test_cooldown_blocks_second_fire(self):
+        """last_run_at récent (cooldown non expiré) → pas de retrain déclenché."""
+        from datetime import timezone
+
+        recent = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        meta = self._make_prod_meta(
+            "drift_cooldown",
+            trigger_on_drift="critical",
+            cooldown_hours=24,
+            last_run_at=recent,
+        )
+        mock_job = self._run_check_with_mocks(meta, feat_status="critical", out_status="ok")
+        mock_job.assert_not_called()
+
+    def test_no_trigger_without_train_script(self):
+        """Pas de train_script_object_key → retrain non déclenché même si drift critique."""
+        meta = self._make_prod_meta(
+            "drift_no_script", trigger_on_drift="critical", has_script=False
+        )
+        mock_job = self._run_check_with_mocks(meta, feat_status="critical", out_status="ok")
+        mock_job.assert_not_called()
+
+    def test_no_trigger_when_trigger_on_drift_is_null(self):
+        """trigger_on_drift=None → aucun retrain même si drift critique."""
+        meta = self._make_prod_meta("drift_null_trigger", trigger_on_drift=None)
+        meta.retrain_schedule = None  # pas de schedule configuré
+        mock_job = self._run_check_with_mocks(meta, feat_status="critical", out_status="ok")
+        mock_job.assert_not_called()
