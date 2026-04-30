@@ -21,5 +21,9 @@ détermine quel est le taux de recouvrement des tests avant et après ton plan
 
 
 
+est ce que l'intégration avec mlflow est ok à 100%. par exemple est ce que tous les retrain sont stockés dans les expérimentations mlflow avec les bons kpis etc..je souhaite que les fonctionnalités de mlflow soit utilisés à 100%. crée d'implémentation pour que ça soit me cas.
+
+
+
 
 crée une page streamlit d'aide avec chat llm pour aider l'utilisateur d'un point de vue code : génération de script train avec sklearn mlflow..., d'appel api vers la solution, d'aide à l'utilisation de l'App streamlit, explication des différents indicateurs etc... se baser sur la documentation et skills du projet pour répondre, si besoin ajouter de la documentation. possibilité de visualiser directement la doc .md
