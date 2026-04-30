@@ -152,7 +152,7 @@ services:
       - "${STREAMLIT_PORT:-8501}:8501"
     environment:
       - API_URL=http://api:8000
-      - MLFLOW_URL=http://localhost:5000
+      - MLFLOW_URL=http://mlflow:5000
     depends_on:
       api:
         condition: service_healthy
