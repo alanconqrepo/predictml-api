@@ -26,7 +26,20 @@ _minio_mock.delete_model.return_value = True
 _minio_mock.download_model.side_effect = Exception("MinIO non disponible en tests")
 
 import src.api.models  # noqa: E402 — doit être importé avant le patch
+import src.tasks.retrain_scheduler  # noqa: E402 — doit être importé avant le patch
 patch("src.api.models.minio_service", _minio_mock).start()
+
+# Mock MLflow service globalement — les tests ne nécessitent pas de serveur MLflow
+_mlflow_mock = MagicMock()
+_mlflow_mock.log_retrain_run.return_value = "mock-mlflow-run-id-abc123"
+_mlflow_mock.update_run_tags.return_value = True
+_mlflow_mock.delete_run.return_value = True
+_mlflow_mock.log_production_snapshot.return_value = "mock-monitoring-run-id"
+
+# Patch dans le namespace de api.models (import module-level déjà lié)
+patch("src.api.models.mlflow_service", _mlflow_mock).start()
+# Patch dans le module source : couvre les imports lazy du scheduler (from src.services.mlflow_service import mlflow_service)
+patch("src.services.mlflow_service.mlflow_service", _mlflow_mock).start()
 
 # Remplacer le client Redis du singleton par un FakeRedis en mémoire
 # (aucun serveur Redis requis pour les tests)
