@@ -507,6 +507,8 @@ class RetrainScheduleInput(BaseModel):
     lookback_days: int = Field(30, ge=1)
     auto_promote: bool = False
     enabled: bool = True
+    trigger_on_drift: Optional[Literal["warning", "critical"]] = None
+    drift_retrain_cooldown_hours: int = Field(24, ge=1)
 
 
 class ScheduleUpdateResponse(BaseModel):

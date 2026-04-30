@@ -1622,6 +1622,8 @@ async def update_retrain_schedule(
         "lookback_days": payload.lookback_days,
         "auto_promote": payload.auto_promote,
         "enabled": payload.enabled,
+        "trigger_on_drift": payload.trigger_on_drift,
+        "drift_retrain_cooldown_hours": payload.drift_retrain_cooldown_hours,
         "last_run_at": existing.get("last_run_at"),
         "next_run_at": next_run_at.isoformat() if next_run_at else None,
     }

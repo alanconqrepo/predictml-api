@@ -20,6 +20,8 @@ from src.services.webhook_service import send_webhook
 
 logger = structlog.get_logger(__name__)
 
+_DRIFT_LEVEL: dict[str, int] = {"ok": 0, "warning": 1, "critical": 2}
+
 
 def _get_model_threshold(thresholds: dict | None, key: str, default: float) -> float:
     """Retourne le seuil du modèle si défini, sinon le seuil global."""
@@ -80,6 +82,10 @@ async def run_alert_check() -> None:
                 metas = meta_by_name.get(model_name, [])
                 prod_meta = next((m for m in metas if m.is_production), metas[0] if metas else None)
                 thresholds = prod_meta.alert_thresholds if prod_meta else None
+
+                # Suivi du niveau de drift max détecté pour le trigger drift-retrain
+                _max_input_drift = "ok"
+                _max_output_drift = "ok"
 
                 # Alerte pic d'erreurs
                 error_threshold = _get_model_threshold(
@@ -159,6 +165,8 @@ async def run_alert_check() -> None:
                             prod_meta.feature_baseline, production_stats, min_count=10
                         )
                         for feat_name, feat_result in features.items():
+                            if _DRIFT_LEVEL.get(feat_result.drift_status, 0) > _DRIFT_LEVEL.get(_max_input_drift, 0):
+                                _max_input_drift = feat_result.drift_status
                             if feat_result.drift_status == "critical":
                                 logger.warning(
                                     "Drift features critique",
@@ -205,6 +213,7 @@ async def run_alert_check() -> None:
                             model_version=prod_meta.version,
                             min_predictions=10,
                         )
+                        _max_output_drift = output_report.status
                         if output_report.status == "critical":
                             logger.warning(
                                 "Drift de sortie critique (label shift)",
@@ -243,6 +252,32 @@ async def run_alert_check() -> None:
                                 version=prod_meta.version,
                                 reason=reason,
                             )
+
+                # Retrain déclenché par drift
+                if prod_meta:
+                    sched = prod_meta.retrain_schedule
+                    if sched and sched.get("trigger_on_drift") and prod_meta.train_script_object_key:
+                        threshold_level = _DRIFT_LEVEL.get(sched["trigger_on_drift"], 999)
+                        detected_level = max(
+                            _DRIFT_LEVEL.get(_max_input_drift, 0),
+                            _DRIFT_LEVEL.get(_max_output_drift, 0),
+                        )
+                        if detected_level >= threshold_level:
+                            cooldown_hours = int(sched.get("drift_retrain_cooldown_hours", 24))
+                            last_run_str = sched.get("last_run_at")
+                            cooldown_ok = last_run_str is None or (
+                                datetime.utcnow()
+                                >= datetime.fromisoformat(last_run_str) + timedelta(hours=cooldown_hours)
+                            )
+                            if cooldown_ok:
+                                from src.tasks.retrain_scheduler import _run_retrain_job
+
+                                asyncio.create_task(_run_retrain_job(model_name, prod_meta.version))
+                                logger.info(
+                                    "Retrain déclenché par drift",
+                                    model=model_name,
+                                    version=prod_meta.version,
+                                )
 
     except Exception as exc:
         logger.error("Erreur lors de la vérification des alertes", error=str(exc))
