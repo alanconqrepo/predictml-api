@@ -244,6 +244,47 @@ class EmailService:
             html_body=self._base_html("Alerte pic d'erreurs", body),
         )
 
+    def send_auto_demotion_alert(
+        self,
+        model_name: str,
+        version: str,
+        reason: str,
+        no_fallback: bool = False,
+    ) -> bool:
+        """Alerte d'auto-demotion du circuit breaker."""
+        fallback_warning = (
+            """<p style="color:#c0392b;font-weight:bold">
+            ⚠️ Aucune version de fallback disponible — le modèle N'A PAS été démis.
+            Action manuelle requise.</p>"""
+            if no_fallback
+            else ""
+        )
+        action_txt = (
+            "retiré de la production"
+            if not no_fallback
+            else "maintenu en production (pas de fallback)"
+        )
+        body = f"""
+        <p>Le circuit breaker a détecté une dégradation critique sur le modèle
+           <strong>{model_name}</strong> v<strong>{version}</strong>
+           et l'a <strong>{action_txt}</strong> automatiquement.</p>
+        {fallback_warning}
+        <table>
+          <tr><th>Modèle</th><td>{model_name}</td></tr>
+          <tr><th>Version</th><td>{version}</td></tr>
+          <tr><th>Raison</th><td>{reason}</td></tr>
+          <tr><th>Détecté le</th>
+              <td>{datetime.utcnow().strftime('%d/%m/%Y %H:%M')} UTC</td></tr>
+        </table>
+        <p>Vérifiez le tableau de bord de supervision et promouvez une version saine
+           si nécessaire.</p>"""
+
+        return self._send_email(
+            to=settings.ALERT_EMAIL_TO,
+            subject=f"[PredictML] 🔴 Auto-demotion — {model_name} v{version}",
+            html_body=self._base_html("Circuit breaker — Auto-demotion", body),
+        )
+
 
 # Instance globale
 email_service = EmailService()

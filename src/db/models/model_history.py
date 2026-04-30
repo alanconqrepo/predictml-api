@@ -19,6 +19,7 @@ class HistoryActionType(str, enum.Enum):
     DEPRECATED = "deprecated"
     DELETED = "deleted"
     ROLLBACK = "rollback"
+    AUTO_DEMOTE = "auto_demote"
 
 
 class ModelHistory(Base):

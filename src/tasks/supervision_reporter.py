@@ -229,6 +229,21 @@ async def run_alert_check() -> None:
                                     )
                                 )
 
+                # Circuit breaker — auto-demotion
+                if prod_meta and prod_meta.promotion_policy:
+                    policy = prod_meta.promotion_policy
+                    if policy.get("auto_demote"):
+                        from src.services.auto_promotion_service import evaluate_auto_demotion
+
+                        demoted, reason = await evaluate_auto_demotion(db, model_name, policy)
+                        if demoted:
+                            logger.warning(
+                                "Modèle auto-démis par le circuit breaker",
+                                model=model_name,
+                                version=prod_meta.version,
+                                reason=reason,
+                            )
+
     except Exception as exc:
         logger.error("Erreur lors de la vérification des alertes", error=str(exc))
 

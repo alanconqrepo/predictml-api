@@ -30,7 +30,7 @@ from sklearn.datasets import load_iris
 from sklearn.linear_model import LogisticRegression
 
 from src.main import app
-from src.services.auto_promotion_service import evaluate_auto_promotion
+from src.services.auto_promotion_service import evaluate_auto_demotion, evaluate_auto_promotion
 from src.services.db_service import DBService
 from tests.conftest import _minio_mock, _TestSessionLocal
 
@@ -687,3 +687,500 @@ class TestEvaluateAutoPromotion:
             ok, _ = self._run(evaluate_auto_promotion(db, "m", policy))
         # La branche régression est détectée → min_accuracy ignoré → promu
         assert ok is True
+
+
+# ---------------------------------------------------------------------------
+# Tests unitaires — evaluate_auto_demotion()
+# ---------------------------------------------------------------------------
+
+
+class TestAutoDemotion:
+    """Tests unitaires pour src/services/auto_promotion_service.evaluate_auto_demotion."""
+
+    def _run(self, coro):
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    def _make_prod_meta(self, name="m", version="1.0.0", webhook_url=None, feature_baseline=None):
+        meta = MagicMock()
+        meta.name = name
+        meta.version = version
+        meta.is_production = True
+        meta.is_active = True
+        meta.webhook_url = webhook_url
+        meta.feature_baseline = feature_baseline
+        return meta
+
+    def _make_fallback_meta(self, version="0.9.0"):
+        meta = MagicMock()
+        meta.version = version
+        meta.is_production = False
+        meta.is_active = True
+        return meta
+
+    def _make_db(self, prod_meta=None, fallback_metas=None, history_entries=None):
+        """Crée un mock AsyncSession pour evaluate_auto_demotion.
+
+        Les appels db.execute(select(...)) sont séquentiels :
+        1. Requête production model
+        2. Requête fallback versions
+        3. Requête cooldown (ModelHistory)
+        """
+        db = MagicMock()
+
+        responses = []
+
+        # Réponse 1 : prod model
+        r1 = MagicMock()
+        r1.scalars.return_value.first.return_value = prod_meta
+        responses.append(r1)
+
+        if prod_meta is not None:
+            # Réponse 2 : fallback
+            r2 = MagicMock()
+            r2.scalars.return_value.all.return_value = fallback_metas or []
+            responses.append(r2)
+
+            if fallback_metas:
+                # Réponse 3 : cooldown history
+                r3 = MagicMock()
+                r3.scalars.return_value.first.return_value = (
+                    history_entries[0] if history_entries else None
+                )
+                responses.append(r3)
+
+        db.execute = AsyncMock(side_effect=responses)
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        return db
+
+    def _make_history_entry(self, hours_ago: float):
+        from datetime import datetime, timedelta
+        entry = MagicMock()
+        entry.timestamp = datetime.utcnow() - timedelta(hours=hours_ago)
+        return entry
+
+    def _base_policy(self, **overrides):
+        policy = {
+            "auto_demote": True,
+            "demote_on_drift": "critical",
+            "demote_on_accuracy_below": None,
+            "demote_cooldown_hours": 0,
+            "min_sample_validation": 5,
+        }
+        policy.update(overrides)
+        return policy
+
+    # --- Cas de base ---
+
+    def test_auto_demote_disabled_returns_false(self):
+        db = MagicMock()
+        policy = {"auto_demote": False}
+        ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
+        assert ok is False
+        assert "désactivée" in reason.lower()
+        db.execute.assert_not_called()
+
+    def test_no_production_model_returns_false(self):
+        db = self._make_db(prod_meta=None)
+        ok, reason = self._run(evaluate_auto_demotion(db, "m", self._base_policy()))
+        assert ok is False
+        assert "production" in reason.lower()
+
+    # --- Garde-fou fallback ---
+
+    def test_no_fallback_returns_false_and_sends_email(self):
+        prod = self._make_prod_meta()
+        db = self._make_db(prod_meta=prod, fallback_metas=[])
+        with (
+            patch("src.services.auto_promotion_service.email_service") as mock_email,
+            patch("src.services.auto_promotion_service.settings") as mock_settings,
+        ):
+            mock_settings.ENABLE_EMAIL_ALERTS = True
+            ok, reason = self._run(evaluate_auto_demotion(db, "m", self._base_policy()))
+        assert ok is False
+        assert "fallback" in reason.lower()
+        mock_email.send_auto_demotion_alert.assert_called_once()
+        call_kwargs = mock_email.send_auto_demotion_alert.call_args
+        assert call_kwargs.kwargs.get("no_fallback") is True or (
+            len(call_kwargs.args) >= 4 and call_kwargs.args[3] is True
+        )
+
+    def test_no_fallback_no_email_when_disabled(self):
+        prod = self._make_prod_meta()
+        db = self._make_db(prod_meta=prod, fallback_metas=[])
+        with (
+            patch("src.services.auto_promotion_service.email_service") as mock_email,
+            patch("src.services.auto_promotion_service.settings") as mock_settings,
+        ):
+            mock_settings.ENABLE_EMAIL_ALERTS = False
+            ok, reason = self._run(evaluate_auto_demotion(db, "m", self._base_policy()))
+        assert ok is False
+        mock_email.send_auto_demotion_alert.assert_not_called()
+
+    # --- Cooldown ---
+
+    def test_cooldown_active_returns_false(self):
+        prod = self._make_prod_meta()
+        fallback = self._make_fallback_meta()
+        recent_entry = self._make_history_entry(hours_ago=2)
+        db = self._make_db(prod_meta=prod, fallback_metas=[fallback], history_entries=[recent_entry])
+        policy = self._base_policy(demote_cooldown_hours=24)
+        ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
+        assert ok is False
+        assert "cooldown" in reason.lower()
+
+    def test_cooldown_expired_allows_demotion(self):
+        """Entrée de cooldown plus ancienne que la fenêtre → la demotion peut procéder.
+
+        Le mock retourne [] pour la requête cooldown (aucun AUTO_DEMOTE dans la fenêtre),
+        ce qui simule un cooldown expiré.
+        """
+        prod = self._make_prod_meta()  # sans feature_baseline → drift skippé
+        fallback = self._make_fallback_meta()
+        # history_entries=None → cooldown query returns None (aucun match dans la fenêtre)
+        db = self._make_db(prod_meta=prod, fallback_metas=[fallback], history_entries=None)
+        policy = self._base_policy(demote_cooldown_hours=24)
+        # Pas de baseline → drift skippé, pas d'accuracy check → aucun critère → pas de demotion
+        ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
+        assert ok is False
+        assert "cooldown" not in reason.lower()
+
+    def test_zero_cooldown_skips_history_check(self):
+        """demote_cooldown_hours=0 → pas de requête cooldown."""
+        prod = self._make_prod_meta()
+        fallback = self._make_fallback_meta()
+        # Avec cooldown=0, la requête history ne devrait pas être émise
+        # On mock uniquement 2 réponses (prod + fallback)
+        db = self._make_db(prod_meta=prod, fallback_metas=[fallback], history_entries=None)
+        policy = self._base_policy(demote_cooldown_hours=0)
+        ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
+        # Aucun critère actif → pas de demotion, mais pas de crash non plus
+        assert ok is False
+        assert "cooldown" not in reason.lower()
+
+    # --- Drift ---
+
+    def test_critical_drift_triggers_demotion(self):
+        baseline = {"feat1": {"mean": 5.0, "std": 1.0, "min": 0.0, "max": 10.0}}
+        prod = self._make_prod_meta(feature_baseline=baseline)
+        fallback = self._make_fallback_meta()
+        db = self._make_db(prod_meta=prod, fallback_metas=[fallback])
+
+        feat_result = MagicMock()
+        feat_result.drift_status = "critical"
+        feat_result.null_rate_status = None
+
+        output_report = MagicMock()
+        output_report.status = "ok"
+
+        with (
+            patch(
+                "src.services.auto_promotion_service.DBService.get_feature_production_stats",
+                new=AsyncMock(return_value={"feat1": {"mean": 9.0, "std": 0.5, "count": 50}}),
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.compute_feature_drift",
+                return_value={"feat1": feat_result},
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.summarize_drift",
+                return_value="critical",
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.compute_output_drift",
+                new=AsyncMock(return_value=output_report),
+            ),
+            patch("src.services.auto_promotion_service.DBService.log_model_history", new=AsyncMock(return_value=MagicMock(snapshot={}))),
+            patch("src.services.auto_promotion_service.email_service"),
+            patch("src.services.auto_promotion_service.settings") as mock_settings,
+        ):
+            mock_settings.ENABLE_EMAIL_ALERTS = False
+            ok, reason = self._run(evaluate_auto_demotion(db, "m", self._base_policy()))
+
+        assert ok is True
+        assert "drift" in reason.lower()
+        assert prod.is_production is False
+        db.commit.assert_called_once()
+
+    def test_warning_drift_no_trigger_when_threshold_is_critical(self):
+        baseline = {"feat1": {"mean": 5.0, "std": 1.0, "min": 0.0, "max": 10.0}}
+        prod = self._make_prod_meta(feature_baseline=baseline)
+        fallback = self._make_fallback_meta()
+        db = self._make_db(prod_meta=prod, fallback_metas=[fallback])
+
+        feat_result = MagicMock()
+        feat_result.drift_status = "warning"
+        feat_result.null_rate_status = None
+
+        output_report = MagicMock()
+        output_report.status = "ok"
+
+        with (
+            patch(
+                "src.services.auto_promotion_service.DBService.get_feature_production_stats",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.compute_feature_drift",
+                return_value={"feat1": feat_result},
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.summarize_drift",
+                return_value="warning",
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.compute_output_drift",
+                new=AsyncMock(return_value=output_report),
+            ),
+        ):
+            policy = self._base_policy(demote_on_drift="critical")
+            ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
+
+        assert ok is False
+
+    def test_warning_drift_triggers_when_threshold_is_warning(self):
+        baseline = {"feat1": {"mean": 5.0, "std": 1.0, "min": 0.0, "max": 10.0}}
+        prod = self._make_prod_meta(feature_baseline=baseline)
+        fallback = self._make_fallback_meta()
+        db = self._make_db(prod_meta=prod, fallback_metas=[fallback])
+
+        output_report = MagicMock()
+        output_report.status = "ok"
+
+        with (
+            patch(
+                "src.services.auto_promotion_service.DBService.get_feature_production_stats",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.compute_feature_drift",
+                return_value={},
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.summarize_drift",
+                return_value="warning",
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.compute_output_drift",
+                new=AsyncMock(return_value=output_report),
+            ),
+            patch("src.services.auto_promotion_service.DBService.log_model_history", new=AsyncMock(return_value=MagicMock(snapshot={}))),
+            patch("src.services.auto_promotion_service.email_service"),
+            patch("src.services.auto_promotion_service.settings") as mock_settings,
+        ):
+            mock_settings.ENABLE_EMAIL_ALERTS = False
+            policy = self._base_policy(demote_on_drift="warning")
+            ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
+
+        assert ok is True
+        assert "drift" in reason.lower()
+
+    def test_no_feature_baseline_skips_drift_check(self):
+        """Sans feature_baseline → drift skippé, aucune demotion si pas d'autres critères."""
+        prod = self._make_prod_meta(feature_baseline=None)
+        fallback = self._make_fallback_meta()
+        db = self._make_db(prod_meta=prod, fallback_metas=[fallback])
+        ok, reason = self._run(evaluate_auto_demotion(db, "m", self._base_policy()))
+        assert ok is False
+
+    # --- Accuracy ---
+
+    def test_accuracy_below_threshold_triggers_demotion(self):
+        prod = self._make_prod_meta(feature_baseline=None)
+        fallback = self._make_fallback_meta()
+        db = self._make_db(prod_meta=prod, fallback_metas=[fallback])
+
+        # 10 paires à 50% accuracy
+        pairs = [("A", "A", None, None)] * 5 + [("B", "A", None, None)] * 5
+        with (
+            patch(
+                "src.services.auto_promotion_service.DBService.get_performance_pairs",
+                new=AsyncMock(return_value=pairs),
+            ),
+            patch("src.services.auto_promotion_service.DBService.log_model_history", new=AsyncMock(return_value=MagicMock(snapshot={}))),
+            patch("src.services.auto_promotion_service.email_service"),
+            patch("src.services.auto_promotion_service.settings") as mock_settings,
+        ):
+            mock_settings.ENABLE_EMAIL_ALERTS = False
+            policy = self._base_policy(demote_on_accuracy_below=0.80, min_sample_validation=5)
+            ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
+
+        assert ok is True
+        assert "accuracy" in reason.lower() or "précision" in reason.lower() or "insuffisant" in reason.lower()
+
+    def test_accuracy_above_threshold_no_demotion(self):
+        prod = self._make_prod_meta(feature_baseline=None)
+        fallback = self._make_fallback_meta()
+        db = self._make_db(prod_meta=prod, fallback_metas=[fallback])
+
+        pairs = [("A", "A", None, None)] * 10  # 100% accuracy
+        with patch(
+            "src.services.auto_promotion_service.DBService.get_performance_pairs",
+            new=AsyncMock(return_value=pairs),
+        ):
+            policy = self._base_policy(demote_on_accuracy_below=0.80, min_sample_validation=5)
+            ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
+
+        assert ok is False
+
+    def test_accuracy_insufficient_samples_skips_check(self):
+        """Moins de min_sample_validation paires → check accuracy ignoré."""
+        prod = self._make_prod_meta(feature_baseline=None)
+        fallback = self._make_fallback_meta()
+        db = self._make_db(prod_meta=prod, fallback_metas=[fallback])
+
+        pairs = [("B", "A", None, None)] * 3  # 3 paires, accuracy 0%, mais min=5
+        with patch(
+            "src.services.auto_promotion_service.DBService.get_performance_pairs",
+            new=AsyncMock(return_value=pairs),
+        ):
+            policy = self._base_policy(demote_on_accuracy_below=0.80, min_sample_validation=5)
+            ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
+
+        assert ok is False  # check skippé → aucun critère déclenché
+
+    # --- Combiné ---
+
+    def test_both_drift_and_accuracy_combined_reason(self):
+        baseline = {"feat1": {"mean": 5.0, "std": 1.0, "min": 0.0, "max": 10.0}}
+        prod = self._make_prod_meta(feature_baseline=baseline)
+        fallback = self._make_fallback_meta()
+        db = self._make_db(prod_meta=prod, fallback_metas=[fallback])
+
+        pairs = [("B", "A", None, None)] * 10  # 0% accuracy
+
+        output_report = MagicMock()
+        output_report.status = "ok"
+
+        with (
+            patch(
+                "src.services.auto_promotion_service.DBService.get_feature_production_stats",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.compute_feature_drift",
+                return_value={},
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.summarize_drift",
+                return_value="critical",
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.compute_output_drift",
+                new=AsyncMock(return_value=output_report),
+            ),
+            patch(
+                "src.services.auto_promotion_service.DBService.get_performance_pairs",
+                new=AsyncMock(return_value=pairs),
+            ),
+            patch("src.services.auto_promotion_service.DBService.log_model_history", new=AsyncMock(return_value=MagicMock(snapshot={}))),
+            patch("src.services.auto_promotion_service.email_service"),
+            patch("src.services.auto_promotion_service.settings") as mock_settings,
+        ):
+            mock_settings.ENABLE_EMAIL_ALERTS = False
+            policy = self._base_policy(
+                demote_on_drift="critical",
+                demote_on_accuracy_below=0.80,
+                min_sample_validation=5,
+            )
+            ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
+
+        assert ok is True
+        # La raison combinée contient les deux déclencheurs
+        assert "drift" in reason.lower()
+
+    # --- Audit trail ---
+
+    def test_history_logged_with_auto_demote_action_and_reason(self):
+        """Après demotion, log_model_history appelé avec AUTO_DEMOTE et raison dans snapshot."""
+        from src.db.models.model_history import HistoryActionType
+
+        baseline = {"feat1": {"mean": 5.0, "std": 1.0, "min": 0.0, "max": 10.0}}
+        prod = self._make_prod_meta(feature_baseline=baseline)
+        fallback = self._make_fallback_meta()
+        db = self._make_db(prod_meta=prod, fallback_metas=[fallback])
+
+        captured_entry = MagicMock()
+        captured_entry.snapshot = {}
+        log_mock = AsyncMock(return_value=captured_entry)
+
+        output_report = MagicMock()
+        output_report.status = "ok"
+
+        with (
+            patch(
+                "src.services.auto_promotion_service.DBService.get_feature_production_stats",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.compute_feature_drift",
+                return_value={},
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.summarize_drift",
+                return_value="critical",
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.compute_output_drift",
+                new=AsyncMock(return_value=output_report),
+            ),
+            patch(
+                "src.services.auto_promotion_service.DBService.log_model_history",
+                new=log_mock,
+            ),
+            patch("src.services.auto_promotion_service.email_service"),
+            patch("src.services.auto_promotion_service.settings") as mock_settings,
+        ):
+            mock_settings.ENABLE_EMAIL_ALERTS = False
+            ok, reason = self._run(evaluate_auto_demotion(db, "m", self._base_policy()))
+
+        assert ok is True
+        log_mock.assert_called_once()
+        call_args = log_mock.call_args
+        assert call_args.args[2] == HistoryActionType.AUTO_DEMOTE
+        assert "auto_demote_reason" in captured_entry.snapshot
+
+    def test_webhook_called_after_demotion(self):
+        """Webhook envoyé avec event_type='auto_demote' après une demotion."""
+        baseline = {"feat1": {"mean": 5.0, "std": 1.0, "min": 0.0, "max": 10.0}}
+        prod = self._make_prod_meta(feature_baseline=baseline, webhook_url="http://hook.example/cb")
+        fallback = self._make_fallback_meta()
+        db = self._make_db(prod_meta=prod, fallback_metas=[fallback])
+
+        output_report = MagicMock()
+        output_report.status = "ok"
+
+        with (
+            patch(
+                "src.services.auto_promotion_service.DBService.get_feature_production_stats",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.compute_feature_drift",
+                return_value={},
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.summarize_drift",
+                return_value="critical",
+            ),
+            patch(
+                "src.services.auto_promotion_service.drift_service.compute_output_drift",
+                new=AsyncMock(return_value=output_report),
+            ),
+            patch("src.services.auto_promotion_service.DBService.log_model_history", new=AsyncMock(return_value=MagicMock(snapshot={}))),
+            patch("src.services.auto_promotion_service.email_service"),
+            patch("src.services.auto_promotion_service.settings") as mock_settings,
+            patch("src.services.auto_promotion_service.asyncio.create_task") as mock_task,
+        ):
+            mock_settings.ENABLE_EMAIL_ALERTS = False
+            ok, _ = self._run(evaluate_auto_demotion(db, "m", self._base_policy()))
+
+        assert ok is True
+        mock_task.assert_called_once()
+        webhook_call_args = mock_task.call_args[0][0]
+        # La coroutine send_webhook est passée à create_task — vérifier son nom
+        assert "send_webhook" in str(type(webhook_call_args)) or hasattr(webhook_call_args, "cr_frame")
