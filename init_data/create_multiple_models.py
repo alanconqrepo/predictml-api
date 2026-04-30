@@ -29,14 +29,14 @@ import mlflow
 import mlflow.sklearn
 from minio import Minio
 
-MLFLOW_TRACKING_URI = "http://localhost:5000"
-MINIO_ENDPOINT = "localhost:9002"
-MINIO_ACCESS_KEY = "minioadmin"
-MINIO_SECRET_KEY = "minio_secure_password_123"
+MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
+MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "localhost:9000")
+MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
 MODEL_VERSION = "1.0.0"
 
-API_URL = "http://localhost:8000"
-API_TOKEN = "ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"
+API_URL = os.environ.get("API_URL", "http://localhost:8000")
+API_TOKEN = os.environ.get("API_TOKEN", "")
 
 
 def configure_mlflow():
