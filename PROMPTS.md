@@ -32,3 +32,16 @@ crée une page streamlit d'aide avec chat llm pour aider l'utilisateur d'un poin
 
 en tant qu'expert en sécurité analyse la base de code pour identifier problème de sécurités. vérifie qu'aucunz reelle variable d'environnement n'est publié dans git.
 crée un plan pour améliorer la sécurité du projet.
+
+
+
+crée les tests utiles manquants pour les scripts suivants :
+- services/golden_test_service.py
+- api/models.py
+- api/monitoring.py
+- api/prédictions.py
+- api/users.py
+- db/database.py
+- src/main.py
+
+donne le taux de couverture globale suite aux ajouts
