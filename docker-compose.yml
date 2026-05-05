@@ -158,6 +158,10 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     volumes:
       - ./documentation:/app/documentation:ro
+      - ./src:/app/src:ro
+      - ./init_data:/app/init_data:ro
+      - ./README.md:/app/README.md:ro
+      - ./CODING_STANDARDS.md:/app/CODING_STANDARDS.md:ro
     depends_on:
       api:
         condition: service_healthy
