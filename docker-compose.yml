@@ -155,6 +155,9 @@ services:
     environment:
       - API_URL=http://api:8000
       - MLFLOW_URL=http://mlflow:5000
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./documentation:/app/documentation:ro
     depends_on:
       api:
         condition: service_healthy
