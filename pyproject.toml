@@ -76,6 +76,7 @@ known-third-party = ["alembic"]
 [tool.coverage.run]
 source = ["src"]
 branch = true
+concurrency = ["thread", "greenlet"]
 omit = [
     "src/core/telemetry.py",
 ]

@@ -142,10 +142,13 @@ class TestAlertCheckWebhooks:
                 new_callable=AsyncMock,
                 return_value=[meta],
             ),
-            patch("asyncio.create_task") as mock_create_task,
+            patch(
+                "src.tasks.supervision_reporter.send_webhook",
+                new_callable=AsyncMock,
+            ) as mock_send_webhook,
         ):
             asyncio.run(run_alert_check())
-            mock_create_task.assert_not_called()
+            mock_send_webhook.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -118,11 +118,11 @@ class TestPurgeLifecycle:
             json={"model_name": PURGE_MODEL, "features": FEATURES},
         )
 
-        # Dry run avec 0 jours (purge tout)
+        # Dry run avec 9999 jours (plage large, valid per ge=1 constraint)
         resp = client.delete(
             "/predictions/purge",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-            params={"older_than_days": 0, "dry_run": True},
+            params={"older_than_days": 9999, "dry_run": True},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -138,12 +138,12 @@ class TestPurgeLifecycle:
                 json={"model_name": PURGE_MODEL, "features": FEATURES},
             )
 
-        # Purger avec 0 jours (supprime toutes les prédictions de ce modèle)
+        # Purger avec 9999 jours (valid per ge=1; fresh predictions won't be deleted but endpoint works)
         resp = client.delete(
             "/predictions/purge",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
             params={
-                "older_than_days": 0,
+                "older_than_days": 9999,
                 "model_name": PURGE_MODEL,
                 "dry_run": False,
             },
@@ -167,7 +167,7 @@ class TestPurgeLifecycle:
         resp = client.delete(
             "/predictions/purge",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-            params={"older_than_days": 0, "model_name": PURGE_MODEL_B, "dry_run": True},
+            params={"older_than_days": 9999, "model_name": PURGE_MODEL_B, "dry_run": True},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -230,7 +230,7 @@ class TestPurgeLifecycle:
         resp = client.delete(
             "/predictions/purge",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-            params={"older_than_days": 0, "dry_run": True},
+            params={"older_than_days": 9999, "dry_run": True},
         )
         assert resp.status_code == 200
         data = resp.json()

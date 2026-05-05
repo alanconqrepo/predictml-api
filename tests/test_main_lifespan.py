@@ -10,7 +10,6 @@ Couvre les branches try/except du startup et du shutdown :
 """
 
 import asyncio
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -21,34 +20,38 @@ class TestLifespanStartupFailures:
 
     def test_migration_failure_does_not_crash(self):
         """Échec Alembic → warning loggé, lifespan continue."""
-        from src.main import lifespan
-        from src.main import app
+        from src.main import lifespan, app
 
         async def _run():
             with (
                 patch("src.main.run_migrations", side_effect=Exception("alembic error")),
                 patch("src.main.init_db", new_callable=AsyncMock),
-                patch("src.main.start_retrain_scheduler", new_callable=AsyncMock),
                 patch("src.tasks.supervision_reporter.start_scheduler"),
+                patch(
+                    "src.tasks.retrain_scheduler.start_retrain_scheduler",
+                    new_callable=AsyncMock,
+                ),
                 patch("src.main.close_db", new_callable=AsyncMock),
                 patch("src.main.model_service.close", new_callable=AsyncMock),
             ):
                 async with lifespan(app):
-                    pass  # startup réussi malgré l'exception
+                    pass
 
         asyncio.run(_run())
 
     def test_init_db_failure_does_not_crash(self):
         """Échec init_db → warning loggé, lifespan continue."""
-        from src.main import lifespan
-        from src.main import app
+        from src.main import lifespan, app
 
         async def _run():
             with (
                 patch("src.main.run_migrations", new_callable=AsyncMock),
                 patch("src.main.init_db", side_effect=Exception("db init error")),
-                patch("src.main.start_retrain_scheduler", new_callable=AsyncMock),
                 patch("src.tasks.supervision_reporter.start_scheduler"),
+                patch(
+                    "src.tasks.retrain_scheduler.start_retrain_scheduler",
+                    new_callable=AsyncMock,
+                ),
                 patch("src.main.close_db", new_callable=AsyncMock),
                 patch("src.main.model_service.close", new_callable=AsyncMock),
             ):
@@ -59,17 +62,19 @@ class TestLifespanStartupFailures:
 
     def test_supervision_scheduler_failure_does_not_crash(self):
         """Échec start_scheduler supervision → warning loggé, lifespan continue."""
-        from src.main import lifespan
-        from src.main import app
+        from src.main import lifespan, app
 
         async def _run():
             with (
                 patch("src.main.run_migrations", new_callable=AsyncMock),
                 patch("src.main.init_db", new_callable=AsyncMock),
-                patch("src.main.start_retrain_scheduler", new_callable=AsyncMock),
                 patch(
                     "src.tasks.supervision_reporter.start_scheduler",
                     side_effect=Exception("scheduler error"),
+                ),
+                patch(
+                    "src.tasks.retrain_scheduler.start_retrain_scheduler",
+                    new_callable=AsyncMock,
                 ),
                 patch("src.main.close_db", new_callable=AsyncMock),
                 patch("src.main.model_service.close", new_callable=AsyncMock),
@@ -81,18 +86,17 @@ class TestLifespanStartupFailures:
 
     def test_retrain_scheduler_failure_does_not_crash(self):
         """Échec start_retrain_scheduler → warning loggé, lifespan continue."""
-        from src.main import lifespan
-        from src.main import app
+        from src.main import lifespan, app
 
         async def _run():
             with (
                 patch("src.main.run_migrations", new_callable=AsyncMock),
                 patch("src.main.init_db", new_callable=AsyncMock),
+                patch("src.tasks.supervision_reporter.start_scheduler"),
                 patch(
-                    "src.main.start_retrain_scheduler",
+                    "src.tasks.retrain_scheduler.start_retrain_scheduler",
                     side_effect=Exception("retrain scheduler error"),
                 ),
-                patch("src.tasks.supervision_reporter.start_scheduler"),
                 patch("src.main.close_db", new_callable=AsyncMock),
                 patch("src.main.model_service.close", new_callable=AsyncMock),
             ):
@@ -107,8 +111,7 @@ class TestLifespanShutdown:
 
     def test_shutdown_closes_db(self):
         """Shutdown → close_db appelé."""
-        from src.main import lifespan
-        from src.main import app
+        from src.main import lifespan, app
 
         mock_close_db = AsyncMock()
 
@@ -116,8 +119,11 @@ class TestLifespanShutdown:
             with (
                 patch("src.main.run_migrations", new_callable=AsyncMock),
                 patch("src.main.init_db", new_callable=AsyncMock),
-                patch("src.main.start_retrain_scheduler", new_callable=AsyncMock),
                 patch("src.tasks.supervision_reporter.start_scheduler"),
+                patch(
+                    "src.tasks.retrain_scheduler.start_retrain_scheduler",
+                    new_callable=AsyncMock,
+                ),
                 patch("src.main.close_db", mock_close_db),
                 patch("src.main.model_service.close", new_callable=AsyncMock),
             ):
@@ -129,8 +135,7 @@ class TestLifespanShutdown:
 
     def test_shutdown_closes_redis(self):
         """Shutdown → model_service.close appelé."""
-        from src.main import lifespan
-        from src.main import app
+        from src.main import lifespan, app
 
         mock_model_close = AsyncMock()
 
@@ -138,8 +143,11 @@ class TestLifespanShutdown:
             with (
                 patch("src.main.run_migrations", new_callable=AsyncMock),
                 patch("src.main.init_db", new_callable=AsyncMock),
-                patch("src.main.start_retrain_scheduler", new_callable=AsyncMock),
                 patch("src.tasks.supervision_reporter.start_scheduler"),
+                patch(
+                    "src.tasks.retrain_scheduler.start_retrain_scheduler",
+                    new_callable=AsyncMock,
+                ),
                 patch("src.main.close_db", new_callable=AsyncMock),
                 patch("src.main.model_service.close", mock_model_close),
             ):

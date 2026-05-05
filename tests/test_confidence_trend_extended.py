@@ -124,10 +124,10 @@ class TestConfidenceTrendEmpty:
                 {
                     "date": "2025-05-01",
                     "mean_confidence": 0.87,
-                    "p25_confidence": 0.75,
-                    "p75_confidence": 0.95,
-                    "low_confidence_rate": 0.05,
-                    "n_predictions": 100,
+                    "p25": 0.75,
+                    "p75": 0.95,
+                    "predictions": 100,
+                    "low_confidence_count": 5,
                 }
             ],
         }

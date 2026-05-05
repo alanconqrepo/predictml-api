@@ -125,7 +125,7 @@ class TestGoldenTestsCRUD:
             f"/models/{GT_E2E_MODEL}/golden-tests",
             headers=_headers(),
             json={
-                "features": FEATURES,
+                "input_features": FEATURES,
                 "expected_output": "setosa",
                 "description": "Test case E2E setosa",
             },
@@ -142,7 +142,7 @@ class TestGoldenTestsCRUD:
             f"/models/{GT_E2E_MODEL}/golden-tests",
             headers=_headers(),
             json={
-                "features": FEATURES,
+                "input_features": FEATURES,
                 "expected_output": "setosa",
             },
         )
@@ -156,7 +156,7 @@ class TestGoldenTestsCRUD:
         r = client.post(
             f"/models/{GT_E2E_MODEL}/golden-tests",
             headers=_headers(),
-            json={"features": FEATURES, "expected_output": "setosa"},
+            json={"input_features": FEATURES, "expected_output": "setosa"},
         )
         assert r.status_code in [200, 201]
         test_id = r.json()["id"]
@@ -171,7 +171,7 @@ class TestGoldenTestsCRUD:
         """POST sans auth → 401/403."""
         resp = client.post(
             f"/models/{GT_E2E_MODEL}/golden-tests",
-            json={"features": FEATURES, "expected_output": "setosa"},
+            json={"input_features": FEATURES, "expected_output": "setosa"},
         )
         assert resp.status_code in [401, 403]
 
@@ -210,7 +210,7 @@ class TestGoldenTestsRun:
         client.post(
             f"/models/{GT_E2E_MODEL}/golden-tests",
             headers=_headers(),
-            json={"features": FEATURES, "expected_output": "setosa"},
+            json={"input_features": FEATURES, "expected_output": "setosa"},
         )
 
         resp = client.post(
@@ -219,7 +219,7 @@ class TestGoldenTestsRun:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert "total" in data
+        assert "total_tests" in data
         assert "passed" in data
         assert "failed" in data
         assert "pass_rate" in data
@@ -243,7 +243,7 @@ class TestGoldenTestsPolicyGate:
                 result, reason = await evaluate_auto_promotion(
                     db=db,
                     model_name=GT_E2E_MODEL,
-                    new_version=GT_VERSION,
+                    version=GT_VERSION,
                     policy={
                         "auto_promote": True,
                         "min_accuracy": None,

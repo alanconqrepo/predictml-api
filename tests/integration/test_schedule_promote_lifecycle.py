@@ -115,11 +115,13 @@ async def _mock_exec_success(*args, **kwargs):
 _r = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-    files={"file": ("m.pkl", io.BytesIO(_make_pkl()), "application/octet-stream")},
+    files={
+        "file": ("m.pkl", io.BytesIO(_make_pkl()), "application/octet-stream"),
+        "train_file": ("train.py", io.BytesIO(VALID_TRAIN_SCRIPT.encode()), "text/x-python"),
+    },
     data={
         "name": SP_MODEL,
         "version": MODEL_VERSION,
-        "train_file": ("train.py", io.BytesIO(VALID_TRAIN_SCRIPT.encode()), "text/x-python"),
     },
 )
 assert _r.status_code == 201, _r.text
@@ -139,8 +141,8 @@ class TestPolicyEndpointInteg:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["auto_promote"] is True
-        assert data["min_accuracy"] == pytest.approx(0.90)
+        assert data["promotion_policy"]["auto_promote"] is True
+        assert data["promotion_policy"]["min_accuracy"] == pytest.approx(0.90)
 
     def test_set_policy_without_auth_returns_403(self):
         """PATCH /models/{name}/policy sans admin → 403."""

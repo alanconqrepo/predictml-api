@@ -68,7 +68,7 @@ def _make_prediction(
     return Prediction(
         model_name=model_name,
         model_version=version,
-        input_data={"f1": 1.0},
+        input_features={"f1": 1.0},
         prediction_result="class_a",
         status=status,
         response_time_ms=response_time_ms,
@@ -155,17 +155,19 @@ class TestGetGlobalMonitoringStatsExtended:
         asyncio.run(_run())
 
     def test_avg_latency_none_when_all_errors(self):
-        """Toutes les prédictions sont des erreurs → avg_latency_ms=None."""
+        """Toutes les prédictions sont des erreurs → avg_latency_ms=None (latence non comptée)."""
 
         async def _run():
             model = f"{MODEL_X}_all_errors"
             async with _TestSessionLocal() as db:
                 for _ in range(3):
+                    # response_time_ms NOT NULL en DB : on met une valeur factice
+                    # mais le service n'inclut les temps que pour status="success"
                     db.add(
                         _make_prediction(
                             model,
                             status="error",
-                            response_time_ms=None,
+                            response_time_ms=99.0,
                             timestamp=_NOW,
                         )
                     )
@@ -174,6 +176,7 @@ class TestGetGlobalMonitoringStatsExtended:
                 result = await DBService.get_global_monitoring_stats(db, _LAST_WEEK, _FUTURE)
 
             stat = next(r for r in result if r["model_name"] == model)
+            # avg_latency_ms est None car les erreurs ne comptent pas dans les temps
             assert stat["avg_latency_ms"] is None
 
         asyncio.run(_run())

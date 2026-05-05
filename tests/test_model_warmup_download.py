@@ -219,12 +219,11 @@ class TestDownloadEndpoint:
 
         from tests.conftest import _minio_mock
 
-        _minio_mock.download_file_bytes = MagicMock(return_value=pkl_bytes)
-
-        resp = client.get(
-            f"/models/{WM_MODEL}_dl/1.0.0/download",
-            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        )
+        with patch.object(_minio_mock, "download_file_bytes", return_value=pkl_bytes):
+            resp = client.get(
+                f"/models/{WM_MODEL}_dl/1.0.0/download",
+                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            )
 
         assert resp.status_code == 200
         assert resp.content == pkl_bytes
@@ -236,13 +235,14 @@ class TestDownloadEndpoint:
 
         from tests.conftest import _minio_mock
 
-        _minio_mock.download_file_bytes = MagicMock(
-            side_effect=Exception("MinIO connexion perdue")
-        )
-
-        resp = client.get(
-            f"/models/{WM_MODEL}_minerr/1.0.0/download",
-            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        )
+        with patch.object(
+            _minio_mock,
+            "download_file_bytes",
+            side_effect=Exception("MinIO connexion perdue"),
+        ):
+            resp = client.get(
+                f"/models/{WM_MODEL}_minerr/1.0.0/download",
+                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            )
 
         assert resp.status_code == 500
