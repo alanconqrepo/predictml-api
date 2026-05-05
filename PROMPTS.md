@@ -27,3 +27,8 @@ est ce que l'intégration avec mlflow est ok à 100%. par exemple est ce que tou
 
 
 crée une page streamlit d'aide avec chat llm pour aider l'utilisateur d'un point de vue code : génération de script train avec sklearn mlflow..., d'appel api vers la solution, d'aide à l'utilisation de l'App streamlit, explication des différents indicateurs etc... se baser sur la documentation et skills du projet pour répondre, si besoin ajouter de la documentation. possibilité de visualiser directement la doc .md
+
+
+
+en tant qu'expert en sécurité analyse la base de code pour identifier problème de sécurités. vérifie qu'aucunz reelle variable d'environnement n'est publié dans git.
+crée un plan pour améliorer la sécurité du projet.
