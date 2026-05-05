@@ -35,18 +35,20 @@ predictml-api/
 │   │   │   ├── prediction.py       # Table predictions
 │   │   │   ├── model_metadata.py   # Table model_metadata
 │   │   │   ├── observed_result.py  # Table observed_results
+│   │   │   ├── golden_test.py      # Table golden_tests
 │   │   │   └── model_history.py    # Table model_history
 │   │   └── database.py             # Session async (asyncpg)
 │   ├── services/
 │   │   ├── db_service.py               # Toutes les requêtes DB
 │   │   ├── model_service.py            # Chargement, cache Redis, routage A/B/shadow
 │   │   ├── minio_service.py            # Upload/download MinIO
-│   │   ├── drift_service.py            # Calcul dérive Z-score + PSI + null rate (4 dimensions)
+│   │   ├── drift_service.py            # Calcul dérive Z-score + PSI + null rate (input + output)
 │   │   ├── shap_service.py             # Explications SHAP locales (tree + linear)
 │   │   ├── ab_significance_service.py  # Tests statistiques A/B (Chi-², Mann-Whitney U)
-│   │   ├── auto_promotion_service.py   # Évaluation politique d'auto-promotion post-retrain
+│   │   ├── auto_promotion_service.py   # Auto-promotion, auto-demotion (circuit breaker)
+│   │   ├── golden_test_service.py      # Tests de régression golden (CRUD + run)
 │   │   ├── input_validation_service.py # Validation schéma de features d'entrée
-│   │   ├── supervision_reporter.py     # Rapports de supervision et seuils d'alerte par modèle
+│   │   ├── supervision_reporter.py     # Supervision toutes les 6h : drift, alertes, retrain réactif
 │   │   ├── email_service.py            # Alertes email & rapports hebdomadaires
 │   │   └── webhook_service.py          # Webhooks HTTP post-prédiction
 │   ├── schemas/                    # Schémas Pydantic (validation I/O)
@@ -71,7 +73,8 @@ predictml-api/
 │       ├── 5_Code_Example.py
 │       ├── 6_AB_Testing.py      # A/B testing, shadow mode, comparaison statistique
 │       ├── 7_Supervision.py     # Monitoring global, drift, alertes, performance
-│       └── 8_Retrain.py         # Gestion centralisée des retrains (manuel + planifié)
+│       ├── 8_Retrain.py         # Gestion centralisée des retrains (manuel + planifié)
+│       └── 9_Golden_Tests.py    # CRUD cas de test golden, run par version, import CSV
 ├── tests/                          # Tests pytest (automatisés, sans Docker)
 ├── smoke-tests/                    # Tests manuels (Docker live)
 ├── init_data/                      # Scripts one-shot (init_db, create_multiple_models)
@@ -150,6 +153,7 @@ Le dashboard Streamlit ne parle **jamais directement** à la DB ou à MinIO — 
 | `model_metadata` | Registre des modèles (versioning, localisation MinIO/MLflow, tags, A/B config) |
 | `predictions` | Log complet de chaque appel API (features, résultat, temps de réponse, shadow flag) |
 | `observed_results` | Résultats réels observés (pour comparer aux prédictions) |
+| `golden_tests` | Cas de test golden par modèle (features attendues, sortie attendue, description) |
 | `model_history` | Journal des changements d'état des modèles (pour rollback) |
 
 ### Table `predictions` — colonnes notables
@@ -311,3 +315,5 @@ Déclenchées automatiquement par `email_service.py` (scheduler APScheduler) qua
 4. Exécute la logique retrain dans un sous-processus (timeout 600 s), crée une nouvelle version, met à jour `last_run_at` / `next_run_at`.
 
 **Modification d'un planning en live :** l'endpoint `PATCH /models/{name}/{version}/schedule` met à jour la DB *et* le scheduler en cours d'exécution (`add_retrain_job` / `remove_retrain_job`).
+
+**Retrain réactif (drift-triggered) :** si `trigger_on_drift` est configuré dans `retrain_schedule` (`"warning"` ou `"critical"`), `run_alert_check()` évalue `_max_input_drift` et `_max_output_drift` après chaque cycle de 6h. Si le niveau de drift détecté atteint ou dépasse le seuil configuré et que le cooldown `drift_retrain_cooldown_hours` est expiré, un retrain est déclenché immédiatement via `_run_retrain_job()` — sans attendre le prochain cycle cron.

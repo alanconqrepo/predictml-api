@@ -88,6 +88,8 @@ services:
       - REDIS_CACHE_TTL=${REDIS_CACHE_TTL:-3600}
       - METRICS_TOKEN=${METRICS_TOKEN:-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-http://mlflow:5000}
       # --- Alertes e-mail (optionnel — décommentez et configurez pour activer) ---
       # - ENABLE_EMAIL_ALERTS=false
       # - WEEKLY_REPORT_ENABLED=false
