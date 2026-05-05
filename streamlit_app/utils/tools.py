@@ -53,38 +53,60 @@ TOOL_DEFINITIONS: list[dict] = [
     {
         "name": "call_api",
         "description": (
-            "Effectue une requête HTTP vers l'API PredictML au nom de l'utilisateur connecté "
-            "(token Bearer de sa session). Utilise ce tool pour récupérer des données en temps "
-            "réel : liste des modèles, métriques de performance, rapport de drift, leaderboard, "
-            "statut de santé, comparaison A/B, importance des features SHAP, informations sur "
-            "les prédictions, quota utilisateur, etc. "
-            "Préfère GET /models, /health, /models/{name}/drift, /models/{name}/performance, "
-            "/models/leaderboard, /predictions/stats, /users/me/quota."
+            "Effectue n'importe quelle requête HTTP vers l'API PredictML au nom de l'utilisateur "
+            "connecté (token Bearer de sa session). "
+            "Tu as accès à TOUS les endpoints documentés — consulte la section DOC: API_REFERENCE "
+            "dans ton contexte pour connaître l'endpoint exact, la méthode, les paramètres de "
+            "chemin, les query params et le corps JSON attendus. "
+            "Endpoints disponibles (non exhaustif) : "
+            "GET /models, GET /models/{name}/drift, GET /models/{name}/performance, "
+            "GET /models/leaderboard, GET /predictions, GET /predictions/stats, "
+            "GET /models/{name}/ab-compare, GET /models/{name}/feature-importance, "
+            "GET /users, GET /users/me, GET /health, "
+            "POST /predict, POST /models/{name}/{version}/retrain, "
+            "POST /models/{name}/{version}/validate-input, "
+            "PATCH /models/{name}/{version}, PATCH /models/{name}/policy, "
+            "PATCH /models/{name}/{version}/schedule, PATCH /users/{id}, "
+            "DELETE /predictions/purge, DELETE /models/{name}/{version}. "
+            "Pour les appels destructifs (DELETE, PATCH modifiant la production), "
+            "annonce à l'utilisateur l'action que tu vas effectuer avant de l'exécuter."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "method": {
                     "type": "string",
-                    "enum": ["GET", "POST", "PATCH"],
-                    "description": "Méthode HTTP. Utilise GET pour la lecture, POST pour créer/tester, PATCH pour modifier.",
+                    "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+                    "description": (
+                        "Méthode HTTP. Consulte la documentation API_REFERENCE pour la méthode "
+                        "correcte de chaque endpoint. GET = lecture, POST = créer/exécuter, "
+                        "PATCH = modifier partiellement, PUT = remplacer, DELETE = supprimer."
+                    ),
                 },
                 "endpoint": {
                     "type": "string",
                     "description": (
-                        "Chemin de l'endpoint (sans l'URL de base). Exemples : "
-                        "'/models', '/health', '/models/iris/drift', "
-                        "'/models/leaderboard', '/predictions/stats', '/users/me'."
+                        "Chemin complet de l'endpoint avec les paramètres de chemin résolus "
+                        "(sans l'URL de base). Exemples : '/models', '/models/iris/drift', "
+                        "'/models/iris/1.0.0/retrain', '/predictions/purge', '/users/42'. "
+                        "Remplace {name}, {version}, {id} par les valeurs réelles."
                     ),
                 },
                 "params": {
                     "type": "object",
-                    "description": "Paramètres de requête (query string) sous forme de dict. Ex: {\"days\": 7, \"model_name\": \"iris\"}.",
+                    "description": (
+                        "Paramètres de requête (query string) sous forme de dict. "
+                        "Ex: {\"days\": 7, \"model_name\": \"iris\", \"dry_run\": true}."
+                    ),
                     "additionalProperties": True,
                 },
                 "body": {
                     "type": "object",
-                    "description": "Corps JSON pour POST/PATCH. Ex: {\"model_name\": \"iris\", \"features\": {...}}.",
+                    "description": (
+                        "Corps JSON pour POST/PUT/PATCH. "
+                        "Ex: {\"features\": {\"sepal_length\": 5.1}, \"model_name\": \"iris\"}. "
+                        "Consulte la doc API_REFERENCE pour le schéma exact attendu."
+                    ),
                     "additionalProperties": True,
                 },
             },
