@@ -155,8 +155,23 @@ services:
     environment:
       - API_URL=http://api:8000
       - MLFLOW_URL=http://mlflow:5000
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Connexion PostgreSQL pour le tool SQL du chatbot
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-sklearn_api}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - ./documentation:/app/documentation:ro
+      - ./src:/app/src:ro
+      - ./init_data:/app/init_data:ro
+      - ./README.md:/app/README.md:ro
+      - ./CODING_STANDARDS.md:/app/CODING_STANDARDS.md:ro
     depends_on:
       api:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     restart: unless-stopped
 
