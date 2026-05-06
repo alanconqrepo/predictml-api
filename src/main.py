@@ -147,7 +147,9 @@ app = FastAPI(
 
 # CORS — n'autoriser que les origines explicitement configurées
 _cors_origins = [
-    o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:8501").split(",") if o.strip()
+    o.strip()
+    for o in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:8501").split(",")
+    if o.strip()
 ]
 app.add_middleware(
     CORSMiddleware,

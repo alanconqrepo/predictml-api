@@ -16,8 +16,13 @@ _INSECURE_DEFAULTS = {"change-this-secret-key", "minioadmin", "minioadmin"}
 def _require_env(name: str, default: str, insecure_values: set[str] | None = None) -> str:
     """Retourne la valeur de la variable d'env ; lève une erreur si non définie ou non sécurisée en production."""
     value = os.getenv(name, default)
-    if insecure_values and value in insecure_values and not os.getenv("DEBUG", "false").lower() == "true":
+    if (
+        insecure_values
+        and value in insecure_values
+        and not os.getenv("DEBUG", "false").lower() == "true"
+    ):
         import warnings
+
         warnings.warn(
             f"[SECURITY] {name} utilise une valeur par défaut non sécurisée. "
             f"Définissez {name} via variable d'environnement avant le déploiement en production.",
