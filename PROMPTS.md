@@ -1,4 +1,4 @@
-quelles sont les améliorations qu'on peut faire en terme de fonctionnalités ? exmple de nouvelles routes ?
+uquelles sont les améliorations qu'on peut faire en terme de fonctionnalités ? exmple de nouvelles routes ?
 mets toi dans le Role Data scientist MLOps engineer, quelles fonctionnalités pourrait être intérréssantes facile à implémenter sans devenir une usine à gaz. garde en tête l'objectif initial du projet ne propose pas des fonctionnalités qui n'ont rien à voir où inutiles pour 80%des utilisateurs. si toutes les fonctionnalités nécessaires sont déjà présentes n'en invente pas de nouvelles. classes tes idées par ordre de priorité et niveau de difficulté à implémenter. écris le résultat dans un nouveau fichier ROADMAP_VX.md toutes les fonctionnalités des roadmap précédentes ont déjà été implémentées. propose les fonctionnalités api et ou dans l'App streamlit utiles pour les utilisateurs. propose uniquement des choses utiles et nécessaires ! si le projet est déjà complet et que tes propositions ne font que complexifié le projet sans apport il vaut mieux éviter.
 si tu as quand même des propositions explique en détails le pourquoi et le comment
 
@@ -44,4 +44,15 @@ crée les tests utiles manquants pour les scripts suivants :
 - db/database.py
 - src/main.py
 
-donne le taux de couverture globale suite aux ajouts
+donne le taux de couverture globale suite aux ajout
+
+
+
+
+Action manuelle requise
+GitHub Actions : créer ces 5 secrets dans les paramètres du dépôt (Settings → Secrets → Actions) :
+CI_DB_PASSWORD
+CI_MINIO_ACCESS_KEY
+CI_MINIO_SECRET_KEY
+CI_SECRET_KEY
+CI_ADMIN_TOKEN
