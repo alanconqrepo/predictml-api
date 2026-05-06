@@ -48,19 +48,25 @@ from src.services.model_service import model_service  # noqa: E402
 
 model_service._redis = fakeredis.aioredis.FakeRedis()
 
+import tempfile
+
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool
 
 from src.db.database import get_db, Base
 from src.db.models import GoldenTest, User, Prediction, ModelMetadata, ObservedResult  # noqa: F401 — enregistre les modèles dans Base
 from src.main import app
 
 
-# Base de données SQLite en mémoire — aucun PostgreSQL requis pour les tests
+# SQLite fichier temporaire — évite l'invalidation de connexion aiosqlite/StaticPool
+# en Python 3.13 où asyncio.run() ferme l'executor et tue le thread aiosqlite.
+# Avec NullPool + fichier, chaque session ouvre une connexion fraîche au même fichier.
+_test_db_file = os.path.join(tempfile.gettempdir(), f"predictml_test_{os.getpid()}.db")
+
 _test_engine = create_async_engine(
-    "sqlite+aiosqlite:///:memory:",
+    f"sqlite+aiosqlite:///{_test_db_file}",
     connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
+    poolclass=NullPool,
     echo=False,
 )
 
