@@ -211,10 +211,10 @@ async def root(db: AsyncSession = Depends(get_db)):
             "models_cached_count": len(cached),
         }
     except Exception as e:
+        logger.warning("Erreur récupération modèles (endpoint /)", error=str(e))
         return {
             "message": "API de prédiction sklearn - Multi Models v2.0",
             "status": "active",
-            "error": str(e),
             "note": "Exécutez init_db.py pour initialiser la base de données",
         }
 
@@ -237,10 +237,10 @@ async def health(db: AsyncSession = Depends(get_db)):
             "models_cached": len(cached),
         }
     except Exception as e:
+        logger.warning("Health check dégradé", error=str(e))
         return {
             "status": "degraded",
             "database": "error",
-            "error": str(e),
         }
 
 
@@ -250,7 +250,8 @@ async def _check_db(db: AsyncSession) -> DependencyDetail:
         await db.execute(text("SELECT 1"))
         return DependencyDetail(status="ok", latency_ms=round((time.monotonic() - start) * 1000, 1))
     except Exception as exc:
-        return DependencyDetail(status="error", latency_ms=None, detail=str(exc))
+        logger.warning("Health check DB failed", error=str(exc))
+        return DependencyDetail(status="error", latency_ms=None, detail="connexion échouée")
 
 
 async def _check_redis() -> DependencyDetail:
@@ -260,7 +261,8 @@ async def _check_redis() -> DependencyDetail:
         await redis.ping()
         return DependencyDetail(status="ok", latency_ms=round((time.monotonic() - start) * 1000, 1))
     except Exception as exc:
-        return DependencyDetail(status="error", latency_ms=None, detail=str(exc))
+        logger.warning("Health check Redis failed", error=str(exc))
+        return DependencyDetail(status="error", latency_ms=None, detail="connexion échouée")
 
 
 async def _check_minio() -> DependencyDetail:
@@ -270,7 +272,8 @@ async def _check_minio() -> DependencyDetail:
         await loop.run_in_executor(None, minio_service.client.bucket_exists, minio_service.bucket)
         return DependencyDetail(status="ok", latency_ms=round((time.monotonic() - start) * 1000, 1))
     except Exception as exc:
-        return DependencyDetail(status="error", latency_ms=None, detail=str(exc))
+        logger.warning("Health check MinIO failed", error=str(exc))
+        return DependencyDetail(status="error", latency_ms=None, detail="connexion échouée")
 
 
 async def _check_mlflow() -> DependencyDetail:
@@ -282,7 +285,8 @@ async def _check_mlflow() -> DependencyDetail:
             resp.raise_for_status()
         return DependencyDetail(status="ok", latency_ms=round((time.monotonic() - start) * 1000, 1))
     except Exception as exc:
-        return DependencyDetail(status="error", latency_ms=None, detail=str(exc))
+        logger.warning("Health check MLflow failed", error=str(exc))
+        return DependencyDetail(status="error", latency_ms=None, detail="connexion échouée")
 
 
 @app.get("/health/dependencies", response_model=DependencyHealthResponse)

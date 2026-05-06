@@ -3,10 +3,20 @@ Page d'accueil et login — PredictML Admin Dashboard
 """
 
 import os
+from urllib.parse import urlparse
 
 import streamlit as st
 from utils.api_client import APIClient
 from utils.auth import logout
+
+
+def _is_valid_api_url(url: str) -> bool:
+    """Vérifie que l'URL est http/https et pointe vers un hôte non vide."""
+    try:
+        parsed = urlparse(url)
+        return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+    except Exception:
+        return False
 
 st.set_page_config(
     page_title="PredictML Admin",
@@ -30,6 +40,9 @@ def show_login():
     if submitted:
         if not token:
             st.error("Veuillez saisir un token.")
+            return
+        if not _is_valid_api_url(api_url):
+            st.error("URL invalide. Elle doit commencer par http:// ou https://")
             return
 
         client = APIClient(base_url=api_url, token=token)
