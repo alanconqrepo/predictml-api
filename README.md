@@ -84,7 +84,7 @@ curl http://localhost:8000/health
 
 | Service | Identifiants |
 |---|---|
-| Token admin API | `ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA` |
+| Token admin API | `<ADMIN_TOKEN>` |
 | PostgreSQL | `postgres / postgres` |
 | MinIO | `minioadmin / minioadmin` |
 | MLflow UI | http://localhost:5000 |
@@ -316,7 +316,7 @@ curl http://localhost:8000/health
 import requests
 
 BASE_URL = "http://localhost:8000"
-TOKEN = "ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"
+TOKEN = "<ADMIN_TOKEN>"
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 
 # Prédiction unitaire

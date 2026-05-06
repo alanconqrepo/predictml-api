@@ -3,6 +3,7 @@ Point d'entrée principal de l'application FastAPI
 """
 
 import asyncio
+import hmac
 import os
 import time
 from contextlib import asynccontextmanager
@@ -14,12 +15,14 @@ import structlog
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, generate_latest
 from prometheus_client import multiprocess as prom_multiprocess
 from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.api import models, monitoring, observed_results, predict, users
 from src.core.config import settings
@@ -121,6 +124,19 @@ async def lifespan(app: FastAPI):
     logger.info("Application arrêtée")
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Ajoute les en-têtes de sécurité HTTP à chaque réponse."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+
 # Créer l'application FastAPI
 app = FastAPI(
     title=settings.API_TITLE,
@@ -128,6 +144,20 @@ app = FastAPI(
     description="API REST pour faire des prédictions avec plusieurs modèles scikit-learn",
     lifespan=lifespan,
 )
+
+# CORS — n'autoriser que les origines explicitement configurées
+_cors_origins = [
+    o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:8501").split(",") if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Instrumenter l'app sans exposer — l'endpoint /metrics est défini plus bas
 Instrumentator().instrument(app)
@@ -150,7 +180,8 @@ app.include_router(monitoring.router)
 async def metrics(request: Request) -> Response:
     if settings.METRICS_TOKEN:
         auth = request.headers.get("Authorization", "")
-        if auth != f"Bearer {settings.METRICS_TOKEN}":
+        expected = f"Bearer {settings.METRICS_TOKEN}"
+        if not hmac.compare_digest(auth.encode(), expected.encode()):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
     if "PROMETHEUS_MULTIPROC_DIR" in os.environ:
         registry = CollectorRegistry()

@@ -45,9 +45,12 @@ async def create_default_user():
 
         print(f"\n   Utilisateur admin cree!")
         print(f"   Username : {user.username}")
-        print(f"   API Token: {admin_token}")
         if not os.environ.get("ADMIN_TOKEN"):
+            # Token généré aléatoirement — à conserver de façon sécurisée
+            print(f"   API Token: {admin_token}")
             print(f"   SAUVEGARDEZ CE TOKEN - Il ne sera plus affiche!")
+        else:
+            print(f"   API Token: défini via ADMIN_TOKEN (variable d'environnement)")
         print()
 
         return user

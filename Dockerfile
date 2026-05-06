@@ -22,8 +22,11 @@ COPY alembic/ ./alembic/
 COPY alembic.ini ./alembic.ini
 COPY entrypoint.sh ./entrypoint.sh
 
-# Créer le dossier Models et rendre l'entrypoint exécutable
-RUN mkdir -p /app/Models && chmod +x /app/entrypoint.sh
+# Créer l'utilisateur non-root et le dossier Models, rendre l'entrypoint exécutable
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app/Models && \
+    chmod +x /app/entrypoint.sh && \
+    chown -R appuser:appuser /app
 
 # Exposer le port 8000
 EXPOSE 8000
@@ -31,6 +34,9 @@ EXPOSE 8000
 # Définir les variables d'environnement par défaut
 ENV MODELS_DIR=/app/Models
 ENV PYTHONPATH=/app
+
+# Exécuter en tant qu'utilisateur non-root
+USER appuser
 
 # Lance init_db.py puis démarre l'API
 CMD ["/app/entrypoint.sh"]

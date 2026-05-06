@@ -56,7 +56,7 @@ curl http://localhost:8000/models
 | MinIO console | http://localhost:9001 | minioadmin / minioadmin |
 | Grafana | http://localhost:3000 | admin / admin |
 
-**Token admin par défaut :** `ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA`
+**Token admin par défaut :** `<ADMIN_TOKEN>`
 
 ---
 
@@ -107,7 +107,7 @@ python train_iris.py
 import requests
 
 BASE_URL = "http://localhost:8000"
-TOKEN = "ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"
+TOKEN = "<ADMIN_TOKEN>"
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 
 with open("iris_model.pkl", "rb") as f:
@@ -149,7 +149,7 @@ print(response.json()["is_production"])  # True
 import requests
 
 BASE_URL = "http://localhost:8000"
-TOKEN = "ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"
+TOKEN = "<ADMIN_TOKEN>"
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 
 # Prédiction unitaire
@@ -240,7 +240,7 @@ Le dashboard permet de :
 ## Utiliser l'API directement (curl)
 
 ```bash
-export TOKEN="ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"
+export TOKEN="<ADMIN_TOKEN>"
 
 # Statut
 curl http://localhost:8000/

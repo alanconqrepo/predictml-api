@@ -12,9 +12,11 @@ DIFFÉRENCE AVEC pytest tests/ :
 EXÉCUTION :
     python smoke-tests/test_multimodel_api.py
 
+    Variables d'environnement requises :
+        API_TOKEN=<admin_token>              (OBLIGATOIRE — token admin du docker-compose)
+
     Variables d'environnement optionnelles :
         API_BASE_URL=http://localhost:8000   (défaut)
-        API_TOKEN=<admin_token>              (défaut : token admin du docker-compose)
 """
 import os
 import sys
@@ -28,7 +30,11 @@ import requests
 # Configuration
 # ---------------------------------------------------------------------------
 BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
-API_TOKEN = os.environ.get("API_TOKEN", "ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA")
+API_TOKEN = os.environ.get("API_TOKEN", "")
+if not API_TOKEN:
+    print("ERREUR : la variable d'environnement API_TOKEN est requise.", file=sys.stderr)
+    print("  export API_TOKEN=<votre_token_admin>", file=sys.stderr)
+    sys.exit(1)
 
 AUTH = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
 PUBLIC = {"Content-Type": "application/json"}

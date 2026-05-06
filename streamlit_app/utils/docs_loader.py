@@ -129,7 +129,7 @@ def build_system_prompt(docs: dict[str, str], snippets: dict[str, str]) -> str:
         "3. **Précis et concis** : va droit au but, évite les introductions inutiles",
         "4. **Mentionne la page dashboard** concernée quand c'est pertinent (ex: '→ Page 8 Retrain du dashboard')",
         "5. **Donne les deux interfaces** (API + dashboard) quand les deux existent",
-        "6. **Token admin par défaut** : `ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA` (pour les exemples)",
+        "6. **Token admin par défaut** : `<ADMIN_TOKEN>` (pour les exemples)",
         "7. **URL de base** : `http://localhost:8000` pour l'API, `http://localhost:8501` pour le dashboard",
         "8. **N'invente pas de fonctionnalités** qui n'existent pas dans la doc — signale si une fonctionnalité",
         "   n'est pas disponible et propose la meilleure alternative existante",

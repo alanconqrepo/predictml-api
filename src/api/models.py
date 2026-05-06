@@ -3468,9 +3468,12 @@ async def warmup_model(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(
+            "Erreur préchauffage modèle", model_name=name, version=version, error=str(e)
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erreur lors du préchauffage du modèle '{name}' v'{version}': {str(e)}",
+            detail=f"Erreur lors du préchauffage du modèle '{name}' v'{version}'.",
         )
     load_time_ms = (time.monotonic() - t0) * 1000
 
@@ -3609,7 +3612,7 @@ async def download_model(
         logger.error("Erreur téléchargement modèle", name=name, version=version, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erreur lors du téléchargement du modèle : {str(e)}",
+            detail="Erreur lors du téléchargement du modèle.",
         )
 
     filename = f"{name}_{version}.pkl"

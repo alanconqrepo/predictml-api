@@ -19,7 +19,7 @@ curl http://localhost:8000/health
 # {"status": "healthy", "database": "connected", ...}
 ```
 
-Le dashboard est sur http://localhost:8501, le token admin par défaut est `ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA`.
+Le dashboard est sur http://localhost:8501, le token admin par défaut est `<ADMIN_TOKEN>`.
 
 ---
 
@@ -51,13 +51,13 @@ docker-compose up -d --build streamlit
 
 ### Comment obtenir mon token d'API ?
 
-Le token admin par défaut est `ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA`.
+Le token admin par défaut est `<ADMIN_TOKEN>`.
 
 Pour créer un token pour un autre utilisateur :
 ```python
 response = requests.post(
     "http://localhost:8000/users",
-    headers={"Authorization": "Bearer ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"},
+    headers={"Authorization": "Bearer <ADMIN_TOKEN>"},
     json={"username": "alice", "email": "alice@example.com", "role": "user", "rate_limit": 1000}
 )
 token = response.json()["api_token"]
@@ -129,7 +129,7 @@ with open("mon_modele.pkl", "wb") as f:
 with open("mon_modele.pkl", "rb") as f:
     r = requests.post(
         "http://localhost:8000/models",
-        headers={"Authorization": "Bearer ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"},
+        headers={"Authorization": "Bearer <ADMIN_TOKEN>"},
         files={"file": ("mon_modele.pkl", f, "application/octet-stream")},
         data={
             "name": "mon_modele", "version": "1.0.0",

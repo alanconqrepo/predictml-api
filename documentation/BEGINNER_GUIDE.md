@@ -122,7 +122,7 @@ python 1_train.py
 import requests
 
 BASE_URL = "http://localhost:8000"
-TOKEN = "ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"
+TOKEN = "<ADMIN_TOKEN>"
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 
 with open("iris_model.pkl", "rb") as f:
@@ -154,7 +154,7 @@ print(f"ID : {model['id']}, version : {model['version']}")
 import requests
 
 BASE_URL = "http://localhost:8000"
-HEADERS = {"Authorization": "Bearer ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"}
+HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
 response = requests.patch(
     f"{BASE_URL}/models/iris_model/1.0.0",
@@ -171,7 +171,7 @@ print(f"En production : {response.json()['is_production']}")  # True
 import requests
 
 BASE_URL = "http://localhost:8000"
-HEADERS = {"Authorization": "Bearer ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"}
+HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
 # Une fleur à identifier
 response = requests.post(
@@ -206,7 +206,7 @@ Plus efficace que des appels individuels : le modèle est chargé une seule fois
 import requests
 
 BASE_URL = "http://localhost:8000"
-HEADERS = {"Authorization": "Bearer ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"}
+HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
 observations = [
     {"id_obs": "obs-001", "features": {"sepal length (cm)": 5.1, "sepal width (cm)": 3.5, "petal length (cm)": 1.4, "petal width (cm)": 0.2}},
@@ -238,7 +238,7 @@ Comprendre pourquoi le modèle a fait cette prédiction.
 import requests
 
 BASE_URL = "http://localhost:8000"
-HEADERS = {"Authorization": "Bearer ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"}
+HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
 response = requests.post(
     f"{BASE_URL}/explain",
@@ -273,7 +273,7 @@ import requests
 from datetime import datetime
 
 BASE_URL = "http://localhost:8000"
-HEADERS = {"Authorization": "Bearer ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"}
+HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
 # Les vrais résultats (ce que vous avez constaté après la prédiction)
 observed = [
@@ -300,7 +300,7 @@ print(response.json())  # {"upserted": 3}
 import requests
 
 BASE_URL = "http://localhost:8000"
-HEADERS = {"Authorization": "Bearer ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"}
+HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
 response = requests.get(
     f"{BASE_URL}/models/iris_model/performance",
@@ -324,7 +324,7 @@ Configurer d'abord une baseline (stats des features à l'entraînement) :
 import requests
 
 BASE_URL = "http://localhost:8000"
-HEADERS = {"Authorization": "Bearer ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"}
+HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
 # 1. Définir la baseline (stats des features en entraînement)
 requests.patch(
@@ -372,7 +372,7 @@ Tester une nouvelle version sur 20% du trafic sans risque :
 import requests
 
 BASE_URL = "http://localhost:8000"
-HEADERS = {"Authorization": "Bearer ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"}
+HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
 # 1. Uploader la nouvelle version
 with open("iris_model_v2.pkl", "rb") as f:
@@ -530,7 +530,7 @@ import io
 import requests
 
 BASE_URL = "http://localhost:8000"
-HEADERS = {"Authorization": "Bearer ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"}
+HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
 # Format attendu : colonnes id_obs, model_name, date_time, observed_result
 csv_content = """id_obs,model_name,date_time,observed_result
@@ -602,7 +602,7 @@ Ouvrez **http://localhost:8501** et connectez-vous avec le token admin.
 import requests
 
 BASE_URL = "http://localhost:8000"
-ADMIN_HEADERS = {"Authorization": "Bearer ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA"}
+ADMIN_HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
 # Créer un utilisateur pour votre application
 response = requests.post(

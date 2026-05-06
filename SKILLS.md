@@ -572,4 +572,4 @@ Retourne par modèle : total prédictions, taux d'erreur, latences moyennes p50/
 5. **Surveiller `drift_status`** via `GET /models/{name}/drift` avant de décider un retrain.
 6. **Ne pas mettre `set_production: true`** sur un retrain sans avoir vérifié les métriques retournées dans la réponse.
 7. **Utiliser `model_version: null`** dans `/predict` pour bénéficier du routing automatique en A/B ou shadow.
-8. **L'admin token** pour ce projet est `ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA` (à ne jamais exposer publiquement).
+8. **L'admin token** pour ce projet est `<ADMIN_TOKEN>` (à ne jamais exposer publiquement).
