@@ -76,7 +76,7 @@ docker exec -it predictml-postgres psql -U postgres -d sklearn_api
 
 | Service | Valeur |
 |---|---|
-| Admin token | `ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA` |
+| Admin token | `<ADMIN_TOKEN>` |
 | DB | `postgres / postgres` |
 | MinIO | `minioadmin / minioadmin` |
 

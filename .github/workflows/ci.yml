@@ -36,7 +36,7 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres_secure_password_123
+          POSTGRES_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
           POSTGRES_DB: sklearn_api
         ports:
           - 5434:5432
@@ -47,12 +47,12 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres_secure_password_123@localhost:5434/sklearn_api
+      DATABASE_URL: postgresql+asyncpg://postgres:${{ secrets.CI_DB_PASSWORD }}@localhost:5434/sklearn_api
       MINIO_ENDPOINT: localhost:9002
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minio_secure_password_123
-      SECRET_KEY: test-secret-key-for-ci
-      ADMIN_TOKEN: ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA
+      MINIO_ACCESS_KEY: ${{ secrets.CI_MINIO_ACCESS_KEY }}
+      MINIO_SECRET_KEY: ${{ secrets.CI_MINIO_SECRET_KEY }}
+      SECRET_KEY: ${{ secrets.CI_SECRET_KEY }}
+      ADMIN_TOKEN: ${{ secrets.CI_ADMIN_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4

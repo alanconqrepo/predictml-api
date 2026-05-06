@@ -8,7 +8,7 @@ Le dashboard est accessible sur **http://localhost:8501**. Connectez-vous avec v
 
 1. Ouvrez http://localhost:8501
 2. Dans le champ **API URL**, laissez `http://localhost:8000` (ou remplacez par l'URL de votre serveur)
-3. Collez votre **token Bearer** (ex : le token admin par défaut `ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA`)
+3. Collez votre **token Bearer** (ex : le token admin par défaut `<ADMIN_TOKEN>`)
 4. Cliquez **Se connecter**
 
 Le dashboard détecte automatiquement si votre token est admin ou utilisateur simple.

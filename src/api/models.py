@@ -1184,14 +1184,31 @@ async def retrain_model(
         with open(script_path, "wb") as f:
             f.write(script_bytes)
 
-        env = {
-            **os.environ,
-            "TRAIN_START_DATE": payload.start_date,
-            "TRAIN_END_DATE": payload.end_date,
-            "OUTPUT_MODEL_PATH": output_model_path,
-            "MLFLOW_TRACKING_URI": mlflow_tracking_uri,
-            "MODEL_NAME": name,
+        # Construire un environnement minimal — ne pas passer os.environ entier
+        # pour éviter de transmettre SECRET_KEY, DATABASE_URL, etc. au script.
+        _safe_env_keys = {
+            "PATH",
+            "HOME",
+            "USER",
+            "LANG",
+            "LC_ALL",
+            "TMPDIR",
+            "TEMP",
+            "TMP",
+            "PYTHONPATH",
+            "PYTHONDONTWRITEBYTECODE",
+            "VIRTUAL_ENV",
         }
+        env = {k: v for k, v in os.environ.items() if k in _safe_env_keys}
+        env.update(
+            {
+                "TRAIN_START_DATE": payload.start_date,
+                "TRAIN_END_DATE": payload.end_date,
+                "OUTPUT_MODEL_PATH": output_model_path,
+                "MLFLOW_TRACKING_URI": mlflow_tracking_uri,
+                "MODEL_NAME": name,
+            }
+        )
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -3468,9 +3485,10 @@ async def warmup_model(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error("Erreur préchauffage modèle", model_name=name, version=version, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erreur lors du préchauffage du modèle '{name}' v'{version}': {str(e)}",
+            detail=f"Erreur lors du préchauffage du modèle '{name}' v'{version}'.",
         )
     load_time_ms = (time.monotonic() - t0) * 1000
 
@@ -3609,7 +3627,7 @@ async def download_model(
         logger.error("Erreur téléchargement modèle", name=name, version=version, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erreur lors du téléchargement du modèle : {str(e)}",
+            detail="Erreur lors du téléchargement du modèle.",
         )
 
     filename = f"{name}_{version}.pkl"

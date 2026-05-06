@@ -3,6 +3,7 @@ Point d'entrée principal de l'application FastAPI
 """
 
 import asyncio
+import hmac
 import os
 import time
 from contextlib import asynccontextmanager
@@ -14,12 +15,14 @@ import structlog
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, generate_latest
 from prometheus_client import multiprocess as prom_multiprocess
 from prometheus_fastapi_instrumentator import Instrumentator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.api import models, monitoring, observed_results, predict, users
 from src.core.config import settings
@@ -121,6 +124,19 @@ async def lifespan(app: FastAPI):
     logger.info("Application arrêtée")
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Ajoute les en-têtes de sécurité HTTP à chaque réponse."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+
 # Créer l'application FastAPI
 app = FastAPI(
     title=settings.API_TITLE,
@@ -128,6 +144,22 @@ app = FastAPI(
     description="API REST pour faire des prédictions avec plusieurs modèles scikit-learn",
     lifespan=lifespan,
 )
+
+# CORS — n'autoriser que les origines explicitement configurées
+_cors_origins = [
+    o.strip()
+    for o in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:8501").split(",")
+    if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Instrumenter l'app sans exposer — l'endpoint /metrics est défini plus bas
 Instrumentator().instrument(app)
@@ -150,7 +182,8 @@ app.include_router(monitoring.router)
 async def metrics(request: Request) -> Response:
     if settings.METRICS_TOKEN:
         auth = request.headers.get("Authorization", "")
-        if auth != f"Bearer {settings.METRICS_TOKEN}":
+        expected = f"Bearer {settings.METRICS_TOKEN}"
+        if not hmac.compare_digest(auth.encode(), expected.encode()):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
     if "PROMETHEUS_MULTIPROC_DIR" in os.environ:
         registry = CollectorRegistry()
@@ -180,10 +213,10 @@ async def root(db: AsyncSession = Depends(get_db)):
             "models_cached_count": len(cached),
         }
     except Exception as e:
+        logger.warning("Erreur récupération modèles (endpoint /)", error=str(e))
         return {
             "message": "API de prédiction sklearn - Multi Models v2.0",
             "status": "active",
-            "error": str(e),
             "note": "Exécutez init_db.py pour initialiser la base de données",
         }
 
@@ -206,10 +239,10 @@ async def health(db: AsyncSession = Depends(get_db)):
             "models_cached": len(cached),
         }
     except Exception as e:
+        logger.warning("Health check dégradé", error=str(e))
         return {
             "status": "degraded",
             "database": "error",
-            "error": str(e),
         }
 
 
@@ -219,7 +252,8 @@ async def _check_db(db: AsyncSession) -> DependencyDetail:
         await db.execute(text("SELECT 1"))
         return DependencyDetail(status="ok", latency_ms=round((time.monotonic() - start) * 1000, 1))
     except Exception as exc:
-        return DependencyDetail(status="error", latency_ms=None, detail=str(exc))
+        logger.warning("Health check DB failed", error=str(exc))
+        return DependencyDetail(status="error", latency_ms=None, detail="connexion échouée")
 
 
 async def _check_redis() -> DependencyDetail:
@@ -229,7 +263,8 @@ async def _check_redis() -> DependencyDetail:
         await redis.ping()
         return DependencyDetail(status="ok", latency_ms=round((time.monotonic() - start) * 1000, 1))
     except Exception as exc:
-        return DependencyDetail(status="error", latency_ms=None, detail=str(exc))
+        logger.warning("Health check Redis failed", error=str(exc))
+        return DependencyDetail(status="error", latency_ms=None, detail="connexion échouée")
 
 
 async def _check_minio() -> DependencyDetail:
@@ -239,7 +274,8 @@ async def _check_minio() -> DependencyDetail:
         await loop.run_in_executor(None, minio_service.client.bucket_exists, minio_service.bucket)
         return DependencyDetail(status="ok", latency_ms=round((time.monotonic() - start) * 1000, 1))
     except Exception as exc:
-        return DependencyDetail(status="error", latency_ms=None, detail=str(exc))
+        logger.warning("Health check MinIO failed", error=str(exc))
+        return DependencyDetail(status="error", latency_ms=None, detail="connexion échouée")
 
 
 async def _check_mlflow() -> DependencyDetail:
@@ -251,7 +287,8 @@ async def _check_mlflow() -> DependencyDetail:
             resp.raise_for_status()
         return DependencyDetail(status="ok", latency_ms=round((time.monotonic() - start) * 1000, 1))
     except Exception as exc:
-        return DependencyDetail(status="error", latency_ms=None, detail=str(exc))
+        logger.warning("Health check MLflow failed", error=str(exc))
+        return DependencyDetail(status="error", latency_ms=None, detail="connexion échouée")
 
 
 @app.get("/health/dependencies", response_model=DependencyHealthResponse)

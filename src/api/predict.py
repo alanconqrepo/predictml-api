@@ -954,9 +954,14 @@ async def predict(
         except Exception as log_error:
             logger.error("Erreur lors du logging de la prédiction", error=str(log_error))
 
+        logger.error(
+            "Erreur interne lors de la prédiction",
+            model=input_data.model_name,
+            error=error_message,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erreur lors de la prédiction avec '{input_data.model_name}': {error_message}",
+            detail="Erreur interne lors de la prédiction. Consultez les logs serveur.",
         )
 
 
@@ -1110,9 +1115,14 @@ async def predict_batch(
         except Exception as log_error:
             logger.error("Erreur lors du logging du batch en erreur", error=str(log_error))
 
+        logger.error(
+            "Erreur interne lors du batch",
+            model=input_data.model_name,
+            error=error_message,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erreur lors du batch avec '{input_data.model_name}': {error_message}",
+            detail="Erreur interne lors du traitement batch. Consultez les logs serveur.",
         )
 
 

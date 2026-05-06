@@ -3,11 +3,32 @@ Configuration de l'application
 """
 
 import os
+import secrets
 
 from dotenv import load_dotenv
 
 # Charger les variables d'environnement
 load_dotenv()
+
+_INSECURE_DEFAULTS = {"change-this-secret-key", "minioadmin", "minioadmin"}
+
+
+def _require_env(name: str, default: str, insecure_values: set[str] | None = None) -> str:
+    """Retourne la valeur de la variable d'env ; lève une erreur si non définie ou non sécurisée en production."""
+    value = os.getenv(name, default)
+    if (
+        insecure_values
+        and value in insecure_values
+        and not os.getenv("DEBUG", "false").lower() == "true"
+    ):
+        import warnings
+
+        warnings.warn(
+            f"[SECURITY] {name} utilise une valeur par défaut non sécurisée. "
+            f"Définissez {name} via variable d'environnement avant le déploiement en production.",
+            stacklevel=2,
+        )
+    return value
 
 
 class Settings:
@@ -16,7 +37,7 @@ class Settings:
     # API
     API_TITLE: str = "PredictML API - Multi Models"
     API_VERSION: str = "2.0.0"
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "change-this-secret-key")
+    SECRET_KEY: str = os.getenv("SECRET_KEY") or secrets.token_urlsafe(32)
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
 
     # Server
@@ -30,8 +51,8 @@ class Settings:
 
     # MinIO Object Storage
     MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "localhost:9000")
-    MINIO_ACCESS_KEY: str = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-    MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+    MINIO_ACCESS_KEY: str = _require_env("MINIO_ACCESS_KEY", "minioadmin", {"minioadmin"})
+    MINIO_SECRET_KEY: str = _require_env("MINIO_SECRET_KEY", "minioadmin", {"minioadmin"})
     MINIO_BUCKET: str = os.getenv("MINIO_BUCKET", "models")
     MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "false").lower() == "true"
 
@@ -49,7 +70,7 @@ class Settings:
     MLFLOW_REGISTER_MODELS: bool = os.getenv("MLFLOW_REGISTER_MODELS", "true").lower() == "true"
     MLFLOW_ENABLE: bool = os.getenv("MLFLOW_ENABLE", "true").lower() == "true"
 
-    # Prometheus metrics — token optionnel pour protéger /metrics (vide = public)
+    # Prometheus metrics — token requis pour protéger /metrics (vide = accès public)
     METRICS_TOKEN: str = os.getenv("METRICS_TOKEN", "")
 
     # OpenTelemetry

@@ -3092,7 +3092,7 @@ class PredictMLClient:
 
 # ── Exemple d'utilisation ─────────────────────────────────────────────────────
 
-client = PredictMLClient("http://localhost:8000", "ZC_W_-mcw-01l5W5fN8VFx-h4WornlnxwAtiQutT2BA")
+client = PredictMLClient("http://localhost:8000", "<ADMIN_TOKEN>")
 
 # Prédiction simple
 result = client.predict(
