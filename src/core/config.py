@@ -3,7 +3,6 @@ Configuration de l'application
 """
 
 import os
-import secrets
 
 from dotenv import load_dotenv
 
@@ -12,10 +11,27 @@ load_dotenv()
 
 _INSECURE_DEFAULTS = {"change-this-secret-key", "minioadmin", "minioadmin"}
 
+_MISSING = object()
 
-def _require_env(name: str, default: str, insecure_values: set[str] | None = None) -> str:
-    """Retourne la valeur de la variable d'env ; lève une erreur si non définie ou non sécurisée en production."""
-    value = os.getenv(name, default)
+
+def _require_env(
+    name: str, default: object = _MISSING, insecure_values: set[str] | None = None
+) -> str:
+    """Retourne la valeur de la variable d'env.
+
+    Si la variable n'est pas définie et qu'aucun default n'est fourni, lève
+    EnvironmentError — utilisé pour les variables obligatoires comme SECRET_KEY.
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        if default is _MISSING:
+            raise EnvironmentError(
+                f"[CONFIG] La variable d'environnement '{name}' est obligatoire mais non définie. "
+                f'Générez une valeur avec : python -c "import secrets; print(secrets.token_urlsafe(32))"'
+            )
+        value = str(default)
+    else:
+        value = raw
     if (
         insecure_values
         and value in insecure_values
@@ -37,7 +53,7 @@ class Settings:
     # API
     API_TITLE: str = "PredictML API - Multi Models"
     API_VERSION: str = "2.0.0"
-    SECRET_KEY: str = os.getenv("SECRET_KEY") or secrets.token_urlsafe(32)
+    SECRET_KEY: str = _require_env("SECRET_KEY", insecure_values=set())
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
 
     # Server

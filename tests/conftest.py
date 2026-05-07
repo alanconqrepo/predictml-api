@@ -11,6 +11,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Forcer les endpoints locaux pour les tests
+os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest-do-not-use-in-production")
 os.environ.setdefault("MINIO_ENDPOINT", "localhost:9002")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6399/0")  # port fantaisiste — jamais contacté
 
