@@ -14,7 +14,9 @@ _INSECURE_DEFAULTS = {"change-this-secret-key", "minioadmin", "minioadmin"}
 _MISSING = object()
 
 
-def _require_env(name: str, default: object = _MISSING, insecure_values: set[str] | None = None) -> str:
+def _require_env(
+    name: str, default: object = _MISSING, insecure_values: set[str] | None = None
+) -> str:
     """Retourne la valeur de la variable d'env.
 
     Si la variable n'est pas définie et qu'aucun default n'est fourni, lève
@@ -25,7 +27,7 @@ def _require_env(name: str, default: object = _MISSING, insecure_values: set[str
         if default is _MISSING:
             raise EnvironmentError(
                 f"[CONFIG] La variable d'environnement '{name}' est obligatoire mais non définie. "
-                f"Générez une valeur avec : python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                f'Générez une valeur avec : python -c "import secrets; print(secrets.token_urlsafe(32))"'
             )
         value = str(default)
     else:
