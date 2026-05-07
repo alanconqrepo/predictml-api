@@ -142,8 +142,15 @@ docker exec predictml-api python -c "import redis; r = redis.from_url('redis://r
 
 ## Variables d'environnement (`.env`)
 
+> **SECRET_KEY est obligatoire.** L'API refuse de démarrer si cette variable est absente.
+> Générez une valeur sécurisée avant le premier déploiement :
+> ```bash
+> python -c "import secrets; print(secrets.token_urlsafe(32))"
+> ```
+
 | Variable | Défaut | Description |
 |---|---|---|
+| `SECRET_KEY` | — | **Obligatoire.** Clé HMAC pour la signature du cache Redis. Aucune valeur par défaut — l'API lève une erreur au démarrage si absente. |
 | `API_PORT` | `8000` | Port de l'API |
 | `STREAMLIT_PORT` | `8501` | Port du dashboard |
 | `POSTGRES_PORT` | `5433` | Port PostgreSQL externe |
