@@ -369,6 +369,9 @@ curl -X POST http://localhost:8000/models/mon_modele/1.0.0/retrain \
 Un exemple complet de `train.py` respectant le contrat est disponible dans
 `init_data/example_train.py`.
 
+Voir aussi `documentation/TRAIN_SCRIPT_GUIDE.md` — section « Sécurité & sandbox »
+pour les détails sur la liste blanche d'imports et les limites de ressources.
+
 ## Fonctionnalité Auto-promotion post-retrain
 
 ### Comment ça fonctionne
