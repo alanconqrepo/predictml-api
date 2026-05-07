@@ -3366,7 +3366,7 @@ def _delete_minio_object(object_key: str) -> bool:
 async def delete_model_version(
     name: str,
     version: str,
-    user: User = Depends(verify_token),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -3376,7 +3376,7 @@ async def delete_model_version(
     - Supprime le run MLflow associé (si `mlflow_run_id` renseigné).
     - Supprime l'objet `.pkl` dans MinIO.
 
-    Retourne **204 No Content** en cas de succès.
+    Retourne **204 No Content** en cas de succès. Nécessite un token Bearer admin.
     """
     result = await db.execute(
         select(ModelMetadata).where(
@@ -3646,7 +3646,7 @@ async def download_model(
 @router.delete("/models/{name}", response_model=ModelDeleteResponse)
 async def delete_model_all_versions(
     name: str,
-    user: User = Depends(verify_token),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -3656,7 +3656,7 @@ async def delete_model_all_versions(
     - Supprime chaque run MLflow associé.
     - Supprime chaque objet `.pkl` dans MinIO.
 
-    Retourne un résumé des suppressions effectuées.
+    Retourne un résumé des suppressions effectuées. Nécessite un token Bearer admin.
     """
     result = await db.execute(select(ModelMetadata).where(ModelMetadata.name == name))
     models = result.scalars().all()

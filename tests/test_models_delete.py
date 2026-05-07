@@ -15,7 +15,8 @@ from tests.conftest import _TestSessionLocal
 
 client = TestClient(app)
 
-TEST_TOKEN = "test-token-delete-models"
+ADMIN_TOKEN = "test-token-delete-models-admin"
+USER_TOKEN = "test-token-delete-models-user"
 MODEL_PREFIX = "delete_model"
 
 
@@ -26,12 +27,21 @@ def make_pkl_bytes() -> bytes:
 
 async def _setup():
     async with _TestSessionLocal() as db:
-        if not await DBService.get_user_by_token(db, TEST_TOKEN):
+        if not await DBService.get_user_by_token(db, ADMIN_TOKEN):
             await DBService.create_user(
                 db,
-                username="test_delete_models",
-                email="test_delete@test.com",
-                api_token=TEST_TOKEN,
+                username="test_delete_models_admin",
+                email="test_delete_admin@test.com",
+                api_token=ADMIN_TOKEN,
+                role="admin",
+                rate_limit=10000,
+            )
+        if not await DBService.get_user_by_token(db, USER_TOKEN):
+            await DBService.create_user(
+                db,
+                username="test_delete_models_user",
+                email="test_delete_user@test.com",
+                api_token=USER_TOKEN,
                 role="user",
                 rate_limit=10000,
             )
@@ -43,7 +53,7 @@ asyncio.run(_setup())
 def _create_model(name: str, version: str = "1.0.0") -> dict:
     r = client.post(
         "/models",
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
         files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         data={"name": name, "version": version},
     )
@@ -55,7 +65,7 @@ def _create_mlflow_only_model(name: str, version: str = "1.0.0", run_id: str = "
     """Crée un modèle avec mlflow_run_id uniquement (pas de fichier → minio_object_key=None)."""
     r = client.post(
         "/models",
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
         data={"name": name, "version": version, "mlflow_run_id": run_id},
     )
     assert r.status_code == 201, r.text
@@ -88,6 +98,16 @@ def test_delete_version_with_invalid_token():
     assert r.status_code == 401
 
 
+def test_delete_version_non_admin_forbidden():
+    """DELETE /models/{name}/{version} avec token non-admin → 403"""
+    _create_model(f"{MODEL_PREFIX}_nonadmin_v")
+    r = client.delete(
+        f"/models/{MODEL_PREFIX}_nonadmin_v/1.0.0",
+        headers={"Authorization": f"Bearer {USER_TOKEN}"},
+    )
+    assert r.status_code == 403
+
+
 # ---------------------------------------------------------------------------
 # Auth — DELETE all versions
 # ---------------------------------------------------------------------------
@@ -109,6 +129,16 @@ def test_delete_all_with_invalid_token():
     assert r.status_code == 401
 
 
+def test_delete_all_non_admin_forbidden():
+    """DELETE /models/{name} avec token non-admin → 403"""
+    _create_model(f"{MODEL_PREFIX}_nonadmin_all")
+    r = client.delete(
+        f"/models/{MODEL_PREFIX}_nonadmin_all",
+        headers={"Authorization": f"Bearer {USER_TOKEN}"},
+    )
+    assert r.status_code == 403
+
+
 # ---------------------------------------------------------------------------
 # DELETE version spécifique
 # ---------------------------------------------------------------------------
@@ -121,7 +151,7 @@ def test_delete_specific_version_success():
 
     r = client.delete(
         f"/models/{name}/1.0.0",
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     )
     assert r.status_code == 204
 
@@ -134,7 +164,7 @@ def test_delete_specific_version_not_found():
     """DELETE version inexistante → 404"""
     r = client.delete(
         f"/models/inexistant_model/9.9.9",
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     )
     assert r.status_code == 404
 
@@ -144,10 +174,10 @@ def test_delete_specific_version_twice():
     name = f"{MODEL_PREFIX}_twice"
     _create_model(name)
 
-    r1 = client.delete(f"/models/{name}/1.0.0", headers={"Authorization": f"Bearer {TEST_TOKEN}"})
+    r1 = client.delete(f"/models/{name}/1.0.0", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
     assert r1.status_code == 204
 
-    r2 = client.delete(f"/models/{name}/1.0.0", headers={"Authorization": f"Bearer {TEST_TOKEN}"})
+    r2 = client.delete(f"/models/{name}/1.0.0", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
     assert r2.status_code == 404
 
 
@@ -162,7 +192,7 @@ def test_delete_all_versions_success():
     _create_model(name, version="2.0.0")
     _create_model(name, version="3.0.0")
 
-    r = client.delete(f"/models/{name}", headers={"Authorization": f"Bearer {TEST_TOKEN}"})
+    r = client.delete(f"/models/{name}", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
     assert r.status_code == 200
 
     data = r.json()
@@ -180,7 +210,7 @@ def test_delete_all_versions_not_found():
     """DELETE all sur nom inexistant → 404"""
     r = client.delete(
         "/models/inexistant_model_all",
-        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     )
     assert r.status_code == 404
 
@@ -190,7 +220,7 @@ def test_delete_all_versions_single_version():
     name = f"{MODEL_PREFIX}_single"
     _create_model(name)
 
-    r = client.delete(f"/models/{name}", headers={"Authorization": f"Bearer {TEST_TOKEN}"})
+    r = client.delete(f"/models/{name}", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
     assert r.status_code == 200
     assert r.json()["deleted_versions"] == ["1.0.0"]
     assert not _model_exists(name, "1.0.0")
@@ -209,7 +239,7 @@ def test_delete_mlflow_only_version_success():
 
     _minio_mock.delete_model.reset_mock()
 
-    r = client.delete(f"/models/{name}/1.0.0", headers={"Authorization": f"Bearer {TEST_TOKEN}"})
+    r = client.delete(f"/models/{name}/1.0.0", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
     assert r.status_code == 204
 
     # minio_object_key est None → delete_model ne doit pas être appelé
@@ -223,7 +253,7 @@ def test_delete_mlflow_only_all_versions():
     _create_mlflow_only_model(name, version="1.0.0", run_id="mlflowrun002")
     _create_mlflow_only_model(name, version="2.0.0", run_id="mlflowrun003")
 
-    r = client.delete(f"/models/{name}", headers={"Authorization": f"Bearer {TEST_TOKEN}"})
+    r = client.delete(f"/models/{name}", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
     assert r.status_code == 200
 
     data = r.json()
