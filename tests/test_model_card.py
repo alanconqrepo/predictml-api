@@ -166,7 +166,7 @@ def test_card_invalid_token():
 
 
 def test_card_404():
-    r = client.get("/models/nonexistent_xyz/v999/card", headers=AUTH)
+    r = client.get("/models/nonexistent_xyz/999.0.0/card", headers=AUTH)
     assert r.status_code == 404
 
 
