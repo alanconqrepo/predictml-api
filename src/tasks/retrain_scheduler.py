@@ -18,6 +18,7 @@ Chaque job :
 import asyncio
 import json
 import os
+import resource
 import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -34,6 +35,19 @@ _retrain_scheduler = AsyncIOScheduler(timezone="UTC")
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+_SAFE_ENV_KEYS = {
+    "PATH", "HOME", "USER", "LANG", "LC_ALL",
+    "TMPDIR", "TEMP", "TMP", "PYTHONPATH",
+    "PYTHONDONTWRITEBYTECODE", "VIRTUAL_ENV",
+}
+
+
+def _set_subprocess_limits() -> None:
+    """Appelé dans le processus enfant après fork — réduit la surface d'attaque."""
+    resource.setrlimit(resource.RLIMIT_AS, (2 * 1024**3, 2 * 1024**3))  # 2 Go RAM
+    resource.setrlimit(resource.RLIMIT_NOFILE, (50, 50))  # 50 descripteurs de fichiers
 
 
 def _compute_next_run_at(cron: str) -> Optional[datetime]:
@@ -191,14 +205,16 @@ async def _do_retrain(name: str, version: str) -> None:
             with open(script_path, "wb") as f:
                 f.write(script_bytes)
 
-            env = {
-                **os.environ,
-                "TRAIN_START_DATE": start_date,
-                "TRAIN_END_DATE": end_date,
-                "OUTPUT_MODEL_PATH": output_model_path,
-                "MLFLOW_TRACKING_URI": mlflow_uri,
-                "MODEL_NAME": name,
-            }
+            env = {k: v for k, v in os.environ.items() if k in _SAFE_ENV_KEYS}
+            env.update(
+                {
+                    "TRAIN_START_DATE": start_date,
+                    "TRAIN_END_DATE": end_date,
+                    "OUTPUT_MODEL_PATH": output_model_path,
+                    "MLFLOW_TRACKING_URI": mlflow_uri,
+                    "MODEL_NAME": name,
+                }
+            )
 
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -208,6 +224,7 @@ async def _do_retrain(name: str, version: str) -> None:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=tmpdir,
+                    preexec_fn=_set_subprocess_limits,
                 )
                 try:
                     raw_stdout, raw_stderr = await asyncio.wait_for(

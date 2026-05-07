@@ -7,6 +7,7 @@ import asyncio
 import json
 import math
 import os
+import resource
 import tempfile
 import time
 from datetime import datetime, timedelta, timezone
@@ -140,24 +141,59 @@ async def _get_leaderboard_drift_status(
     return drift_service.summarize_drift(features, baseline_available=True)
 
 
+_ALLOWED_IMPORT_MODULES = {
+    "os", "sys", "json", "pickle", "joblib",
+    "pandas", "numpy", "sklearn",
+    "datetime", "pathlib", "math", "statistics",
+    "collections", "typing", "warnings", "logging",
+    "time", "copy", "functools", "itertools", "re",
+    "io", "abc", "enum", "dataclasses", "csv",
+}
+
+
+def _set_subprocess_limits() -> None:
+    """Appelé dans le processus enfant après fork — réduit la surface d'attaque."""
+    resource.setrlimit(resource.RLIMIT_AS, (2 * 1024**3, 2 * 1024**3))  # 2 Go RAM
+    resource.setrlimit(resource.RLIMIT_NOFILE, (50, 50))  # 50 descripteurs de fichiers
+
+
 def _validate_train_script(source: str) -> Optional[str]:
     """
     Valide statiquement un script train.py contre les contraintes requises.
 
     Le script doit :
     1. Être du Python syntaxiquement valide
-    2. Référencer TRAIN_START_DATE (variable d'env)
-    3. Référencer TRAIN_END_DATE (variable d'env)
-    4. Référencer OUTPUT_MODEL_PATH (variable d'env)
-    5. Contenir un appel de sauvegarde : pickle.dump, joblib.dump ou save_model
+    2. N'importer que des modules de la liste autorisée
+    3. Référencer TRAIN_START_DATE (variable d'env)
+    4. Référencer TRAIN_END_DATE (variable d'env)
+    5. Référencer OUTPUT_MODEL_PATH (variable d'env)
+    6. Contenir un appel de sauvegarde : pickle.dump, joblib.dump ou save_model
 
     Returns:
         None si le script est valide, sinon un message d'erreur.
     """
     try:
-        ast.parse(source)
+        tree = ast.parse(source)
     except SyntaxError as e:
         return f"Syntaxe Python invalide : {e}"
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split(".")[0]
+                if top not in _ALLOWED_IMPORT_MODULES:
+                    return (
+                        f"Import non autorisé : '{alias.name}'. "
+                        f"Modules autorisés : {sorted(_ALLOWED_IMPORT_MODULES)}"
+                    )
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                top = node.module.split(".")[0]
+                if top not in _ALLOWED_IMPORT_MODULES:
+                    return (
+                        f"Import non autorisé : '{node.module}'. "
+                        f"Modules autorisés : {sorted(_ALLOWED_IMPORT_MODULES)}"
+                    )
 
     required_tokens = {
         "TRAIN_START_DATE": "doit référencer la variable d'env TRAIN_START_DATE",
@@ -1218,6 +1254,7 @@ async def retrain_model(
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=tmpdir,
+                preexec_fn=_set_subprocess_limits,
             )
             try:
                 raw_stdout, raw_stderr = await asyncio.wait_for(proc.communicate(), timeout=600.0)

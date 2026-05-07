@@ -251,6 +251,62 @@ class TestValidateTrainScript:
         error = _validate_train_script(script)
         assert error is not None
 
+    def test_disallowed_import_subprocess_rejected(self):
+        """import subprocess → rejeté (module hors allowlist)."""
+        script = VALID_TRAIN_SCRIPT.replace(
+            "import os\n", "import os\nimport subprocess\n"
+        )
+        error = _validate_train_script(script)
+        assert error is not None
+        assert "subprocess" in error
+
+    def test_disallowed_import_requests_rejected(self):
+        """import requests → rejeté (module hors allowlist)."""
+        script = VALID_TRAIN_SCRIPT.replace(
+            "import os\n", "import os\nimport requests\n"
+        )
+        error = _validate_train_script(script)
+        assert error is not None
+        assert "requests" in error
+
+    def test_disallowed_from_import_socket_rejected(self):
+        """from socket import create_connection → rejeté."""
+        script = VALID_TRAIN_SCRIPT.replace(
+            "import os\n", "import os\nfrom socket import create_connection\n"
+        )
+        error = _validate_train_script(script)
+        assert error is not None
+        assert "socket" in error
+
+    def test_disallowed_import_submodule_rejected(self):
+        """import urllib.request → rejeté (urllib hors allowlist)."""
+        script = VALID_TRAIN_SCRIPT.replace(
+            "import os\n", "import os\nimport urllib.request\n"
+        )
+        error = _validate_train_script(script)
+        assert error is not None
+        assert "urllib" in error
+
+    def test_allowed_sklearn_submodule_accepted(self):
+        """from sklearn.linear_model import LogisticRegression → autorisé."""
+        assert _validate_train_script(VALID_TRAIN_SCRIPT) is None
+
+    def test_allowed_numpy_import_accepted(self):
+        """import numpy as np → autorisé."""
+        script = VALID_TRAIN_SCRIPT.replace(
+            "import os\n", "import os\nimport numpy as np\n"
+        )
+        assert _validate_train_script(script) is None
+
+    def test_disallowed_import_ctypes_rejected(self):
+        """import ctypes → rejeté."""
+        script = VALID_TRAIN_SCRIPT.replace(
+            "import os\n", "import os\nimport ctypes\n"
+        )
+        error = _validate_train_script(script)
+        assert error is not None
+        assert "ctypes" in error
+
 
 # ---------------------------------------------------------------------------
 # Tests — POST /models avec train_file
