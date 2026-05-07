@@ -3059,7 +3059,7 @@ async def create_model(
             "Silencieusement ignoré si moins de 100 prédictions sont disponibles."
         ),
     ),
-    user: User = Depends(verify_token),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -3072,7 +3072,7 @@ async def create_model(
     - **train_file** : script `train.py` optionnel permettant le ré-entraînement automatique.
       Doit respecter le contrat d'interface (TRAIN_START_DATE, TRAIN_END_DATE, OUTPUT_MODEL_PATH).
 
-    Nécessite un token Bearer valide.
+    Nécessite un token Bearer admin.
     """
     # Vérifier l'unicité name + version
     result = await db.execute(
