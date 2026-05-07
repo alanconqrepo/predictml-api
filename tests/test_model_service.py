@@ -1,14 +1,15 @@
 """
-Tests pour le service de gestion des modèles
+Tests pour le service de gestion des modèles ML
 """
 import asyncio
+import pickle
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import fakeredis.aioredis
 import pytest
 
-from src.services.model_service import ModelService
+from src.services.model_service import ModelService, compute_model_hmac, _sign_for_cache
 
 
 def _make_service() -> ModelService:
@@ -18,13 +19,21 @@ def _make_service() -> ModelService:
     return service
 
 
-def _fake_metadata(mlflow_run_id=None, minio_object_key="model/v1.0.0.pkl"):
-    """Retourne un faux objet ModelMetadata."""
+def _fake_metadata(mlflow_run_id=None, minio_object_key="model/v1.0.0.pkl", model_bytes=None):
+    """
+    Retourne un faux objet ModelMetadata avec une signature HMAC valide.
+
+    model_bytes : bytes pkl du modèle ; si None, une valeur par défaut est utilisée.
+    """
+    if model_bytes is None:
+        model_bytes = b"fake_pkl_bytes"
+    sig = compute_model_hmac(model_bytes) if minio_object_key else None
     return SimpleNamespace(
         name="test_model",
         version="1.0.0",
         mlflow_run_id=mlflow_run_id,
         minio_object_key=minio_object_key,
+        pkl_hmac_signature=sig,
     )
 
 
@@ -69,24 +78,25 @@ def test_clear_cache():
 # ---------------------------------------------------------------------------
 
 def test_load_model_via_minio():
-    """load_model sans mlflow_run_id → charge depuis MinIO"""
+    """load_model sans mlflow_run_id → charge depuis MinIO via download_file_bytes"""
     service = _make_service()
-    # Pickle/unpickle via Redis crée de nouveaux objets (pas identity) — on vérifie via attribut
     fake_model = SimpleNamespace(marker="fake_minio_model")
-    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl")
+    fake_pkl = pickle.dumps(fake_model)
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
+                               model_bytes=fake_pkl)
 
     with patch(
         "src.services.db_service.DBService.get_model_metadata",
         new_callable=AsyncMock,
         return_value=metadata,
     ), patch("src.services.model_service.minio_service") as minio_mock:
-        minio_mock.download_model.return_value = fake_model
+        minio_mock.download_file_bytes.return_value = fake_pkl
         result = asyncio.run(service.load_model(AsyncMock(), "test_model"))
 
     assert result["model"].marker == "fake_minio_model"
     assert result["metadata"].name == "test_model"
     assert result["metadata"].minio_object_key == "iris/v1.0.0.pkl"
-    minio_mock.download_model.assert_called_once_with("iris/v1.0.0.pkl")
+    minio_mock.download_file_bytes.assert_called_once_with("iris/v1.0.0.pkl")
 
 
 def test_load_model_via_mlflow():
@@ -94,7 +104,7 @@ def test_load_model_via_mlflow():
     service = _make_service()
     fake_model = SimpleNamespace(marker="fake_mlflow_model")
     run_id = "abc123def456abc123def456abc123de"
-    metadata = _fake_metadata(mlflow_run_id=run_id, minio_object_key=None)
+    metadata = _fake_metadata(mlflow_run_id=run_id, minio_object_key=None, model_bytes=None)
 
     with patch(
         "src.services.db_service.DBService.get_model_metadata",
@@ -106,33 +116,37 @@ def test_load_model_via_mlflow():
 
     assert result["model"].marker == "fake_mlflow_model"
     mlflow_mock.assert_called_once_with(f"runs:/{run_id}/model")
-    minio_mock.download_model.assert_not_called()
+    minio_mock.download_file_bytes.assert_not_called()
 
 
 def test_load_model_cache_hit():
-    """load_model appelle le stockage une seule fois : le second appel vient du cache Redis"""
+    """load_model : le second appel est servi depuis le cache Redis (MinIO non rappelé)"""
     service = _make_service()
     fake_model = SimpleNamespace(marker="cache_hit_model")
-    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl")
+    fake_pkl = pickle.dumps(fake_model)
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
+                               model_bytes=fake_pkl)
 
     with patch(
         "src.services.db_service.DBService.get_model_metadata",
         new_callable=AsyncMock,
         return_value=metadata,
     ), patch("src.services.model_service.minio_service") as minio_mock:
-        minio_mock.download_model.return_value = fake_model
+        minio_mock.download_file_bytes.return_value = fake_pkl
         asyncio.run(service.load_model(AsyncMock(), "test_model"))
         asyncio.run(service.load_model(AsyncMock(), "test_model"))
 
     # MinIO appelé une seule fois malgré deux load_model
-    assert minio_mock.download_model.call_count == 1
+    assert minio_mock.download_file_bytes.call_count == 1
 
 
 def test_load_model_forwards_explicit_version():
     """load_model avec version explicite → get_model_metadata appelé avec cette version"""
     service = _make_service()
     fake_model = SimpleNamespace(marker="fake_model")
-    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v2.0.0.pkl")
+    fake_pkl = pickle.dumps(fake_model)
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v2.0.0.pkl",
+                               model_bytes=fake_pkl)
     metadata.version = "2.0.0"
 
     with patch(
@@ -140,27 +154,28 @@ def test_load_model_forwards_explicit_version():
         new_callable=AsyncMock,
         return_value=metadata,
     ) as mock_get, patch("src.services.model_service.minio_service") as minio_mock:
-        minio_mock.download_model.return_value = fake_model
+        minio_mock.download_file_bytes.return_value = fake_pkl
         asyncio.run(service.load_model(AsyncMock(), "test_model", "2.0.0"))
 
     mock_get.assert_called_once()
     _, args, kwargs = mock_get.mock_calls[0]
-    # Le troisième argument positionnel (ou kwarg 'version') doit être "2.0.0"
     assert args[2] == "2.0.0" or kwargs.get("version") == "2.0.0"
 
 
 def test_load_model_no_version_passes_none():
-    """load_model sans version → get_model_metadata appelé avec version=None (production en priorité)"""
+    """load_model sans version → get_model_metadata appelé avec version=None"""
     service = _make_service()
     fake_model = SimpleNamespace(marker="fake_model")
-    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl")
+    fake_pkl = pickle.dumps(fake_model)
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
+                               model_bytes=fake_pkl)
 
     with patch(
         "src.services.db_service.DBService.get_model_metadata",
         new_callable=AsyncMock,
         return_value=metadata,
     ) as mock_get, patch("src.services.model_service.minio_service") as minio_mock:
-        minio_mock.download_model.return_value = fake_model
+        minio_mock.download_file_bytes.return_value = fake_pkl
         asyncio.run(service.load_model(AsyncMock(), "test_model"))
 
     mock_get.assert_called_once()
@@ -191,3 +206,85 @@ def test_load_model_not_found():
             asyncio.run(service.load_model(AsyncMock(), "inexistant"))
 
     assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Sécurité HMAC
+# ---------------------------------------------------------------------------
+
+def test_load_model_missing_signature_raises_403():
+    """load_model sans pkl_hmac_signature → HTTPException 403 (modèle legacy non signé)"""
+    from fastapi import HTTPException
+
+    service = _make_service()
+    fake_pkl = pickle.dumps(SimpleNamespace(marker="x"))
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
+                               model_bytes=fake_pkl)
+    metadata.pkl_hmac_signature = None  # simule un modèle sans signature
+
+    with patch(
+        "src.services.db_service.DBService.get_model_metadata",
+        new_callable=AsyncMock,
+        return_value=metadata,
+    ), patch("src.services.model_service.minio_service") as minio_mock:
+        minio_mock.download_file_bytes.return_value = fake_pkl
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(service.load_model(AsyncMock(), "test_model"))
+
+    assert exc_info.value.status_code == 403
+    assert "resign_models" in exc_info.value.detail
+
+
+def test_load_model_tampered_pkl_raises_500():
+    """load_model avec pkl falsifié → HTTPException 500 (signature invalide)"""
+    from fastapi import HTTPException
+
+    service = _make_service()
+    real_pkl = pickle.dumps(SimpleNamespace(marker="real"))
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
+                               model_bytes=real_pkl)
+    tampered_pkl = b"this_is_not_the_signed_file"
+
+    with patch(
+        "src.services.db_service.DBService.get_model_metadata",
+        new_callable=AsyncMock,
+        return_value=metadata,
+    ), patch("src.services.model_service.minio_service") as minio_mock:
+        minio_mock.download_file_bytes.return_value = tampered_pkl
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(service.load_model(AsyncMock(), "test_model"))
+
+    assert exc_info.value.status_code == 500
+    assert "signature" in exc_info.value.detail.lower()
+
+
+def test_load_model_tampered_redis_cache_invalidated():
+    """
+    Si le cache Redis contient des bytes avec un HMAC invalide,
+    load_model invalide l'entrée et charge depuis MinIO.
+    """
+    service = _make_service()
+    fake_model = SimpleNamespace(marker="fresh_from_minio")
+    fake_pkl = pickle.dumps(fake_model)
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
+                               model_bytes=fake_pkl)
+
+    # Injecter des bytes corrompus dans le cache (HMAC invalide)
+    cache_key = f"model:test_model:1.0.0"
+    corrupted = b"A" * 64 + b"malicious_payload"
+    asyncio.run(service._redis.setex(cache_key, 3600, corrupted))
+
+    with patch(
+        "src.services.db_service.DBService.get_model_metadata",
+        new_callable=AsyncMock,
+        return_value=metadata,
+    ), patch("src.services.model_service.minio_service") as minio_mock:
+        minio_mock.download_file_bytes.return_value = fake_pkl
+        result = asyncio.run(service.load_model(AsyncMock(), "test_model"))
+
+    # L'entrée corrompue doit être ignorée ; MinIO doit avoir été appelé
+    assert result["model"].marker == "fresh_from_minio"
+    minio_mock.download_file_bytes.assert_called_once_with("iris/v1.0.0.pkl")
+    # Le cache doit maintenant contenir l'entrée valide
+    new_cached = asyncio.run(service._redis.get(cache_key))
+    assert new_cached is not None and len(new_cached) > 64

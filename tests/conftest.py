@@ -44,9 +44,51 @@ patch("src.services.mlflow_service.mlflow_service", _mlflow_mock).start()
 # Remplacer le client Redis du singleton par un FakeRedis en mémoire
 # (aucun serveur Redis requis pour les tests)
 import fakeredis.aioredis  # noqa: E402
-from src.services.model_service import model_service  # noqa: E402
+from src.services.model_service import model_service, _sign_for_cache  # noqa: E402
 
-model_service._redis = fakeredis.aioredis.FakeRedis()
+
+class _SigningFakeRedis:
+    """
+    Wrapper autour de FakeRedis qui signe automatiquement les entrées du cache modèle.
+
+    Toute écriture sur une clé ``model:*`` (via set ou setex) est transparentement
+    enveloppée avec un HMAC-SHA256 avant le stockage, de la même façon que le fait
+    model_service.load_model() en production. Cela permet aux fonctions _inject_cache()
+    des tests de continuer à écrire des données non-signées (elles sont signées ici).
+    """
+
+    def __init__(self, redis):
+        self._r = redis
+
+    def _maybe_sign(self, key: object, value: bytes) -> bytes:
+        if isinstance(key, (str, bytes)):
+            k = key.decode() if isinstance(key, bytes) else key
+            if k.startswith("model:") and isinstance(value, bytes):
+                return _sign_for_cache(value)
+        return value
+
+    async def set(self, key, value, *args, **kwargs):
+        value = self._maybe_sign(key, value)
+        return await self._r.set(key, value, *args, **kwargs)
+
+    async def setex(self, key, ttl, value):
+        value = self._maybe_sign(key, value)
+        return await self._r.setex(key, ttl, value)
+
+    async def get(self, key):
+        return await self._r.get(key)
+
+    async def keys(self, pattern):
+        return await self._r.keys(pattern)
+
+    async def delete(self, *keys):
+        return await self._r.delete(*keys)
+
+    def __getattr__(self, name):
+        return getattr(self._r, name)
+
+
+model_service._redis = _SigningFakeRedis(fakeredis.aioredis.FakeRedis())
 
 import tempfile
 
