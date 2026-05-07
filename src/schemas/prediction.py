@@ -2,10 +2,14 @@
 Schémas Pydantic pour les prédictions
 """
 
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+_VERSION_RE = re.compile(r"^\d+\.\d+(\.\d+)?$")
 
 
 class PredictionInput(BaseModel):
@@ -70,6 +74,20 @@ class PredictionInput(BaseModel):
             "Le modèle doit exposer feature_names_in_ (entraîné avec un DataFrame pandas)."
         ),
     )
+
+    @field_validator("model_name")
+    @classmethod
+    def validate_model_name(cls, v: str) -> str:
+        if not _NAME_RE.match(v):
+            raise ValueError("Nom de modèle invalide (caractères autorisés : a-z A-Z 0-9 _ -)")
+        return v
+
+    @field_validator("model_version")
+    @classmethod
+    def validate_model_version(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not _VERSION_RE.match(v):
+            raise ValueError("Version invalide (format attendu : X.Y ou X.Y.Z)")
+        return v
 
 
 class PredictionOutput(BaseModel):
@@ -159,6 +177,20 @@ class BatchPredictionInput(BaseModel):
         ..., min_length=1, description="Liste d'observations à scorer"
     )
 
+    @field_validator("model_name")
+    @classmethod
+    def validate_model_name(cls, v: str) -> str:
+        if not _NAME_RE.match(v):
+            raise ValueError("Nom de modèle invalide (caractères autorisés : a-z A-Z 0-9 _ -)")
+        return v
+
+    @field_validator("model_version")
+    @classmethod
+    def validate_model_version(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not _VERSION_RE.match(v):
+            raise ValueError("Version invalide (format attendu : X.Y ou X.Y.Z)")
+        return v
+
 
 class BatchPredictionResultItem(BaseModel):
     """Résultat d'une prédiction individuelle dans un batch"""
@@ -220,6 +252,20 @@ class ExplainInput(BaseModel):
         ...,
         description="Features pour l'explication sous forme de dict nommé.",
     )
+
+    @field_validator("model_name")
+    @classmethod
+    def validate_model_name(cls, v: str) -> str:
+        if not _NAME_RE.match(v):
+            raise ValueError("Nom de modèle invalide (caractères autorisés : a-z A-Z 0-9 _ -)")
+        return v
+
+    @field_validator("model_version")
+    @classmethod
+    def validate_model_version(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not _VERSION_RE.match(v):
+            raise ValueError("Version invalide (format attendu : X.Y ou X.Y.Z)")
+        return v
 
 
 class ExplainOutput(BaseModel):

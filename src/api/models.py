@@ -7,11 +7,12 @@ import asyncio
 import json
 import math
 import os
+import re
 import resource
 import tempfile
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 import numpy as np
 import structlog
@@ -21,6 +22,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Path,
     Query,
     Request,
     Response,
@@ -123,6 +125,39 @@ router = APIRouter(tags=["models"])
 
 _leaderboard_cache: dict = {}
 _LEADERBOARD_TTL = 300  # 5 minutes
+
+# Validation regex — prevent path traversal in MinIO object keys (e.g. "../admin")
+NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+VERSION_RE = re.compile(r"^\d+\.\d+(\.\d+)?$")
+
+
+def validate_model_name(name: str) -> str:
+    if not NAME_RE.match(name):
+        raise HTTPException(
+            status_code=422,
+            detail="Nom de modèle invalide (caractères autorisés : a-z A-Z 0-9 _ -)",
+        )
+    return name
+
+
+def validate_version(version: str) -> str:
+    if not VERSION_RE.match(version):
+        raise HTTPException(
+            status_code=422,
+            detail="Version invalide (format attendu : X.Y ou X.Y.Z)",
+        )
+    return version
+
+
+# Annotated path-parameter types — FastAPI enforces the pattern before the handler runs
+ModelNamePath = Annotated[
+    str,
+    Path(pattern=r"^[a-zA-Z0-9_-]{1,64}$", description="Nom du modèle"),
+]
+ModelVersionPath = Annotated[
+    str,
+    Path(pattern=r"^\d+\.\d+(\.\d+)?$", description="Version du modèle (X.Y ou X.Y.Z)"),
+]
 
 
 async def _get_leaderboard_drift_status(
@@ -416,10 +451,10 @@ def _bucket_key(ts: datetime, granularity: str) -> str:
 
 @router.get("/models/{name}/performance", response_model=ModelPerformanceResponse)
 async def get_model_performance(
-    name: str,
+    name: ModelNamePath,
     start: Optional[datetime] = Query(None, description="Début de période (ISO 8601)"),
     end: Optional[datetime] = Query(None, description="Fin de période (ISO 8601)"),
-    version: Optional[str] = Query(None, description="Version du modèle (optionnel)"),
+    version: Optional[str] = Query(None, description="Version du modèle (optionnel)", pattern=r"^\d+\.\d+(\.\d+)?$"),
     granularity: Optional[Literal["day", "week", "month"]] = Query(
         None, description="Agrégation temporelle (day, week, month)"
     ),
@@ -529,7 +564,7 @@ async def get_model_performance(
 
 @router.get("/models/{name}/performance-timeline", response_model=PerformanceTimelineResponse)
 async def get_model_performance_timeline(
-    name: str,
+    name: ModelNamePath,
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -562,9 +597,9 @@ async def get_model_performance_timeline(
 
 @router.get("/models/{name}/drift", response_model=DriftReportResponse)
 async def get_model_drift(
-    name: str,
+    name: ModelNamePath,
     version: Optional[str] = Query(
-        None, description="Version du modèle (défaut : production/dernière)"
+        None, description="Version du modèle (défaut : production/dernière)", pattern=r"^\d+\.\d+(\.\d+)?$"
     ),
     days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours"),
     min_predictions: int = Query(
@@ -640,10 +675,10 @@ async def get_model_drift(
 
 @router.get("/models/{name}/output-drift", response_model=OutputDriftResponse)
 async def get_model_output_drift(
-    name: str,
+    name: ModelNamePath,
     period_days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours"),
     model_version: Optional[str] = Query(
-        None, description="Version du modèle (défaut : production/dernière)"
+        None, description="Version du modèle (défaut : production/dernière)", pattern=r"^\d+\.\d+(\.\d+)?$"
     ),
     min_predictions: int = Query(
         30, ge=5, description="Nombre minimum de prédictions pour calculer le drift"
@@ -683,8 +718,8 @@ async def get_model_output_drift(
 
 @router.get("/models/{name}/readiness")
 async def get_model_readiness(
-    name: str,
-    version: str = Query(..., description="Version du modèle à vérifier"),
+    name: ModelNamePath,
+    version: str = Query(..., description="Version du modèle à vérifier", pattern=r"^\d+\.\d+(\.\d+)?$"),
     user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -764,9 +799,9 @@ async def get_model_readiness(
 
 @router.get("/models/{name}/feature-importance", response_model=FeatureImportanceResponse)
 async def get_feature_importance(
-    name: str,
+    name: ModelNamePath,
     version: Optional[str] = Query(
-        None, description="Version du modèle (défaut : production/dernière)"
+        None, description="Version du modèle (défaut : production/dernière)", pattern=r"^\d+\.\d+(\.\d+)?$"
     ),
     last_n: int = Query(100, ge=1, le=500, description="Nb de prédictions à échantillonner"),
     days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours"),
@@ -887,7 +922,7 @@ async def get_feature_importance(
 
 @router.get("/models/{name}/history", response_model=ModelHistoryResponse)
 async def list_model_history(
-    name: str,
+    name: ModelNamePath,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     _auth: User = Depends(verify_token),
@@ -911,8 +946,8 @@ async def list_model_history(
 
 @router.get("/models/{name}/{version}/history", response_model=ModelHistoryResponse)
 async def list_model_version_history(
-    name: str,
-    version: str,
+    name: ModelNamePath,
+    version: ModelVersionPath,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     _auth: User = Depends(verify_token),
@@ -939,8 +974,8 @@ async def list_model_version_history(
     response_model=RollbackResponse,
 )
 async def rollback_model(
-    name: str,
-    version: str,
+    name: ModelNamePath,
+    version: ModelVersionPath,
     history_id: int,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
@@ -1036,8 +1071,8 @@ async def rollback_model(
 
 @router.patch("/models/{name}/{version}/deprecate", response_model=DeprecateModelResponse)
 async def deprecate_model_version(
-    name: str,
-    version: str,
+    name: ModelNamePath,
+    version: ModelVersionPath,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1097,7 +1132,7 @@ async def deprecate_model_version(
 
 @router.patch("/models/{name}/policy", response_model=PolicyUpdateResponse)
 async def update_model_policy(
-    name: str,
+    name: ModelNamePath,
     payload: PromotionPolicy,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
@@ -1155,8 +1190,8 @@ async def update_model_policy(
     response_model=RetrainResponse,
 )
 async def retrain_model(
-    name: str,
-    version: str,
+    name: ModelNamePath,
+    version: ModelVersionPath,
     payload: RetrainRequest,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
@@ -1623,7 +1658,7 @@ async def retrain_model(
     response_model=RetrainHistoryResponse,
 )
 async def get_retrain_history(
-    name: str,
+    name: ModelNamePath,
     limit: int = Query(20, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: User = Depends(verify_token),
@@ -1676,8 +1711,8 @@ async def get_retrain_history(
     response_model=ScheduleUpdateResponse,
 )
 async def update_retrain_schedule(
-    name: str,
-    version: str,
+    name: ModelNamePath,
+    version: ModelVersionPath,
     payload: RetrainScheduleInput,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
@@ -1773,7 +1808,7 @@ async def update_retrain_schedule(
 
 @router.get("/models/{name}/ab-compare", response_model=ABCompareResponse)
 async def get_ab_comparison(
-    name: str,
+    name: ModelNamePath,
     days: int = Query(30, ge=1, le=90, description="Fenêtre d'analyse en jours (max 90)"),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
@@ -1876,7 +1911,7 @@ def _shadow_recommendation(
 
 @router.get("/models/{name}/shadow-compare", response_model=ShadowCompareResponse)
 async def get_shadow_comparison(
-    name: str,
+    name: ModelNamePath,
     period_days: int = Query(30, ge=1, le=90, description="Fenêtre d'analyse en jours (max 90)"),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
@@ -1934,8 +1969,8 @@ async def get_shadow_comparison(
 
 @router.get("/models/{name}/calibration", response_model=CalibrationResponse)
 async def get_model_calibration(
-    name: str,
-    version: Optional[str] = Query(None, description="Version du modèle (toutes si absent)"),
+    name: ModelNamePath,
+    version: Optional[str] = Query(None, description="Version du modèle (toutes si absent)", pattern=r"^\d+\.\d+(\.\d+)?$"),
     start: Optional[datetime] = Query(None, description="Début de la plage temporelle"),
     end: Optional[datetime] = Query(None, description="Fin de la plage temporelle"),
     n_bins: int = Query(
@@ -2354,7 +2389,7 @@ async def _build_feature_importance_section(
 
 @router.get("/models/{name}/performance-report", response_model=PerformanceReportResponse)
 async def get_performance_report(
-    name: str,
+    name: ModelNamePath,
     days: int = Query(30, ge=1, le=365, description="Fenêtre d'analyse en jours"),
     format: str = Query("json", description="Format de sortie (json ; html prévu en phase 2)"),
     _auth: User = Depends(verify_token),
@@ -2422,8 +2457,8 @@ async def get_performance_report(
 
 @router.get("/models/{name}/confidence-trend", response_model=ConfidenceTrendResponse)
 async def get_confidence_trend(
-    name: str,
-    version: Optional[str] = Query(None, description="Version du modèle (toutes si absent)"),
+    name: ModelNamePath,
+    version: Optional[str] = Query(None, description="Version du modèle (toutes si absent)", pattern=r"^\d+\.\d+(\.\d+)?$"),
     days: int = Query(30, ge=1, le=365, description="Fenêtre glissante en jours"),
     granularity: str = Query("day", description="Granularité temporelle (day)"),
     _auth: User = Depends(verify_token),
@@ -2483,8 +2518,8 @@ async def get_confidence_trend(
     response_model=ConfidenceDistributionResponse,
 )
 async def get_confidence_distribution(
-    name: str,
-    version: Optional[str] = Query(None, description="Version du modèle (toutes si absent)"),
+    name: ModelNamePath,
+    version: Optional[str] = Query(None, description="Version du modèle (toutes si absent)", pattern=r"^\d+\.\d+(\.\d+)?$"),
     days: int = Query(7, ge=1, le=90, description="Fenêtre glissante en jours"),
     high_threshold: float = Query(0.80, ge=0.5, le=1.0, description="Seuil confiance élevée"),
     uncertain_threshold: float = Query(
@@ -2542,7 +2577,7 @@ async def get_confidence_distribution(
 
 @router.get("/models/{name}/compare", response_model=ModelCompareResponse)
 async def compare_model_versions(
-    name: str,
+    name: ModelNamePath,
     versions: Optional[str] = Query(
         None,
         description="Versions séparées par des virgules (ex: 1.0.0,2.0.0). Toutes les versions actives si absent.",
@@ -2751,8 +2786,8 @@ def _build_model_card_markdown(card: ModelCardResponse) -> str:
 
 @router.get("/models/{name}/{version}/card")
 async def get_model_card(
-    name: str,
-    version: str,
+    name: ModelNamePath,
+    version: ModelVersionPath,
     request: Request,
     days: int = Query(30, ge=1, le=365, description="Fenêtre d'analyse en jours"),
     _auth: User = Depends(verify_token),
@@ -2941,7 +2976,7 @@ async def get_model_card(
     response_model=List[GoldenTestResponse],
 )
 async def list_golden_tests(
-    name: str,
+    name: ModelNamePath,
     _user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2963,8 +2998,8 @@ async def list_golden_tests(
 
 @router.get("/models/{name}/{version}", response_model=ModelGetResponse)
 async def get_model(
-    name: str,
-    version: str,
+    name: ModelNamePath,
+    version: ModelVersionPath,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -3296,8 +3331,8 @@ async def create_model(
 
 @router.patch("/models/{name}/{version}", response_model=ModelCreateResponse)
 async def update_model(
-    name: str,
-    version: str,
+    name: ModelNamePath,
+    version: ModelVersionPath,
     payload: ModelUpdateInput,
     user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
@@ -3421,8 +3456,8 @@ def _delete_minio_object(object_key: str) -> bool:
 
 @router.delete("/models/{name}/{version}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_model_version(
-    name: str,
-    version: str,
+    name: ModelNamePath,
+    version: ModelVersionPath,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3462,8 +3497,8 @@ async def delete_model_version(
 
 @router.post("/models/{name}/{version}/validate-input", response_model=ValidateInputResponse)
 async def validate_model_input(
-    name: str,
-    version: str,
+    name: ModelNamePath,
+    version: ModelVersionPath,
     features: Dict[str, Any],
     db: AsyncSession = Depends(get_db),
     _auth: User = Depends(verify_token),
@@ -3523,8 +3558,8 @@ async def validate_model_input(
 
 @router.post("/models/{name}/{version}/warmup", response_model=WarmupResponse)
 async def warmup_model(
-    name: str,
-    version: str,
+    name: ModelNamePath,
+    version: ModelVersionPath,
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3576,8 +3611,8 @@ async def warmup_model(
     response_model=ComputeBaselineResponse,
 )
 async def compute_model_baseline(
-    name: str,
-    version: str,
+    name: ModelNamePath,
+    version: ModelVersionPath,
     days: int = Query(30, ge=1, le=180, description="Fenêtre temporelle en jours"),
     dry_run: bool = Query(True, description="Calculer sans sauvegarder (défaut : True)"),
     user: User = Depends(require_admin),
@@ -3654,8 +3689,8 @@ async def compute_model_baseline(
 
 @router.get("/models/{name}/{version}/download")
 async def download_model(
-    name: str,
-    version: str,
+    name: ModelNamePath,
+    version: ModelVersionPath,
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3702,7 +3737,7 @@ async def download_model(
 
 @router.delete("/models/{name}", response_model=ModelDeleteResponse)
 async def delete_model_all_versions(
-    name: str,
+    name: ModelNamePath,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3762,7 +3797,7 @@ async def delete_model_all_versions(
     status_code=status.HTTP_201_CREATED,
 )
 async def upload_golden_tests_csv(
-    name: str,
+    name: ModelNamePath,
     file: UploadFile = File(...),
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
@@ -3808,7 +3843,7 @@ async def upload_golden_tests_csv(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_golden_test(
-    name: str,
+    name: ModelNamePath,
     payload: GoldenTestCreate,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
@@ -3839,7 +3874,7 @@ async def create_golden_test(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_golden_test(
-    name: str,
+    name: ModelNamePath,
     test_id: int,
     _user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
@@ -3859,8 +3894,8 @@ async def delete_golden_test(
     response_model=GoldenTestRunResponse,
 )
 async def run_golden_tests(
-    name: str,
-    version: str,
+    name: ModelNamePath,
+    version: ModelVersionPath,
     _user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
