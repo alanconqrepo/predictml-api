@@ -454,7 +454,9 @@ async def get_model_performance(
     name: ModelNamePath,
     start: Optional[datetime] = Query(None, description="Début de période (ISO 8601)"),
     end: Optional[datetime] = Query(None, description="Fin de période (ISO 8601)"),
-    version: Optional[str] = Query(None, description="Version du modèle (optionnel)", pattern=r"^\d+\.\d+(\.\d+)?$"),
+    version: Optional[str] = Query(
+        None, description="Version du modèle (optionnel)", pattern=r"^\d+\.\d+(\.\d+)?$"
+    ),
     granularity: Optional[Literal["day", "week", "month"]] = Query(
         None, description="Agrégation temporelle (day, week, month)"
     ),
@@ -599,7 +601,9 @@ async def get_model_performance_timeline(
 async def get_model_drift(
     name: ModelNamePath,
     version: Optional[str] = Query(
-        None, description="Version du modèle (défaut : production/dernière)", pattern=r"^\d+\.\d+(\.\d+)?$"
+        None,
+        description="Version du modèle (défaut : production/dernière)",
+        pattern=r"^\d+\.\d+(\.\d+)?$",
     ),
     days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours"),
     min_predictions: int = Query(
@@ -678,7 +682,9 @@ async def get_model_output_drift(
     name: ModelNamePath,
     period_days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours"),
     model_version: Optional[str] = Query(
-        None, description="Version du modèle (défaut : production/dernière)", pattern=r"^\d+\.\d+(\.\d+)?$"
+        None,
+        description="Version du modèle (défaut : production/dernière)",
+        pattern=r"^\d+\.\d+(\.\d+)?$",
     ),
     min_predictions: int = Query(
         30, ge=5, description="Nombre minimum de prédictions pour calculer le drift"
@@ -719,7 +725,9 @@ async def get_model_output_drift(
 @router.get("/models/{name}/readiness")
 async def get_model_readiness(
     name: ModelNamePath,
-    version: str = Query(..., description="Version du modèle à vérifier", pattern=r"^\d+\.\d+(\.\d+)?$"),
+    version: str = Query(
+        ..., description="Version du modèle à vérifier", pattern=r"^\d+\.\d+(\.\d+)?$"
+    ),
     user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -801,7 +809,9 @@ async def get_model_readiness(
 async def get_feature_importance(
     name: ModelNamePath,
     version: Optional[str] = Query(
-        None, description="Version du modèle (défaut : production/dernière)", pattern=r"^\d+\.\d+(\.\d+)?$"
+        None,
+        description="Version du modèle (défaut : production/dernière)",
+        pattern=r"^\d+\.\d+(\.\d+)?$",
     ),
     last_n: int = Query(100, ge=1, le=500, description="Nb de prédictions à échantillonner"),
     days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours"),
@@ -1970,7 +1980,9 @@ async def get_shadow_comparison(
 @router.get("/models/{name}/calibration", response_model=CalibrationResponse)
 async def get_model_calibration(
     name: ModelNamePath,
-    version: Optional[str] = Query(None, description="Version du modèle (toutes si absent)", pattern=r"^\d+\.\d+(\.\d+)?$"),
+    version: Optional[str] = Query(
+        None, description="Version du modèle (toutes si absent)", pattern=r"^\d+\.\d+(\.\d+)?$"
+    ),
     start: Optional[datetime] = Query(None, description="Début de la plage temporelle"),
     end: Optional[datetime] = Query(None, description="Fin de la plage temporelle"),
     n_bins: int = Query(
@@ -2458,7 +2470,9 @@ async def get_performance_report(
 @router.get("/models/{name}/confidence-trend", response_model=ConfidenceTrendResponse)
 async def get_confidence_trend(
     name: ModelNamePath,
-    version: Optional[str] = Query(None, description="Version du modèle (toutes si absent)", pattern=r"^\d+\.\d+(\.\d+)?$"),
+    version: Optional[str] = Query(
+        None, description="Version du modèle (toutes si absent)", pattern=r"^\d+\.\d+(\.\d+)?$"
+    ),
     days: int = Query(30, ge=1, le=365, description="Fenêtre glissante en jours"),
     granularity: str = Query("day", description="Granularité temporelle (day)"),
     _auth: User = Depends(verify_token),
@@ -2519,7 +2533,9 @@ async def get_confidence_trend(
 )
 async def get_confidence_distribution(
     name: ModelNamePath,
-    version: Optional[str] = Query(None, description="Version du modèle (toutes si absent)", pattern=r"^\d+\.\d+(\.\d+)?$"),
+    version: Optional[str] = Query(
+        None, description="Version du modèle (toutes si absent)", pattern=r"^\d+\.\d+(\.\d+)?$"
+    ),
     days: int = Query(7, ge=1, le=90, description="Fenêtre glissante en jours"),
     high_threshold: float = Query(0.80, ge=0.5, le=1.0, description="Seuil confiance élevée"),
     uncertain_threshold: float = Query(
