@@ -32,18 +32,21 @@ def _require_env(
         value = str(default)
     else:
         value = raw
-    if (
-        insecure_values
-        and value in insecure_values
-        and not os.getenv("DEBUG", "false").lower() == "true"
-    ):
-        import warnings
+    if insecure_values and value in insecure_values:
+        if os.getenv("DEBUG", "false").lower() == "true":
+            import warnings
 
-        warnings.warn(
-            f"[SECURITY] {name} utilise une valeur par défaut non sécurisée. "
-            f"Définissez {name} via variable d'environnement avant le déploiement en production.",
-            stacklevel=2,
-        )
+            warnings.warn(
+                f"[SECURITY] {name} utilise une valeur par défaut non sécurisée. "
+                f"Définissez {name} via variable d'environnement avant le déploiement en production.",
+                stacklevel=2,
+            )
+        else:
+            raise EnvironmentError(
+                f"[SECURITY] {name} utilise une valeur non sécurisée interdite en production. "
+                f"Définissez {name} avec une valeur forte avant le déploiement. "
+                f'Générez-en une avec : python -c "import secrets; print(secrets.token_urlsafe(32))"'
+            )
     return value
 
 
@@ -76,7 +79,11 @@ class Settings:
     MAX_MODEL_SIZE_MB: int = int(os.getenv("MAX_MODEL_SIZE_MB", "500"))
 
     # Redis Cache
-    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    REDIS_URL: str = os.getenv("REDIS_URL") or (
+        "redis://:{pw}@localhost:6379/0".format(pw=os.getenv("REDIS_PASSWORD", ""))
+        if os.getenv("REDIS_PASSWORD")
+        else "redis://localhost:6379/0"
+    )
     REDIS_CACHE_TTL: int = int(os.getenv("REDIS_CACHE_TTL", "3600"))
 
     # MLflow Experiment Tracking
