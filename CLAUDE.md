@@ -369,85 +369,8 @@ curl -X POST http://localhost:8000/models/mon_modele/1.0.0/retrain \
 Un exemple complet de `train.py` respectant le contrat est disponible dans
 `init_data/example_train.py`.
 
-## Sandbox d'exécution des scripts retrain
-
-### Deux niveaux de protection
-
-Les scripts `train.py` uploadés par un admin sont syntaxiquement valides mais peuvent
-contenir du code malveillant (exfiltration réseau, `os.system(...)`, accès fichiers système).
-Deux protections complémentaires sont appliquées.
-
-#### 1. Validation statique des imports (à l'upload)
-
-`_validate_train_script()` parcourt l'AST et rejette tout `import X` ou `from X import ...`
-dont le module de premier niveau n'est pas dans `_ALLOWED_IMPORT_MODULES` :
-
-```python
-# src/api/models.py
-_ALLOWED_IMPORT_MODULES = {
-    "os", "sys", "json", "pickle", "joblib",
-    "pandas", "numpy", "sklearn",
-    "datetime", "pathlib", "math", "statistics",
-    "collections", "typing", "warnings", "logging",
-    "time", "copy", "functools", "itertools", "re",
-    "io", "abc", "enum", "dataclasses", "csv",
-}
-```
-
-Modules bloqués à l'upload : `subprocess`, `socket`, `requests`, `urllib`,
-`ctypes`, `paramiko`, `boto3`, etc.
-
-**Pour ajouter un module** (ex. `xgboost`, `lightgbm`, `torch`) : modifier
-`_ALLOWED_IMPORT_MODULES` dans `src/api/models.py` via une PR. Ne pas exposer
-cette liste en variable d'environnement — c'est un contrôle de sécurité,
-pas un paramètre de configuration (voir section « Pourquoi pas docker-compose »).
-
-#### 2. Contraintes de ressources sur le sous-processus (à l'exécution)
-
-`_set_subprocess_limits()` est passé comme `preexec_fn` au sous-processus,
-s'exécute après `fork()` dans le processus enfant :
-
-```python
-resource.setrlimit(resource.RLIMIT_AS,     (2 * 1024**3, 2 * 1024**3))  # 2 Go RAM
-resource.setrlimit(resource.RLIMIT_NOFILE, (50, 50))                     # 50 fd max
-```
-
-- **RAM** : évite qu'un script charge un dataset entier en mémoire et fasse crasher l'API.
-- **Descripteurs de fichiers** : 50 fd suffisent pour `open()` + quelques sockets système,
-  mais rendent difficile l'ouverture de connexions réseau en masse ou la lecture de fichiers
-  sensibles à grande échelle.
-
-Ces limites s'appliquent aux deux points d'entrée : endpoint manuel
-(`POST /models/{name}/{version}/retrain`) et scheduler APScheduler.
-
-#### Environnement minimal injecté
-
-Le subprocess ne reçoit **pas** `os.environ` complet. Seules ces clés sont transmises :
-
-```
-PATH, HOME, USER, LANG, LC_ALL, TMPDIR, TEMP, TMP,
-PYTHONPATH, PYTHONDONTWRITEBYTECODE, VIRTUAL_ENV
-```
-
-Plus les variables fonctionnelles : `TRAIN_START_DATE`, `TRAIN_END_DATE`,
-`OUTPUT_MODEL_PATH`, `MLFLOW_TRACKING_URI`, `MODEL_NAME`.
-
-`DATABASE_URL`, `SECRET_KEY` et tout autre secret présent dans l'env de l'API
-ne sont jamais exposés au script.
-
-### Pourquoi `_ALLOWED_IMPORT_MODULES` n'est pas dans docker-compose
-
-La liste blanche est un **périmètre de sécurité**, pas un paramètre opérationnel.
-La rendre configurable via une variable d'environnement permettrait à quiconque
-ayant accès au `docker-compose.yml` d'élargir silencieusement la surface d'attaque
-sans revue de code. Tout ajout de module doit passer par une PR et être audité.
-
-### Implémentation
-
-- Allowlist + validation AST : `_ALLOWED_IMPORT_MODULES`, `_validate_train_script()` dans `src/api/models.py`
-- Limites ressources endpoint : `_set_subprocess_limits()` dans `src/api/models.py`
-- Limites ressources scheduler : `_set_subprocess_limits()` dans `src/tasks/retrain_scheduler.py`
-- Tests : `tests/test_retrain.py` — classe `TestValidateTrainScript` (17 tests dont 7 sur l'allowlist)
+Voir aussi `documentation/TRAIN_SCRIPT_GUIDE.md` — section « Sécurité & sandbox »
+pour les détails sur la liste blanche d'imports et les limites de ressources.
 
 ## Fonctionnalité Auto-promotion post-retrain
 
