@@ -142,12 +142,32 @@ async def _get_leaderboard_drift_status(
 
 
 _ALLOWED_IMPORT_MODULES = {
-    "os", "sys", "json", "pickle", "joblib",
-    "pandas", "numpy", "sklearn",
-    "datetime", "pathlib", "math", "statistics",
-    "collections", "typing", "warnings", "logging",
-    "time", "copy", "functools", "itertools", "re",
-    "io", "abc", "enum", "dataclasses", "csv",
+    "os",
+    "sys",
+    "json",
+    "pickle",
+    "joblib",
+    "pandas",
+    "numpy",
+    "sklearn",
+    "datetime",
+    "pathlib",
+    "math",
+    "statistics",
+    "collections",
+    "typing",
+    "warnings",
+    "logging",
+    "time",
+    "copy",
+    "functools",
+    "itertools",
+    "re",
+    "io",
+    "abc",
+    "enum",
+    "dataclasses",
+    "csv",
 }
 
 

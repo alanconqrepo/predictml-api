@@ -38,9 +38,17 @@ _retrain_scheduler = AsyncIOScheduler(timezone="UTC")
 
 
 _SAFE_ENV_KEYS = {
-    "PATH", "HOME", "USER", "LANG", "LC_ALL",
-    "TMPDIR", "TEMP", "TMP", "PYTHONPATH",
-    "PYTHONDONTWRITEBYTECODE", "VIRTUAL_ENV",
+    "PATH",
+    "HOME",
+    "USER",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "PYTHONPATH",
+    "PYTHONDONTWRITEBYTECODE",
+    "VIRTUAL_ENV",
 }
 
 
