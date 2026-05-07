@@ -2,6 +2,8 @@
 Service de gestion des modèles ML (v3 - cache Redis distribué)
 """
 
+import hashlib
+import hmac as _hmac_mod
 import pickle
 import random
 from typing import Any, Dict, List, Optional, Tuple
@@ -20,6 +22,79 @@ from src.services.minio_service import minio_service
 logger = structlog.get_logger(__name__)
 
 _CACHE_PREFIX = "model:"
+_HMAC_HEX_LEN = 64  # SHA-256 hex digest = 64 chars
+
+
+def compute_model_hmac(data: bytes) -> str:
+    """Return HMAC-SHA256 hex digest of data, keyed with SECRET_KEY."""
+    return _hmac_mod.new(settings.SECRET_KEY.encode(), data, hashlib.sha256).hexdigest()
+
+
+def _sign_for_cache(payload: bytes) -> bytes:
+    """Prepend 64-char HMAC hex to payload for tamper-evident Redis storage."""
+    return compute_model_hmac(payload).encode() + payload
+
+
+def _verify_cache_signature(signed: bytes) -> bytes:
+    """
+    Verify the HMAC prefix and return the payload. Raises ValueError on mismatch.
+
+    Compares bytes (not str) to avoid TypeError on non-ASCII input.
+    """
+    sig_bytes = signed[:_HMAC_HEX_LEN]
+    payload = signed[_HMAC_HEX_LEN:]
+    expected_bytes = compute_model_hmac(payload).encode()
+    if not _hmac_mod.compare_digest(sig_bytes, expected_bytes):
+        raise ValueError("Cache HMAC signature mismatch")
+    return payload
+
+
+def _verify_minio_hmac(raw_bytes: bytes, metadata: Any, model_name: str) -> None:
+    """
+    Verify raw pkl bytes against the HMAC-SHA256 stored in DB metadata.
+
+    Raises HTTPException 403 if the model has no stored signature (legacy, un-signed).
+    Raises HTTPException 500 if the signature does not match (tampering detected).
+    """
+    if not metadata.pkl_hmac_signature:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Le modèle '{model_name}' v{metadata.version} n'a pas de signature HMAC. "
+                "Exécutez init_data/resign_models.py pour re-signer les modèles existants "
+                "avant de pouvoir les charger."
+            ),
+        )
+    expected = compute_model_hmac(raw_bytes)
+    if not _hmac_mod.compare_digest(expected, metadata.pkl_hmac_signature):
+        logger.error(
+            "Signature HMAC invalide — chargement refusé",
+            model=model_name,
+            version=str(metadata.version),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                f"Signature du modèle '{model_name}' v{metadata.version} invalide — "
+                "chargement refusé (possible falsification du fichier .pkl)."
+            ),
+        )
+
+
+def _extract_model_from_payload(payload: bytes) -> Any:
+    """
+    Deserialize the cache payload into a model object.
+
+    Handles two formats for backward compatibility:
+    - New format: raw pickle of the model object directly.
+    - Old format (legacy): pickle of {"model": obj, "metadata": ...}; model is extracted.
+
+    The HMAC was already verified by the caller before this is invoked.
+    """
+    loaded = pickle.loads(payload)  # noqa: S301 - caller verified HMAC
+    if isinstance(loaded, dict) and "model" in loaded:
+        return loaded["model"]
+    return loaded
 
 
 class ModelService:
@@ -106,7 +181,13 @@ class ModelService:
         """
         Charge un modèle depuis le cache Redis ou depuis MinIO/MLflow en cas de cache miss.
 
-        Clé Redis : ``model:{name}:{version}`` — TTL configurable via REDIS_CACHE_TTL.
+        Sécurité :
+        - Cache Redis : vérifie l'enveloppe HMAC-SHA256 (64 octets ASCII) avant pickle.loads().
+          Protège contre l'empoisonnement du cache Redis (l'attaquant ne connaît pas SECRET_KEY).
+        - MinIO : vérifie la signature HMAC stockée en DB avant pickle.loads().
+          Protège contre la falsification du fichier .pkl dans MinIO.
+
+        Format Redis : HMAC_HEX(64 octets ASCII) + payload_bytes
 
         Args:
             db: Session de base de données
@@ -117,9 +198,11 @@ class ModelService:
             Dict contenant le modèle et ses métadonnées
 
         Raises:
-            HTTPException: Si le modèle n'existe pas ou ne peut pas être chargé
+            HTTPException 403: Modèle MinIO sans signature HMAC (modèle legacy non signé)
+            HTTPException 500: Signature HMAC invalide (falsification détectée)
+            HTTPException 404: Modèle introuvable
         """
-        # 1. Récupérer les métadonnées depuis la DB
+        # 1. Récupérer les métadonnées depuis la DB (source de vérité pour la signature)
         metadata = await DBService.get_model_metadata(db, model_name, version)
 
         if not metadata:
@@ -135,14 +218,28 @@ class ModelService:
         cache_key = f"{_CACHE_PREFIX}{model_name}:{metadata.version}"
         redis = await self._get_redis()
 
-        cached_bytes = await redis.get(cache_key)
-        if cached_bytes:
-            logger.info(
-                "Modèle chargé depuis le cache Redis",
-                model_name=model_name,
-                version=str(metadata.version),
-            )
-            return pickle.loads(cached_bytes)  # noqa: S301
+        cached_signed = await redis.get(cache_key)
+        if cached_signed:
+            try:
+                payload = _verify_cache_signature(cached_signed)
+            except ValueError:
+                # Tampered or old-format (unsigned) cache entry — reject and reload from source
+                logger.warning(
+                    "Cache Redis HMAC invalide — entrée invalidée",
+                    cache_key=cache_key,
+                    model=model_name,
+                    version=str(metadata.version),
+                )
+                await redis.delete(cache_key)
+            else:
+                logger.info(
+                    "Modèle chargé depuis le cache Redis",
+                    model_name=model_name,
+                    version=str(metadata.version),
+                )
+                # HMAC envelope verified; extract model (handles both old and new formats)
+                model = _extract_model_from_payload(payload)
+                return {"model": model, "metadata": metadata}
 
         # 3. Charger le modèle depuis la source
         try:
@@ -156,17 +253,22 @@ class ModelService:
                 import mlflow.sklearn
 
                 model = mlflow.sklearn.load_model(f"runs:/{metadata.mlflow_run_id}/model")
+                cache_payload = pickle.dumps(model)  # noqa: S301
             else:
                 logger.info(
                     "Téléchargement du modèle depuis MinIO",
                     model_name=model_name,
                     version=str(metadata.version),
                 )
-                model = minio_service.download_model(metadata.minio_object_key)
+                # Download raw pkl bytes — do NOT call pickle.loads() until HMAC is verified
+                raw_bytes = minio_service.download_file_bytes(metadata.minio_object_key)
+                _verify_minio_hmac(raw_bytes, metadata, model_name)
+                model = pickle.loads(raw_bytes)  # noqa: S301 - HMAC verified above
+                cache_payload = raw_bytes
 
-            # 4. Stocker en cache Redis avec TTL
-            cached_data = {"model": model, "metadata": metadata}
-            await redis.setex(cache_key, settings.REDIS_CACHE_TTL, pickle.dumps(cached_data))
+            # 4. Stocker en cache Redis avec enveloppe HMAC (TTL configurable)
+            signed = _sign_for_cache(cache_payload)
+            await redis.setex(cache_key, settings.REDIS_CACHE_TTL, signed)
 
             logger.info(
                 "Modèle chargé et mis en cache Redis",
@@ -174,7 +276,7 @@ class ModelService:
                 version=str(metadata.version),
                 ttl=settings.REDIS_CACHE_TTL,
             )
-            return cached_data
+            return {"model": model, "metadata": metadata}
 
         except HTTPException:
             raise

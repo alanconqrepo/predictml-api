@@ -112,7 +112,7 @@ from src.services.golden_test_service import GoldenTestService
 from src.services.input_validation_service import resolve_expected_features, validate_input_features
 from src.services.minio_service import minio_service
 from src.services.mlflow_service import mlflow_service
-from src.services.model_service import model_service
+from src.services.model_service import compute_model_hmac, model_service
 from src.services.shap_service import compute_shap_explanation
 from src.services.webhook_service import send_webhook
 
@@ -1346,6 +1346,7 @@ async def retrain_model(
 
     # 7. Uploader le nouveau modèle dans MinIO
     new_object_key = f"{name}/v{new_version}.pkl"
+    new_pkl_hmac_signature = compute_model_hmac(new_model_bytes)
     upload_info = minio_service.upload_model_bytes(new_model_bytes, new_object_key)
 
     # 8. Copier le script train.py pour la nouvelle version (pour chaîner les ré-entraînements)
@@ -1359,6 +1360,7 @@ async def retrain_model(
         minio_bucket=upload_info["bucket"],
         minio_object_key=new_object_key,
         file_size_bytes=upload_info["size"],
+        pkl_hmac_signature=new_pkl_hmac_signature,
         train_script_object_key=new_train_key,
         description=source_model.description,
         algorithm=source_model.algorithm,
@@ -3087,6 +3089,7 @@ async def create_model(
     minio_bucket = None
     minio_object_key = None
     file_size_bytes = None
+    pkl_hmac_signature = None
 
     if file is not None:
         # Lire et uploader le fichier vers MinIO
@@ -3107,6 +3110,7 @@ async def create_model(
                 detail="Le fichier est vide.",
             )
         object_name = f"{name}/v{version}.pkl"
+        pkl_hmac_signature = compute_model_hmac(model_bytes)
         upload_info = minio_service.upload_model_bytes(model_bytes, object_name)
         minio_bucket = upload_info["bucket"]
         minio_object_key = object_name
@@ -3161,6 +3165,7 @@ async def create_model(
         minio_bucket=minio_bucket,
         minio_object_key=minio_object_key,
         file_size_bytes=file_size_bytes,
+        pkl_hmac_signature=pkl_hmac_signature,
         description=description,
         algorithm=algorithm,
         mlflow_run_id=mlflow_run_id,

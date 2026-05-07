@@ -43,6 +43,7 @@ class ModelMetadata(Base):
     )  # Chemin dans MinIO (None si mlflow_run_id)
     file_size_bytes = Column(Integer, nullable=True)
     file_hash = Column(String(64), nullable=True)  # SHA256
+    pkl_hmac_signature = Column(String(64), nullable=True)  # HMAC-SHA256 of raw pkl bytes
 
     # Métadonnées du modèle
     description = Column(Text, nullable=True)

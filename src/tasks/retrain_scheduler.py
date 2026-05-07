@@ -129,6 +129,7 @@ async def _do_retrain(name: str, version: str) -> None:
     from src.services.db_service import DBService
     from src.services.minio_service import minio_service
     from src.services.mlflow_service import mlflow_service
+    from src.services.model_service import compute_model_hmac
 
     logger.info("Démarrage du ré-entraînement planifié", model=name, version=version)
 
@@ -306,6 +307,7 @@ async def _do_retrain(name: str, version: str) -> None:
 
         # 6. Uploader le nouveau modèle et le script dans MinIO
         new_object_key = f"{name}/v{new_version}.pkl"
+        new_pkl_hmac_signature = compute_model_hmac(new_model_bytes)
         upload_info = minio_service.upload_model_bytes(new_model_bytes, new_object_key)
         new_train_key = f"{name}/v{new_version}_train.py"
         minio_service.upload_file_bytes(script_bytes, new_train_key, content_type="text/x-python")
@@ -318,6 +320,7 @@ async def _do_retrain(name: str, version: str) -> None:
             minio_bucket=upload_info.get("bucket"),
             minio_object_key=new_object_key,
             file_size_bytes=upload_info.get("size"),
+            pkl_hmac_signature=new_pkl_hmac_signature,
             train_script_object_key=new_train_key,
             description=source_model.description,
             algorithm=source_model.algorithm,
