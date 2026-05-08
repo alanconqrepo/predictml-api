@@ -43,6 +43,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.core.audit import audit_log
 from src.core.config import settings
 from src.core.security import require_admin, verify_token
 from src.db.database import get_db
@@ -1077,6 +1078,12 @@ async def rollback_model(
 
     await db.commit()
     await db.refresh(model)
+    audit_log(
+        "model.rollback",
+        actor_id=user.id,
+        resource=f"{name}:{version}",
+        details={"history_id": history_id},
+    )
 
     return RollbackResponse(
         model_name=name,
@@ -1138,6 +1145,7 @@ async def deprecate_model_version(
     )
 
     logger.info("Modèle déprécié", model=name, version=version, by=user.username)
+    audit_log("model.deprecate", actor_id=user.id, resource=f"{name}:{version}")
 
     return DeprecateModelResponse(
         name=meta.name,
@@ -1196,6 +1204,7 @@ async def update_model_policy(
         policy=policy_dict,
         updated_by=user.username,
     )
+    audit_log("model.policy_update", actor_id=user.id, resource=name)
 
     return PolicyUpdateResponse(
         model_name=name,
@@ -1653,6 +1662,12 @@ async def retrain_model(
         set_production=payload.set_production,
         auto_promoted=auto_promoted,
     )
+    audit_log(
+        "retrain.trigger",
+        actor_id=user.id,
+        resource=f"{name}:{version}",
+        details={"new_version": new_version, "set_production": payload.set_production},
+    )
 
     return RetrainResponse(
         model_name=name,
@@ -1819,6 +1834,12 @@ async def update_retrain_schedule(
         cron=cron,
         enabled=payload.enabled,
         updated_by=user.username,
+    )
+    audit_log(
+        "model.schedule_update",
+        actor_id=user.id,
+        resource=f"{name}:{version}",
+        details={"cron": cron, "enabled": payload.enabled},
     )
 
     return ScheduleUpdateResponse(
@@ -3312,6 +3333,7 @@ async def create_model(
     )
     await db.commit()
     await db.refresh(metadata)
+    audit_log("model.upload", actor_id=user.id, resource=f"{name}:{version}")
 
     if auto_baseline:
         try:
@@ -3521,6 +3543,7 @@ async def delete_model_version(
     await DBService.log_model_history(db, model, HistoryActionType.DELETED, user.id, user.username)
     await db.delete(model)
     await db.commit()
+    audit_log("model.delete", actor_id=user.id, resource=f"{name}:{version}")
 
 
 @router.post("/models/{name}/{version}/validate-input", response_model=ValidateInputResponse)
@@ -3806,6 +3829,9 @@ async def delete_model_all_versions(
         await db.delete(model)
 
     await db.commit()
+    audit_log(
+        "model.delete_all", actor_id=user.id, resource=name, details={"versions": deleted_versions}
+    )
 
     return ModelDeleteResponse(
         name=name,
