@@ -38,6 +38,7 @@ class UserResponse(BaseModel):
     api_token: str
     created_at: datetime
     last_login: Optional[datetime]
+    token_expires_at: Optional[datetime]
 
     model_config = {"from_attributes": True}
 
