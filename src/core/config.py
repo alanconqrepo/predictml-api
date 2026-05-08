@@ -93,7 +93,7 @@ class Settings:
     MLFLOW_REGISTER_MODELS: bool = os.getenv("MLFLOW_REGISTER_MODELS", "true").lower() == "true"
     MLFLOW_ENABLE: bool = os.getenv("MLFLOW_ENABLE", "true").lower() == "true"
 
-    # Prometheus metrics — token requis pour protéger /metrics (vide = accès public)
+    # Prometheus metrics — obligatoire en production (DEBUG=False) ; vide interdit hors dev
     METRICS_TOKEN: str = os.getenv("METRICS_TOKEN", "")
 
     # OpenTelemetry

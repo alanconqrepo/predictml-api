@@ -16,6 +16,7 @@ os.environ.setdefault("MINIO_ENDPOINT", "localhost:9002")
 os.environ.setdefault("MINIO_ACCESS_KEY", "test-minio-access-key")
 os.environ.setdefault("MINIO_SECRET_KEY", "test-minio-secret-key-safe-value")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6399/0")  # port fantaisiste — jamais contacté
+os.environ.setdefault("METRICS_TOKEN", "test-metrics-token-for-pytest")
 
 # Mock MinIO globalement — les tests ne nécessitent pas de vrai serveur MinIO
 _minio_mock = MagicMock()
