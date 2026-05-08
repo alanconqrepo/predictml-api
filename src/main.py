@@ -47,6 +47,17 @@ async def run_migrations() -> None:
     await asyncio.get_event_loop().run_in_executor(None, _run)
 
 
+def _check_metrics_config() -> None:
+    """Lève RuntimeError en production si METRICS_TOKEN n'est pas défini."""
+    if not settings.METRICS_TOKEN:
+        logger.warning("METRICS_TOKEN non défini — endpoint /metrics accessible publiquement")
+        if not settings.DEBUG:
+            raise RuntimeError(
+                "METRICS_TOKEN doit être défini en production. "
+                'Générez-en un avec : python -c "import secrets; print(secrets.token_urlsafe(32))"'
+            )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestion du cycle de vie de l'application"""
@@ -56,6 +67,8 @@ async def lifespan(app: FastAPI):
         title=settings.API_TITLE,
         version=settings.API_VERSION,
     )
+
+    _check_metrics_config()
 
     try:
         await run_migrations()

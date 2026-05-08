@@ -2,19 +2,21 @@
 Tests pour l'endpoint GET /metrics (Prometheus).
 
 Couvre :
-- Accès libre sans METRICS_TOKEN configuré
+- Accès libre sans METRICS_TOKEN configuré (mode DEBUG uniquement)
 - Accès avec METRICS_TOKEN valide → 200
 - Accès avec METRICS_TOKEN invalide → 401
 - Content-type Prometheus text/plain
 - Branche PROMETHEUS_MULTIPROC_DIR
+- Validation au démarrage : RuntimeError en production sans token
 """
 
 import os
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
-from src.main import app
+from src.main import app, _check_metrics_config
 
 client = TestClient(app)
 
@@ -108,3 +110,40 @@ class TestMetricsMultiprocess:
             resp = client.get("/metrics")
         assert resp.status_code == 200
         mock_collector.assert_called_once()
+
+
+class TestMetricsTokenStartupValidation:
+    """Validation de METRICS_TOKEN au démarrage (_check_metrics_config)."""
+
+    def test_raises_runtime_error_in_production_without_token(self):
+        """En production (DEBUG=False) sans METRICS_TOKEN → RuntimeError."""
+        with patch("src.main.settings") as mock_s:
+            mock_s.METRICS_TOKEN = ""
+            mock_s.DEBUG = False
+            with pytest.raises(RuntimeError, match="METRICS_TOKEN"):
+                _check_metrics_config()
+
+    def test_no_error_in_debug_mode_without_token(self):
+        """En mode DEBUG, METRICS_TOKEN vide ne lève pas d'erreur."""
+        with patch("src.main.settings") as mock_s:
+            mock_s.METRICS_TOKEN = ""
+            mock_s.DEBUG = True
+            _check_metrics_config()  # ne doit pas lever
+
+    def test_no_error_in_production_with_token(self):
+        """En production avec METRICS_TOKEN défini → aucune erreur."""
+        with patch("src.main.settings") as mock_s:
+            mock_s.METRICS_TOKEN = "secure-token"
+            mock_s.DEBUG = False
+            _check_metrics_config()  # ne doit pas lever
+
+    def test_warning_logged_without_token(self, caplog):
+        """Un avertissement est loggué quand METRICS_TOKEN est vide."""
+        import logging
+
+        with patch("src.main.settings") as mock_s:
+            mock_s.METRICS_TOKEN = ""
+            mock_s.DEBUG = True
+            with caplog.at_level(logging.WARNING):
+                _check_metrics_config()
+        assert any("METRICS_TOKEN" in r.message for r in caplog.records)
