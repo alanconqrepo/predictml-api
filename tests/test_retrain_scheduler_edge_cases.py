@@ -294,3 +294,86 @@ class TestSchedulerLifecycle:
         with patch("src.tasks.retrain_scheduler._retrain_scheduler", mock_scheduler):
             stop_retrain_scheduler()
             mock_scheduler.shutdown.assert_called_once_with(wait=False)
+
+    def test_stop_retrain_scheduler_no_shutdown_when_not_running(self):
+        """stop_retrain_scheduler sans running → shutdown() NON appelé."""
+        from src.tasks.retrain_scheduler import stop_retrain_scheduler
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.running = False
+
+        with patch("src.tasks.retrain_scheduler._retrain_scheduler", mock_scheduler):
+            stop_retrain_scheduler()
+            mock_scheduler.shutdown.assert_not_called()
+
+    def test_start_retrain_scheduler_db_failure_does_not_crash(self):
+        """start_retrain_scheduler : AsyncSessionLocal lève → warning loggé, pas d'exception."""
+        from src.tasks.retrain_scheduler import start_retrain_scheduler
+
+        async def _run():
+            with patch(
+                "src.db.database.AsyncSessionLocal"
+            ) as mock_session_cls:
+                mock_session_cls.return_value.__aenter__ = AsyncMock(
+                    side_effect=Exception("DB unavailable")
+                )
+                mock_session_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+                await start_retrain_scheduler()  # ne doit pas lever
+
+        asyncio.run(_run())
+
+
+class TestComputeNextRunAtNoneReturn:
+    def test_returns_none_when_trigger_has_no_next_fire_time(self):
+        """CronTrigger.get_next_fire_time retourne None → _compute_next_run_at retourne None."""
+        from unittest.mock import MagicMock
+        from src.tasks.retrain_scheduler import _compute_next_run_at
+
+        mock_trigger = MagicMock()
+        mock_trigger.get_next_fire_time.return_value = None
+
+        with patch("src.tasks.retrain_scheduler.CronTrigger") as mock_cls:
+            mock_cls.from_crontab.return_value = mock_trigger
+            result = _compute_next_run_at("0 3 * * *")
+
+        assert result is None
+
+
+class TestSetSubprocessLimits:
+    def test_set_subprocess_limits_calls_setrlimit_twice(self):
+        """_set_subprocess_limits appelle resource.setrlimit exactement deux fois."""
+        import resource
+        from src.tasks.retrain_scheduler import _set_subprocess_limits
+
+        with patch.object(resource, "setrlimit") as mock_setrlimit:
+            _set_subprocess_limits()
+            assert mock_setrlimit.call_count == 2
+
+
+class TestRunRetrainJobErrorHandling:
+    def test_do_retrain_exception_is_caught_not_propagated(self):
+        """_run_retrain_job : exception de _do_retrain → attrapée, pas propagée."""
+
+        async def _run():
+            mock_redis = AsyncMock()
+            mock_redis.set.return_value = True  # verrou libre
+            mock_redis.delete = AsyncMock()
+
+            import src.tasks.retrain_scheduler as mod
+
+            with (
+                patch.object(
+                    __import__(
+                        "src.services.model_service", fromlist=["model_service"]
+                    ).model_service,
+                    "_get_redis",
+                    AsyncMock(return_value=mock_redis),
+                ),
+                patch.object(
+                    mod, "_do_retrain", side_effect=RuntimeError("crash inattendu")
+                ),
+            ):
+                # _run_retrain_job ne doit pas propager l'exception
+                await mod._run_retrain_job("my_model", "1.0.0")
+
+        asyncio.run(_run())
