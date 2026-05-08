@@ -212,6 +212,15 @@ def _set_subprocess_limits() -> None:
     resource.setrlimit(resource.RLIMIT_NOFILE, (50, 50))  # 50 descripteurs de fichiers
 
 
+def _parse_json_field(value: str | None, field_name: str) -> dict | list | None:
+    if not value:
+        return None
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"JSON invalide dans '{field_name}': {exc.msg}")
+
+
 def _validate_train_script(source: str) -> Optional[str]:
     """
     Valide statiquement un script train.py contre les contraintes requises.
@@ -3261,10 +3270,10 @@ async def create_model(
         )
 
     # Désérialiser les champs JSON optionnels
-    classes_parsed = json.loads(classes) if classes else None
-    training_params_parsed = json.loads(training_params) if training_params else None
-    feature_baseline_parsed = json.loads(feature_baseline) if feature_baseline else None
-    tags_parsed = json.loads(tags) if tags else None
+    classes_parsed = _parse_json_field(classes, "classes")
+    training_params_parsed = _parse_json_field(training_params, "training_params")
+    feature_baseline_parsed = _parse_json_field(feature_baseline, "feature_baseline")
+    tags_parsed = _parse_json_field(tags, "tags")
 
     # Créer l'entrée en base
     metadata = ModelMetadata(
