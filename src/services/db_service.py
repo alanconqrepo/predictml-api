@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.core.config import settings
 from src.core.utils import _utcnow
 from src.db.models import (
     HistoryActionType,
@@ -54,12 +55,16 @@ class DBService:
         rate_limit: int = 1000,
     ) -> User:
         """Crée un nouvel utilisateur"""
+        token_expires_at = None
+        if settings.TOKEN_LIFETIME_DAYS > 0:
+            token_expires_at = _utcnow() + timedelta(days=settings.TOKEN_LIFETIME_DAYS)
         user = User(
             username=username,
             email=email,
             api_token=api_token,
             role=role,
             rate_limit_per_day=rate_limit,
+            token_expires_at=token_expires_at,
         )
         db.add(user)
         await db.commit()
@@ -96,6 +101,10 @@ class DBService:
                 setattr(user, field, value)
         if regenerate:
             user.api_token = secrets.token_urlsafe(32)
+            if settings.TOKEN_LIFETIME_DAYS > 0:
+                user.token_expires_at = _utcnow() + timedelta(days=settings.TOKEN_LIFETIME_DAYS)
+            else:
+                user.token_expires_at = None
         await db.commit()
         await db.refresh(user)
         return user

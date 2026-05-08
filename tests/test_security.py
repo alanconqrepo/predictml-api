@@ -13,6 +13,7 @@ Couvre :
 """
 
 import asyncio
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -26,6 +27,7 @@ def _make_user(
     is_active=True,
     role="user",
     rate_limit=100,
+    token_expires_at=None,
 ):
     """Construit un objet User mock minimal."""
     from src.db.models import UserRole
@@ -38,6 +40,7 @@ def _make_user(
         UserRole.READONLY if role == "readonly" else UserRole.USER
     )
     user.rate_limit_per_day = rate_limit
+    user.token_expires_at = token_expires_at
     return user
 
 
@@ -155,6 +158,91 @@ class TestVerifyToken:
         with pytest.raises(HTTPException) as exc_info:
             asyncio.run(_run())
         assert exc_info.value.detail != ""
+
+    def test_expired_token_raises_401(self):
+        """Token dont token_expires_at est dans le passé → HTTPException 401."""
+        from src.core.security import verify_token
+
+        past = datetime.utcnow() - timedelta(days=1)
+        mock_user = _make_user(is_active=True, token_expires_at=past)
+        mock_db = MagicMock()
+
+        async def _run():
+            with patch(
+                "src.core.security.DBService.get_user_by_token",
+                new=AsyncMock(return_value=mock_user),
+            ):
+                await verify_token(_make_credentials("expired-token"), mock_db)
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(_run())
+        assert exc_info.value.status_code == 401
+
+    def test_expired_token_detail_says_expire(self):
+        """Le message 401 pour token expiré contient 'expiré'."""
+        from src.core.security import verify_token
+
+        past = datetime.utcnow() - timedelta(seconds=1)
+        mock_user = _make_user(is_active=True, token_expires_at=past)
+        mock_db = MagicMock()
+
+        async def _run():
+            with patch(
+                "src.core.security.DBService.get_user_by_token",
+                new=AsyncMock(return_value=mock_user),
+            ):
+                await verify_token(_make_credentials("expired-token"), mock_db)
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(_run())
+        assert "expiré" in exc_info.value.detail
+
+    def test_non_expired_token_passes(self):
+        """Token avec token_expires_at dans le futur → authentification réussie."""
+        from src.core.security import verify_token
+
+        future = datetime.utcnow() + timedelta(days=89)
+        mock_user = _make_user(is_active=True, token_expires_at=future)
+        mock_db = MagicMock()
+
+        async def _run():
+            with (
+                patch(
+                    "src.core.security.DBService.get_user_by_token",
+                    new=AsyncMock(return_value=mock_user),
+                ),
+                patch(
+                    "src.core.security.DBService.update_user_last_login",
+                    new=AsyncMock(return_value=None),
+                ),
+            ):
+                return await verify_token(_make_credentials("valid-token"), mock_db)
+
+        result = asyncio.run(_run())
+        assert result is mock_user
+
+    def test_no_expiry_token_passes(self):
+        """Token sans token_expires_at (None) → pas de contrôle d'expiration."""
+        from src.core.security import verify_token
+
+        mock_user = _make_user(is_active=True, token_expires_at=None)
+        mock_db = MagicMock()
+
+        async def _run():
+            with (
+                patch(
+                    "src.core.security.DBService.get_user_by_token",
+                    new=AsyncMock(return_value=mock_user),
+                ),
+                patch(
+                    "src.core.security.DBService.update_user_last_login",
+                    new=AsyncMock(return_value=None),
+                ),
+            ):
+                return await verify_token(_make_credentials("valid-token"), mock_db)
+
+        result = asyncio.run(_run())
+        assert result is mock_user
 
 
 # ---------------------------------------------------------------------------
