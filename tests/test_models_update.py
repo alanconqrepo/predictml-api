@@ -34,7 +34,7 @@ async def _setup():
                 username="test_patch_models",
                 email="test_patch@test.com",
                 api_token=TEST_TOKEN,
-                role="user",
+                role="admin",
                 rate_limit=10000,
             )
 

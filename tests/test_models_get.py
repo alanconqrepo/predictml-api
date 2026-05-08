@@ -34,7 +34,7 @@ async def _setup_user():
                 username="test_get_models",
                 email="test_get_models@test.com",
                 api_token=TEST_TOKEN,
-                role="user",
+                role="admin",
                 rate_limit=10000,
             )
 
@@ -101,10 +101,10 @@ def test_get_model_mlflow_only_returns_load_instructions():
     """Modèle MLflow uniquement → instructions MLflow."""
     client.post(
         "/models",
-        data={"name": TEST_MODEL_NAME, "version": "mlflow-only", "mlflow_run_id": "abc123run"},
+        data={"name": TEST_MODEL_NAME, "version": "4.0.0", "mlflow_run_id": "abc123run"},
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
     )
-    response = client.get(f"/models/{TEST_MODEL_NAME}/mlflow-only")
+    response = client.get(f"/models/{TEST_MODEL_NAME}/4.0.0")
     assert response.status_code == 200
     data = response.json()
     assert data["model_loaded"] is False

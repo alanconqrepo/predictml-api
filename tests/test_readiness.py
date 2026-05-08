@@ -35,7 +35,7 @@ async def _setup_user():
                 username="test_readiness_user",
                 email="test_readiness@test.com",
                 api_token=TEST_TOKEN,
-                role="user",
+                role="admin",
                 rate_limit=10000,
             )
 

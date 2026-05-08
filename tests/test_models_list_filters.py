@@ -58,7 +58,7 @@ def _create(name: str, version: str = "1.0.0", **extra_form) -> dict:
         "/models",
         data=data,
         files={"file": (f"{name}.pkl", io.BytesIO(_make_pkl()), "application/octet-stream")},
-        headers=HEADERS,
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     )
     assert r.status_code == 201, r.text
     return r.json()
