@@ -196,30 +196,15 @@ async def metrics(request: Request) -> Response:
 
 
 @app.get("/")
-async def root(db: AsyncSession = Depends(get_db)):
+async def root():
     """
     Endpoint racine - Informations sur l'API
-
-    Retourne les informations générales et la liste des modèles disponibles
     """
-    try:
-        available = await model_service.get_available_models(db)
-        cached = await model_service.get_cached_models()
-
-        return {
-            "message": "API de prédiction sklearn - Multi Models v2.0",
-            "status": "active",
-            "models_available": [m["name"] for m in available],
-            "models_count": len(available),
-            "models_cached_count": len(cached),
-        }
-    except Exception as e:
-        logger.warning("Erreur récupération modèles (endpoint /)", error=str(e))
-        return {
-            "message": "API de prédiction sklearn - Multi Models v2.0",
-            "status": "active",
-            "note": "Exécutez init_db.py pour initialiser la base de données",
-        }
+    return {
+        "status": "ok",
+        "version": settings.API_VERSION,
+        "docs": "/docs",
+    }
 
 
 @app.get("/health")

@@ -40,9 +40,11 @@ def test_root_endpoint():
     assert response.status_code == 200
 
     data = response.json()
-    assert data["status"] == "active"
-    assert "models_available" in data
-    assert "models_count" in data
+    assert data["status"] == "ok"
+    assert "version" in data
+    assert data["docs"] == "/docs"
+    assert "models_available" not in data
+    assert "models_count" not in data
 
 
 def test_health_endpoint():
