@@ -17,6 +17,14 @@ Couvre :
 import importlib
 import os
 from contextlib import contextmanager
+from unittest.mock import patch
+
+
+@contextmanager
+def _env_patch(env_vars: dict):
+    """Context manager qui set des env vars sans recharger Settings."""
+    with patch.dict(os.environ, env_vars):
+        yield
 
 
 @contextmanager
@@ -204,3 +212,50 @@ class TestSettingsWithEnvOverride:
         """SECRET_KEY=my-key → Settings.SECRET_KEY == 'my-key'."""
         with _with_env(SECRET_KEY="my-super-secret-key") as s:
             assert s.SECRET_KEY == "my-super-secret-key"
+
+
+class TestRequireEnvFunction:
+    """Tests unitaires pour la fonction _require_env (lignes non couvertes)."""
+
+    def test_missing_required_var_raises_environment_error(self):
+        """Variable obligatoire absente (pas de default) → EnvironmentError."""
+        import pytest
+        from src.core.config import _require_env
+
+        key = "PYTEST_MISSING_VAR_COVERAGE_XYZ"
+        os.environ.pop(key, None)
+        with pytest.raises(EnvironmentError, match=key):
+            _require_env(key)  # aucun default → _MISSING
+
+    def test_insecure_value_with_debug_true_warns_not_raises(self):
+        """Valeur non sécurisée + DEBUG=true → UserWarning émis, pas d'exception."""
+        import warnings
+        from src.core.config import _require_env
+
+        key = "PYTEST_INSECURE_VAR_DEBUG_XYZ"
+        with _env_patch({key: "bad_val", "DEBUG": "true"}):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                result = _require_env(key, "bad_val", {"bad_val"})
+        assert result == "bad_val"
+        security_warns = [x for x in w if "SECURITY" in str(x.message)]
+        assert len(security_warns) >= 1
+
+    def test_insecure_value_with_debug_false_raises(self):
+        """Valeur non sécurisée + DEBUG=false → EnvironmentError."""
+        import pytest
+        from src.core.config import _require_env
+
+        key = "PYTEST_INSECURE_PROD_VAR_XYZ"
+        with _env_patch({key: "bad_val", "DEBUG": "false"}):
+            with pytest.raises(EnvironmentError, match="non sécurisée"):
+                _require_env(key, "bad_val", {"bad_val"})
+
+    def test_missing_var_with_default_returns_default(self):
+        """Variable absente mais default fourni → default retourné sans exception."""
+        from src.core.config import _require_env
+
+        key = "PYTEST_MISSING_VAR_WITH_DEFAULT_XYZ"
+        os.environ.pop(key, None)
+        result = _require_env(key, "fallback_value")
+        assert result == "fallback_value"
