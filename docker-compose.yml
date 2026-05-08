@@ -11,13 +11,15 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./init_data/create_mlflow_db.sql:/docker-entrypoint-initdb.d/create_mlflow_db.sql:ro
     ports:
-      - "${POSTGRES_PORT:-5433}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - internal
 
   # MinIO pour le stockage des modèles
   minio:
@@ -30,14 +32,16 @@ services:
     volumes:
       - minio_data:/data
     ports:
-      - "${MINIO_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
       timeout: 20s
       retries: 3
     restart: unless-stopped
+    networks:
+      - internal
 
   # Stack Grafana LGTM (Loki + Grafana + Tempo + Prometheus) + OpenTelemetry Collector
   # Activé via ENABLE_OTEL=true — interface Grafana sur http://localhost:3000
@@ -48,13 +52,15 @@ services:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?Définissez GRAFANA_ADMIN_PASSWORD dans .env}
     ports:
-      - "3000:3000"   # Grafana UI
-      - "4317:4317"   # OTLP gRPC receiver
-      - "4318:4318"   # OTLP HTTP receiver
+      - "127.0.0.1:3000:3000"   # Grafana UI
+      - "127.0.0.1:4317:4317"   # OTLP gRPC receiver
+      - "127.0.0.1:4318:4318"   # OTLP HTTP receiver
     volumes:
       - grafana_data:/data
       - ./monitoring/prometheus.yml:/otel-lgtm/prometheus.yaml:ro
     restart: unless-stopped
+    networks:
+      - internal
 
   # Cache Redis — partagé entre les instances API (multi-pod)
   redis:
@@ -64,13 +70,15 @@ services:
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD}
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD-SHELL", "redis-cli --no-auth-warning -a $$REDIS_PASSWORD ping"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - internal
 
   # API FastAPI
   api:
@@ -125,6 +133,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    networks:
+      - internal
+      - frontend
 
   # MLflow Tracking Server
   mlflow:
@@ -142,13 +153,15 @@ services:
       - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
       - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     depends_on:
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - internal
 
   # Dashboard Streamlit
   streamlit:
@@ -180,6 +193,9 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - internal
+      - frontend
 
 volumes:
   postgres_data:
@@ -188,3 +204,9 @@ volumes:
     driver: local
   grafana_data:
     driver: local
+
+networks:
+  internal:
+    driver: bridge
+  frontend:
+    driver: bridge
