@@ -293,7 +293,9 @@ async def _check_mlflow() -> DependencyDetail:
 
 
 @app.get("/health/dependencies", response_model=DependencyHealthResponse)
-async def health_dependencies(db: AsyncSession = Depends(get_db), _: object = Depends(require_admin)):
+async def health_dependencies(
+    db: AsyncSession = Depends(get_db), _: object = Depends(require_admin)
+):
     """
     Health check détaillé — vérifie DB, Redis, MinIO et MLflow en parallèle.
 
