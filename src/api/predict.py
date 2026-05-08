@@ -16,6 +16,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.rate_limit import limiter
 from src.core.security import check_prediction_rate_limit, require_admin, verify_token
 from src.db.database import AsyncSessionLocal, get_db
 from src.db.models import Prediction, User
@@ -705,6 +706,7 @@ async def explain_prediction_by_id(
 
 
 @router.post("/predict", response_model=PredictionOutput)
+@limiter.limit("60/minute")
 async def predict(
     input_data: PredictionInput,
     request: Request,

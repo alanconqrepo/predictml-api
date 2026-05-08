@@ -6,11 +6,12 @@ import secrets
 from datetime import date, datetime, time, timedelta, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.audit import audit_log
+from src.core.rate_limit import limiter
 from src.core.security import require_admin, verify_token
 from src.db.database import get_db
 from src.db.models import User, UserRole
@@ -58,7 +59,9 @@ async def get_my_quota(
 
 
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/minute")
 async def create_user(
+    request: Request,
     payload: UserCreateInput,
     _: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
