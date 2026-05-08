@@ -8,8 +8,30 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from src.main import app
+from src.services.db_service import DBService
+from tests.conftest import _TestSessionLocal
 
 client = TestClient(app)
+
+_ADMIN_TOKEN = "test-token-health-admin"
+
+
+async def _ensure_admin():
+    async with _TestSessionLocal() as db:
+        if not await DBService.get_user_by_token(db, _ADMIN_TOKEN):
+            await DBService.create_user(
+                db,
+                username="health_admin",
+                email="health_admin@test.com",
+                api_token=_ADMIN_TOKEN,
+                role="admin",
+                rate_limit=10000,
+            )
+
+
+asyncio.run(_ensure_admin())
+
+_ADMIN_HEADERS = {"Authorization": f"Bearer {_ADMIN_TOKEN}"}
 
 
 def test_root_endpoint():
@@ -155,15 +177,27 @@ def test_cached_models_count_reflects_injected_model():
 # GET /health/dependencies
 # ---------------------------------------------------------------------------
 
-def test_health_dependencies_returns_200():
-    """L'endpoint répond 200 quelle que soit l'état des dépendances."""
+def test_health_dependencies_requires_admin():
+    """L'endpoint doit retourner 401/403 sans authentification."""
     response = client.get("/health/dependencies")
+    assert response.status_code in (401, 403)
+
+
+def test_health_dependencies_requires_admin_token_not_user():
+    """Un token non-admin doit retourner 403."""
+    response = client.get("/health/dependencies", headers={"Authorization": "Bearer invalid-token"})
+    assert response.status_code in (401, 403)
+
+
+def test_health_dependencies_returns_200():
+    """L'endpoint répond 200 pour un admin quelle que soit l'état des dépendances."""
+    response = client.get("/health/dependencies", headers=_ADMIN_HEADERS)
     assert response.status_code == 200
 
 
 def test_health_dependencies_response_structure():
     """La réponse contient status, checked_at et les quatre dépendances."""
-    response = client.get("/health/dependencies")
+    response = client.get("/health/dependencies", headers=_ADMIN_HEADERS)
     data = response.json()
 
     assert "status" in data
@@ -179,7 +213,7 @@ def test_health_dependencies_response_structure():
 
 def test_health_dependencies_db_ok(monkeypatch):
     """Quand la DB répond, database.status == 'ok' et latency_ms est un nombre."""
-    response = client.get("/health/dependencies")
+    response = client.get("/health/dependencies", headers=_ADMIN_HEADERS)
     data = response.json()
     # La DB est SQLite en mémoire — elle doit toujours répondre en test
     assert data["dependencies"]["database"]["status"] == "ok"
@@ -189,7 +223,7 @@ def test_health_dependencies_db_ok(monkeypatch):
 
 def test_health_dependencies_redis_ok():
     """Avec FakeRedis, redis.status == 'ok'."""
-    response = client.get("/health/dependencies")
+    response = client.get("/health/dependencies", headers=_ADMIN_HEADERS)
     data = response.json()
     assert data["dependencies"]["redis"]["status"] == "ok"
     assert data["dependencies"]["redis"]["latency_ms"] is not None
@@ -208,7 +242,7 @@ def test_health_dependencies_global_status_critical_when_db_fails(monkeypatch):
          patch("src.main._check_redis", AsyncMock(return_value=ok)), \
          patch("src.main._check_minio", AsyncMock(return_value=ok)), \
          patch("src.main._check_mlflow", AsyncMock(return_value=ok)):
-        response = client.get("/health/dependencies")
+        response = client.get("/health/dependencies", headers=_ADMIN_HEADERS)
 
     assert response.status_code == 200
     assert response.json()["status"] == "critical"
@@ -227,7 +261,7 @@ def test_health_dependencies_global_status_degraded_when_non_db_fails(monkeypatc
          patch("src.main._check_redis", AsyncMock(return_value=ok)), \
          patch("src.main._check_minio", AsyncMock(return_value=err)), \
          patch("src.main._check_mlflow", AsyncMock(return_value=ok)):
-        response = client.get("/health/dependencies")
+        response = client.get("/health/dependencies", headers=_ADMIN_HEADERS)
 
     assert response.status_code == 200
     assert response.json()["status"] == "degraded"
@@ -245,7 +279,7 @@ def test_health_dependencies_global_status_ok_when_all_pass(monkeypatch):
          patch("src.main._check_redis", AsyncMock(return_value=ok)), \
          patch("src.main._check_minio", AsyncMock(return_value=ok)), \
          patch("src.main._check_mlflow", AsyncMock(return_value=ok)):
-        response = client.get("/health/dependencies")
+        response = client.get("/health/dependencies", headers=_ADMIN_HEADERS)
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
@@ -264,7 +298,7 @@ def test_health_dependencies_error_detail_included():
          patch("src.main._check_redis", AsyncMock(return_value=ok)), \
          patch("src.main._check_minio", AsyncMock(return_value=err)), \
          patch("src.main._check_mlflow", AsyncMock(return_value=ok)):
-        response = client.get("/health/dependencies")
+        response = client.get("/health/dependencies", headers=_ADMIN_HEADERS)
 
     data = response.json()
     assert data["dependencies"]["minio"]["status"] == "error"
