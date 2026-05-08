@@ -92,7 +92,12 @@ async def create_user(
         role=payload.role,
         rate_limit=payload.rate_limit,
     )
-    audit_log("user.create", actor_id=_.id, resource=f"user:{user.id}", details={"username": user.username})
+    audit_log(
+        "user.create",
+        actor_id=_.id,
+        resource=f"user:{user.id}",
+        details={"username": user.username},
+    )
     return user
 
 

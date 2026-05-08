@@ -1078,7 +1078,12 @@ async def rollback_model(
 
     await db.commit()
     await db.refresh(model)
-    audit_log("model.rollback", actor_id=user.id, resource=f"{name}:{version}", details={"history_id": history_id})
+    audit_log(
+        "model.rollback",
+        actor_id=user.id,
+        resource=f"{name}:{version}",
+        details={"history_id": history_id},
+    )
 
     return RollbackResponse(
         model_name=name,
@@ -1827,7 +1832,12 @@ async def update_retrain_schedule(
         enabled=payload.enabled,
         updated_by=user.username,
     )
-    audit_log("model.schedule_update", actor_id=user.id, resource=f"{name}:{version}", details={"cron": cron, "enabled": payload.enabled})
+    audit_log(
+        "model.schedule_update",
+        actor_id=user.id,
+        resource=f"{name}:{version}",
+        details={"cron": cron, "enabled": payload.enabled},
+    )
 
     return ScheduleUpdateResponse(
         model_name=name,
@@ -3816,7 +3826,9 @@ async def delete_model_all_versions(
         await db.delete(model)
 
     await db.commit()
-    audit_log("model.delete_all", actor_id=user.id, resource=name, details={"versions": deleted_versions})
+    audit_log(
+        "model.delete_all", actor_id=user.id, resource=name, details={"versions": deleted_versions}
+    )
 
     return ModelDeleteResponse(
         name=name,
