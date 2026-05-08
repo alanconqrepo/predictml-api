@@ -1278,7 +1278,7 @@ async def retrain_model(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Impossible de télécharger le script train.py : {e}",
+            detail="Impossible de télécharger le script train.py. Consulter les logs serveur.",
         )
 
     # 4. Exécuter le script dans un répertoire temporaire
@@ -1362,7 +1362,7 @@ async def retrain_model(
                     model=name,
                     version=version,
                     returncode=proc.returncode,
-                    stderr=stderr_text[:500],
+                    stderr=stderr_text,
                 )
                 return RetrainResponse(
                     model_name=name,
@@ -1370,23 +1370,26 @@ async def retrain_model(
                     new_version=new_version,
                     success=False,
                     stdout=stdout_text,
-                    stderr=stderr_text,
+                    stderr=stderr_text if settings.DEBUG else "",
                     error=f"Le script a terminé avec le code {proc.returncode}.",
                 )
 
             # 5. Vérifier que le fichier modèle a été produit
             if not os.path.exists(output_model_path):
+                logger.error(
+                    "Script n'a pas produit de fichier modèle",
+                    model=name,
+                    version=version,
+                    output_model_path=output_model_path,
+                )
                 return RetrainResponse(
                     model_name=name,
                     source_version=version,
                     new_version=new_version,
                     success=False,
                     stdout=stdout_text,
-                    stderr=stderr_text,
-                    error=(
-                        f"Le script n'a pas produit de fichier modèle "
-                        f"à OUTPUT_MODEL_PATH={output_model_path}"
-                    ),
+                    stderr=stderr_text if settings.DEBUG else "",
+                    error="Le script n'a pas produit de fichier modèle à OUTPUT_MODEL_PATH.",
                 )
 
             with open(output_model_path, "rb") as f:
@@ -1402,8 +1405,8 @@ async def retrain_model(
                 new_version=new_version,
                 success=False,
                 stdout=stdout_text,
-                stderr=stderr_text,
-                error=f"Erreur d'exécution inattendue : {e}",
+                stderr=stderr_text if settings.DEBUG else "",
+                error="Erreur d'exécution inattendue. Consulter les logs serveur.",
             )
 
     # 6. Extraire les métriques JSON depuis la dernière ligne stdout
@@ -1657,7 +1660,7 @@ async def retrain_model(
         new_version=new_version,
         success=True,
         stdout=stdout_text,
-        stderr=stderr_text,
+        stderr=stderr_text if settings.DEBUG else "",
         new_model_metadata=ModelCreateResponse(
             **{c.name: getattr(new_metadata, c.name) for c in new_metadata.__table__.columns},
             creator_username=user.username,
