@@ -27,6 +27,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from src.api import models, monitoring, observed_results, predict, users
 from src.core.config import settings
 from src.core.logging import setup_logging
+from src.core.security import require_admin
 from src.db.database import close_db, engine, get_db, init_db
 from src.schemas.health import DependencyDetail, DependencyHealthResponse
 from src.services.minio_service import minio_service
@@ -292,7 +293,9 @@ async def _check_mlflow() -> DependencyDetail:
 
 
 @app.get("/health/dependencies", response_model=DependencyHealthResponse)
-async def health_dependencies(db: AsyncSession = Depends(get_db)):
+async def health_dependencies(
+    db: AsyncSession = Depends(get_db), _: object = Depends(require_admin)
+):
     """
     Health check détaillé — vérifie DB, Redis, MinIO et MLflow en parallèle.
 
