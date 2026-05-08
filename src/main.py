@@ -16,10 +16,12 @@ from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, generate_latest
 from prometheus_client import multiprocess as prom_multiprocess
 from prometheus_fastapi_instrumentator import Instrumentator
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -27,6 +29,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from src.api import models, monitoring, observed_results, predict, users
 from src.core.config import settings
 from src.core.logging import setup_logging
+from src.core.rate_limit import limiter
 from src.core.security import require_admin
 from src.db.database import close_db, engine, get_db, init_db
 from src.schemas.health import DependencyDetail, DependencyHealthResponse
@@ -158,6 +161,10 @@ app = FastAPI(
     description="API REST pour faire des prédictions avec plusieurs modèles scikit-learn",
     lifespan=lifespan,
 )
+
+# Rate limiting par IP (slowapi)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS — n'autoriser que les origines explicitement configurées
 _cors_origins = [

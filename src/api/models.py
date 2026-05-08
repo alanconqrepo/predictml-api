@@ -44,6 +44,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.core.config import settings
+from src.core.rate_limit import limiter
 from src.core.security import require_admin, verify_token
 from src.db.database import get_db
 from src.db.models import HistoryActionType, ModelMetadata, User
@@ -3134,7 +3135,9 @@ async def get_model(
 
 
 @router.post("/models", response_model=ModelCreateResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/minute")
 async def create_model(
+    request: Request,
     name: str = Form(..., description="Nom unique du modèle"),
     version: str = Form(..., description="Version du modèle (ex: 1.0.0)"),
     file: Optional[UploadFile] = File(
