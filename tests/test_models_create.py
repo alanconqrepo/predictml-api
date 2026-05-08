@@ -287,3 +287,19 @@ def test_create_model_auto_baseline_false():
     )
     assert response.status_code == 201
     assert response.json()["feature_baseline"] is None
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["classes", "feature_baseline", "training_params", "tags"],
+)
+def test_create_model_invalid_json_field(field):
+    """JSON malformé dans un champ optionnel → 400 avec message explicite."""
+    response = client.post(
+        "/models",
+        headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        data={"name": f"{TEST_MODEL_NAME}_bad_json", "version": "1.0.0", field: "{invalid json"},
+    )
+    assert response.status_code == 400
+    assert field in response.json()["detail"]
