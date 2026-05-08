@@ -164,9 +164,9 @@ def test_list_users_limit():
 
 def test_list_users_skip():
     """GET /users?skip=N → retourne moins d'utilisateurs qu'une requête sans skip"""
-    total = client.get("/users", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"}).json()
+    total = client.get("/users?limit=500", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"}).json()
     skipped = client.get(
-        f"/users?skip={len(total)}", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"}
+        f"/users?skip={len(total)}&limit=500", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"}
     ).json()
     assert len(skipped) == 0
 

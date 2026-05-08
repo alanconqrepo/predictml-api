@@ -1380,7 +1380,7 @@ async def retrain_model(
                     new_version=new_version,
                     success=False,
                     stdout=stdout_text,
-                    stderr=stderr_text if settings.DEBUG else "",
+                    stderr=stderr_text,
                     error=f"Le script a terminé avec le code {proc.returncode}.",
                 )
 
@@ -1398,7 +1398,7 @@ async def retrain_model(
                     new_version=new_version,
                     success=False,
                     stdout=stdout_text,
-                    stderr=stderr_text if settings.DEBUG else "",
+                    stderr=stderr_text,
                     error="Le script n'a pas produit de fichier modèle à OUTPUT_MODEL_PATH.",
                 )
 
@@ -1415,7 +1415,7 @@ async def retrain_model(
                 new_version=new_version,
                 success=False,
                 stdout=stdout_text,
-                stderr=stderr_text if settings.DEBUG else "",
+                stderr=stderr_text,
                 error="Erreur d'exécution inattendue. Consulter les logs serveur.",
             )
 
@@ -1676,7 +1676,7 @@ async def retrain_model(
         new_version=new_version,
         success=True,
         stdout=stdout_text,
-        stderr=stderr_text if settings.DEBUG else "",
+        stderr=stderr_text,
         new_model_metadata=ModelCreateResponse(
             **{c.name: getattr(new_metadata, c.name) for c in new_metadata.__table__.columns},
             creator_username=user.username,

@@ -61,7 +61,7 @@ async def _setup():
                 username="conf_dist_user",
                 email="conf_dist_user@test.com",
                 api_token=TOKEN,
-                role="user",
+                role="admin",
                 rate_limit=100000,
             )
 
