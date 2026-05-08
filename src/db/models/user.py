@@ -39,6 +39,7 @@ class User(Base):
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
     last_login = Column(DateTime, nullable=True)
+    token_expires_at = Column(DateTime, nullable=True)
 
     # Relations
     predictions = relationship("Prediction", back_populates="user", cascade="all, delete-orphan")

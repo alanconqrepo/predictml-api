@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.audit import audit_log
 from src.core.rate_limit import limiter
 from src.core.security import require_admin, verify_token
 from src.db.database import get_db
@@ -93,6 +94,12 @@ async def create_user(
         api_token=api_token,
         role=payload.role,
         rate_limit=payload.rate_limit,
+    )
+    audit_log(
+        "user.create",
+        actor_id=_.id,
+        resource=f"user:{user.id}",
+        details={"username": user.username},
     )
     return user
 
@@ -218,6 +225,10 @@ async def update_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Utilisateur {user_id} introuvable.",
         )
+    if payload.regenerate_token:
+        audit_log("user.token_regen", actor_id=current_user.id, resource=f"user:{user_id}")
+    else:
+        audit_log("user.update", actor_id=current_user.id, resource=f"user:{user_id}")
     return user
 
 
@@ -246,3 +257,4 @@ async def delete_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Utilisateur {user_id} introuvable.",
         )
+    audit_log("user.delete", actor_id=current_user.id, resource=f"user:{user_id}")

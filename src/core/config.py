@@ -118,6 +118,9 @@ class Settings:
     WEEKLY_REPORT_ENABLED: bool = os.getenv("WEEKLY_REPORT_ENABLED", "false").lower() == "true"
     WEEKLY_REPORT_DAY: str = os.getenv("WEEKLY_REPORT_DAY", "monday")
     WEEKLY_REPORT_HOUR: int = int(os.getenv("WEEKLY_REPORT_HOUR", "8"))
+
+    # Token expiration (days) — 0 = pas d'expiration
+    TOKEN_LIFETIME_DAYS: int = int(os.getenv("TOKEN_LIFETIME_DAYS", "90"))
     # Seuil de baisse d'accuracy (ex: 0.10 = chute de 10 pts → alerte)
     PERFORMANCE_DRIFT_ALERT_THRESHOLD: float = float(
         os.getenv("PERFORMANCE_DRIFT_ALERT_THRESHOLD", "0.10")

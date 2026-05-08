@@ -2,6 +2,8 @@
 Gestion de la sécurité et de l'authentification
 """
 
+from datetime import datetime
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,7 +30,7 @@ async def verify_token(
         L'utilisateur authentifié
 
     Raises:
-        HTTPException: Si le token est invalide ou l'utilisateur inactif
+        HTTPException: Si le token est invalide, expiré ou l'utilisateur inactif
     """
     # Récupérer l'utilisateur par token
     user = await DBService.get_user_by_token(db, credentials.credentials)
@@ -44,6 +46,13 @@ async def verify_token(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Compte utilisateur désactivé",
+        )
+
+    if user.token_expires_at and user.token_expires_at < datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token expiré",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     # Mettre à jour la dernière connexion (async, non bloquant)
