@@ -155,6 +155,40 @@ def test_list_users_success():
     assert f"{USERNAME_PREFIX}_regular" in usernames
 
 
+def test_list_users_limit():
+    """GET /users?limit=1 → 200 avec exactement 1 utilisateur"""
+    r = client.get("/users?limit=1", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
+    assert r.status_code == 200
+    assert len(r.json()) == 1
+
+
+def test_list_users_skip():
+    """GET /users?skip=N → retourne moins d'utilisateurs qu'une requête sans skip"""
+    total = client.get("/users", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"}).json()
+    skipped = client.get(
+        f"/users?skip={len(total)}", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"}
+    ).json()
+    assert len(skipped) == 0
+
+
+def test_list_users_limit_max_enforced():
+    """GET /users?limit=501 → 422 (dépasse le maximum autorisé de 500)"""
+    r = client.get("/users?limit=501", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
+    assert r.status_code == 422
+
+
+def test_list_users_skip_negative_rejected():
+    """GET /users?skip=-1 → 422"""
+    r = client.get("/users?skip=-1", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
+    assert r.status_code == 422
+
+
+def test_list_users_limit_zero_rejected():
+    """GET /users?limit=0 → 422"""
+    r = client.get("/users?limit=0", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
+    assert r.status_code == 422
+
+
 # ---------------------------------------------------------------------------
 # GET /users/{user_id}
 # ---------------------------------------------------------------------------
