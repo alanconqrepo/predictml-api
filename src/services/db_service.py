@@ -67,9 +67,11 @@ class DBService:
         return user
 
     @staticmethod
-    async def get_all_users(db: AsyncSession) -> List[User]:
-        """Récupère tous les utilisateurs"""
-        result = await db.execute(select(User).order_by(User.created_at.desc()))
+    async def get_all_users(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[User]:
+        """Récupère les utilisateurs avec pagination offset/limit"""
+        result = await db.execute(
+            select(User).order_by(User.created_at.desc()).offset(skip).limit(limit)
+        )
         return result.scalars().all()
 
     @staticmethod

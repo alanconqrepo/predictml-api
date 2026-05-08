@@ -6,7 +6,7 @@ import secrets
 from datetime import date, datetime, time, timedelta, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -96,15 +96,20 @@ async def create_user(
 
 @router.get("", response_model=List[UserResponse])
 async def list_users(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
     _: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Liste tous les utilisateurs.
+    Liste les utilisateurs avec pagination.
+
+    - **skip** : nombre d'utilisateurs à ignorer (défaut: 0)
+    - **limit** : nombre maximum d'utilisateurs retournés (défaut: 100, max: 500)
 
     Réservé aux administrateurs.
     """
-    return await DBService.get_all_users(db)
+    return await DBService.get_all_users(db, skip=skip, limit=limit)
 
 
 @router.get("/{user_id}", response_model=UserResponse)
