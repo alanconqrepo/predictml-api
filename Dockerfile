@@ -1,11 +1,6 @@
 # Utiliser une image Python officielle
 FROM python:3.13-slim
 
-# Installer curl et dépendances nécessaires
-RUN apt-get update && \
-    apt-get install -y curl && \
-    rm -rf /var/lib/apt/lists/*
-
 # Définir le répertoire de travail dans le conteneur
 WORKDIR /app
 
@@ -13,7 +8,10 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Installer les dépendances
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir \
+    --trusted-host pypi.org \
+    --trusted-host files.pythonhosted.org \
+    -r requirements.txt
 
 # Copier le code source de l'application
 COPY src/ ./src/

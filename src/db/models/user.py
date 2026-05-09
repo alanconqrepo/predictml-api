@@ -29,7 +29,7 @@ class User(Base):
     username = Column(String(50), unique=True, index=True, nullable=False)
     email = Column(String(100), unique=True, index=True, nullable=False)
     api_token = Column(String(255), unique=True, index=True, nullable=False)
-    role = Column(SQLEnum(UserRole), default=UserRole.USER, nullable=False)
+    role = Column(SQLEnum(UserRole, values_callable=lambda x: [e.value for e in x]), default=UserRole.USER, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
 
     # Quotas

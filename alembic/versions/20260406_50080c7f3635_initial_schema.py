@@ -10,6 +10,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 
 # revision identifiers, used by Alembic.
 revision: str = "50080c7f3635"
@@ -34,7 +35,7 @@ def upgrade() -> None:
         sa.Column("api_token", sa.String(255), nullable=False),
         sa.Column(
             "role",
-            sa.Enum("admin", "user", "readonly", name="userrole"),
+            PgEnum("admin", "user", "readonly", name="userrole", create_type=False),
             nullable=False,
         ),
         sa.Column("is_active", sa.Boolean(), nullable=False),

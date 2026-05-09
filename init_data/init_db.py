@@ -113,14 +113,8 @@ async def upload_local_models_to_minio():
                 continue
 
 
-async def main():
-    """Fonction principale d'initialisation"""
-    print("=" * 60)
-    print("Initialisation de la Base de Donnees et MinIO")
-    print("=" * 60)
-
-    # 1. Appliquer les migrations Alembic (crée ou met à jour le schéma)
-    print("\n1. Application des migrations Alembic...")
+def run_migrations():
+    """Applique les migrations Alembic (contexte synchrone)."""
     import os
     from alembic import command as alembic_command
     from alembic.config import Config as AlembicConfig
@@ -128,7 +122,13 @@ async def main():
     _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     alembic_cfg = AlembicConfig(os.path.join(_root, "alembic.ini"))
     alembic_command.upgrade(alembic_cfg, "head")
-    print("   Migrations appliquees")
+
+
+async def main():
+    """Fonction principale d'initialisation"""
+    print("=" * 60)
+    print("Initialisation de la Base de Donnees et MinIO")
+    print("=" * 60)
 
     # 2. Créer l'utilisateur admin
     print("\n2. Creation de l'utilisateur admin...")
@@ -148,4 +148,9 @@ async def main():
 
 
 if __name__ == "__main__":
+    # 1. Migrations en contexte synchrone (avant toute boucle asyncio)
+    print("\n1. Application des migrations Alembic...")
+    run_migrations()
+    print("   Migrations appliquees")
+
     asyncio.run(main())
