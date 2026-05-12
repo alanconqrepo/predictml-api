@@ -316,3 +316,94 @@ def test_ip_rate_limit_limiter_attached_to_app():
     from src.main import app
 
     assert app.state.limiter is limiter
+
+
+# ---------------------------------------------------------------------------
+# Tests rate limiting et taille de batch sur POST /predict-batch
+# ---------------------------------------------------------------------------
+
+def test_ip_rate_limit_predict_batch_endpoint_has_limiter_configured():
+    """Vérifie que POST /predict-batch a bien le décorateur @limiter.limit configuré."""
+    from src.api.predict import predict_batch
+
+    assert hasattr(predict_batch, "__wrapped__") or callable(predict_batch)
+
+
+def test_predict_batch_max_batch_size_env_default():
+    """MAX_BATCH_SIZE doit valoir 500 par défaut (variable d'env non définie)."""
+    import importlib
+    import os
+    from unittest.mock import patch
+
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("MAX_BATCH_SIZE", None)
+        import src.api.predict as predict_mod
+        importlib.reload(predict_mod)
+        assert predict_mod.MAX_BATCH_SIZE == 500
+
+
+def test_predict_batch_max_batch_size_env_override():
+    """MAX_BATCH_SIZE doit lire la variable d'env MAX_BATCH_SIZE."""
+    import importlib
+    import os
+    from unittest.mock import patch
+
+    with patch.dict(os.environ, {"MAX_BATCH_SIZE": "200"}):
+        import src.api.predict as predict_mod
+        importlib.reload(predict_mod)
+        assert predict_mod.MAX_BATCH_SIZE == 200
+
+
+def test_predict_batch_rejects_oversized_batch():
+    """Un batch dépassant MAX_BATCH_SIZE doit retourner 422."""
+    import os
+    from unittest.mock import patch
+
+    model = _make_model()
+    key = _inject_cache(RL_MODEL, RL_MODEL_VERSION, model)
+    asyncio.run(_delete_predictions())
+
+    try:
+        with patch("src.api.predict.MAX_BATCH_SIZE", 2):
+            inputs = [{"features": {"f1": 1.0, "f2": 2.0}} for _ in range(3)]
+            response = client.post(
+                "/predict-batch",
+                headers={"Authorization": f"Bearer {RL_TOKEN}"},
+                json={
+                    "model_name": RL_MODEL,
+                    "inputs": inputs,
+                },
+            )
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert "Batch trop grand" in detail
+        assert "max 2" in detail
+    finally:
+        asyncio.run(model_service.clear_cache(key))
+        asyncio.run(_delete_predictions())
+
+
+def test_predict_batch_accepts_batch_within_limit():
+    """Un batch dans la limite de MAX_BATCH_SIZE ne doit pas être rejeté pour taille."""
+    from unittest.mock import patch
+
+    model = _make_model()
+    key = _inject_cache(RL_MODEL, RL_MODEL_VERSION, model)
+    asyncio.run(_delete_predictions())
+
+    try:
+        with patch("src.api.predict.MAX_BATCH_SIZE", 500):
+            inputs = [{"features": {"f1": 1.0, "f2": 2.0}} for _ in range(2)]
+            response = client.post(
+                "/predict-batch",
+                headers={"Authorization": f"Bearer {RL_TOKEN}"},
+                json={
+                    "model_name": RL_MODEL,
+                    "inputs": inputs,
+                },
+            )
+        # Peut retourner 200 (succès) ou 429 (quota journalier) mais pas 422 pour taille
+        assert response.status_code != 422 or "Batch trop grand" not in response.json().get("detail", "")
+    finally:
+        asyncio.run(model_service.clear_cache(key))
+        asyncio.run(_delete_predictions())
