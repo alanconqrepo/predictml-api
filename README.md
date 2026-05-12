@@ -86,7 +86,7 @@ curl http://localhost:8000/health
 |---|---|
 | Token admin API | `<ADMIN_TOKEN>` |
 | PostgreSQL | `postgres / postgres` |
-| MinIO | `minioadmin / minioadmin` |
+| MinIO | `minioadmin / minioadmin` ⚠️ À changer en production (`MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`) |
 | MLflow UI | http://localhost:5000 |
 | Grafana | http://localhost:3000 (admin / admin) |
 
@@ -226,9 +226,18 @@ curl http://localhost:8000/health
 
 ### Gestion des utilisateurs
 - Création par un admin avec rôle et quota journalier
-- Token Bearer unique par utilisateur
+- Token Bearer unique par utilisateur, valide `TOKEN_LIFETIME_DAYS` jours (défaut 90)
 - Renouvellement de token via `PATCH /users/{id}` avec `{"regenerate_token": true}`
-- Rate limiting automatique (HTTP 429 si quota dépassé)
+- Rate limiting automatique (HTTP 429 si quota journalier dépassé)
+
+### Sécurité
+- **HMAC-SHA256** — chaque `.pkl` est signé à l'upload et vérifié avant `pickle.loads()` (clé : `SECRET_KEY`)
+- **Audit logging** — opérations admin sensibles (création/suppression de modèle, retrain, gestion utilisateurs) loguées en JSON via `structlog` avec `user_id`, IP et action
+- **Token expiration** — les tokens Bearer expirent après `TOKEN_LIFETIME_DAYS` jours (HTTP 401 au-delà) ; renouvellement possible via `PATCH /users/{id}`
+- **Rate limiting per-IP** — limite par IP et par minute via `slowapi` (HTTP 429 si dépassé), en plus du quota journalier par utilisateur
+- **Validation des noms** — les formats de `name` et `version` sont validés (prévention path traversal)
+- **`/health/dependencies`** — protégé par auth admin (santé interne des dépendances, non exposée publiquement)
+- **`SECRET_KEY` obligatoire** — l'API refuse de démarrer si absente ; générez-la avec `python -c "import secrets; print(secrets.token_urlsafe(32))"`
 
 ---
 
@@ -305,7 +314,7 @@ curl http://localhost:8000/health
 | **Monitoring** | | | |
 | GET | `/monitoring/overview` | Oui | Tableau de bord global |
 | GET | `/monitoring/model/{name}` | Oui | Détail monitoring d'un modèle |
-| GET | `/health/dependencies` | Non | Santé détaillée de chaque dépendance (DB, Redis, MinIO, MLflow) |
+| GET | `/health/dependencies` | Admin | Santé détaillée de chaque dépendance (DB, Redis, MinIO, MLflow) |
 | GET | `/metrics` | Optionnel | Métriques Prometheus (scraped par Grafana LGTM) |
 
 ---

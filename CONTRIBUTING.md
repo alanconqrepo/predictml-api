@@ -95,9 +95,11 @@ Toute contribution qui ajoute ou modifie une fonctionnalité doit inclure :
 
 ---
 
-## Fonctionnalités récentes à connaître (V10–V12)
+## Fonctionnalités récentes à connaître (V10–V14)
 
 Avant de toucher au code lié aux domaines suivants, lire les sections correspondantes du `CLAUDE.md` :
+
+### V10–V12 — Monitoring & ML
 
 | Fonctionnalité | Fichiers clés |
 |---|---|
@@ -111,3 +113,25 @@ Avant de toucher au code lié aux domaines suivants, lire les sections correspon
 | **Confidence filters** | `GET /predictions?min_confidence=&max_confidence=` |
 | **Retrain history** | `GET /models/{name}/retrain-history` · `ModelHistory` table |
 | **Free-text search** | `GET /models?search=` · `ModelService.get_available_models()` |
+
+### V13–V14 — Sécurité & robustesse (PRs #159–#177)
+
+| Fonctionnalité | Fichiers clés |
+|---|---|
+| **HMAC-SHA256 modèles** | Signature à l'upload + vérification avant `pickle.loads()` · `SECRET_KEY` dans `src/core/config.py` |
+| **Sandbox retrain scripts** | Whitelist d'imports + limites ressources · `src/tasks/retrain_scheduler.py` · voir `documentation/TRAIN_SCRIPT_GUIDE.md` |
+| **Rate limiting per-IP** | Middleware `slowapi` · `src/core/rate_limit.py` · HTTP 429 si dépassé |
+| **Token expiration** | `TOKEN_LIFETIME_DAYS` dans `src/core/config.py` · vérification dans `src/core/security.py` |
+| **Audit logging** | Opérations admin loguées en JSON · `src/core/audit.py` · appelé depuis `src/api/models.py`, `src/api/users.py` |
+| **Pagination /users** | `skip` / `limit` dans `GET /users` · `src/api/users.py` |
+| **Auth sur /health/dependencies** | Requiert rôle admin · `src/api/monitoring.py` |
+| **METRICS_TOKEN en production** | Token Bearer pour `GET /metrics` · `src/core/config.py` · doc dans `documentation/DOCKER.md` |
+| **Validation name/version** | Formats validés (prévention path traversal) · `src/api/models.py` |
+
+### Fichiers de tests associés
+
+| Fichier | Fonctionnalité testée |
+|---|---|
+| `tests/test_rate_limit.py` | Rate limiting per-IP (HTTP 429) |
+| `tests/test_security.py` | Auth Bearer, token expiration, roles |
+| `tests/test_monitoring_api.py` | Endpoints monitoring, auth sur `/health/dependencies` |
