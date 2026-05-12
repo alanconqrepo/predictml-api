@@ -25,10 +25,19 @@ docker compose version  # Docker Compose version v2+
 git clone https://github.com/alanconqrepo/predictml-api.git
 cd predictml-api
 
-# 2. Lancer tous les services (API, DB, MinIO, MLflow, Redis, Grafana, Streamlit)
+# 2. Créer le fichier .env avec la SECRET_KEY obligatoire
+#    L'API refuse de démarrer si SECRET_KEY est absente.
+cp .env.example .env 2>/dev/null || touch .env
+python -c "import secrets; print('SECRET_KEY=' + secrets.token_urlsafe(32))" >> .env
+
+# En production, changer aussi les credentials MinIO (ne pas utiliser les valeurs par défaut) :
+# echo "MINIO_ROOT_USER=votre-user" >> .env
+# echo "MINIO_ROOT_PASSWORD=votre-mot-de-passe-fort" >> .env
+
+# 3. Lancer tous les services (API, DB, MinIO, MLflow, Redis, Grafana, Streamlit)
 docker-compose up -d --build
 
-# 3. Initialiser la base de données (premier déploiement uniquement)
+# 4. Initialiser la base de données (premier déploiement uniquement)
 docker exec predictml-api python init_data/init_db.py
 ```
 

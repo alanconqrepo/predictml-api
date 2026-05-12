@@ -29,8 +29,8 @@ docker-compose up -d --build streamlit
 | API docs | http://localhost:8000/docs | Swagger UI |
 | Dashboard | http://localhost:8501 | Streamlit Admin Dashboard |
 | MLflow | http://localhost:5000 | Experiment tracking |
-| MinIO console | http://localhost:9001 | Gestion du stockage modèles (minioadmin/minioadmin) |
-| Redis | localhost:6379 | Cache distribué des modèles |
+| MinIO console | http://localhost:9001 | Gestion du stockage modèles (credentials définis par `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`) |
+| Redis | localhost:6379 | Cache distribué des modèles (auth si `REDIS_PASSWORD` défini) |
 | Grafana | http://localhost:3000 | Observabilité (admin/admin) |
 | PostgreSQL | localhost:5433 | Base de données |
 
@@ -43,8 +43,11 @@ docker exec -it predictml-postgres psql -U postgres -d sklearn_api
 ## Cache Redis
 
 ```bash
-# Se connecter à Redis
+# Se connecter à Redis (sans auth)
 docker exec -it predictml-redis redis-cli
+
+# Si REDIS_PASSWORD est configuré, ajouter l'option -a
+docker exec -it predictml-redis redis-cli -a "$REDIS_PASSWORD"
 
 # Lister les clés en cache
 docker exec -it predictml-redis redis-cli KEYS "*"
@@ -55,6 +58,9 @@ docker exec -it predictml-redis redis-cli FLUSHDB
 # Logs Redis
 docker-compose logs -f redis
 ```
+
+> **Note sécurité** : si `REDIS_PASSWORD` est défini, mettre à jour `REDIS_URL` en conséquence :
+> `REDIS_URL=redis://:votre-mot-de-passe@redis:6379/0`
 
 ## Réinitialisation complète
 
@@ -150,7 +156,11 @@ docker exec predictml-api python -c "import redis; r = redis.from_url('redis://r
 
 | Variable | Défaut | Description |
 |---|---|---|
-| `SECRET_KEY` | — | **Obligatoire.** Clé HMAC pour la signature du cache Redis. Aucune valeur par défaut — l'API lève une erreur au démarrage si absente. |
+| `SECRET_KEY` | — | **Obligatoire.** Clé HMAC pour la signature des modèles (vérification avant `pickle.loads()`) et du cache Redis. L'API refuse de démarrer si absente. |
+| `TOKEN_LIFETIME_DAYS` | `90` | Durée de validité des tokens Bearer en jours. Après expiration, l'API retourne HTTP 401 — l'admin doit régénérer le token via `PATCH /users/{id}`. |
+| `REDIS_PASSWORD` | `` | Mot de passe Redis. Si défini, inclure dans `REDIS_URL` : `redis://:mot-de-passe@redis:6379/0`. |
+| `MINIO_ROOT_USER` | `minioadmin` | Login du compte root MinIO. **À changer en production.** |
+| `MINIO_ROOT_PASSWORD` | `minioadmin` | Mot de passe du compte root MinIO. **À changer en production.** |
 | `API_PORT` | `8000` | Port de l'API |
 | `STREAMLIT_PORT` | `8501` | Port du dashboard |
 | `POSTGRES_PORT` | `5433` | Port PostgreSQL externe |
