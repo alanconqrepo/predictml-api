@@ -1,0 +1,43 @@
+apiVersion: 1
+
+# Datasources — matches the internal services bundled in grafana/otel-lgtm
+# These UIDs are referenced by the pre-built dashboards.
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    url: http://localhost:9090
+    access: proxy
+    isDefault: true
+    jsonData:
+      timeInterval: 15s
+      httpMethod: POST
+
+  - name: Loki
+    type: loki
+    uid: loki
+    url: http://localhost:3100
+    access: proxy
+    jsonData:
+      maxLines: 1000
+
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    url: http://localhost:3200
+    access: proxy
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+        filterByTraceID: true
+        filterBySpanID: false
+      tracesToMetrics:
+        datasourceUid: prometheus
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
