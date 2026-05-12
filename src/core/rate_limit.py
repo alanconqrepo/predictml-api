@@ -1,5 +1,19 @@
+from urllib.parse import urlparse, urlunparse
+
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
+from src.core.config import settings
+
+
+def _rate_limit_storage_uri() -> str:
+    """Return a Redis URI for rate-limit counters on DB /1 (separate from the model cache on /0)."""
+    parsed = urlparse(settings.REDIS_URL)
+    return urlunparse(parsed._replace(path="/1"))
+
+
 # Set RATELIMIT_ENABLED=0 to disable per-IP rate limiting (e.g. in tests).
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=_rate_limit_storage_uri(),
+)
