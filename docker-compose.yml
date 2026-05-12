@@ -58,6 +58,8 @@ services:
     volumes:
       - grafana_data:/data
       - ./monitoring/prometheus.yml:/otel-lgtm/prometheus.yaml:ro
+      - ./monitoring/grafana/provisioning.yaml:/etc/grafana/provisioning/datasources/predictml.yaml:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
     restart: unless-stopped
     networks:
       - internal
