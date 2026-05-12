@@ -1049,7 +1049,9 @@ async def predict_batch(
 
             # Mode strict : rejeter si des features inattendues sont présentes
             if strict_validation:
-                expected = resolve_expected_features(model, getattr(metadata, "feature_baseline", None))
+                expected = resolve_expected_features(
+                    model, getattr(metadata, "feature_baseline", None)
+                )
                 if expected is not None:
                     errors, _ = validate_input_features(item.features, expected)
                     if errors:
