@@ -16,6 +16,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.ml_metrics import inference_duration_seconds, predictions_total
 from src.core.rate_limit import limiter
 from src.core.security import check_prediction_rate_limit, require_admin, verify_token
 from src.db.database import AsyncSessionLocal, get_db
@@ -38,7 +39,6 @@ from src.schemas.prediction import (
     PredictionStatsResponse,
     PurgeResponse,
 )
-from src.core.ml_metrics import inference_duration_seconds, predictions_total
 from src.services.db_service import DBService
 from src.services.input_validation_service import resolve_expected_features, validate_input_features
 from src.services.model_service import model_service

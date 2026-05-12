@@ -145,6 +145,7 @@ async def _do_retrain(name: str, version: str) -> None:
     from sqlalchemy import and_, select
 
     from src.core.config import settings
+    from src.core.ml_metrics import retrain_total
     from src.db.database import AsyncSessionLocal
     from src.db.models import HistoryActionType, ModelMetadata
     from src.services.auto_promotion_service import evaluate_auto_promotion
@@ -152,8 +153,6 @@ async def _do_retrain(name: str, version: str) -> None:
     from src.services.minio_service import minio_service
     from src.services.mlflow_service import mlflow_service
     from src.services.model_service import compute_model_hmac
-
-    from src.core.ml_metrics import retrain_total
 
     logger.info("Démarrage du ré-entraînement planifié", model=name, version=version)
     structlog.contextvars.bind_contextvars(event_type="retrain", model_name=name)
