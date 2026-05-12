@@ -971,6 +971,13 @@ async def predict(
 async def predict_batch(
     input_data: BatchPredictionInput,
     request: Request,
+    strict_validation: bool = Query(
+        False,
+        description=(
+            "Si true, rejette la requête avec 422 si des features inattendues sont présentes "
+            "dans l'un des items du batch."
+        ),
+    ),
     user: User = Depends(check_prediction_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1039,6 +1046,22 @@ async def predict_batch(
                         f"{sorted(missing)}. Features attendues : {list(model.feature_names_in_)}"
                     ),
                 )
+
+            # Mode strict : rejeter si des features inattendues sont présentes
+            if strict_validation:
+                expected = resolve_expected_features(model, getattr(metadata, "feature_baseline", None))
+                if expected is not None:
+                    errors, _ = validate_input_features(item.features, expected)
+                    if errors:
+                        raise HTTPException(
+                            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail={
+                                "message": f"Validation stricte échouée pour l'observation '{item.id_obs}' : le schéma d'entrée ne correspond pas.",
+                                "valid": False,
+                                "errors": [e.model_dump() for e in errors],
+                                "expected_features": sorted(expected),
+                            },
+                        )
 
             x = np.array([[item.features[name] for name in model.feature_names_in_]], dtype=object)
 

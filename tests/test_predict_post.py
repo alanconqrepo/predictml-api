@@ -511,3 +511,47 @@ def test_predict_batch_empty_inputs_returns_422():
         json={"model_name": PP_IRIS_MODEL, "inputs": []},
     )
     assert response.status_code == 422
+
+
+def test_predict_batch_strict_validation_rejects_unexpected_features():
+    """POST /predict-batch?strict_validation=true — feature inattendue sur un item → 422."""
+    model = _make_iris_model()
+    key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
+    try:
+        response = client.post(
+            "/predict-batch?strict_validation=true",
+            headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+            json={
+                "model_name": PP_IRIS_MODEL,
+                "inputs": [
+                    {"features": {"f1": 1.0, "f2": 2.0, "f3": 0.1, "extra_col": 99.0}},
+                ],
+            },
+        )
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert detail["valid"] is False
+        assert any(e["type"] == "unexpected_feature" for e in detail["errors"])
+    finally:
+        asyncio.run(model_service.clear_cache(key))
+
+
+def test_predict_batch_strict_validation_false_allows_unexpected_features():
+    """POST /predict-batch sans strict_validation — feature inattendue ignorée silencieusement → 200."""
+    model = _make_iris_model()
+    key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
+    try:
+        response = client.post(
+            "/predict-batch",
+            headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+            json={
+                "model_name": PP_IRIS_MODEL,
+                "inputs": [
+                    {"features": {"f1": 1.0, "f2": 2.0, "f3": 0.1, "extra_col": 99.0}},
+                ],
+            },
+        )
+        assert response.status_code == 200
+        assert len(response.json()["predictions"]) == 1
+    finally:
+        asyncio.run(model_service.clear_cache(key))
