@@ -37,6 +37,20 @@
         ],
         "hide": 0,
         "query": "1m,5m,10m,30m"
+      },
+      {
+        "name": "model_name",
+        "type": "query",
+        "label": "Modèle",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(predictml_predictions_total, model_name)",
+        "current": { "value": "$__all", "text": "All" },
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "refresh": 2,
+        "sort": 1,
+        "hide": 0
       }
     ]
   },
@@ -318,7 +332,7 @@
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [
         {
-          "expr": "{service_name=\"predictml-api\"} |= \"retrain\" | json",
+          "expr": "{service_name=\"predictml-api\"} |= \"retrain\" | json | model_name =~ \"$model_name\"",
           "legendFormat": "",
           "refId": "A"
         }
@@ -343,12 +357,12 @@
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [
         {
-          "expr": "{service_name=\"predictml-api\"} |= \"drift\" | json",
+          "expr": "{service_name=\"predictml-api\"} |= \"drift\" | json | model_name =~ \"$model_name\"",
           "legendFormat": "",
           "refId": "A"
         },
         {
-          "expr": "{service_name=\"predictml-api\"} |= \"alert\" | json",
+          "expr": "{service_name=\"predictml-api\"} |= \"alert\" | json | model_name =~ \"$model_name\"",
           "legendFormat": "",
           "refId": "B"
         }
@@ -373,7 +387,7 @@
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [
         {
-          "expr": "{service_name=\"predictml-api\"} | json | level =~ \"(?i)(error|warning|warn|critical)\"",
+          "expr": "{service_name=\"predictml-api\"} | json | level =~ \"(?i)(error|warning|warn|critical)\" | model_name =~ \"$model_name\"",
           "legendFormat": "",
           "refId": "A"
         }
@@ -396,7 +410,215 @@
       "gridPos": { "h": 3, "w": 24, "x": 0, "y": 38 },
       "options": {
         "mode": "markdown",
-        "content": "**Les panels de logs ci-dessus nécessitent `ENABLE_OTEL=true` dans le `.env`.**  \nSans OTEL, les logs ne sont pas envoyés à Loki et les panels restent vides.  \nPour explorer les traces, utilisez le datasource **Tempo** dans le menu Explore de Grafana.  \nVoir [documentation/GRAFANA_OTEL.md](https://github.com/alanconqrepo/predictml-api/blob/main/documentation/GRAFANA_OTEL.md) pour les détails."
+        "content": "**Les panels de logs (ci-dessus) et métriques ML (ci-dessous) nécessitent `ENABLE_OTEL=true` dans le `.env`** — activé par défaut depuis la v2.1.  \nPour explorer les traces, utilisez le datasource **Tempo** dans Grafana → Explore.  \nVoir [documentation/GRAFANA_OTEL.md](https://github.com/alanconqrepo/predictml-api/blob/main/documentation/GRAFANA_OTEL.md) pour les détails."
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Prédictions par modèle (predictml_predictions_total)",
+      "description": "Taux de prédictions par seconde, filtré par modèle et statut. Source : compteur Prometheus ML custom.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 41 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(predictml_predictions_total{model_name=~\"$model_name\", status=\"success\"}[$interval])) by (model_name, version)",
+          "legendFormat": "{{model_name}} {{version}} ✓",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(predictml_predictions_total{model_name=~\"$model_name\", status=\"error\"}[$interval])) by (model_name, version)",
+          "legendFormat": "{{model_name}} {{version}} ✗",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["mean", "max", "sum"]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": false }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Latence d'inférence ML P95 par modèle",
+      "description": "95e percentile de la durée d'inférence ML (endpoint /predict complet) par modèle. Source : histogram Prometheus ML custom.",
+      "gridPos": { "h": 8, "w": 14, "x": 0, "y": 49 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(predictml_inference_duration_seconds_bucket{model_name=~\"$model_name\"}[$interval])) by (le, model_name)) * 1000",
+          "legendFormat": "{{model_name}} P50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(predictml_inference_duration_seconds_bucket{model_name=~\"$model_name\"}[$interval])) by (le, model_name)) * 1000",
+          "legendFormat": "{{model_name}} P95",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["mean", "max"]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "lineWidth": 2, "fillOpacity": 8, "spanNulls": false }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Retrains (total période)",
+      "description": "Nombre de ré-entraînements déclenchés (manuels + planifiés) sur la période sélectionnée.",
+      "gridPos": { "h": 4, "w": 5, "x": 14, "y": 49 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(increase(predictml_retrain_total{model_name=~\"$model_name\", status=\"success\"}[$interval]))",
+          "legendFormat": "succès",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(predictml_retrain_total{model_name=~\"$model_name\", status=\"failure\"}[$interval]))",
+          "legendFormat": "échecs",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["sum"] },
+        "orientation": "vertical",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "échecs" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Drifts détectés (période)",
+      "description": "Événements de drift (feature, performance, output, error_rate) détectés par le scheduler de supervision.",
+      "gridPos": { "h": 4, "w": 5, "x": 19, "y": 49 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(increase(predictml_drift_detected_total{model_name=~\"$model_name\", severity=\"critical\"}[$interval]))",
+          "legendFormat": "critical",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(predictml_drift_detected_total{model_name=~\"$model_name\", severity=\"warning\"}[$interval]))",
+          "legendFormat": "warning",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["sum"] },
+        "orientation": "vertical",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "critical" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "warning" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Drift détecté par type (predictml_drift_detected_total)",
+      "description": "Événements de drift cumulés sur la période, par type et sévérité. Source : counter Prometheus ML custom.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 57 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum(increase(predictml_drift_detected_total{model_name=~\"$model_name\"}[$interval])) by (model_name, drift_type, severity)",
+          "legendFormat": "{{model_name}} — {{drift_type}} ({{severity}})",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["sum"]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": false }
+        },
+        "overrides": []
       }
     }
   ]

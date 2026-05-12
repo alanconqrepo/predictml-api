@@ -38,6 +38,7 @@ from src.schemas.prediction import (
     PredictionStatsResponse,
     PurgeResponse,
 )
+from src.core.ml_metrics import inference_duration_seconds, predictions_total
 from src.services.db_service import DBService
 from src.services.input_validation_service import resolve_expected_features, validate_input_features
 from src.services.model_service import model_service
@@ -750,6 +751,9 @@ async def predict(
     probability = None
     error_message = None
     shadow_meta = None
+    _metric_version = "unknown"
+    _metric_mode = "production"
+    structlog.contextvars.bind_contextvars(event_type="predict", model_name=input_data.model_name)
 
     try:
         # --- Routage : version explicite OU routage A/B/shadow ---
@@ -843,6 +847,18 @@ async def predict(
             low_confidence = max(probability) < metadata.confidence_threshold
 
         response_time_ms = (time.time() - start_time) * 1000
+        _metric_version = metadata.version
+        _metric_mode = "explicit" if input_data.model_version is not None else "production"
+        predictions_total.labels(
+            model_name=metadata.name,
+            version=_metric_version,
+            mode=_metric_mode,
+            status="success",
+        ).inc()
+        inference_duration_seconds.labels(
+            model_name=metadata.name,
+            version=_metric_version,
+        ).observe(response_time_ms / 1000)
 
         # Logger la prédiction réussie dans la DB
         await DBService.create_prediction(
@@ -937,6 +953,13 @@ async def predict(
         response_time_ms = (time.time() - start_time) * 1000
         error_message = str(e)
 
+        predictions_total.labels(
+            model_name=input_data.model_name,
+            version=_metric_version,
+            mode=_metric_mode,
+            status="error",
+        ).inc()
+
         try:
             await DBService.create_prediction(
                 db=db,
@@ -965,6 +988,9 @@ async def predict(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Erreur interne lors de la prédiction. Consultez les logs serveur.",
         )
+
+    finally:
+        structlog.contextvars.clear_contextvars()
 
 
 @router.post("/predict-batch", response_model=BatchPredictionOutput)

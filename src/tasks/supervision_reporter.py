@@ -54,7 +54,10 @@ async def run_alert_check() -> None:
       - error_rate_threshold : taux d'erreur > seuil
       - drift_critical       : drift de features critique détecté
     """
+    from src.core.ml_metrics import drift_detected_total
+
     logger.info("Vérification des alertes de supervision")
+    structlog.contextvars.bind_contextvars(event_type="supervision")
 
     try:
         from src.db.database import AsyncSessionLocal
@@ -92,6 +95,10 @@ async def run_alert_check() -> None:
                     thresholds, "error_rate_max", settings.ERROR_RATE_ALERT_THRESHOLD
                 )
                 if error_rate >= error_threshold:
+                    severity = "critical" if error_rate >= error_threshold * 2 else "warning"
+                    drift_detected_total.labels(
+                        model_name=model_name, drift_type="error_rate", severity=severity
+                    ).inc()
                     logger.warning(
                         "Pic d'erreurs détecté",
                         model=model_name,
@@ -143,6 +150,11 @@ async def run_alert_check() -> None:
                             should_alert = drop >= settings.PERFORMANCE_DRIFT_ALERT_THRESHOLD
 
                         if should_alert:
+                            drift_detected_total.labels(
+                                model_name=model_name,
+                                drift_type="performance",
+                                severity="warning",
+                            ).inc()
                             logger.warning(
                                 "Drift de performance détecté",
                                 model=model_name,
@@ -169,6 +181,12 @@ async def run_alert_check() -> None:
                                 _max_input_drift, 0
                             ):
                                 _max_input_drift = feat_result.drift_status
+                            if feat_result.drift_status in ("warning", "critical"):
+                                drift_detected_total.labels(
+                                    model_name=model_name,
+                                    drift_type="feature",
+                                    severity=feat_result.drift_status,
+                                ).inc()
                             if feat_result.drift_status == "critical":
                                 logger.warning(
                                     "Drift features critique",
@@ -216,6 +234,12 @@ async def run_alert_check() -> None:
                             min_predictions=10,
                         )
                         _max_output_drift = output_report.status
+                        if output_report.status in ("warning", "critical"):
+                            drift_detected_total.labels(
+                                model_name=model_name,
+                                drift_type="output",
+                                severity=output_report.status,
+                            ).inc()
                         if output_report.status == "critical":
                             logger.warning(
                                 "Drift de sortie critique (label shift)",
@@ -288,6 +312,8 @@ async def run_alert_check() -> None:
 
     except Exception as exc:
         logger.error("Erreur lors de la vérification des alertes", error=str(exc))
+    finally:
+        structlog.contextvars.clear_contextvars()
 
 
 async def run_weekly_report() -> None:
