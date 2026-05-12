@@ -145,6 +145,7 @@ async def _do_retrain(name: str, version: str) -> None:
     from sqlalchemy import and_, select
 
     from src.core.config import settings
+    from src.core.ml_metrics import retrain_total
     from src.db.database import AsyncSessionLocal
     from src.db.models import HistoryActionType, ModelMetadata
     from src.services.auto_promotion_service import evaluate_auto_promotion
@@ -154,6 +155,7 @@ async def _do_retrain(name: str, version: str) -> None:
     from src.services.model_service import compute_model_hmac
 
     logger.info("Démarrage du ré-entraînement planifié", model=name, version=version)
+    structlog.contextvars.bind_contextvars(event_type="retrain", model_name=name)
 
     async with AsyncSessionLocal() as db:
         # 1. Charger le modèle source
@@ -196,6 +198,7 @@ async def _do_retrain(name: str, version: str) -> None:
                 version=version,
                 error=str(exc),
             )
+            retrain_total.labels(model_name=name, status="failure").inc()
             return
 
         # 4. Exécuter le subprocess (timeout 600 s — identique à l'endpoint manuel)
@@ -246,6 +249,7 @@ async def _do_retrain(name: str, version: str) -> None:
                         model=name,
                         version=version,
                     )
+                    retrain_total.labels(model_name=name, status="failure").inc()
                     return
 
                 stdout_text = raw_stdout.decode("utf-8", errors="replace")
@@ -258,6 +262,7 @@ async def _do_retrain(name: str, version: str) -> None:
                         returncode=proc.returncode,
                         stderr=stderr_text[:500],
                     )
+                    retrain_total.labels(model_name=name, status="failure").inc()
                     return
 
                 if not os.path.exists(output_model_path):
@@ -266,6 +271,7 @@ async def _do_retrain(name: str, version: str) -> None:
                         model=name,
                         version=version,
                     )
+                    retrain_total.labels(model_name=name, status="failure").inc()
                     return
 
                 with open(output_model_path, "rb") as f:
@@ -278,6 +284,7 @@ async def _do_retrain(name: str, version: str) -> None:
                     version=version,
                     error=str(exc),
                 )
+                retrain_total.labels(model_name=name, status="failure").inc()
                 return
 
         # 5. Extraire les métriques depuis la dernière ligne JSON de stdout
@@ -477,6 +484,7 @@ async def _do_retrain(name: str, version: str) -> None:
                     )
                 )
 
+        retrain_total.labels(model_name=name, status="success").inc()
         logger.info(
             "Ré-entraînement planifié terminé",
             model=name,
@@ -484,6 +492,8 @@ async def _do_retrain(name: str, version: str) -> None:
             new_version=new_version,
             stdout_lines=len(stdout_text.splitlines()),
         )
+
+    structlog.contextvars.clear_contextvars()
 
 
 # ---------------------------------------------------------------------------

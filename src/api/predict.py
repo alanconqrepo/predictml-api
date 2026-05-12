@@ -16,6 +16,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.ml_metrics import inference_duration_seconds, predictions_total
 from src.core.rate_limit import limiter
 from src.core.security import check_prediction_rate_limit, require_admin, verify_token
 from src.db.database import AsyncSessionLocal, get_db
@@ -750,6 +751,9 @@ async def predict(
     probability = None
     error_message = None
     shadow_meta = None
+    _metric_version = "unknown"
+    _metric_mode = "production"
+    structlog.contextvars.bind_contextvars(event_type="predict", model_name=input_data.model_name)
 
     try:
         # --- Routage : version explicite OU routage A/B/shadow ---
@@ -843,6 +847,18 @@ async def predict(
             low_confidence = max(probability) < metadata.confidence_threshold
 
         response_time_ms = (time.time() - start_time) * 1000
+        _metric_version = metadata.version
+        _metric_mode = "explicit" if input_data.model_version is not None else "production"
+        predictions_total.labels(
+            model_name=metadata.name,
+            version=_metric_version,
+            mode=_metric_mode,
+            status="success",
+        ).inc()
+        inference_duration_seconds.labels(
+            model_name=metadata.name,
+            version=_metric_version,
+        ).observe(response_time_ms / 1000)
 
         # Logger la prédiction réussie dans la DB
         await DBService.create_prediction(
@@ -937,6 +953,13 @@ async def predict(
         response_time_ms = (time.time() - start_time) * 1000
         error_message = str(e)
 
+        predictions_total.labels(
+            model_name=input_data.model_name,
+            version=_metric_version,
+            mode=_metric_mode,
+            status="error",
+        ).inc()
+
         try:
             await DBService.create_prediction(
                 db=db,
@@ -965,6 +988,9 @@ async def predict(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Erreur interne lors de la prédiction. Consultez les logs serveur.",
         )
+
+    finally:
+        structlog.contextvars.clear_contextvars()
 
 
 @router.post("/predict-batch", response_model=BatchPredictionOutput)

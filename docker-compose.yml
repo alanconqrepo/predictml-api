@@ -97,7 +97,7 @@ services:
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
       - MINIO_BUCKET=${MINIO_BUCKET:-models}
       - ADMIN_TOKEN=${ADMIN_TOKEN:-}
-      - ENABLE_OTEL=${ENABLE_OTEL:-false}
+      - ENABLE_OTEL=${ENABLE_OTEL:-true}
       - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-predictml-api}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://grafana:4317}
       - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis:6379/0
