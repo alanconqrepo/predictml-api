@@ -5,6 +5,7 @@ Endpoints pour les prédictions
 import csv
 import io
 import json
+import os
 import time
 from datetime import datetime
 from typing import List, Optional
@@ -993,7 +994,11 @@ async def predict(
         structlog.contextvars.clear_contextvars()
 
 
+MAX_BATCH_SIZE = int(os.getenv("MAX_BATCH_SIZE", "500"))
+
+
 @router.post("/predict-batch", response_model=BatchPredictionOutput)
+@limiter.limit("10/minute")
 async def predict_batch(
     input_data: BatchPredictionInput,
     request: Request,
@@ -1020,6 +1025,11 @@ async def predict_batch(
     Nécessite un token Bearer dans le header Authorization.
     """
     batch_size = len(input_data.inputs)
+    if batch_size > MAX_BATCH_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Batch trop grand ({batch_size} items, max {MAX_BATCH_SIZE}).",
+        )
     client_ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
 
