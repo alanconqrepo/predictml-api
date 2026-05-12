@@ -130,5 +130,9 @@ class Settings:
     # Taux d'erreur déclenchant une alerte (ex: 0.10 = 10 %)
     ERROR_RATE_ALERT_THRESHOLD: float = float(os.getenv("ERROR_RATE_ALERT_THRESHOLD", "0.10"))
 
+    # Analytics safety caps — protect aggregation queries from full-table scans
+    MAX_ROWS_ANALYTICS: int = int(os.getenv("MAX_ROWS_ANALYTICS", "50000"))
+    ANALYTICS_MAX_DAYS: int = int(os.getenv("ANALYTICS_MAX_DAYS", "90"))
+
 
 settings = Settings()

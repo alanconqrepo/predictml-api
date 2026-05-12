@@ -135,13 +135,18 @@ class DBService:
         Agrège les prédictions par modèle (calls, errors, avg_latency_ms)
         et par jour (calls), calculées côté Python pour compatibilité SQLite/PostgreSQL.
         """
+        days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
-        stmt = select(
-            Prediction.model_name,
-            Prediction.status,
-            Prediction.response_time_ms,
-            Prediction.timestamp,
-        ).where(and_(Prediction.user_id == user_id, Prediction.timestamp >= cutoff))
+        stmt = (
+            select(
+                Prediction.model_name,
+                Prediction.status,
+                Prediction.response_time_ms,
+                Prediction.timestamp,
+            )
+            .where(and_(Prediction.user_id == user_id, Prediction.timestamp >= cutoff))
+            .limit(settings.MAX_ROWS_ANALYTICS)
+        )
 
         result = await db.execute(stmt)
         rows = result.all()
@@ -414,6 +419,7 @@ class DBService:
             )
             .where(and_(*filters))
             .order_by(Prediction.timestamp)
+            .limit(settings.MAX_ROWS_ANALYTICS)
         )
 
         result = await db.execute(stmt)
@@ -516,6 +522,10 @@ class DBService:
         Plus légère que get_performance_pairs() : ne sélectionne pas les probabilities.
         Retourne une liste de dicts {"date": "YYYY-MM-DD", "matched_count": int, "accuracy": float}.
         """
+        max_start = end - timedelta(days=settings.ANALYTICS_MAX_DAYS)
+        if start < max_start:
+            start = max_start
+
         filters = [
             Prediction.model_name == model_name,
             Prediction.status == "success",
@@ -541,6 +551,7 @@ class DBService:
             )
             .where(and_(*filters))
             .order_by(func.date(Prediction.timestamp))
+            .limit(settings.MAX_ROWS_ANALYTICS)
         )
 
         result = await db.execute(stmt)
@@ -593,6 +604,7 @@ class DBService:
         """
         import numpy as np
 
+        days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
 
         filters = [
@@ -605,10 +617,14 @@ class DBService:
         if version:
             filters.append(Prediction.model_version == version)
 
-        stmt = select(
-            func.date(Prediction.timestamp).label("day"),
-            Prediction.probabilities,
-        ).where(and_(*filters))
+        stmt = (
+            select(
+                func.date(Prediction.timestamp).label("day"),
+                Prediction.probabilities,
+            )
+            .where(and_(*filters))
+            .limit(settings.MAX_ROWS_ANALYTICS)
+        )
 
         result = await db.execute(stmt)
         rows = result.all()
@@ -666,6 +682,7 @@ class DBService:
     ) -> dict:
         import numpy as np
 
+        days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
 
         filters = [
@@ -678,7 +695,11 @@ class DBService:
         if version:
             filters.append(Prediction.model_version == version)
 
-        stmt = select(Prediction.probabilities).where(and_(*filters))
+        stmt = (
+            select(Prediction.probabilities)
+            .where(and_(*filters))
+            .limit(settings.MAX_ROWS_ANALYTICS)
+        )
         result = await db.execute(stmt)
         rows = result.scalars().all()
 
@@ -737,6 +758,7 @@ class DBService:
 
         import numpy as np
 
+        days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
 
         filters = [
@@ -747,7 +769,11 @@ class DBService:
         if model_version:
             filters.append(Prediction.model_version == model_version)
 
-        stmt = select(Prediction.input_features).where(and_(*filters))
+        stmt = (
+            select(Prediction.input_features)
+            .where(and_(*filters))
+            .limit(settings.MAX_ROWS_ANALYTICS)
+        )
         result = await db.execute(stmt)
         rows = result.scalars().all()
 
@@ -786,6 +812,7 @@ class DBService:
         days: int = 7,
     ) -> tuple[dict[str, int], int]:
         """Returns ({label: count}, total) for successful predictions in the last N days."""
+        days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
         filters = [
             Prediction.model_name == model_name,
@@ -796,7 +823,11 @@ class DBService:
         if model_version:
             filters.append(Prediction.model_version == model_version)
 
-        stmt = select(Prediction.prediction_result).where(and_(*filters))
+        stmt = (
+            select(Prediction.prediction_result)
+            .where(and_(*filters))
+            .limit(settings.MAX_ROWS_ANALYTICS)
+        )
         result = await db.execute(stmt)
         rows = result.scalars().all()
 
@@ -819,16 +850,21 @@ class DBService:
         - total, erreurs, taux d'erreur
         - temps de réponse moyen, p50, p95 (uniquement pour les prédictions réussies)
         """
+        days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
         filters = [Prediction.timestamp >= cutoff]
         if model_name:
             filters.append(Prediction.model_name == model_name)
 
-        stmt = select(
-            Prediction.model_name,
-            Prediction.status,
-            Prediction.response_time_ms,
-        ).where(and_(*filters))
+        stmt = (
+            select(
+                Prediction.model_name,
+                Prediction.status,
+                Prediction.response_time_ms,
+            )
+            .where(and_(*filters))
+            .limit(settings.MAX_ROWS_ANALYTICS)
+        )
 
         result = await db.execute(stmt)
         rows = result.all()
@@ -1430,19 +1466,24 @@ class DBService:
         Group by (model_version, is_shadow) — agrégation Python-side pour compatibilité SQLite.
         Retourne une liste de dicts, un par version active dans la fenêtre.
         """
+        days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
 
-        stmt = select(
-            Prediction.model_version,
-            Prediction.is_shadow,
-            Prediction.status,
-            Prediction.response_time_ms,
-            Prediction.prediction_result,
-        ).where(
-            and_(
-                Prediction.model_name == model_name,
-                Prediction.timestamp >= cutoff,
+        stmt = (
+            select(
+                Prediction.model_version,
+                Prediction.is_shadow,
+                Prediction.status,
+                Prediction.response_time_ms,
+                Prediction.prediction_result,
             )
+            .where(
+                and_(
+                    Prediction.model_name == model_name,
+                    Prediction.timestamp >= cutoff,
+                )
+            )
+            .limit(settings.MAX_ROWS_ANALYTICS)
         )
 
         result = await db.execute(stmt)
@@ -1512,6 +1553,7 @@ class DBService:
         """
         from sqlalchemy.orm import aliased
 
+        days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
 
         prod_p = aliased(Prediction)
@@ -1541,6 +1583,7 @@ class DBService:
                     shadow_p.id_obs.isnot(None),
                 )
             )
+            .limit(settings.MAX_ROWS_ANALYTICS)
         )
 
         result = await db.execute(stmt)
@@ -1573,6 +1616,7 @@ class DBService:
         """
         from sqlalchemy.orm import aliased
 
+        period_days = min(period_days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=period_days)
 
         meta_result = await db.execute(
@@ -1633,6 +1677,7 @@ class DBService:
                     shadow_p.id_obs.isnot(None),
                 )
             )
+            .limit(settings.MAX_ROWS_ANALYTICS)
         )
 
         result = await db.execute(stmt)
@@ -1710,18 +1755,26 @@ class DBService:
         Aggrégation Python-side (compatible SQLite + PostgreSQL, percentiles inclus).
         Retourne une liste de dicts, un par model_name distinct dans la période.
         """
-        stmt = select(
-            Prediction.model_name,
-            Prediction.model_version,
-            Prediction.is_shadow,
-            Prediction.status,
-            Prediction.response_time_ms,
-            Prediction.timestamp,
-        ).where(
-            and_(
-                Prediction.timestamp >= start,
-                Prediction.timestamp <= end,
+        max_start = end - timedelta(days=settings.ANALYTICS_MAX_DAYS)
+        if start < max_start:
+            start = max_start
+
+        stmt = (
+            select(
+                Prediction.model_name,
+                Prediction.model_version,
+                Prediction.is_shadow,
+                Prediction.status,
+                Prediction.response_time_ms,
+                Prediction.timestamp,
             )
+            .where(
+                and_(
+                    Prediction.timestamp >= start,
+                    Prediction.timestamp <= end,
+                )
+            )
+            .limit(settings.MAX_ROWS_ANALYTICS)
         )
 
         result = await db.execute(stmt)
@@ -1795,17 +1848,25 @@ class DBService:
         Retourne une liste de dicts triée par date asc :
         [{date, total_predictions, error_count, error_rate, avg/p50/p95_latency_ms}]
         """
-        stmt = select(
-            Prediction.status,
-            Prediction.response_time_ms,
-            Prediction.timestamp,
-        ).where(
-            and_(
-                Prediction.model_name == model_name,
-                Prediction.is_shadow.is_(False),
-                Prediction.timestamp >= start,
-                Prediction.timestamp <= end,
+        max_start = end - timedelta(days=settings.ANALYTICS_MAX_DAYS)
+        if start < max_start:
+            start = max_start
+
+        stmt = (
+            select(
+                Prediction.status,
+                Prediction.response_time_ms,
+                Prediction.timestamp,
             )
+            .where(
+                and_(
+                    Prediction.model_name == model_name,
+                    Prediction.is_shadow.is_(False),
+                    Prediction.timestamp >= start,
+                    Prediction.timestamp <= end,
+                )
+            )
+            .limit(settings.MAX_ROWS_ANALYTICS)
         )
 
         result = await db.execute(stmt)
@@ -1856,17 +1917,25 @@ class DBService:
 
         Retourne une liste de dicts : un par version (non-shadow + shadow séparément).
         """
-        stmt = select(
-            Prediction.model_version,
-            Prediction.is_shadow,
-            Prediction.status,
-            Prediction.response_time_ms,
-        ).where(
-            and_(
-                Prediction.model_name == model_name,
-                Prediction.timestamp >= start,
-                Prediction.timestamp <= end,
+        max_start = end - timedelta(days=settings.ANALYTICS_MAX_DAYS)
+        if start < max_start:
+            start = max_start
+
+        stmt = (
+            select(
+                Prediction.model_version,
+                Prediction.is_shadow,
+                Prediction.status,
+                Prediction.response_time_ms,
             )
+            .where(
+                and_(
+                    Prediction.model_name == model_name,
+                    Prediction.timestamp >= start,
+                    Prediction.timestamp <= end,
+                )
+            )
+            .limit(settings.MAX_ROWS_ANALYTICS)
         )
 
         result = await db.execute(stmt)
