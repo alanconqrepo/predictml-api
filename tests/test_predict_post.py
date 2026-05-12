@@ -7,14 +7,14 @@ Stratégie de mock :
   - Chaque test nettoie le cache avec try/finally pour éviter les interférences
   - Pas de Docker requis (SQLite in-memory + modèles créés à la volée)
 """
+
 import asyncio
 import pickle
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
-import pytest
 from fastapi.testclient import TestClient
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeRegressor
@@ -28,10 +28,10 @@ client = TestClient(app)
 
 # Tokens et noms de modèles uniques à ce fichier de test
 TEST_TOKEN = "test-token-predict-post-xq7z"
-PP_IRIS_MODEL = "pp_iris_model"       # LogisticRegression, 3 features, predict_proba
-PP_REGRESSOR_MODEL = "pp_reg_model"   # DecisionTreeRegressor, 2 features, pas de predict_proba
-PP_NOFEAT_MODEL = "pp_nofeat_model"   # LogisticRegression sans feature_names_in_
-PP_VERSIONED_MODEL = "pp_versioned"   # Pour tester model_version explicite
+PP_IRIS_MODEL = "pp_iris_model"  # LogisticRegression, 3 features, predict_proba
+PP_REGRESSOR_MODEL = "pp_reg_model"  # DecisionTreeRegressor, 2 features, pas de predict_proba
+PP_NOFEAT_MODEL = "pp_nofeat_model"  # LogisticRegression sans feature_names_in_
+PP_VERSIONED_MODEL = "pp_versioned"  # Pour tester model_version explicite
 MODEL_VERSION = "1.0.0"
 MODEL_VERSION_V2 = "2.0.0"
 
@@ -40,25 +40,28 @@ MODEL_VERSION_V2 = "2.0.0"
 # Helpers — construction de modèles
 # ---------------------------------------------------------------------------
 
+
 def _make_iris_model() -> LogisticRegression:
     """LogisticRegression sur DataFrame → feature_names_in_ + predict_proba."""
-    X = pd.DataFrame({"f1": [1.0, 2.0, 3.0, 4.0], "f2": [2.0, 3.0, 4.0, 5.0], "f3": [0.1, 0.2, 0.3, 0.4]})
+    x = pd.DataFrame(
+        {"f1": [1.0, 2.0, 3.0, 4.0], "f2": [2.0, 3.0, 4.0, 5.0], "f3": [0.1, 0.2, 0.3, 0.4]}
+    )
     y = [0, 1, 0, 1]
-    return LogisticRegression(max_iter=1000).fit(X, y)
+    return LogisticRegression(max_iter=1000).fit(x, y)
 
 
 def _make_regressor_model() -> DecisionTreeRegressor:
     """DecisionTreeRegressor sur DataFrame → feature_names_in_ mais PAS predict_proba."""
-    X = pd.DataFrame({"f1": [1.0, 2.0, 3.0], "f2": [4.0, 5.0, 6.0]})
+    x = pd.DataFrame({"f1": [1.0, 2.0, 3.0], "f2": [4.0, 5.0, 6.0]})
     y = [0.5, 1.5, 2.5]
-    return DecisionTreeRegressor().fit(X, y)
+    return DecisionTreeRegressor().fit(x, y)
 
 
 def _make_model_no_feature_names() -> LogisticRegression:
     """LogisticRegression sur numpy array → PAS de feature_names_in_."""
-    X = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]])
+    x = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]])
     y = [0, 1, 0, 1]
-    return LogisticRegression(max_iter=1000).fit(X, y)
+    return LogisticRegression(max_iter=1000).fit(x, y)
 
 
 def _inject_cache(model_name: str, version: str, model) -> str:
@@ -66,7 +69,9 @@ def _inject_cache(model_name: str, version: str, model) -> str:
     key = f"{model_name}:{version}"
     data = {
         "model": model,
-        "metadata": SimpleNamespace(name=model_name, version=version, confidence_threshold=None, webhook_url=None),
+        "metadata": SimpleNamespace(
+            name=model_name, version=version, confidence_threshold=None, webhook_url=None
+        ),
     }
     asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
     return key
@@ -75,6 +80,7 @@ def _inject_cache(model_name: str, version: str, model) -> str:
 # ---------------------------------------------------------------------------
 # Setup module-level : user + entrées ModelMetadata en DB
 # ---------------------------------------------------------------------------
+
 
 async def _setup():
     async with _TestSessionLocal() as db:
@@ -118,6 +124,7 @@ asyncio.run(_setup())
 # Auth
 # ---------------------------------------------------------------------------
 
+
 def test_predict_post_without_auth():
     """POST /predict sans header Authorization → 401/403."""
     response = client.post(
@@ -140,6 +147,7 @@ def test_predict_post_with_invalid_token():
 # ---------------------------------------------------------------------------
 # Happy path
 # ---------------------------------------------------------------------------
+
 
 def test_predict_success_happy_path():
     """POST /predict — prédiction réussie : 200 avec tous les champs attendus."""
@@ -261,6 +269,7 @@ def test_predict_saves_to_db():
 # predict_proba
 # ---------------------------------------------------------------------------
 
+
 def test_predict_with_predict_proba():
     """Modèle avec predict_proba → probability est une liste de floats."""
     model = _make_iris_model()
@@ -300,6 +309,7 @@ def test_predict_without_predict_proba():
 # Erreurs métier (422 / 404)
 # ---------------------------------------------------------------------------
 
+
 def test_predict_missing_features_returns_422():
     """Features manquantes dans la requête → 422 avec message explicatif."""
     model = _make_iris_model()
@@ -312,7 +322,10 @@ def test_predict_missing_features_returns_422():
             json={"model_name": PP_IRIS_MODEL, "features": {"f1": 1.0}},
         )
         assert response.status_code == 422
-        assert "manquantes" in response.json()["detail"].lower() or "missing" in response.json()["detail"].lower()
+        assert (
+            "manquantes" in response.json()["detail"].lower()
+            or "missing" in response.json()["detail"].lower()
+        )
     finally:
         asyncio.run(model_service.clear_cache(key))
 
@@ -346,6 +359,7 @@ def test_predict_model_not_found_returns_404():
 # ---------------------------------------------------------------------------
 # POST /predict-batch
 # ---------------------------------------------------------------------------
+
 
 def test_predict_batch_success_happy_path():
     """POST /predict-batch — batch de 2 observations → 200 avec liste de résultats."""
