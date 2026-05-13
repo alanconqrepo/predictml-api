@@ -249,6 +249,7 @@ services:
       - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis-master:6379/0
       - REDIS_SENTINEL_HOSTS=redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
       - REDIS_CACHE_TTL=${REDIS_CACHE_TTL:-3600}
+      - PREDICTION_STREAM_ENABLED=true
       - METRICS_TOKEN=${METRICS_TOKEN:-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
@@ -287,6 +288,39 @@ services:
     networks:
       - internal
       - frontend
+
+  # Worker — consommateur Redis Stream, batch INSERT en DB
+  prediction-writer:
+    build: .
+    command: python -m src.workers.prediction_writer
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:5432/${POSTGRES_DB:-sklearn_api}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis-master:6379/0
+      - REDIS_SENTINEL_HOSTS=redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+      - SECRET_KEY=${SECRET_KEY:?Définissez SECRET_KEY dans .env}
+      - PREDICTION_STREAM_ENABLED=true
+      - PREDICTION_STREAM_BATCH_SIZE=${PREDICTION_STREAM_BATCH_SIZE:-100}
+      - PREDICTION_STREAM_FLUSH_MS=${PREDICTION_STREAM_FLUSH_MS:-500}
+      - PREDICTION_STREAM_MAX_RETRIES=${PREDICTION_STREAM_MAX_RETRIES:-3}
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis-sentinel-1:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
 
   # MLflow Tracking Server
   mlflow:
