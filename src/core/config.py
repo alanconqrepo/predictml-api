@@ -137,5 +137,16 @@ class Settings:
     MAX_ROWS_ANALYTICS: int = int(os.getenv("MAX_ROWS_ANALYTICS", "50000"))
     ANALYTICS_MAX_DAYS: int = int(os.getenv("ANALYTICS_MAX_DAYS", "90"))
 
+    # Redis Streams — queue asynchrone des writes de prédictions
+    PREDICTION_STREAM_ENABLED: bool = (
+        os.getenv("PREDICTION_STREAM_ENABLED", "false").lower() == "true"
+    )
+    PREDICTION_STREAM_NAME: str = os.getenv("PREDICTION_STREAM_NAME", "predictions:new")
+    PREDICTION_STREAM_DLQ: str = os.getenv("PREDICTION_STREAM_DLQ", "predictions:dlq")
+    PREDICTION_STREAM_BATCH_SIZE: int = int(os.getenv("PREDICTION_STREAM_BATCH_SIZE", "100"))
+    PREDICTION_STREAM_FLUSH_MS: int = int(os.getenv("PREDICTION_STREAM_FLUSH_MS", "500"))
+    PREDICTION_STREAM_MAX_RETRIES: int = int(os.getenv("PREDICTION_STREAM_MAX_RETRIES", "3"))
+    PREDICTION_STREAM_MAXLEN: int = int(os.getenv("PREDICTION_STREAM_MAXLEN", "100000"))
+
 
 settings = Settings()

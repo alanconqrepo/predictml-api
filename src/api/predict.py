@@ -17,6 +17,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.config import settings
 from src.core.ml_metrics import inference_duration_seconds, predictions_total
 from src.core.rate_limit import limiter
 from src.core.security import check_prediction_rate_limit, require_admin, verify_token
@@ -119,6 +120,42 @@ async def _run_shadow_prediction(
             version=shadow_version,
             error=str(e),
         )
+
+
+async def _publish_prediction_to_stream(payload: dict) -> bool:
+    """Publie le payload de prédiction dans Redis Stream. Retourne True si succès, False sinon."""
+    try:
+        redis = await model_service._get_redis()
+        flat: dict = {
+            "user_id": str(payload["user_id"]),
+            "model_name": payload["model_name"],
+            "model_version": payload.get("model_version") or "",
+            "id_obs": payload.get("id_obs") or "",
+            "input_features": json.dumps(payload["input_features"], default=str),
+            "prediction_result": json.dumps(payload["prediction_result"], default=str),
+            "probabilities": (
+                json.dumps(payload["probabilities"]) if payload.get("probabilities") else ""
+            ),
+            "response_time_ms": str(payload["response_time_ms"]),
+            "client_ip": payload.get("client_ip") or "",
+            "user_agent": payload.get("user_agent") or "",
+            "status": payload.get("status", "success"),
+            "error_message": payload.get("error_message") or "",
+            "is_shadow": "true" if payload.get("is_shadow") else "false",
+            "max_confidence": (
+                str(payload["max_confidence"]) if payload.get("max_confidence") is not None else ""
+            ),
+        }
+        await redis.xadd(
+            settings.PREDICTION_STREAM_NAME,
+            flat,
+            maxlen=settings.PREDICTION_STREAM_MAXLEN,
+            approximate=True,
+        )
+        return True
+    except Exception as exc:
+        logger.warning("Échec publication stream Redis — fallback sync", error=str(exc))
+        return False
 
 
 @router.get("/predictions/stats", response_model=PredictionStatsResponse)
@@ -861,22 +898,27 @@ async def predict(
             version=_metric_version,
         ).observe(response_time_ms / 1000)
 
-        # Logger la prédiction réussie dans la DB
-        await DBService.create_prediction(
-            db=db,
-            user_id=user.id,
-            model_name=metadata.name,
-            model_version=metadata.version,
-            input_features=input_data.features,
-            prediction_result=prediction_result,
-            probabilities=probability,
-            response_time_ms=response_time_ms,
-            client_ip=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            status="success",
-            id_obs=input_data.id_obs,
-            max_confidence=max(probability) if probability else None,
-        )
+        # Logger la prédiction réussie — async via Redis Stream ou sync en fallback
+        _prediction_payload = {
+            "user_id": user.id,
+            "model_name": metadata.name,
+            "model_version": metadata.version,
+            "id_obs": input_data.id_obs,
+            "input_features": input_data.features,
+            "prediction_result": prediction_result,
+            "probabilities": probability,
+            "response_time_ms": response_time_ms,
+            "client_ip": request.client.host if request.client else None,
+            "user_agent": request.headers.get("user-agent"),
+            "status": "success",
+            "max_confidence": max(probability) if probability else None,
+        }
+        if settings.PREDICTION_STREAM_ENABLED:
+            _published = await _publish_prediction_to_stream(_prediction_payload)
+            if not _published:
+                await DBService.create_prediction(db=db, **_prediction_payload)
+        else:
+            await DBService.create_prediction(db=db, **_prediction_payload)
 
         # --- Dispatch shadow en background (si une version shadow est active) ---
         if shadow_meta is not None:
