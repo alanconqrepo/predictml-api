@@ -1,0 +1,769 @@
+# docker-compose-anti-spof.yml
+#
+# Stack predictml-api — VERSION SANS SPOF
+# ==========================================
+# Ce fichier remplace docker-compose.yml pour les déploiements qui exigent
+# une haute disponibilité sans recours à des services cloud externes ni à Kubernetes.
+#
+# Trois SPOFs résolus vs docker-compose.yml :
+#
+#   SPOF 1 — MinIO (instance unique)
+#     → 4 nœuds distribués avec erasure coding (tolérance 2 pannes sur 4)
+#     → Fichiers associés : docker/minio-nginx.conf
+#
+#   SPOF 2 — PostgreSQL (bascule manuelle)
+#     → Patroni + etcd (failover automatique en ~15-30 s)
+#     → Fichiers associés : docker/patroni/, docker/haproxy-postgres.cfg
+#
+# Prérequis avant le premier démarrage :
+#   1. Construire l'image Patroni :
+#        docker build -t predictml-patroni:latest docker/patroni/
+#   2. Ajouter dans .env :
+#        REPLICATION_PASSWORD=<mot_de_passe_fort>
+#   3. Pour migrer les données MinIO existantes :
+#        mc mirror old/models new/models --overwrite  (voir roadmap_scalabilty_n2.md)
+#
+# Démarrage :
+#   docker compose -f docker-compose-anti-spof.yml up -d
+
+services:
+
+  # ============================================================
+  # BLOC 1 — BASE DE DONNÉES HA
+  # Remplace : postgres + postgres-replica + pgbouncer + pgbouncer-read
+  # Ajoute   : etcd-1/2/3 + patroni-1/2 + haproxy-postgres
+  #
+  # Pourquoi etcd ?
+  #   Patroni a besoin d'un DCS (Distributed Configuration Store) pour décider
+  #   quel nœud PostgreSQL est le primary. etcd stocke un "bail leader" à durée
+  #   limitée (30 s). Si le primary ne renouvelle pas son bail, etcd l'invalide
+  #   et Patroni déclenche une élection parmi les replicas disponibles.
+  #   3 nœuds = quorum 2/3 → tolère la panne d'1 nœud etcd sans perte de service.
+  #
+  # Pourquoi HAProxy devant Patroni ?
+  #   Après un failover, l'adresse IP du primary change. HAProxy interroge l'API
+  #   REST de chaque nœud Patroni (port 8008) toutes les 3 s pour savoir qui est
+  #   le primary courant. PgBouncer pointe sur HAProxy : l'API ne voit jamais
+  #   le changement de primary.
+  # ============================================================
+
+  # --- DCS : cluster etcd 3 nœuds ---
+  # Quorum : 2 nœuds sur 3 doivent être vivants.
+  # Si les 3 tombent simultanément, PostgreSQL reste accessible en lecture
+  # mais aucun nouveau primary ne peut être élu jusqu'au retour d'au moins 2 nœuds.
+  etcd-1:
+    image: bitnami/etcd:3.5
+    environment:
+      ETCD_NAME: etcd-1
+      ETCD_INITIAL_CLUSTER: "etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380"
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd-1:2380
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd-1:2379
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ALLOW_NONE_AUTHENTICATION: "yes"
+    volumes:
+      - etcd_data_1:/bitnami/etcd/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:2379/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  etcd-2:
+    image: bitnami/etcd:3.5
+    environment:
+      ETCD_NAME: etcd-2
+      ETCD_INITIAL_CLUSTER: "etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380"
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd-2:2380
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd-2:2379
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ALLOW_NONE_AUTHENTICATION: "yes"
+    volumes:
+      - etcd_data_2:/bitnami/etcd/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:2379/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  etcd-3:
+    image: bitnami/etcd:3.5
+    environment:
+      ETCD_NAME: etcd-3
+      ETCD_INITIAL_CLUSTER: "etcd-1=http://etcd-1:2380,etcd-2=http://etcd-2:2380,etcd-3=http://etcd-3:2380"
+      ETCD_INITIAL_CLUSTER_STATE: new
+      ETCD_INITIAL_ADVERTISE_PEER_URLS: http://etcd-3:2380
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd-3:2379
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ALLOW_NONE_AUTHENTICATION: "yes"
+    volumes:
+      - etcd_data_3:/bitnami/etcd/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:2379/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # --- Nœuds PostgreSQL gérés par Patroni ---
+  # patroni-1 démarre et tente d'obtenir le bail leader dans etcd.
+  # patroni-2 détecte qu'un leader existe, se clone via pg_basebackup,
+  # et entre en hot_standby (accessible en lecture).
+  #
+  # Scénario de failover si patroni-1 tombe :
+  #   1. Le bail leader expire dans etcd (TTL=30 s).
+  #   2. patroni-2 obtient le bail et s'auto-promeut primary (~15-30 s total).
+  #   3. HAProxy détecte le changement au prochain healthcheck (intervalle 3 s).
+  #   4. Les nouvelles connexions sont routées vers patroni-2.
+  #   → Les connexions actives sont coupées pendant la bascule (inévitable).
+  #   → PgBouncer reconnecte automatiquement à la reprise.
+  patroni-1:
+    build:
+      context: docker/patroni
+      dockerfile: Dockerfile
+    image: predictml-patroni:latest
+    environment:
+      PATRONI_NAME: patroni-1
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:?Définissez REPLICATION_PASSWORD dans .env}
+      POSTGRES_DB: ${POSTGRES_DB:-sklearn_api}
+    volumes:
+      - patroni_data_1:/var/lib/postgresql/data
+      - ./docker/patroni/patroni-template.yml:/etc/patroni/patroni-template.yml:ro
+      - ./docker/patroni/post-init.sh:/docker/patroni-post-init.sh:ro
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8008/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      etcd-1:
+        condition: service_healthy
+      etcd-2:
+        condition: service_healthy
+      etcd-3:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
+  patroni-2:
+    build:
+      context: docker/patroni
+      dockerfile: Dockerfile
+    image: predictml-patroni:latest
+    environment:
+      PATRONI_NAME: patroni-2
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:?Définissez REPLICATION_PASSWORD dans .env}
+      POSTGRES_DB: ${POSTGRES_DB:-sklearn_api}
+    volumes:
+      - patroni_data_2:/var/lib/postgresql/data
+      - ./docker/patroni/patroni-template.yml:/etc/patroni/patroni-template.yml:ro
+      - ./docker/patroni/post-init.sh:/docker/patroni-post-init.sh:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8008/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s  # délai plus long : clonage pg_basebackup depuis patroni-1
+    depends_on:
+      etcd-1:
+        condition: service_healthy
+      patroni-1:
+        condition: service_healthy  # s'assure qu'un primary existe avant de cloner
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # --- HAProxy : routeur dynamique vers le primary Patroni ---
+  # Expose deux ports TCP :
+  #   5432 → writes, redirigé vers le primary uniquement (GET /primary = 200)
+  #   5433 → reads, redirigé vers les replicas (GET /replica = 200)
+  #   8404 → stats HAProxy (monitoring Grafana + healthcheck Docker)
+  #
+  # Quand un failover se produit, HAProxy retire le nœud tombé du pool
+  # au prochain cycle de healthcheck (intervalle 3 s, fall 3 = 9 s max).
+  # Aucune intervention humaine requise.
+  haproxy-postgres:
+    image: haproxy:2.9-alpine
+    volumes:
+      - ./docker/haproxy-postgres.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      patroni-1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8404/stats"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # ============================================================
+  # BLOC 2 — PGBOUNCER (fonctionnellement identique au docker-compose.yml)
+  #
+  # Seul changement : DATABASES_HOST pointe sur haproxy-postgres au lieu de postgres.
+  # PgBouncer reste nécessaire même avec HAProxy : HAProxy fait du routage TCP,
+  # pas du pooling. PgBouncer limite à 20 connexions réelles vers PostgreSQL
+  # quel que soit le nombre de workers API (6 workers × pool SQLAlchemy).
+  # ============================================================
+
+  # Connexions writes → haproxy-postgres:5432 → primary Patroni
+  pgbouncer:
+    image: pgbouncer/pgbouncer:1.23
+    environment:
+      DATABASES_HOST: haproxy-postgres   # ← routé vers le primary via HAProxy
+      DATABASES_PORT: "5432"
+      DATABASES_USER: ${POSTGRES_USER:-postgres}
+      DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DATABASES_DBNAME: ${POSTGRES_DB:-sklearn_api}
+      POOL_MODE: transaction             # requis avec SQLAlchemy prepared_statement_cache_size=0
+      MAX_CLIENT_CONN: "200"
+      DEFAULT_POOL_SIZE: "20"
+      SERVER_RESET_QUERY: DISCARD ALL
+    depends_on:
+      haproxy-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # Connexions reads → haproxy-postgres:5433 → replicas Patroni (hot_standby)
+  # Utilisé pour les requêtes analytics/monitoring qui ne nécessitent pas
+  # de lire les dernières écritures en temps réel.
+  pgbouncer-read:
+    image: pgbouncer/pgbouncer:1.23
+    environment:
+      DATABASES_HOST: haproxy-postgres
+      DATABASES_PORT: "5433"             # ← port read-only dans haproxy-postgres.cfg
+      DATABASES_USER: ${POSTGRES_USER:-postgres}
+      DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DATABASES_DBNAME: ${POSTGRES_DB:-sklearn_api}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "100"
+      DEFAULT_POOL_SIZE: "10"
+      SERVER_RESET_QUERY: DISCARD ALL
+    depends_on:
+      haproxy-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # Migration Alembic — attend pgbouncer (qui attend haproxy-postgres, qui attend patroni-1)
+  # La chaîne de dépendances garantit qu'un primary PostgreSQL est élu avant la migration.
+  migrate:
+    build: .
+    command: alembic upgrade head
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:5432/${POSTGRES_DB:-sklearn_api}
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - internal
+
+  # ============================================================
+  # BLOC 3 — MINIO HA (remplace l'instance minio unique)
+  #
+  # Mode distribué MinIO avec 4 nœuds (erasure coding 2+2 sur 4 drives).
+  # Chaque objet est stocké avec 2 fragments de données + 2 fragments de parité.
+  #
+  # Tolérance :
+  #   - 2 nœuds sur 4 peuvent tomber simultanément → lecture et écriture continuent.
+  #   - 3+ nœuds en panne → lecture-seule jusqu'au retour d'un nœud.
+  #   - Auto-réparation : quand un nœud revient, MinIO reconstruit ses fragments.
+  #
+  # Sur machine unique : protège contre la corruption d'un volume et le crash de processus.
+  # Sur 4 machines distinctes : protège contre la panne matérielle complète de 2 machines.
+  #
+  # L'API ne change rien à son code : MINIO_ENDPOINT pointe sur minio-nginx:9000
+  # qui distribue les requêtes sur les 4 nœuds de manière transparente.
+  # ============================================================
+
+  minio-1:
+    image: minio/minio:latest
+    hostname: minio-1
+    # La syntaxe http://minio-{1...4}/data est la notation MinIO pour le mode distribué.
+    # Chaque nœud connaît les 3 autres et coordonne les écritures via quorum interne.
+    command: server http://minio-{1...4}/data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
+    volumes:
+      - minio_data_1:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - internal
+
+  minio-2:
+    image: minio/minio:latest
+    hostname: minio-2
+    command: server http://minio-{1...4}/data --console-address ":9002"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
+    volumes:
+      - minio_data_2:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - internal
+
+  minio-3:
+    image: minio/minio:latest
+    hostname: minio-3
+    command: server http://minio-{1...4}/data --console-address ":9003"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
+    volumes:
+      - minio_data_3:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - internal
+
+  minio-4:
+    image: minio/minio:latest
+    hostname: minio-4
+    command: server http://minio-{1...4}/data --console-address ":9004"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
+    volumes:
+      - minio_data_4:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # Load balancer devant les 4 nœuds MinIO.
+  # Distribue les requêtes S3 en least_conn. Si un nœud est down, MinIO gère
+  # la redondance en interne — les 3 nœuds restants continuent à servir
+  # via les fragments de parité erasure coding.
+  # L'API et MLflow continuent d'utiliser le même endpoint (port 9000).
+  minio-nginx:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./docker/minio-nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      minio-1:
+        condition: service_healthy
+      minio-2:
+        condition: service_healthy
+      minio-3:
+        condition: service_healthy
+      minio-4:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/cluster"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    ports:
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # ============================================================
+  # BLOC 4 — REDIS HA (inchangé — déjà haute disponibilité depuis N1)
+  #
+  # 1 master + 2 replicas + 3 sentinels.
+  # Failover automatique en < 10 s (quorum 2/3 sentinels).
+  #
+  # Rôles dans la stack :
+  #   - Cache des modèles ML (HMAC-signé, TTL configurable)
+  #   - Locks distribués pour les retrains planifiés (SET NX EX 700)
+  #   - Stream de prédictions async (XREADGROUP consumer group)
+  # ============================================================
+
+  redis-master:
+    image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a $$REDIS_PASSWORD ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  redis-replica-1:
+    image: redis:7-alpine
+    command: >-
+      redis-server
+      --replicaof redis-master 6379
+      --requirepass ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+      --masterauth ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
+  redis-replica-2:
+    image: redis:7-alpine
+    command: >-
+      redis-server
+      --replicaof redis-master 6379
+      --requirepass ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+      --masterauth ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
+  redis-sentinel-1:
+    image: redis:7-alpine
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+    volumes:
+      - ./docker/sentinel-entrypoint.sh:/docker-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  redis-sentinel-2:
+    image: redis:7-alpine
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+    volumes:
+      - ./docker/sentinel-entrypoint.sh:/docker-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  redis-sentinel-3:
+    image: redis:7-alpine
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+    volumes:
+      - ./docker/sentinel-entrypoint.sh:/docker-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # ============================================================
+  # BLOC 5 — OBSERVABILITÉ (inchangé)
+  # Grafana LGTM = Loki (logs) + Grafana (dashboards) + Tempo (traces) + Prometheus (métriques)
+  # Collecte via OpenTelemetry Collector (ports 4317 gRPC / 4318 HTTP)
+  # ============================================================
+
+  grafana:
+    image: grafana/otel-lgtm:latest
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?Définissez GRAFANA_ADMIN_PASSWORD dans .env}
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    volumes:
+      - grafana_data:/data
+      - ./monitoring/prometheus.yml:/otel-lgtm/prometheus.yaml:ro
+      - ./monitoring/grafana/provisioning.yaml:/etc/grafana/provisioning/datasources/predictml.yaml:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # ============================================================
+  # BLOC 6 — API FastAPI (inchangé — 3 réplicas déjà présents en N1)
+  #
+  # Changements vs docker-compose.yml :
+  #   - MINIO_ENDPOINT → minio-nginx:9000 (plus minio:9000)
+  #   - DATABASE_URL reste sur pgbouncer (transparent — PgBouncer pointe sur HAProxy)
+  #   - Dépend de minio-nginx au lieu de minio
+  # ============================================================
+
+  api:
+    build: .
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:5432/${POSTGRES_DB:-sklearn_api}
+      - DATABASE_READ_REPLICA_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer-read:5432/${POSTGRES_DB:-sklearn_api}
+      - MINIO_ENDPOINT=minio-nginx:9000                     # ← seul changement vs docker-compose.yml
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
+      - MINIO_BUCKET=${MINIO_BUCKET:-models}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      - ENABLE_OTEL=${ENABLE_OTEL:-true}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-predictml-api}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://grafana:4317}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis-master:6379/0
+      - REDIS_SENTINEL_HOSTS=redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+      - REDIS_CACHE_TTL=${REDIS_CACHE_TTL:-3600}
+      - PREDICTION_STREAM_ENABLED=true
+      - METRICS_TOKEN=${METRICS_TOKEN:-}
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      pgbouncer:
+        condition: service_healthy
+      pgbouncer-read:
+        condition: service_healthy
+      minio-nginx:
+        condition: service_healthy           # ← minio-nginx au lieu de minio
+      redis-sentinel-1:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - internal
+      - frontend
+
+  # ============================================================
+  # BLOC 7 — WORKERS ET SERVICES TIERS (inchangés)
+  # ============================================================
+
+  # Worker Redis Stream → batch INSERT prédictions en DB.
+  # Peut être scalé horizontalement (replicas: 2+) si le débit dépasse
+  # ~200 insertions/s — le consumer group Redis distribue automatiquement.
+  prediction-writer:
+    build: .
+    command: python -m src.workers.prediction_writer
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:5432/${POSTGRES_DB:-sklearn_api}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis-master:6379/0
+      - REDIS_SENTINEL_HOSTS=redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+      - SECRET_KEY=${SECRET_KEY:?Définissez SECRET_KEY dans .env}
+      - PREDICTION_STREAM_ENABLED=true
+      - PREDICTION_STREAM_BATCH_SIZE=${PREDICTION_STREAM_BATCH_SIZE:-100}
+      - PREDICTION_STREAM_FLUSH_MS=${PREDICTION_STREAM_FLUSH_MS:-500}
+      - PREDICTION_STREAM_MAX_RETRIES=${PREDICTION_STREAM_MAX_RETRIES:-3}
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis-sentinel-1:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # MLflow : MLFLOW_S3_ENDPOINT_URL pointe sur minio-nginx au lieu de minio
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.20.2
+    command: >
+      bash -c "pip install psycopg2-binary boto3 --quiet &&
+      mlflow server
+      --backend-store-uri postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:5432/mlflow
+      --default-artifact-root s3://mlflow/
+      --host 0.0.0.0
+      --port 5000"
+    environment:
+      - MLFLOW_S3_ENDPOINT_URL=http://minio-nginx:9000      # ← minio-nginx
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
+    ports:
+      - "127.0.0.1:5000:5000"
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      minio-nginx:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # Streamlit : POSTGRES_HOST pointe sur haproxy-postgres (toujours le primary courant)
+  streamlit:
+    build:
+      context: ./streamlit_app
+      dockerfile: Dockerfile
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+    environment:
+      - API_URL=http://api:8000
+      - MLFLOW_URL=http://mlflow:5000
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - POSTGRES_HOST=haproxy-postgres    # ← chatbot SQL pointe sur HAProxy
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-sklearn_api}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - ./documentation:/app/documentation:ro
+      - ./src:/app/src:ro
+      - ./init_data:/app/init_data:ro
+      - ./README.md:/app/README.md:ro
+      - ./CODING_STANDARDS.md:/app/CODING_STANDARDS.md:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      haproxy-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+      - frontend
+
+  # ============================================================
+  # BLOC 8 — NGINX (reverse proxy)
+  #
+  # Déploiement sur machine unique : restart: unless-stopped redémarre
+  # le container en < 10 s si le process crash — protection suffisante.
+  # Une panne de la machine hôte emporte toute la stack de toute façon.
+  # ============================================================
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - frontend
+
+volumes:
+  # PostgreSQL HA via Patroni (un volume par nœud — NE PAS partager entre nœuds)
+  patroni_data_1:
+    driver: local
+  patroni_data_2:
+    driver: local
+
+  # DCS etcd (un volume par nœud pour la persistance du raft log)
+  etcd_data_1:
+    driver: local
+  etcd_data_2:
+    driver: local
+  etcd_data_3:
+    driver: local
+
+  # MinIO distribué (4 volumes indépendants = 4 "drives" erasure coding)
+  # Sur machine unique : 4 volumes Docker sur le même disque physique.
+  # Sur 4 machines : monter un volume réseau (NFS) ou disque local par machine.
+  minio_data_1:
+    driver: local
+  minio_data_2:
+    driver: local
+  minio_data_3:
+    driver: local
+  minio_data_4:
+    driver: local
+
+  grafana_data:
+    driver: local
+
+networks:
+  internal:
+    driver: bridge
+  frontend:
+    driver: bridge

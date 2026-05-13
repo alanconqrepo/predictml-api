@@ -42,9 +42,9 @@ multi-workload — mais son coût opérationnel est significatif :
 - **Complexité disproportionnée** pour moins de ~20 microservices ou moins de 600 req/s
   soutenus : Docker Compose avec des services bien configurés offre 90 % des bénéfices
   pour 10 % de la complexité.
-- **Les SPOFs restent** : Kubernetes ne résout pas MinIO, PostgreSQL ou Nginx de lui-même.
-  Il faut toujours Patroni, le mode distribué MinIO, et un load balancer HA — autant de
-  choses que l'on peut faire sans Kubernetes.
+- **Les SPOFs restent** : Kubernetes ne résout pas MinIO ou PostgreSQL de lui-même.
+  Il faut toujours Patroni et le mode distribué MinIO — autant de choses que l'on peut
+  faire sans Kubernetes.
 
 ### L'approche retenue
 
@@ -63,7 +63,7 @@ compétences Docker que la stack existante, sur la même infrastructure.
   Clients
     │
     ▼
-  [Nginx]  ← SPOF 3 : container unique, pas de failover si la machine tombe
+  [Nginx]  ← hors périmètre (machine unique : restart suffit)
     │
     ▼
   [API × 3 réplicas]  ←─ robuste
@@ -389,151 +389,12 @@ cat backup_migration.sql | docker exec -i <patroni-1-container> psql -U postgres
 
 ---
 
-## SPOF 3 — Nginx : reverse proxy sans redondance
-
-### Pourquoi c'est (partiellement) moins critique
-
-Contrairement aux deux SPOFs précédents, la panne du container Nginx est déjà partiellement
-mitigée :
-
-- `restart: unless-stopped` redémarre le container en quelques secondes si le process crash.
-- Les healthchecks sur l'API permettent à Docker de détecter les services en mauvaise santé.
-
-**Ce qui reste un SPOF réel** :
-
-| Événement | `restart: unless-stopped` couvre-t-il ? |
-|---|---|
-| Process Nginx crash | ✅ Oui — redémarrage en ~5 s |
-| Container OOM killed | ✅ Oui — redémarrage immédiat |
-| Panne de la machine hôte | ❌ Non — toute la stack tombe |
-| Saturation réseau sur l'hôte Nginx | ❌ Non — goulot d'étranglement non distribuable |
-| Mise à jour Nginx avec coupure | ❌ Non — pas de rolling update sur container unique |
-
-Ce SPOF ne devient critique que dans deux contextes :
-1. La stack est déployée sur **plusieurs machines physiques ou VMs** (l'hôte Nginx peut tomber
-   indépendamment des hôtes API).
-2. Un **SLA contractuel** impose une disponibilité > 99,9 % (ce qui ne tolère que ~9h de
-   coupure par an, panne machine incluse).
-
-Sur une machine unique, ce SPOF est de facto fusionné avec la panne machine — résoudre Nginx
-sans multi-machine n'a pas de sens.
-
-### Ce que Keepalived + double Nginx apporte
-
-Keepalived implémente le protocole **VRRP** (_Virtual Router Redundancy Protocol_) entre
-deux machines. Une **VIP** (_Virtual IP_) flotte entre les deux hôtes : elle est assignée
-au MASTER, et bascule automatiquement sur le BACKUP si le MASTER ne répond plus.
-
-```
-DNS → VIP 192.168.1.100 (toujours active)
-           │
-    ┌──────┴──────┐
-    │             │
-[Machine A]    [Machine B]
-[Nginx]        [Nginx]
-[Keepalived    [Keepalived
- MASTER]        BACKUP]
-    │
-  Trafic normal
-```
-
-Si Machine A tombe :
-1. Keepalived sur Machine B détecte l'absence de messages VRRP (~2 s).
-2. Machine B s'assigne la VIP.
-3. Le trafic reprend via Machine B en ~2–3 secondes.
-4. Le DNS ne change pas — il pointe toujours sur la VIP.
-
-### Ce qu'il faut faire
-
-Ce fix s'implémente **sur l'hôte**, pas dans Docker. Keepalived interagit avec les
-interfaces réseau physiques pour gérer la VIP.
-
-**1. Installer Keepalived sur les deux machines**
-
-```bash
-# Sur Machine A et Machine B
-apt install -y keepalived
-```
-
-**2. Configurer Keepalived sur Machine A (MASTER)**
-
-```bash
-# /etc/keepalived/keepalived.conf — Machine A
-vrrp_script chk_nginx {
-    script "curl -sf http://localhost:80/health || exit 1"
-    interval 2
-    weight -20      # retire 20 points de priorité si Nginx ne répond pas
-    fall 2
-    rise 2
-}
-
-vrrp_instance VI_PREDICTML {
-    state MASTER
-    interface eth0             # adapter au nom de l'interface réseau
-    virtual_router_id 51
-    priority 100
-    advert_int 1
-
-    authentication {
-        auth_type PASS
-        auth_pass ${KEEPALIVED_SECRET}
-    }
-
-    virtual_ipaddress {
-        192.168.1.100/24       # la VIP — adapter au sous-réseau
-    }
-
-    track_script {
-        chk_nginx
-    }
-}
-```
-
-**3. Configurer Keepalived sur Machine B (BACKUP)**
-
-```bash
-# /etc/keepalived/keepalived.conf — Machine B
-# Identique à Machine A, avec deux différences :
-state BACKUP
-priority 90        # inférieur à Machine A
-```
-
-**4. Démarrer et activer Keepalived**
-
-```bash
-# Sur les deux machines
-systemctl enable keepalived
-systemctl start keepalived
-
-# Vérifier que la VIP est bien assignée à Machine A
-ip addr show eth0 | grep 192.168.1.100
-```
-
-**5. Vérifier le failover**
-
-```bash
-# Simuler une panne en stoppant Nginx sur Machine A
-docker stop predictml-nginx
-
-# Sur Machine B, vérifier que la VIP a basculé
-ip addr show eth0 | grep 192.168.1.100  # doit apparaître sur Machine B
-
-# Vérifier que les requêtes passent toujours
-curl http://192.168.1.100/health
-```
-
-**Effort estimé** : 3–4 heures (nécessite 2 machines ou VMs configurées)  
-**Prérequis** : 2 machines sur le même sous-réseau L2 (même VLAN ou même hôte hyperviseur)
-
----
-
 ## Récapitulatif et ordre d'implémentation
 
 | Priorité | SPOF | Risque actuel | Solution | Effort | Protection obtenue |
 |---|---|---|---|---|---|
 | **1** | MinIO | Perte définitive de tous les modèles | Mode distribué 4 nœuds | 3–4 h | 2 nœuds sur 4 peuvent tomber |
 | **2** | PostgreSQL | Coupure jusqu'à intervention manuelle | Patroni + etcd + HAProxy | 1 jour | Failover automatique en 15–30 s |
-| **3** | Nginx | Coupure si la machine hôte tombe | Keepalived + 2 machines | 3–4 h | Bascule VIP en 2–3 s |
 
 ### Pourquoi cet ordre
 
@@ -544,10 +405,6 @@ Un cache Redis chaud peut masquer la panne pendant 1 heure — après quoi les p
 **Patroni en deuxième** : une panne PostgreSQL primary stoppe immédiatement toutes les
 écritures. C'est l'impact le plus visible en production. Le failover manuel peut durer
 des heures si la panne survient la nuit ou le week-end.
-
-**Nginx en dernier** : sur machine unique, `restart: unless-stopped` couvre les pannes
-de container. Le fix Nginx ne prend tout son sens qu'avec une infrastructure multi-machine,
-qui est souvent la condition préalable à la mise en place des deux premiers fixes également.
 
 ---
 
