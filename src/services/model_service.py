@@ -15,6 +15,14 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
+from src.db.models.model_metadata import DeploymentMode, ModelMetadata
+from src.services.db_service import DBService
+from src.services.minio_service import minio_service
+
+logger = structlog.get_logger(__name__)
+
+_CACHE_PREFIX = "model:"
+_HMAC_HEX_LEN = 64  # SHA-256 hex digest = 64 chars
 
 
 def _build_sentinel_redis() -> aioredis.Redis:
@@ -31,14 +39,6 @@ def _build_sentinel_redis() -> aioredis.Redis:
     redis_password = urlparse(settings.REDIS_URL).password or None
     sentinel = Sentinel(hosts, password=redis_password, socket_timeout=0.5)
     return sentinel.master_for("mymaster", decode_responses=False)
-from src.db.models.model_metadata import DeploymentMode, ModelMetadata
-from src.services.db_service import DBService
-from src.services.minio_service import minio_service
-
-logger = structlog.get_logger(__name__)
-
-_CACHE_PREFIX = "model:"
-_HMAC_HEX_LEN = 64  # SHA-256 hex digest = 64 chars
 
 
 def compute_model_hmac(data: bytes) -> str:
