@@ -9,7 +9,7 @@ from typing import Any, List, Optional
 
 from sklearn.metrics import accuracy_score, mean_absolute_error
 from sklearn.metrics import f1_score as sklearn_f1_score
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -24,6 +24,18 @@ from src.db.models import (
     Prediction,
     User,
 )
+
+
+def _pg(db: AsyncSession) -> bool:
+    """True si la session est connectée à PostgreSQL (production), False pour SQLite (tests)."""
+    # db.sync_session.bind est l'engine (AsyncEngine ou Engine) transmis à async_sessionmaker
+    try:
+        bind = db.sync_session.bind
+        if bind is not None:
+            return bind.dialect.name == "postgresql"
+    except Exception:
+        pass
+    return settings.DATABASE_URL.startswith("postgresql")
 
 
 class DBService:
@@ -518,14 +530,69 @@ class DBService:
     ) -> List[dict]:
         """
         Retourne l'accuracy journalière pour le suivi de drift de performance.
-        Requête SQL avec fenêtre temporelle, agrégat par jour.
-        Plus légère que get_performance_pairs() : ne sélectionne pas les probabilities.
-        Retourne une liste de dicts {"date": "YYYY-MM-DD", "matched_count": int, "accuracy": float}.
+        PostgreSQL : GROUP BY DATE_TRUNC, précision et MAE calculés en SQL.
+        SQLite (tests) : agrégation Python-side avec LIMIT de sécurité.
         """
         max_start = end - timedelta(days=settings.ANALYTICS_MAX_DAYS)
         if start < max_start:
             start = max_start
 
+        if _pg(db):
+            sql = text("""
+                SELECT
+                    DATE_TRUNC('day', p.timestamp)::date::text AS day,
+                    COUNT(*) AS matched_count,
+                    AVG(
+                        CASE WHEN p.prediction_result::text = o.observed_result::text
+                             THEN 1.0 ELSE 0.0 END
+                    ) AS accuracy,
+                    BOOL_OR(
+                        p.prediction_result::text ~ '^-?[0-9]+\\.[0-9]+$'
+                        OR o.observed_result::text ~ '^-?[0-9]+\\.[0-9]+$'
+                    ) AS is_regression,
+                    AVG(
+                        CASE
+                            WHEN p.prediction_result::text ~ '^-?[0-9]+\\.?[0-9]*$'
+                             AND o.observed_result::text  ~ '^-?[0-9]+\\.?[0-9]*$'
+                            THEN ABS(
+                                p.prediction_result::text::float
+                                - o.observed_result::text::float
+                            )
+                            ELSE NULL
+                        END
+                    ) AS mae
+                FROM predictions p
+                JOIN observed_results o
+                  ON p.id_obs = o.id_obs AND p.model_name = o.model_name
+                WHERE p.model_name  = :name
+                  AND p.status      = 'success'
+                  AND p.id_obs      IS NOT NULL
+                  AND p.timestamp   >= :start
+                  AND p.timestamp   <= :end
+                  AND (:version IS NULL OR p.model_version = :version)
+                GROUP BY DATE_TRUNC('day', p.timestamp)
+                ORDER BY day
+            """)
+            result = await db.execute(
+                sql, {"name": model_name, "start": start, "end": end, "version": model_version}
+            )
+            rows = result.all()
+            output = []
+            for row in rows:
+                mae_val = (
+                    round(float(row.mae), 4) if row.is_regression and row.mae is not None else None
+                )
+                output.append(
+                    {
+                        "date": row.day,
+                        "matched_count": int(row.matched_count),
+                        "accuracy": round(float(row.accuracy), 4),
+                        "mae": mae_val,
+                    }
+                )
+            return output
+
+        # --- SQLite fallback (tests) ---
         filters = [
             Prediction.model_name == model_name,
             Prediction.status == "success",
@@ -569,7 +636,7 @@ class DBService:
             except (ValueError, TypeError):
                 return False
 
-        result = []
+        output = []
         for day, items in sorted(daily.items()):
             is_regression = any(_is_float_val(p) or _is_float_val(o) for p, o in items)
             entry: dict = {
@@ -586,8 +653,8 @@ class DBService:
                     entry["mae"] = None
             else:
                 entry["mae"] = None
-            result.append(entry)
-        return result
+            output.append(entry)
+        return output
 
     @staticmethod
     async def get_confidence_trend(
@@ -598,14 +665,83 @@ class DBService:
         confidence_threshold: float = 0.5,
     ) -> dict:
         """
-        Agrège la confiance (max des probabilités) par jour sur une fenêtre glissante.
+        Agrège la confiance (max_confidence) par jour sur une fenêtre glissante.
+        PostgreSQL : PERCENTILE_CONT sur la colonne max_confidence (indexée).
+        SQLite (tests) : agrégation numpy Python-side sur probabilities.
         Retourne overall stats + liste journalière triée.
-        Compatible SQLite (tests) et PostgreSQL (production).
         """
-        import numpy as np
-
         days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
+
+        if _pg(db):
+            base_where = """
+                model_name  = :name
+                AND status  = 'success'
+                AND is_shadow = false
+                AND max_confidence IS NOT NULL
+                AND timestamp >= :cutoff
+                AND (:version IS NULL OR model_version = :version)
+            """
+            params = {
+                "name": model_name,
+                "cutoff": cutoff,
+                "version": version,
+                "threshold": confidence_threshold,
+            }
+
+            daily_sql = text(f"""
+                SELECT
+                    DATE_TRUNC('day', timestamp)::date::text          AS day,
+                    COUNT(*)                                           AS predictions,
+                    AVG(max_confidence)                                AS mean_confidence,
+                    PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY max_confidence) AS p25,
+                    PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY max_confidence) AS p75,
+                    COUNT(*) FILTER (WHERE max_confidence < :threshold) AS low_confidence_count
+                FROM predictions
+                WHERE {base_where}
+                GROUP BY DATE_TRUNC('day', timestamp)
+                ORDER BY day
+            """)
+            overall_sql = text(f"""
+                SELECT
+                    COUNT(*)                                           AS total,
+                    AVG(max_confidence)                                AS mean_confidence,
+                    PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY max_confidence) AS p25_confidence,
+                    PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY max_confidence) AS p75_confidence,
+                    COUNT(*) FILTER (WHERE max_confidence < :threshold) AS low_count
+                FROM predictions
+                WHERE {base_where}
+            """)
+
+            daily_rows = (await db.execute(daily_sql, params)).all()
+            if not daily_rows:
+                return {"has_data": False, "overall": None, "trend": []}
+
+            overall_row = (await db.execute(overall_sql, params)).one()
+            total = int(overall_row.total)
+            overall = {
+                "mean_confidence": round(float(overall_row.mean_confidence), 4),
+                "p25_confidence": round(float(overall_row.p25_confidence), 4),
+                "p75_confidence": round(float(overall_row.p75_confidence), 4),
+                "low_confidence_rate": (
+                    round(int(overall_row.low_count) / total, 4) if total else 0.0
+                ),
+            }
+            trend = [
+                {
+                    "date": row.day,
+                    "mean_confidence": round(float(row.mean_confidence), 4),
+                    "p25": round(float(row.p25), 4),
+                    "p75": round(float(row.p75), 4),
+                    "predictions": int(row.predictions),
+                    "low_confidence_count": int(row.low_confidence_count),
+                }
+                for row in daily_rows
+            ]
+            return {"has_data": True, "overall": overall, "trend": trend}
+
+        # --- SQLite fallback (tests) ---
+        import numpy as np
 
         filters = [
             Prediction.model_name == model_name,
@@ -750,16 +886,63 @@ class DBService:
         """
         Calcule les statistiques des features de production sur une fenêtre glissante.
 
-        Retourne un dict {feature: {mean, std, min, max, count, values}} où
-        `values` contient les valeurs brutes numériques (pour le calcul PSI).
-        Seules les features numériques (int/float) sont incluses.
+        PostgreSQL : jsonb_each_text() + AVG/STDDEV_SAMP/MIN/MAX côté serveur.
+          Note : `values` est vide dans ce chemin (non nécessaire pour les agrégats SQL).
+        SQLite (tests) : agrégation numpy Python-side avec LIMIT de sécurité.
+        Retourne {feature: {mean, std, min, max, count, values, null_rate}}.
         """
-        from datetime import timedelta
-
-        import numpy as np
-
         days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
+
+        if _pg(db):
+            sql = text("""
+                WITH base AS (
+                    SELECT COUNT(*) AS total_rows
+                    FROM predictions
+                    WHERE model_name = :name
+                      AND status     = 'success'
+                      AND timestamp  >= :cutoff
+                      AND (:version IS NULL OR model_version = :version)
+                )
+                SELECT
+                    kv.key                                         AS feature,
+                    COUNT(kv.value)                                AS count,
+                    AVG(kv.value::float)                           AS mean,
+                    COALESCE(STDDEV_SAMP(kv.value::float), 0.0)   AS std,
+                    MIN(kv.value::float)                           AS min,
+                    MAX(kv.value::float)                           AS max,
+                    (SELECT total_rows FROM base)                  AS total_rows
+                FROM predictions p,
+                     LATERAL jsonb_each_text(p.input_features::jsonb) AS kv(key, value)
+                WHERE p.model_name = :name
+                  AND p.status     = 'success'
+                  AND p.timestamp  >= :cutoff
+                  AND (:version IS NULL OR p.model_version = :version)
+                  AND kv.value     ~ '^-?[0-9]+\\.?[0-9]*$'
+                GROUP BY kv.key
+            """)
+            result = await db.execute(
+                sql, {"name": model_name, "cutoff": cutoff, "version": model_version}
+            )
+            rows = result.all()
+            stats: dict = {}
+            for row in rows:
+                total = int(row.total_rows) if row.total_rows else 0
+                count = int(row.count)
+                null_rate = round(1.0 - count / total, 6) if total > 0 else 0.0
+                stats[row.feature] = {
+                    "mean": float(row.mean),
+                    "std": float(row.std),
+                    "min": float(row.min),
+                    "max": float(row.max),
+                    "count": count,
+                    "values": [],  # non renvoyé en SQL — PSI non calculable sur ce chemin
+                    "null_rate": null_rate,
+                }
+            return stats
+
+        # --- SQLite fallback (tests) ---
+        import numpy as np
 
         filters = [
             Prediction.model_name == model_name,
@@ -787,7 +970,7 @@ class DBService:
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     feature_values.setdefault(feature, []).append(float(value))
 
-        stats: dict = {}
+        stats = {}
         for feature, values in feature_values.items():
             arr = np.array(values, dtype=float)
             count = len(arr)
@@ -814,29 +997,23 @@ class DBService:
         """Returns ({label: count}, total) for successful predictions in the last N days."""
         days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
-        filters = [
-            Prediction.model_name == model_name,
-            Prediction.status == "success",
-            Prediction.timestamp >= cutoff,
-            Prediction.prediction_result.is_not(None),
-        ]
-        if model_version:
-            filters.append(Prediction.model_version == model_version)
 
-        stmt = (
-            select(Prediction.prediction_result)
-            .where(and_(*filters))
-            .limit(settings.MAX_ROWS_ANALYTICS)
+        sql = text("""
+            SELECT prediction_result::text AS label, COUNT(*) AS cnt
+            FROM predictions
+            WHERE model_name = :name
+              AND status = 'success'
+              AND timestamp >= :cutoff
+              AND prediction_result IS NOT NULL
+              AND (:version IS NULL OR model_version = :version)
+            GROUP BY prediction_result::text
+        """)
+        result = await db.execute(
+            sql, {"name": model_name, "cutoff": cutoff, "version": model_version}
         )
-        result = await db.execute(stmt)
-        rows = result.scalars().all()
-
-        counts: dict[str, int] = {}
-        for val in rows:
-            key = str(val)
-            counts[key] = counts.get(key, 0) + 1
-
-        return counts, len(rows)
+        rows = result.all()
+        counts = {row.label: int(row.cnt) for row in rows}
+        return counts, sum(counts.values())
 
     @staticmethod
     async def get_prediction_stats(
@@ -846,12 +1023,64 @@ class DBService:
     ) -> List[dict]:
         """Retourne les statistiques agrégées des prédictions par modèle sur une fenêtre glissante.
 
-        Calcul Python-side (compatible SQLite + PostgreSQL) :
-        - total, erreurs, taux d'erreur
-        - temps de réponse moyen, p50, p95 (uniquement pour les prédictions réussies)
+        PostgreSQL : GROUP BY + PERCENTILE_CONT côté serveur, sans LIMIT bloquant.
+        SQLite (tests) : agrégation Python-side avec LIMIT de sécurité.
         """
         days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
+
+        if _pg(db):
+            sql = text("""
+                SELECT
+                    model_name,
+                    COUNT(*)                                                       AS total_predictions,
+                    COUNT(*) FILTER (WHERE status != 'success')                    AS error_count,
+                    AVG(response_time_ms)
+                        FILTER (WHERE status = 'success')                          AS avg_response_time_ms,
+                    PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY response_time_ms)
+                        FILTER (WHERE status = 'success'
+                                  AND response_time_ms IS NOT NULL)                AS p50_response_time_ms,
+                    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY response_time_ms)
+                        FILTER (WHERE status = 'success'
+                                  AND response_time_ms IS NOT NULL)                AS p95_response_time_ms
+                FROM predictions
+                WHERE timestamp >= :cutoff
+                  AND (:model_name IS NULL OR model_name = :model_name)
+                GROUP BY model_name
+                ORDER BY model_name
+            """)
+            result = await db.execute(sql, {"cutoff": cutoff, "model_name": model_name})
+            rows = result.all()
+            stats = []
+            for row in rows:
+                total = int(row.total_predictions)
+                errors = int(row.error_count)
+                stats.append(
+                    {
+                        "model_name": row.model_name,
+                        "total_predictions": total,
+                        "error_count": errors,
+                        "error_rate": round(errors / total, 4) if total > 0 else 0.0,
+                        "avg_response_time_ms": (
+                            round(float(row.avg_response_time_ms), 2)
+                            if row.avg_response_time_ms is not None
+                            else None
+                        ),
+                        "p50_response_time_ms": (
+                            round(float(row.p50_response_time_ms), 2)
+                            if row.p50_response_time_ms is not None
+                            else None
+                        ),
+                        "p95_response_time_ms": (
+                            round(float(row.p95_response_time_ms), 2)
+                            if row.p95_response_time_ms is not None
+                            else None
+                        ),
+                    }
+                )
+            return stats
+
+        # --- SQLite fallback (tests) ---
         filters = [Prediction.timestamp >= cutoff]
         if model_name:
             filters.append(Prediction.model_name == model_name)
@@ -1463,12 +1692,131 @@ class DBService:
         """
         Retourne les statistiques par version pour une comparaison A/B.
 
-        Group by (model_version, is_shadow) — agrégation Python-side pour compatibilité SQLite.
-        Retourne une liste de dicts, un par version active dans la fenêtre.
+        PostgreSQL : 3 requêtes SQL (agrégats, distribution labels, temps de réponse).
+        GROUP BY et PERCENTILE_CONT côté serveur — pas de LIMIT bloquant.
+        SQLite (tests) : agrégation Python-side avec LIMIT de sécurité.
         """
         days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
 
+        if _pg(db):
+            params: dict = {"name": model_name, "cutoff": cutoff}
+
+            # 1. Agrégats principaux par (version, is_shadow)
+            agg_sql = text("""
+                SELECT
+                    COALESCE(model_version, 'unknown')            AS version,
+                    is_shadow,
+                    COUNT(*)                                       AS total,
+                    COUNT(*) FILTER (WHERE status != 'success')   AS error_count,
+                    AVG(response_time_ms)
+                        FILTER (WHERE status = 'success')          AS avg_response_time_ms,
+                    PERCENTILE_CONT(0.95)
+                        WITHIN GROUP (ORDER BY response_time_ms)
+                        FILTER (WHERE status = 'success'
+                                  AND response_time_ms IS NOT NULL) AS p95_response_time_ms
+                FROM predictions
+                WHERE model_name = :name AND timestamp >= :cutoff
+                GROUP BY model_version, is_shadow
+                ORDER BY model_version, is_shadow
+            """)
+
+            # 2. Distribution des labels (production uniquement)
+            dist_sql = text("""
+                SELECT
+                    COALESCE(model_version, 'unknown') AS version,
+                    prediction_result::text            AS label,
+                    COUNT(*)                           AS cnt
+                FROM predictions
+                WHERE model_name     = :name
+                  AND timestamp      >= :cutoff
+                  AND is_shadow      = false
+                  AND status         = 'success'
+                  AND prediction_result IS NOT NULL
+                GROUP BY model_version, prediction_result::text
+            """)
+
+            # 3. Temps de réponse pour le test Mann-Whitney (limité par version)
+            times_sql = text("""
+                SELECT version, response_time_ms
+                FROM (
+                    SELECT
+                        COALESCE(model_version, 'unknown') AS version,
+                        response_time_ms,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY model_version
+                            ORDER BY timestamp DESC
+                        ) AS rn
+                    FROM predictions
+                    WHERE model_name     = :name
+                      AND timestamp      >= :cutoff
+                      AND is_shadow      = false
+                      AND status         = 'success'
+                      AND response_time_ms IS NOT NULL
+                ) sub
+                WHERE rn <= :per_version_limit
+            """)
+
+            agg_rows = (await db.execute(agg_sql, params)).all()
+            if not agg_rows:
+                return []
+
+            dist_rows = (await db.execute(dist_sql, params)).all()
+            times_rows = (
+                await db.execute(
+                    times_sql, {**params, "per_version_limit": settings.MAX_ROWS_ANALYTICS}
+                )
+            ).all()
+
+            dist: dict[str, dict[str, int]] = {}
+            for row in dist_rows:
+                dist.setdefault(row.version, {})[row.label] = int(row.cnt)
+
+            times: dict[str, list[float]] = {}
+            for row in times_rows:
+                times.setdefault(row.version, []).append(float(row.response_time_ms))
+
+            agg: dict[str, dict] = {}
+            for row in agg_rows:
+                ver = row.version
+                agg.setdefault(ver, {"prod": None, "shadow": None})
+                if row.is_shadow:
+                    agg[ver]["shadow"] = row
+                else:
+                    agg[ver]["prod"] = row
+
+            stats = []
+            for ver in sorted(agg):
+                prod = agg[ver]["prod"]
+                shadow = agg[ver]["shadow"]
+                if prod is None:
+                    continue
+                total_prod = int(prod.total)
+                errors = int(prod.error_count)
+                stats.append(
+                    {
+                        "version": ver,
+                        "total_predictions": total_prod,
+                        "shadow_predictions": int(shadow.total) if shadow else 0,
+                        "error_rate": round(errors / total_prod, 4) if total_prod > 0 else 0.0,
+                        "error_count": errors,
+                        "avg_response_time_ms": (
+                            round(float(prod.avg_response_time_ms), 2)
+                            if prod.avg_response_time_ms is not None
+                            else None
+                        ),
+                        "p95_response_time_ms": (
+                            round(float(prod.p95_response_time_ms), 2)
+                            if prod.p95_response_time_ms is not None
+                            else None
+                        ),
+                        "prediction_distribution": dist.get(ver, {}),
+                        "response_times": times.get(ver, []),
+                    }
+                )
+            return stats
+
+        # --- SQLite fallback (tests) ---
         stmt = (
             select(
                 Prediction.model_version,
@@ -1489,7 +1837,6 @@ class DBService:
         result = await db.execute(stmt)
         rows = result.all()
 
-        # group: version -> {shadow: bool -> {times, errors, total, dist}}
         grouped: dict = defaultdict(
             lambda: {
                 True: {"times": [], "errors": 0, "total": 0, "dist": defaultdict(int)},
@@ -1522,18 +1869,18 @@ class DBService:
             prod = shadow_map[False]
             shad = shadow_map[True]
             total_prod = prod["total"]
-            times = prod["times"]
-            n = len(times)
+            times_list = prod["times"]
+            n = len(times_list)
             stats.append(
                 {
                     "version": ver,
                     "total_predictions": total_prod,
                     "shadow_predictions": shad["total"],
                     "error_rate": round(prod["errors"] / total_prod, 4) if total_prod > 0 else 0.0,
-                    "avg_response_time_ms": round(sum(times) / n, 2) if n > 0 else None,
-                    "p95_response_time_ms": _p95(times),
+                    "avg_response_time_ms": round(sum(times_list) / n, 2) if n > 0 else None,
+                    "p95_response_time_ms": _p95(times_list),
                     "prediction_distribution": dict(prod["dist"]),
-                    "response_times": times,
+                    "response_times": times_list,
                     "error_count": prod["errors"],
                 }
             )
@@ -1752,13 +2099,75 @@ class DBService:
         """
         Retourne les statistiques agrégées par model_name sur une plage calendaire.
 
-        Aggrégation Python-side (compatible SQLite + PostgreSQL, percentiles inclus).
-        Retourne une liste de dicts, un par model_name distinct dans la période.
+        PostgreSQL : GROUP BY + PERCENTILE_CONT + ARRAY_AGG côté serveur, sans LIMIT bloquant.
+        SQLite (tests) : agrégation Python-side avec LIMIT de sécurité.
         """
         max_start = end - timedelta(days=settings.ANALYTICS_MAX_DAYS)
         if start < max_start:
             start = max_start
 
+        if _pg(db):
+            sql = text("""
+                SELECT
+                    model_name,
+                    ARRAY_AGG(DISTINCT model_version)
+                        FILTER (WHERE model_version IS NOT NULL)              AS versions,
+                    COUNT(*) FILTER (WHERE is_shadow = false)                 AS total_predictions,
+                    COUNT(*) FILTER (WHERE is_shadow = true)                  AS shadow_predictions,
+                    COUNT(*) FILTER (WHERE is_shadow = false
+                                      AND status != 'success')                AS error_count,
+                    AVG(response_time_ms)
+                        FILTER (WHERE is_shadow = false
+                                  AND status = 'success')                     AS avg_latency_ms,
+                    PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY response_time_ms)
+                        FILTER (WHERE is_shadow = false
+                                  AND status = 'success'
+                                  AND response_time_ms IS NOT NULL)           AS p50_latency_ms,
+                    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY response_time_ms)
+                        FILTER (WHERE is_shadow = false
+                                  AND status = 'success'
+                                  AND response_time_ms IS NOT NULL)           AS p95_latency_ms,
+                    MAX(timestamp)                                             AS last_prediction
+                FROM predictions
+                WHERE timestamp >= :start AND timestamp <= :end
+                GROUP BY model_name
+                ORDER BY model_name
+            """)
+            result = await db.execute(sql, {"start": start, "end": end})
+            rows = result.all()
+            stats = []
+            for row in rows:
+                total = int(row.total_predictions)
+                errors = int(row.error_count)
+                stats.append(
+                    {
+                        "model_name": row.model_name,
+                        "versions": sorted(row.versions or []),
+                        "total_predictions": total,
+                        "shadow_predictions": int(row.shadow_predictions),
+                        "error_count": errors,
+                        "error_rate": round(errors / total, 4) if total > 0 else 0.0,
+                        "avg_latency_ms": (
+                            round(float(row.avg_latency_ms), 2)
+                            if row.avg_latency_ms is not None
+                            else None
+                        ),
+                        "p50_latency_ms": (
+                            round(float(row.p50_latency_ms), 2)
+                            if row.p50_latency_ms is not None
+                            else None
+                        ),
+                        "p95_latency_ms": (
+                            round(float(row.p95_latency_ms), 2)
+                            if row.p95_latency_ms is not None
+                            else None
+                        ),
+                        "last_prediction": row.last_prediction,
+                    }
+                )
+            return stats
+
+        # --- SQLite fallback (tests) ---
         stmt = (
             select(
                 Prediction.model_name,
@@ -1780,7 +2189,6 @@ class DBService:
         result = await db.execute(stmt)
         rows = result.all()
 
-        # groupe: model_name -> {rows}
         grouped: dict[str, dict] = defaultdict(
             lambda: {
                 "versions": set(),
