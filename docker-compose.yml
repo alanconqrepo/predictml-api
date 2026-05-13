@@ -82,6 +82,32 @@ services:
     networks:
       - internal
 
+  # PgBouncer — connection pooler PostgreSQL
+  pgbouncer:
+    image: pgbouncer/pgbouncer:1.23
+    container_name: predictml-pgbouncer
+    environment:
+      DATABASES_HOST: postgres
+      DATABASES_PORT: "5432"
+      DATABASES_USER: ${POSTGRES_USER:-postgres}
+      DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DATABASES_DBNAME: ${POSTGRES_DB:-sklearn_api}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "200"
+      DEFAULT_POOL_SIZE: "20"
+      SERVER_RESET_QUERY: DISCARD ALL
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
   # Migration one-shot — s'exécute avant l'API, ne redémarre pas
   migrate:
     build: .
@@ -127,7 +153,7 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-sklearn_api}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:5432/${POSTGRES_DB:-sklearn_api}
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
@@ -160,6 +186,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      pgbouncer:
+        condition: service_healthy
       minio:
         condition: service_healthy
       redis:
