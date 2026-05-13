@@ -31,8 +31,9 @@ from src.core.config import settings
 from src.core.logging import setup_logging
 from src.core.rate_limit import limiter
 from src.core.security import require_admin
-from src.db.database import close_db, engine, get_db, init_db
+from src.db.database import AsyncSessionLocal, close_db, engine, get_db, init_db
 from src.schemas.health import DependencyDetail, DependencyHealthResponse
+from src.services.db_service import db_service
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
 
@@ -61,6 +62,23 @@ def _check_metrics_config() -> None:
             )
 
 
+async def _warmup_production_models() -> None:
+    """Précharge en Redis les modèles marqués is_production=True."""
+    try:
+        async with AsyncSessionLocal() as db:
+            active_models = await db_service.get_production_models(db)
+
+        async def _load_one(name: str, version: str) -> None:
+            async with AsyncSessionLocal() as db:
+                await model_service.load_model(db, name, version)
+
+        tasks = [_load_one(m.name, m.version) for m in active_models]
+        await asyncio.gather(*tasks, return_exceptions=True)
+        logger.info("Warm-up terminé", count=len(active_models))
+    except Exception as e:
+        logger.warning("Warm-up ignoré", error=str(e))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestion du cycle de vie de l'application"""
@@ -84,6 +102,8 @@ async def lifespan(app: FastAPI):
         logger.info("Base de données connectée")
     except Exception as e:
         logger.warning("Avertissement DB", error=str(e))
+
+    await _warmup_production_models()
 
     logger.info(
         "Application prête",

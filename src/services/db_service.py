@@ -1019,6 +1019,16 @@ class DBService:
             return result.scalars().first()
 
     @staticmethod
+    async def get_production_models(db: AsyncSession) -> List[ModelMetadata]:
+        """Récupère tous les modèles actifs marqués is_production=True."""
+        result = await db.execute(
+            select(ModelMetadata).where(
+                and_(ModelMetadata.is_production.is_(True), ModelMetadata.is_active.is_(True))
+            )
+        )
+        return result.scalars().all()
+
+    @staticmethod
     async def get_all_active_models(
         db: AsyncSession,
         is_production: Optional[bool] = None,
