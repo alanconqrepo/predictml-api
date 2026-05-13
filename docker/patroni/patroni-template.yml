@@ -1,0 +1,155 @@
+# docker/patroni/patroni-template.yml
+#
+# Template de configuration Patroni.
+# Les variables ${VAR} sont substituées par entrypoint.sh au démarrage du container.
+#
+# Documentation Patroni : https://patroni.readthedocs.io/en/latest/
+
+# Nom du cluster — doit être identique sur tous les nœuds.
+# Patroni crée une clé /service/predictml-cluster/ dans etcd pour ce cluster.
+scope: predictml-cluster
+
+# Nom de ce nœud — doit être unique dans le cluster.
+# Injecté via la variable d'environnement PATRONI_NAME (patroni-1 ou patroni-2).
+name: ${PATRONI_NAME}
+
+# ─────────────────────────────────────────────────────────────
+# API REST Patroni (port 8008)
+#
+# HAProxy interroge cette API pour router les connexions :
+#   GET /primary  → 200 si ce nœud est le primary élu
+#   GET /replica  → 200 si ce nœud est un replica hot_standby
+#   GET /health   → 200 si Patroni est en bonne santé
+#   GET /metrics  → métriques Prometheus (optionnel)
+#
+# connect_address : adresse que les autres nœuds utilisent pour joindre
+# ce nœud. Doit correspondre au nom DNS du service Docker.
+# ─────────────────────────────────────────────────────────────
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: ${PATRONI_NAME}:8008
+
+# ─────────────────────────────────────────────────────────────
+# DCS : cluster etcd
+#
+# Patroni utilise etcd comme source de vérité distribuée pour :
+#   - Le bail leader (qui est le primary)
+#   - La configuration du cluster (paramètres PostgreSQL partagés)
+#   - La découverte des membres du cluster
+#
+# Les 3 nœuds etcd permettent un quorum 2/3 : tolérance à 1 panne.
+# ─────────────────────────────────────────────────────────────
+etcd3:
+  hosts:
+    - etcd-1:2379
+    - etcd-2:2379
+    - etcd-3:2379
+
+# ─────────────────────────────────────────────────────────────
+# Bootstrap (exécuté UNE SEULE FOIS à la création du cluster)
+#
+# Cette section configure :
+#   1. Les paramètres du DCS (timings du failover)
+#   2. Les paramètres PostgreSQL partagés entre tous les nœuds
+#   3. L'initialisation du répertoire de données (initdb)
+#   4. Les règles pg_hba (authentification)
+#   5. Le script post_init (création de la DB MLflow)
+# ─────────────────────────────────────────────────────────────
+bootstrap:
+  dcs:
+    # ttl : durée du bail leader en secondes.
+    # Si le primary ne renouvelle pas son bail dans ce délai, etcd l'invalide.
+    # Valeur plus basse = failover plus rapide mais plus de faux positifs.
+    ttl: 30
+
+    # loop_wait : intervalle entre chaque vérification Patroni (en secondes).
+    loop_wait: 10
+
+    # retry_timeout : temps avant de considérer etcd injoignable.
+    retry_timeout: 10
+
+    # maximum_lag_on_failover : lag WAL maximal accepté (en octets) pour
+    # qu'un replica soit éligible à la promotion. 1 MB = ~1000 transactions.
+    # Un replica trop en retard ne sera pas promu (risque de perte de données).
+    maximum_lag_on_failover: 1048576
+
+    postgresql:
+      # use_pg_rewind : permet de resynchroniser un ancien primary via pg_rewind
+      # au lieu d'un full pg_basebackup. Plus rapide pour les clusters actifs.
+      use_pg_rewind: true
+
+      # use_slots : utilise les replication slots pour garantir qu'aucun WAL
+      # n'est supprimé avant d'être consommé par les replicas.
+      use_slots: true
+
+      parameters:
+        wal_level: replica            # active le WAL streaming pour la réplication
+        hot_standby: "on"            # replicas accessibles en lecture (pgbouncer-read)
+        max_wal_senders: 10           # connexions de réplication simultanées max
+        max_replication_slots: 10     # slots de réplication max (un par replica)
+        wal_log_hints: "on"          # requis pour pg_rewind
+
+  initdb:
+    - encoding: UTF8
+    # data-checksums : détecte la corruption silencieuse des pages de données.
+    # Coût CPU marginal (~2 %) pour une protection significative en production.
+    - data-checksums
+
+  # Règles d'authentification PostgreSQL gérées par Patroni.
+  # Ces règles remplacent pg_hba.conf — ne pas monter de pg_hba.conf externe.
+  pg_hba:
+    - local   all         all                         trust
+    - host    all         all         127.0.0.1/32    trust
+    # Réplication streaming entre les nœuds Patroni (réseau Docker interne)
+    - host    replication replicator  0.0.0.0/0       scram-sha-256
+    # Toutes les connexions applicatives (PgBouncer, Streamlit, MLflow)
+    - host    all         all         0.0.0.0/0       scram-sha-256
+
+  # post_init : script exécuté une seule fois après l'initialisation du cluster.
+  # Crée la base de données MLflow (équivalent du create_mlflow_db.sql en N1).
+  post_init: /docker/patroni-post-init.sh
+
+# ─────────────────────────────────────────────────────────────
+# Configuration PostgreSQL par nœud
+# ─────────────────────────────────────────────────────────────
+postgresql:
+  # listen : écoute sur toutes les interfaces du container Docker.
+  listen: 0.0.0.0:5432
+
+  # connect_address : adresse utilisée par Patroni pour se connecter
+  # à ce nœud PostgreSQL. Doit correspondre au nom DNS du service Docker.
+  connect_address: ${PATRONI_NAME}:5432
+
+  data_dir: /var/lib/postgresql/data
+
+  authentication:
+    replication:
+      username: replicator
+      password: ${REPLICATION_PASSWORD}
+    superuser:
+      username: ${POSTGRES_USER}
+      password: ${POSTGRES_PASSWORD}
+
+  parameters:
+    # unix_socket_directories : requis pour que Patroni se connecte
+    # à PostgreSQL via socket Unix (connexion locale trust).
+    unix_socket_directories: '/var/run/postgresql'
+
+# ─────────────────────────────────────────────────────────────
+# Tags par nœud (comportement dans le cluster)
+# ─────────────────────────────────────────────────────────────
+tags:
+  # nofailover: true → ce nœud ne sera jamais élu primary
+  # Utile pour un nœud de backup dédié (snapshots, analytics lourdes)
+  nofailover: false
+
+  # noloadbalance: true → exclut ce nœud du pool de reads HAProxy
+  # Utile si ce nœud est dédié à une charge lourde (ex: retrain)
+  noloadbalance: false
+
+  # clonefrom: true → les nouveaux nœuds se clonent préférentiellement depuis lui
+  clonefrom: false
+
+  # nosync: true → ce nœud ne participera pas à la réplication synchrone
+  # (si synchronous_mode est activé dans le DCS)
+  nosync: false
