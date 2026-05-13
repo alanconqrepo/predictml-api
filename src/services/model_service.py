@@ -2,6 +2,7 @@
 Service de gestion des modèles ML (v3 - cache Redis distribué)
 """
 
+import asyncio
 import hashlib
 import hmac as _hmac_mod
 import pickle
@@ -23,6 +24,10 @@ logger = structlog.get_logger(__name__)
 
 _CACHE_PREFIX = "model:"
 _HMAC_HEX_LEN = 64  # SHA-256 hex digest = 64 chars
+
+# Verrous intra-process par clé cache — évite les téléchargements MinIO simultanés
+# dans le même worker lors d'un cache miss (thundering herd).
+_LOAD_LOCKS: Dict[str, asyncio.Lock] = {}
 
 
 def _build_sentinel_redis() -> aioredis.Redis:
@@ -233,7 +238,7 @@ class ModelService:
                 f"Modèles disponibles: {available_names}",
             )
 
-        # 2. Vérifier le cache Redis
+        # 2. Vérifier le cache Redis (première vérification rapide sans lock)
         cache_key = f"{_CACHE_PREFIX}{model_name}:{metadata.version}"
         redis = await self._get_redis()
 
@@ -260,50 +265,71 @@ class ModelService:
                 model = _extract_model_from_payload(payload)
                 return {"model": model, "metadata": metadata}
 
-        # 3. Charger le modèle depuis la source
-        try:
-            if metadata.mlflow_run_id:
+        # 3. Cache miss — acquérir le verrou intra-process pour éviter le thundering herd.
+        # Plusieurs coroutines concurrentes dans le même worker ne déclencheront qu'un seul
+        # téléchargement MinIO grâce au double-checked locking.
+        if cache_key not in _LOAD_LOCKS:
+            _LOAD_LOCKS[cache_key] = asyncio.Lock()
+        lock = _LOAD_LOCKS[cache_key]
+
+        async with lock:
+            # Double-check après acquisition du lock (un autre coroutine a peut-être déjà chargé)
+            cached_signed = await redis.get(cache_key)
+            if cached_signed:
+                try:
+                    payload = _verify_cache_signature(cached_signed)
+                except ValueError:
+                    await redis.delete(cache_key)
+                else:
+                    model = _extract_model_from_payload(payload)
+                    return {"model": model, "metadata": metadata}
+
+            # 4. Charger le modèle depuis la source
+            try:
+                if metadata.mlflow_run_id:
+                    logger.info(
+                        "Chargement du modèle depuis MLflow",
+                        model_name=model_name,
+                        version=str(metadata.version),
+                        mlflow_run_id=metadata.mlflow_run_id,
+                    )
+                    import mlflow.sklearn
+
+                    model = mlflow.sklearn.load_model(f"runs:/{metadata.mlflow_run_id}/model")
+                    cache_payload = pickle.dumps(model)  # noqa: S301
+                else:
+                    logger.info(
+                        "Téléchargement du modèle depuis MinIO",
+                        model_name=model_name,
+                        version=str(metadata.version),
+                    )
+                    # Download raw pkl bytes — do NOT call pickle.loads() until HMAC is verified
+                    raw_bytes = await minio_service.async_download_file_bytes(
+                        metadata.minio_object_key
+                    )
+                    _verify_minio_hmac(raw_bytes, metadata, model_name)
+                    model = pickle.loads(raw_bytes)  # noqa: S301 - HMAC verified above
+                    cache_payload = raw_bytes
+
+                # 5. Stocker en cache Redis avec enveloppe HMAC (TTL configurable)
+                signed = _sign_for_cache(cache_payload)
+                await redis.setex(cache_key, settings.REDIS_CACHE_TTL, signed)
+
                 logger.info(
-                    "Chargement du modèle depuis MLflow",
+                    "Modèle chargé et mis en cache Redis",
                     model_name=model_name,
                     version=str(metadata.version),
-                    mlflow_run_id=metadata.mlflow_run_id,
+                    ttl=settings.REDIS_CACHE_TTL,
                 )
-                import mlflow.sklearn
+                return {"model": model, "metadata": metadata}
 
-                model = mlflow.sklearn.load_model(f"runs:/{metadata.mlflow_run_id}/model")
-                cache_payload = pickle.dumps(model)  # noqa: S301
-            else:
-                logger.info(
-                    "Téléchargement du modèle depuis MinIO",
-                    model_name=model_name,
-                    version=str(metadata.version),
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Erreur lors du chargement du modèle '{model_name}': {str(e)}",
                 )
-                # Download raw pkl bytes — do NOT call pickle.loads() until HMAC is verified
-                raw_bytes = minio_service.download_file_bytes(metadata.minio_object_key)
-                _verify_minio_hmac(raw_bytes, metadata, model_name)
-                model = pickle.loads(raw_bytes)  # noqa: S301 - HMAC verified above
-                cache_payload = raw_bytes
-
-            # 4. Stocker en cache Redis avec enveloppe HMAC (TTL configurable)
-            signed = _sign_for_cache(cache_payload)
-            await redis.setex(cache_key, settings.REDIS_CACHE_TTL, signed)
-
-            logger.info(
-                "Modèle chargé et mis en cache Redis",
-                model_name=model_name,
-                version=str(metadata.version),
-                ttl=settings.REDIS_CACHE_TTL,
-            )
-            return {"model": model, "metadata": metadata}
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erreur lors du chargement du modèle '{model_name}': {str(e)}",
-            )
 
     async def get_cached_models(self) -> List[str]:
         """
@@ -315,6 +341,26 @@ class ModelService:
         redis = await self._get_redis()
         keys = await redis.keys(f"{_CACHE_PREFIX}*")
         return [k.decode().removeprefix(_CACHE_PREFIX) for k in keys]
+
+    async def invalidate_model_cache(self, model_name: str, version: Optional[str] = None) -> None:
+        """
+        Invalide les entrées Redis pour un modèle donné.
+
+        Args:
+            model_name: Nom du modèle.
+            version: Si fournie, n'invalide que cette version.
+                     Si None, invalide toutes les versions du modèle.
+        """
+        redis = await self._get_redis()
+        if version:
+            key = f"{_CACHE_PREFIX}{model_name}:{version}"
+            await redis.delete(key)
+            logger.info("Cache modèle invalidé", model=model_name, version=version)
+        else:
+            keys = await redis.keys(f"{_CACHE_PREFIX}{model_name}:*")
+            if keys:
+                await redis.delete(*keys)
+            logger.info("Cache modèle invalidé (toutes versions)", model=model_name)
 
     async def clear_cache(self, cache_key: Optional[str] = None):
         """

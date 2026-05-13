@@ -90,13 +90,13 @@ def test_load_model_via_minio():
         new_callable=AsyncMock,
         return_value=metadata,
     ), patch("src.services.model_service.minio_service") as minio_mock:
-        minio_mock.download_file_bytes.return_value = fake_pkl
+        minio_mock.async_download_file_bytes = AsyncMock(return_value=fake_pkl)
         result = asyncio.run(service.load_model(AsyncMock(), "test_model"))
 
     assert result["model"].marker == "fake_minio_model"
     assert result["metadata"].name == "test_model"
     assert result["metadata"].minio_object_key == "iris/v1.0.0.pkl"
-    minio_mock.download_file_bytes.assert_called_once_with("iris/v1.0.0.pkl")
+    minio_mock.async_download_file_bytes.assert_called_once_with("iris/v1.0.0.pkl")
 
 
 def test_load_model_via_mlflow():
@@ -112,11 +112,12 @@ def test_load_model_via_mlflow():
         return_value=metadata,
     ), patch("mlflow.sklearn.load_model", return_value=fake_model) as mlflow_mock, \
        patch("src.services.model_service.minio_service") as minio_mock:
+        minio_mock.async_download_file_bytes = AsyncMock()
         result = asyncio.run(service.load_model(AsyncMock(), "test_model"))
 
     assert result["model"].marker == "fake_mlflow_model"
     mlflow_mock.assert_called_once_with(f"runs:/{run_id}/model")
-    minio_mock.download_file_bytes.assert_not_called()
+    minio_mock.async_download_file_bytes.assert_not_called()
 
 
 def test_load_model_cache_hit():
@@ -132,12 +133,12 @@ def test_load_model_cache_hit():
         new_callable=AsyncMock,
         return_value=metadata,
     ), patch("src.services.model_service.minio_service") as minio_mock:
-        minio_mock.download_file_bytes.return_value = fake_pkl
+        minio_mock.async_download_file_bytes = AsyncMock(return_value=fake_pkl)
         asyncio.run(service.load_model(AsyncMock(), "test_model"))
         asyncio.run(service.load_model(AsyncMock(), "test_model"))
 
     # MinIO appelé une seule fois malgré deux load_model
-    assert minio_mock.download_file_bytes.call_count == 1
+    assert minio_mock.async_download_file_bytes.call_count == 1
 
 
 def test_load_model_forwards_explicit_version():
@@ -154,7 +155,7 @@ def test_load_model_forwards_explicit_version():
         new_callable=AsyncMock,
         return_value=metadata,
     ) as mock_get, patch("src.services.model_service.minio_service") as minio_mock:
-        minio_mock.download_file_bytes.return_value = fake_pkl
+        minio_mock.async_download_file_bytes = AsyncMock(return_value=fake_pkl)
         asyncio.run(service.load_model(AsyncMock(), "test_model", "2.0.0"))
 
     mock_get.assert_called_once()
@@ -175,7 +176,7 @@ def test_load_model_no_version_passes_none():
         new_callable=AsyncMock,
         return_value=metadata,
     ) as mock_get, patch("src.services.model_service.minio_service") as minio_mock:
-        minio_mock.download_file_bytes.return_value = fake_pkl
+        minio_mock.async_download_file_bytes = AsyncMock(return_value=fake_pkl)
         asyncio.run(service.load_model(AsyncMock(), "test_model"))
 
     mock_get.assert_called_once()
@@ -227,7 +228,7 @@ def test_load_model_missing_signature_raises_403():
         new_callable=AsyncMock,
         return_value=metadata,
     ), patch("src.services.model_service.minio_service") as minio_mock:
-        minio_mock.download_file_bytes.return_value = fake_pkl
+        minio_mock.async_download_file_bytes = AsyncMock(return_value=fake_pkl)
         with pytest.raises(HTTPException) as exc_info:
             asyncio.run(service.load_model(AsyncMock(), "test_model"))
 
@@ -250,7 +251,7 @@ def test_load_model_tampered_pkl_raises_500():
         new_callable=AsyncMock,
         return_value=metadata,
     ), patch("src.services.model_service.minio_service") as minio_mock:
-        minio_mock.download_file_bytes.return_value = tampered_pkl
+        minio_mock.async_download_file_bytes = AsyncMock(return_value=tampered_pkl)
         with pytest.raises(HTTPException) as exc_info:
             asyncio.run(service.load_model(AsyncMock(), "test_model"))
 
@@ -279,12 +280,12 @@ def test_load_model_tampered_redis_cache_invalidated():
         new_callable=AsyncMock,
         return_value=metadata,
     ), patch("src.services.model_service.minio_service") as minio_mock:
-        minio_mock.download_file_bytes.return_value = fake_pkl
+        minio_mock.async_download_file_bytes = AsyncMock(return_value=fake_pkl)
         result = asyncio.run(service.load_model(AsyncMock(), "test_model"))
 
     # L'entrée corrompue doit être ignorée ; MinIO doit avoir été appelé
     assert result["model"].marker == "fresh_from_minio"
-    minio_mock.download_file_bytes.assert_called_once_with("iris/v1.0.0.pkl")
+    minio_mock.async_download_file_bytes.assert_called_once_with("iris/v1.0.0.pkl")
     # Le cache doit maintenant contenir l'entrée valide
     new_cached = asyncio.run(service._redis.get(cache_key))
     assert new_cached is not None and len(new_cached) > 64

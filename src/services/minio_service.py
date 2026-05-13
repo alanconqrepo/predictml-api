@@ -2,6 +2,7 @@
 Service de gestion du stockage MinIO
 """
 
+import asyncio
 import io
 import pickle
 from typing import Any, List, Optional
@@ -225,6 +226,25 @@ class MinIOService:
         except S3Error as e:
             logger.error("Erreur lors du téléchargement du fichier", error=str(e))
             raise
+
+    async def async_download_file_bytes(self, object_name: str) -> bytes:
+        """Version async de download_file_bytes — n'occupe pas l'event loop pendant l'I/O réseau."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.download_file_bytes, object_name)
+
+    async def async_upload_model_bytes(self, model_bytes: bytes, object_name: str) -> dict:
+        """Version async de upload_model_bytes — n'occupe pas l'event loop pendant l'I/O réseau."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.upload_model_bytes, model_bytes, object_name)
+
+    async def async_upload_file_bytes(
+        self, content: bytes, object_name: str, content_type: str = "text/plain"
+    ) -> dict:
+        """Version async de upload_file_bytes — n'occupe pas l'event loop pendant l'I/O réseau."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self.upload_file_bytes, content, object_name, content_type
+        )
 
     def get_object_info(self, object_name: str) -> Optional[dict]:
         """

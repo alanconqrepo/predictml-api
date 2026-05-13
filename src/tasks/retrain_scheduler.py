@@ -152,13 +152,14 @@ async def _do_retrain(name: str, version: str) -> None:
     from src.services.db_service import DBService
     from src.services.minio_service import minio_service
     from src.services.mlflow_service import mlflow_service
-    from src.services.model_service import compute_model_hmac
+    from src.services.model_service import compute_model_hmac, model_service
 
     logger.info("Démarrage du ré-entraînement planifié", model=name, version=version)
     structlog.contextvars.bind_contextvars(event_type="retrain", model_name=name)
 
+    # --- Session 1 : lecture pré-subprocess ---
+    # Fermer la connexion DB avant le subprocess (600 s) pour libérer le pool.
     async with AsyncSessionLocal() as db:
-        # 1. Charger le modèle source
         result = await db.execute(
             select(ModelMetadata).where(
                 and_(ModelMetadata.name == name, ModelMetadata.version == version)
@@ -182,18 +183,123 @@ async def _do_retrain(name: str, version: str) -> None:
             )
             return
 
-        # 2. Calculer la plage de dates
-        lookback_days = int(schedule.get("lookback_days", 30))
-        now_utc = datetime.now(timezone.utc)
-        end_date = now_utc.strftime("%Y-%m-%d")
-        start_date = (now_utc - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+        # Extraire tous les champs nécessaires en mémoire avant de fermer la session
+        source_fields = {
+            "train_script_object_key": source_model.train_script_object_key,
+            "description": source_model.description,
+            "algorithm": source_model.algorithm,
+            "features_count": source_model.features_count,
+            "classes": source_model.classes,
+            "training_params": source_model.training_params,
+            "training_dataset": source_model.training_dataset,
+            "feature_baseline": source_model.feature_baseline,
+            "confidence_threshold": source_model.confidence_threshold,
+            "tags": source_model.tags,
+            "webhook_url": source_model.webhook_url,
+            "promotion_policy": source_model.promotion_policy,
+            "accuracy": source_model.accuracy,
+            "f1_score": source_model.f1_score,
+        }
+    # ← connexion DB libérée ici, avant le subprocess de 600 s
 
-        # 3. Télécharger train.py depuis MinIO
+    # 2. Calculer la plage de dates
+    lookback_days = int(schedule.get("lookback_days", 30))
+    now_utc = datetime.now(timezone.utc)
+    end_date = now_utc.strftime("%Y-%m-%d")
+    start_date = (now_utc - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+
+    # 3. Télécharger train.py depuis MinIO
+    try:
+        script_bytes = await minio_service.async_download_file_bytes(
+            source_fields["train_script_object_key"]
+        )
+    except Exception as exc:
+        logger.error(
+            "Téléchargement train.py échoué",
+            model=name,
+            version=version,
+            error=str(exc),
+        )
+        retrain_total.labels(model_name=name, status="failure").inc()
+        return
+
+    # 4. Exécuter le subprocess (timeout 600 s — identique à l'endpoint manuel)
+    timestamp = now_utc.strftime("%Y%m%d%H%M%S")
+    new_version = f"{version}-sched-{timestamp}"
+    mlflow_uri = settings.MLFLOW_TRACKING_URI
+    stdout_text = ""
+    stderr_text = ""
+    new_model_bytes: Optional[bytes] = None
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        script_path = os.path.join(tmpdir, "train.py")
+        output_model_path = os.path.join(tmpdir, "output_model.pkl")
+
+        with open(script_path, "wb") as f:
+            f.write(script_bytes)
+
+        env = {k: v for k, v in os.environ.items() if k in _SAFE_ENV_KEYS}
+        env.update(
+            {
+                "TRAIN_START_DATE": start_date,
+                "TRAIN_END_DATE": end_date,
+                "OUTPUT_MODEL_PATH": output_model_path,
+                "MLFLOW_TRACKING_URI": mlflow_uri,
+                "MODEL_NAME": name,
+            }
+        )
+
         try:
-            script_bytes = minio_service.download_file_bytes(source_model.train_script_object_key)
+            proc = await asyncio.create_subprocess_exec(
+                "python",
+                script_path,
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=tmpdir,
+                preexec_fn=_set_subprocess_limits,
+            )
+            try:
+                raw_stdout, raw_stderr = await asyncio.wait_for(proc.communicate(), timeout=600.0)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.communicate()
+                logger.error(
+                    "Timeout ré-entraînement planifié (600 s)",
+                    model=name,
+                    version=version,
+                )
+                retrain_total.labels(model_name=name, status="failure").inc()
+                return
+
+            stdout_text = raw_stdout.decode("utf-8", errors="replace")
+            stderr_text = raw_stderr.decode("utf-8", errors="replace")
+
+            if proc.returncode != 0:
+                logger.error(
+                    "Script de ré-entraînement échoué",
+                    model=name,
+                    returncode=proc.returncode,
+                    stderr=stderr_text[:500],
+                )
+                retrain_total.labels(model_name=name, status="failure").inc()
+                return
+
+            if not os.path.exists(output_model_path):
+                logger.error(
+                    "Fichier modèle absent après l'exécution du script",
+                    model=name,
+                    version=version,
+                )
+                retrain_total.labels(model_name=name, status="failure").inc()
+                return
+
+            with open(output_model_path, "rb") as f:
+                new_model_bytes = f.read()
+
         except Exception as exc:
             logger.error(
-                "Téléchargement train.py échoué",
+                "Erreur lors de l'exécution du subprocess",
                 model=name,
                 version=version,
                 error=str(exc),
@@ -201,151 +307,69 @@ async def _do_retrain(name: str, version: str) -> None:
             retrain_total.labels(model_name=name, status="failure").inc()
             return
 
-        # 4. Exécuter le subprocess (timeout 600 s — identique à l'endpoint manuel)
-        timestamp = now_utc.strftime("%Y%m%d%H%M%S")
-        new_version = f"{version}-sched-{timestamp}"
-        mlflow_uri = settings.MLFLOW_TRACKING_URI
-        stdout_text = ""
-        stderr_text = ""
-        new_model_bytes: Optional[bytes] = None
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            script_path = os.path.join(tmpdir, "train.py")
-            output_model_path = os.path.join(tmpdir, "output_model.pkl")
-
-            with open(script_path, "wb") as f:
-                f.write(script_bytes)
-
-            env = {k: v for k, v in os.environ.items() if k in _SAFE_ENV_KEYS}
-            env.update(
-                {
-                    "TRAIN_START_DATE": start_date,
-                    "TRAIN_END_DATE": end_date,
-                    "OUTPUT_MODEL_PATH": output_model_path,
-                    "MLFLOW_TRACKING_URI": mlflow_uri,
-                    "MODEL_NAME": name,
-                }
-            )
-
+    # 5. Extraire les métriques depuis la dernière ligne JSON de stdout
+    new_accuracy = source_fields["accuracy"]
+    new_f1 = source_fields["f1_score"]
+    parsed_metrics: dict = {}
+    for line in reversed(stdout_text.strip().splitlines()):
+        stripped = line.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
             try:
-                proc = await asyncio.create_subprocess_exec(
-                    "python",
-                    script_path,
-                    env=env,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=tmpdir,
-                    preexec_fn=_set_subprocess_limits,
-                )
-                try:
-                    raw_stdout, raw_stderr = await asyncio.wait_for(
-                        proc.communicate(), timeout=600.0
-                    )
-                except asyncio.TimeoutError:
-                    proc.kill()
-                    await proc.communicate()
-                    logger.error(
-                        "Timeout ré-entraînement planifié (600 s)",
-                        model=name,
-                        version=version,
-                    )
-                    retrain_total.labels(model_name=name, status="failure").inc()
-                    return
+                parsed_metrics = json.loads(stripped)
+                new_accuracy = parsed_metrics.get("accuracy", new_accuracy)
+                new_f1 = parsed_metrics.get("f1_score", new_f1)
+            except json.JSONDecodeError:
+                pass
+            break
 
-                stdout_text = raw_stdout.decode("utf-8", errors="replace")
-                stderr_text = raw_stderr.decode("utf-8", errors="replace")
+    training_stats = {
+        "train_start_date": start_date,
+        "train_end_date": end_date,
+        "trained_at": now_utc.isoformat(),
+        "n_rows": parsed_metrics.get("n_rows"),
+        "feature_stats": parsed_metrics.get("feature_stats"),
+        "label_distribution": parsed_metrics.get("label_distribution"),
+    }
 
-                if proc.returncode != 0:
-                    logger.error(
-                        "Script de ré-entraînement échoué",
-                        model=name,
-                        returncode=proc.returncode,
-                        stderr=stderr_text[:500],
-                    )
-                    retrain_total.labels(model_name=name, status="failure").inc()
-                    return
+    # 5b. Créer le run MLflow (dégradation gracieuse si MLflow indisponible)
+    _mlflow_run_id: Optional[str] = None
+    try:
+        _mlflow_run_id = mlflow_service.log_retrain_run(
+            model_name=name,
+            new_version=new_version,
+            source_version=version,
+            trigger="scheduler",
+            trained_by="scheduler",
+            train_start_date=start_date,
+            train_end_date=end_date,
+            accuracy=new_accuracy,
+            f1_score=new_f1,
+            n_rows=parsed_metrics.get("n_rows"),
+            feature_stats=parsed_metrics.get("feature_stats"),
+            label_distribution=parsed_metrics.get("label_distribution"),
+            algorithm=source_fields["algorithm"],
+            training_params=source_fields["training_params"],
+            auto_promoted=False,
+            auto_promote_reason=None,
+            model_bytes=new_model_bytes,
+            lookback_days=lookback_days,
+        )
+    except Exception as _exc:
+        logger.warning("MLflow logging échoué (scheduler)", error=str(_exc))
 
-                if not os.path.exists(output_model_path):
-                    logger.error(
-                        "Fichier modèle absent après l'exécution du script",
-                        model=name,
-                        version=version,
-                    )
-                    retrain_total.labels(model_name=name, status="failure").inc()
-                    return
+    # 6. Uploader le nouveau modèle et le script dans MinIO
+    new_object_key = f"{name}/v{new_version}.pkl"
+    new_pkl_hmac_signature = compute_model_hmac(new_model_bytes)
+    upload_info = await minio_service.async_upload_model_bytes(new_model_bytes, new_object_key)
+    new_train_key = f"{name}/v{new_version}_train.py"
+    await minio_service.async_upload_file_bytes(
+        script_bytes, new_train_key, content_type="text/x-python"
+    )
 
-                with open(output_model_path, "rb") as f:
-                    new_model_bytes = f.read()
-
-            except Exception as exc:
-                logger.error(
-                    "Erreur lors de l'exécution du subprocess",
-                    model=name,
-                    version=version,
-                    error=str(exc),
-                )
-                retrain_total.labels(model_name=name, status="failure").inc()
-                return
-
-        # 5. Extraire les métriques depuis la dernière ligne JSON de stdout
-        new_accuracy = source_model.accuracy
-        new_f1 = source_model.f1_score
-        parsed_metrics: dict = {}
-        for line in reversed(stdout_text.strip().splitlines()):
-            stripped = line.strip()
-            if stripped.startswith("{") and stripped.endswith("}"):
-                try:
-                    parsed_metrics = json.loads(stripped)
-                    new_accuracy = parsed_metrics.get("accuracy", new_accuracy)
-                    new_f1 = parsed_metrics.get("f1_score", new_f1)
-                except json.JSONDecodeError:
-                    pass
-                break
-
-        training_stats = {
-            "train_start_date": start_date,
-            "train_end_date": end_date,
-            "trained_at": now_utc.isoformat(),
-            "n_rows": parsed_metrics.get("n_rows"),
-            "feature_stats": parsed_metrics.get("feature_stats"),
-            "label_distribution": parsed_metrics.get("label_distribution"),
-        }
-
-        # 5b. Créer le run MLflow (dégradation gracieuse si MLflow indisponible)
-        _mlflow_run_id: Optional[str] = None
-        try:
-            _mlflow_run_id = mlflow_service.log_retrain_run(
-                model_name=name,
-                new_version=new_version,
-                source_version=version,
-                trigger="scheduler",
-                trained_by="scheduler",
-                train_start_date=start_date,
-                train_end_date=end_date,
-                accuracy=new_accuracy,
-                f1_score=new_f1,
-                n_rows=parsed_metrics.get("n_rows"),
-                feature_stats=parsed_metrics.get("feature_stats"),
-                label_distribution=parsed_metrics.get("label_distribution"),
-                algorithm=source_model.algorithm,
-                training_params=source_model.training_params,
-                auto_promoted=False,
-                auto_promote_reason=None,
-                model_bytes=new_model_bytes,
-                lookback_days=lookback_days,
-            )
-        except Exception as _exc:
-            logger.warning("MLflow logging échoué (scheduler)", error=str(_exc))
-
-        # 6. Uploader le nouveau modèle et le script dans MinIO
-        new_object_key = f"{name}/v{new_version}.pkl"
-        new_pkl_hmac_signature = compute_model_hmac(new_model_bytes)
-        upload_info = minio_service.upload_model_bytes(new_model_bytes, new_object_key)
-        new_train_key = f"{name}/v{new_version}_train.py"
-        minio_service.upload_file_bytes(script_bytes, new_train_key, content_type="text/x-python")
-
+    # --- Session 2 : écriture post-subprocess ---
+    now_naive = now_utc.replace(tzinfo=None)
+    async with AsyncSessionLocal() as db:
         # 7. Créer la nouvelle entrée ModelMetadata
-        now_naive = now_utc.replace(tzinfo=None)
         new_metadata = ModelMetadata(
             name=name,
             version=new_version,
@@ -354,22 +378,22 @@ async def _do_retrain(name: str, version: str) -> None:
             file_size_bytes=upload_info.get("size"),
             pkl_hmac_signature=new_pkl_hmac_signature,
             train_script_object_key=new_train_key,
-            description=source_model.description,
-            algorithm=source_model.algorithm,
+            description=source_fields["description"],
+            algorithm=source_fields["algorithm"],
             mlflow_run_id=_mlflow_run_id,
             accuracy=new_accuracy,
             f1_score=new_f1,
-            features_count=source_model.features_count,
-            classes=source_model.classes,
-            training_params=source_model.training_params,
+            features_count=source_fields["features_count"],
+            classes=source_fields["classes"],
+            training_params=source_fields["training_params"],
             training_dataset=(
-                f"{source_model.training_dataset or name} [{start_date} → {end_date}]"
+                f"{source_fields['training_dataset'] or name} [{start_date} → {end_date}]"
             ),
-            feature_baseline=source_model.feature_baseline,
-            confidence_threshold=source_model.confidence_threshold,
-            tags=source_model.tags,
-            webhook_url=source_model.webhook_url,
-            promotion_policy=source_model.promotion_policy,
+            feature_baseline=source_fields["feature_baseline"],
+            confidence_threshold=source_fields["confidence_threshold"],
+            tags=source_fields["tags"],
+            webhook_url=source_fields["webhook_url"],
+            promotion_policy=source_fields["promotion_policy"],
             trained_by="scheduler",
             training_date=now_naive,
             user_id_creator=None,
@@ -388,9 +412,9 @@ async def _do_retrain(name: str, version: str) -> None:
         # 8. Auto-promotion si activée et policy définie
         _auto_promoted = False
         _auto_promote_reason: Optional[str] = None
-        if schedule.get("auto_promote") and source_model.promotion_policy:
+        if schedule.get("auto_promote") and source_fields["promotion_policy"]:
             should_promote, reason = await evaluate_auto_promotion(
-                db, name, source_model.promotion_policy
+                db, name, source_fields["promotion_policy"]
             )
             _auto_promoted = should_promote
             _auto_promote_reason = reason
@@ -417,7 +441,7 @@ async def _do_retrain(name: str, version: str) -> None:
             )
 
         # Persist auto_promoted outcome in training_stats for retrain-history
-        if schedule.get("auto_promote") and source_model.promotion_policy:
+        if schedule.get("auto_promote") and source_fields["promotion_policy"]:
             new_metadata.training_stats = {
                 **(new_metadata.training_stats or {}),
                 "auto_promoted": _auto_promoted,
@@ -441,15 +465,38 @@ async def _do_retrain(name: str, version: str) -> None:
         # 9. Mettre à jour last_run_at et next_run_at sur le modèle source
         cron_expr = schedule.get("cron", "")
         next_run = _compute_next_run_at(cron_expr) if cron_expr else None
-        source_model.retrain_schedule = {
-            **schedule,
-            "last_run_at": now_naive.isoformat(),
-            "next_run_at": next_run.isoformat() if next_run else None,
-        }
+        source_update_result = await db.execute(
+            select(ModelMetadata).where(
+                and_(ModelMetadata.name == name, ModelMetadata.version == version)
+            )
+        )
+        source_model_for_update = source_update_result.scalar_one_or_none()
+        if source_model_for_update:
+            source_model_for_update.retrain_schedule = {
+                **schedule,
+                "last_run_at": now_naive.isoformat(),
+                "next_run_at": next_run.isoformat() if next_run else None,
+            }
 
         await db.commit()
 
-        _wh = new_metadata.webhook_url
+        # 10. Invalider le cache Redis du modèle (forcer le rechargement de la nouvelle version)
+        await model_service.invalidate_model_cache(name)
+
+        # 11. Pré-chauffer le cache pour la nouvelle version si promue en production
+        if _auto_promoted or new_metadata.is_production:
+            try:
+                async with AsyncSessionLocal() as warmup_db:
+                    await model_service.load_model(warmup_db, name, new_version)
+                logger.info(
+                    "Cache pré-chauffé pour la nouvelle version",
+                    model=name,
+                    new_version=new_version,
+                )
+            except Exception as _exc:
+                logger.warning("Pré-chauffe cache échouée (non bloquant)", error=str(_exc))
+
+        _wh = source_fields["webhook_url"]
         if _wh:
             _ts = datetime.utcnow().isoformat() + "Z"
             from src.services.webhook_service import send_webhook

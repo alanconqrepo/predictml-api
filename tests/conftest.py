@@ -4,7 +4,7 @@ Configuration pytest - Fixes pour asyncpg + TestClient sur Windows
 import asyncio
 import sys
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Fix event loop sur Windows (requis par asyncpg)
 if sys.platform == "win32":
@@ -21,18 +21,26 @@ os.environ.setdefault("METRICS_TOKEN", "test-metrics-token-for-pytest")
 
 # Mock MinIO globalement — les tests ne nécessitent pas de vrai serveur MinIO
 _minio_mock = MagicMock()
-_minio_mock.upload_model_bytes.return_value = {
+_upload_return = {
     "bucket": "models",
     "object_name": "mock_model/v1.0.0.pkl",
     "size": 512,
     "etag": "mock-etag-abc123",
 }
+_minio_mock.upload_model_bytes.return_value = _upload_return
+_minio_mock.upload_file_bytes.return_value = _upload_return
 _minio_mock.delete_model.return_value = True
 _minio_mock.download_model.side_effect = Exception("MinIO non disponible en tests")
+# Versions async des méthodes MinIO (utilisées depuis les contextes async)
+_minio_mock.async_upload_model_bytes = AsyncMock(return_value=_upload_return)
+_minio_mock.async_upload_file_bytes = AsyncMock(return_value=_upload_return)
+_minio_mock.async_download_file_bytes = AsyncMock(return_value=b"fake-model-bytes")
 
 import src.api.models  # noqa: E402 — doit être importé avant le patch
 import src.tasks.retrain_scheduler  # noqa: E402 — doit être importé avant le patch
 patch("src.api.models.minio_service", _minio_mock).start()
+# Couvre les imports lazy du scheduler (from src.services.minio_service import minio_service)
+patch("src.services.minio_service.minio_service", _minio_mock).start()
 
 # Mock MLflow service globalement — les tests ne nécessitent pas de serveur MLflow
 _mlflow_mock = MagicMock()
@@ -147,3 +155,8 @@ async def _override_get_db():
 # Remplacer les dépendances DB par la version NullPool (lecture + écriture → même SQLite)
 app.dependency_overrides[get_db] = _override_get_db
 app.dependency_overrides[get_read_db] = _override_get_db
+
+# Rediriger AsyncSessionLocal vers la DB de test (SQLite).
+# Nécessaire pour les sessions directes (non injectées via Depends) dans le code retrain.
+patch("src.db.database.AsyncSessionLocal", new=_TestSessionLocal).start()
+patch("src.api.models.AsyncSessionLocal", new=_TestSessionLocal).start()
