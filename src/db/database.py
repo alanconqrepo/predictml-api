@@ -18,6 +18,8 @@ engine = create_async_engine(
     pool_recycle=300,
     pool_pre_ping=True,
     pool_timeout=30,
+    # PgBouncer transaction mode does not support server-side prepared statements
+    connect_args={"prepared_statement_cache_size": 0},
 )
 
 # Session maker
