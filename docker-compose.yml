@@ -1,5 +1,5 @@
 services:
-  # Base de données PostgreSQL
+  # Base de données PostgreSQL (primary — writes)
   postgres:
     image: postgres:16-alpine
     container_name: predictml-postgres
@@ -7,11 +7,43 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-sklearn_api}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    command: >
+      postgres
+      -c hba_file=/etc/postgresql/pg_hba.conf
+      -c wal_level=replica
+      -c max_wal_senders=3
+      -c wal_keep_size=64
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init_data/create_mlflow_db.sql:/docker-entrypoint-initdb.d/create_mlflow_db.sql:ro
+      - ./docker/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # PostgreSQL read replica — streaming replication from primary (reads analytiques)
+  postgres-replica:
+    image: postgres:16-alpine
+    environment:
+      PGDATA: /var/lib/postgresql/data
+      PGUSER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_MASTER_HOST: postgres
+      POSTGRES_MASTER_PORT: "5432"
+    entrypoint: ["/bin/sh", "/docker/postgres-replica-entrypoint.sh"]
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+      - ./docker/postgres-replica-entrypoint.sh:/docker/postgres-replica-entrypoint.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
@@ -166,7 +198,7 @@ services:
     networks:
       - internal
 
-  # PgBouncer — connection pooler PostgreSQL
+  # PgBouncer — connection pooler PostgreSQL (primary / writes)
   pgbouncer:
     image: pgbouncer/pgbouncer:1.23
     container_name: predictml-pgbouncer
@@ -182,6 +214,31 @@ services:
       SERVER_RESET_QUERY: DISCARD ALL
     depends_on:
       postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # PgBouncer — connection pooler for read replica (analytics / reads)
+  pgbouncer-read:
+    image: pgbouncer/pgbouncer:1.23
+    environment:
+      DATABASES_HOST: postgres-replica
+      DATABASES_PORT: "5432"
+      DATABASES_USER: ${POSTGRES_USER:-postgres}
+      DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DATABASES_DBNAME: ${POSTGRES_DB:-sklearn_api}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "100"
+      DEFAULT_POOL_SIZE: "10"
+      SERVER_RESET_QUERY: DISCARD ALL
+    depends_on:
+      postgres-replica:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER:-postgres}"]
@@ -238,6 +295,7 @@ services:
       - .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:5432/${POSTGRES_DB:-sklearn_api}
+      - DATABASE_READ_REPLICA_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer-read:5432/${POSTGRES_DB:-sklearn_api}
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
@@ -273,6 +331,8 @@ services:
       migrate:
         condition: service_completed_successfully
       pgbouncer:
+        condition: service_healthy
+      pgbouncer-read:
         condition: service_healthy
       minio:
         condition: service_healthy
@@ -384,6 +444,8 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  postgres_replica_data:
     driver: local
   minio_data:
     driver: local

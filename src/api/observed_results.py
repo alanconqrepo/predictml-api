@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import require_admin, verify_token
-from src.db.database import get_db
+from src.db.database import get_db, get_read_db
 from src.db.models import User
 from src.schemas.observed_result import (
     CSVParseError,
@@ -279,7 +279,7 @@ async def export_observed_results(
 async def get_observed_results_stats(
     model_name: Optional[str] = Query(None, description="Filtrer par modèle ; omis = global"),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Taux de couverture du ground truth : combien de prédictions ont un résultat observé.

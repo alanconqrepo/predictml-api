@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import verify_token
-from src.db.database import get_db
+from src.db.database import get_read_db
 from src.db.models import User
 from src.schemas.monitoring import (
     GlobalDashboard,
@@ -170,7 +170,7 @@ async def monitoring_overview(
         pattern="^(json|csv)$",
         description="Format de sortie : json (défaut) ou csv",
     ),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
     _user: User = Depends(verify_token),
 ) -> Union[GlobalDashboard, StreamingResponse]:
     """
@@ -360,7 +360,7 @@ async def monitoring_model_detail(
     name: str,
     start: datetime = Query(..., description="Début de la période (ISO 8601)"),
     end: datetime = Query(..., description="Fin de la période (ISO 8601)"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
     _user: User = Depends(verify_token),
 ):
     """

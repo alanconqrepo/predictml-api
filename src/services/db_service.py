@@ -293,7 +293,10 @@ class DBService:
             filters.append(Prediction.max_confidence <= max_confidence)
 
         base_query = (
-            select(Prediction).join(User, Prediction.user_id == User.id).where(and_(*filters))
+            select(Prediction)
+            .join(User, Prediction.user_id == User.id)
+            .options(selectinload(Prediction.user))
+            .where(and_(*filters))
         )
 
         total_result = await db.execute(select(func.count()).select_from(base_query.subquery()))

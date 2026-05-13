@@ -47,7 +47,7 @@ from src.core.audit import audit_log
 from src.core.config import settings
 from src.core.rate_limit import limiter
 from src.core.security import require_admin, verify_token
-from src.db.database import get_db
+from src.db.database import get_db, get_read_db
 from src.db.models import HistoryActionType, ModelMetadata, User
 from src.db.models.model_metadata import DeploymentMode
 from src.schemas.golden_test import GoldenTestCreate, GoldenTestResponse, GoldenTestRunResponse
@@ -338,7 +338,7 @@ async def get_models_leaderboard(
         "accuracy", description="Metric to rank by"
     ),
     days: int = Query(30, ge=1, le=365, description="Sliding window in days"),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
     _user: User = Depends(verify_token),
 ) -> List[LeaderboardEntry]:
     """
@@ -472,7 +472,7 @@ async def get_model_performance(
         None, description="Agrégation temporelle (day, week, month)"
     ),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Calcule les métriques de performance réelle en production pour un modèle.
@@ -579,7 +579,7 @@ async def get_model_performance(
 async def get_model_performance_timeline(
     name: ModelNamePath,
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Retourne l'évolution chronologique des métriques de performance par version du modèle.
@@ -621,7 +621,7 @@ async def get_model_drift(
         30, ge=5, description="Nombre minimum de prédictions pour calculer le drift"
     ),
     user: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Rapport de data drift pour un modèle.
@@ -701,7 +701,7 @@ async def get_model_output_drift(
         30, ge=5, description="Nombre minimum de prédictions pour calculer le drift"
     ),
     user: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Rapport de drift de distribution des sorties (label shift) pour un modèle.
@@ -740,7 +740,7 @@ async def get_model_readiness(
         ..., description="Version du modèle à vérifier", pattern=r"^\d+\.\d+(\.\d+)?$"
     ),
     user: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Vérifie si une version de modèle est opérationnellement prête pour la mise en trafic.
@@ -827,7 +827,7 @@ async def get_feature_importance(
     last_n: int = Query(100, ge=1, le=500, description="Nb de prédictions à échantillonner"),
     days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours"),
     user: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Importance globale des features via valeurs SHAP agrégées.
@@ -947,7 +947,7 @@ async def list_model_history(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Retourne l'historique complet de toutes les versions d'un modèle (tri timestamp DESC).
@@ -972,7 +972,7 @@ async def list_model_version_history(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Retourne l'historique d'une version spécifique d'un modèle (tri timestamp DESC).
@@ -1700,7 +1700,7 @@ async def get_retrain_history(
     limit: int = Query(20, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Retourne l'historique des ré-entraînements d'un modèle.
@@ -1855,7 +1855,7 @@ async def get_ab_comparison(
     name: ModelNamePath,
     days: int = Query(30, ge=1, le=90, description="Fenêtre d'analyse en jours (max 90)"),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Comparaison côte-à-côte des versions A/B et shadow d'un modèle sur une fenêtre glissante.
@@ -1958,7 +1958,7 @@ async def get_shadow_comparison(
     name: ModelNamePath,
     period_days: int = Query(30, ge=1, le=90, description="Fenêtre d'analyse en jours (max 90)"),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Comparaison enrichie entre la version shadow et la version production d'un modèle.
@@ -2023,7 +2023,7 @@ async def get_model_calibration(
         10, ge=2, le=20, description="Nombre de buckets pour la courbe de calibration"
     ),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Analyse la calibration des probabilités d'un modèle de classification.
@@ -2439,7 +2439,7 @@ async def get_performance_report(
     days: int = Query(30, ge=1, le=365, description="Fenêtre d'analyse en jours"),
     format: str = Query("json", description="Format de sortie (json ; html prévu en phase 2)"),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Rapport de performance consolidé pour un modèle.
@@ -2510,7 +2510,7 @@ async def get_confidence_trend(
     days: int = Query(30, ge=1, le=365, description="Fenêtre glissante en jours"),
     granularity: str = Query("day", description="Granularité temporelle (day)"),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Tendance de confiance du modèle sur une fenêtre glissante.
@@ -2576,7 +2576,7 @@ async def get_confidence_distribution(
         0.60, ge=0.5, le=1.0, description="Seuil d'alerte incertitude"
     ),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Histogramme de confiance du modèle sur une fenêtre glissante.
@@ -2636,7 +2636,7 @@ async def compare_model_versions(
         7, ge=1, le=90, description="Fenêtre temporelle pour les stats de latence (jours)"
     ),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Comparaison multi-versions d'un modèle en un seul appel.
@@ -2841,7 +2841,7 @@ async def get_model_card(
     request: Request,
     days: int = Query(30, ge=1, le=365, description="Fenêtre d'analyse en jours"),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Model Card — résumé structuré d'une version de modèle.
