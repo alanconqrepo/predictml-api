@@ -15,11 +15,6 @@
 #     → Patroni + etcd (failover automatique en ~15-30 s)
 #     → Fichiers associés : docker/patroni/, docker/haproxy-postgres.cfg
 #
-#   SPOF 3 — Nginx (container unique)
-#     → Sur machine unique : restart: unless-stopped suffit (redémarrage < 10 s)
-#     → Sur multi-machine : Keepalived sur l'HÔTE avec VIP flottante
-#     → Fichiers associés : docker/keepalived-master.conf, docker/keepalived-backup.conf
-#
 # Prérequis avant le premier démarrage :
 #   1. Construire l'image Patroni :
 #        docker build -t predictml-patroni:latest docker/patroni/
@@ -717,19 +712,11 @@ services:
       - frontend
 
   # ============================================================
-  # BLOC 8 — NGINX (SPOF 3 — partiellement mitigé)
+  # BLOC 8 — NGINX (reverse proxy)
   #
-  # Sur machine unique :
-  #   restart: unless-stopped redémarre le container en < 10 s si le process crash.
-  #   La panne de la machine hôte emporte toute la stack de toute façon.
-  #   → Ce niveau de protection est suffisant sur une seule machine.
-  #
-  # Sur infrastructure multi-machine (2 VMs ou plus) :
-  #   → Déployer ce service sur chaque machine hôte.
-  #   → Installer Keepalived sur l'HÔTE (pas dans Docker) pour gérer une VIP flottante.
-  #   → Voir docker/keepalived-master.conf et docker/keepalived-backup.conf.
-  #   → Le DNS externe doit pointer sur la VIP, pas sur l'IP d'une machine.
-  #   → Bascule automatique en ~2-3 s si la machine MASTER devient injoignable.
+  # Déploiement sur machine unique : restart: unless-stopped redémarre
+  # le container en < 10 s si le process crash — protection suffisante.
+  # Une panne de la machine hôte emporte toute la stack de toute façon.
   # ============================================================
 
   nginx:
