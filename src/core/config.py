@@ -87,6 +87,9 @@ class Settings:
         else "redis://localhost:6379/0"
     )
     REDIS_CACHE_TTL: int = int(os.getenv("REDIS_CACHE_TTL", "3600"))
+    # Sentinel hosts — "sentinel1:26379,sentinel2:26379,sentinel3:26379"
+    # When set, the API connects via Sentinel instead of directly to REDIS_URL.
+    REDIS_SENTINEL_HOSTS: str = os.getenv("REDIS_SENTINEL_HOSTS", "")
 
     # MLflow Experiment Tracking
     MLFLOW_TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")

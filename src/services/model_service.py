@@ -15,6 +15,22 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
+
+
+def _build_sentinel_redis() -> aioredis.Redis:
+    """Return a Redis client connected to the Sentinel-elected master."""
+    from urllib.parse import urlparse
+
+    from redis.asyncio.sentinel import Sentinel
+
+    hosts = [
+        (part.strip().rsplit(":", 1)[0], int(part.strip().rsplit(":", 1)[1]))
+        for part in settings.REDIS_SENTINEL_HOSTS.split(",")
+        if part.strip()
+    ]
+    redis_password = urlparse(settings.REDIS_URL).password or None
+    sentinel = Sentinel(hosts, password=redis_password, socket_timeout=0.5)
+    return sentinel.master_for("mymaster", decode_responses=False)
 from src.db.models.model_metadata import DeploymentMode, ModelMetadata
 from src.services.db_service import DBService
 from src.services.minio_service import minio_service
@@ -105,9 +121,12 @@ class ModelService:
         self._redis: Optional[aioredis.Redis] = None
 
     async def _get_redis(self) -> aioredis.Redis:
-        """Retourne le client Redis, en le créant si nécessaire."""
+        """Retourne le client Redis (direct ou via Sentinel), en le créant si nécessaire."""
         if self._redis is None:
-            self._redis = aioredis.Redis.from_url(settings.REDIS_URL, decode_responses=False)
+            if settings.REDIS_SENTINEL_HOSTS:
+                self._redis = _build_sentinel_redis()
+            else:
+                self._redis = aioredis.Redis.from_url(settings.REDIS_URL, decode_responses=False)
         return self._redis
 
     async def get_available_models(
