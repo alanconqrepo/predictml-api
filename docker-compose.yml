@@ -82,6 +82,21 @@ services:
     networks:
       - internal
 
+  # Migration one-shot — s'exécute avant l'API, ne redémarre pas
+  migrate:
+    build: .
+    command: alembic upgrade head
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-sklearn_api}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - internal
+
   # API FastAPI
   api:
     build: .
@@ -122,8 +137,8 @@ services:
       # - PERFORMANCE_DRIFT_ALERT_THRESHOLD=0.10
       # - ERROR_RATE_ALERT_THRESHOLD=0.10
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       minio:
         condition: service_healthy
       redis:
