@@ -21,7 +21,7 @@ from src.core.config import settings
 from src.core.ml_metrics import inference_duration_seconds, predictions_total
 from src.core.rate_limit import limiter
 from src.core.security import check_prediction_rate_limit, require_admin, verify_token
-from src.db.database import AsyncSessionLocal, get_db
+from src.db.database import AsyncSessionLocal, get_db, get_read_db
 from src.db.models import Prediction, User
 from src.db.models.user import UserRole
 from src.schemas.prediction import (
@@ -163,7 +163,7 @@ async def get_prediction_stats(
     model_name: Optional[str] = Query(None, description="Filtrer par nom de modèle (optionnel)"),
     days: int = Query(30, ge=1, le=365, description="Fenêtre en jours (défaut : 30, max : 365)"),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Statistiques agrégées des prédictions par modèle sur une fenêtre glissante.
@@ -210,7 +210,7 @@ async def get_predictions(
         description="Confiance maximale (max des probabilités) — optionnel, classifieurs uniquement",
     ),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Retourne l'historique des prédictions avec filtres (pagination par curseur).
@@ -295,7 +295,7 @@ async def export_predictions(
         None, alias="status", description="Filtrer par statut : success ou error"
     ),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Export bulk des prédictions au format CSV, JSONL ou Parquet via streaming par curseur.
@@ -485,7 +485,7 @@ async def get_anomalous_predictions(
         200, ge=1, le=1000, description="Max prédictions à analyser (défaut : 200, max : 1000)"
     ),
     _auth: User = Depends(verify_token),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
 ):
     """
     Prédictions avec features aberrantes (z-score ≥ seuil).

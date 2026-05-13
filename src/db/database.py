@@ -8,9 +8,7 @@ from sqlalchemy.orm import declarative_base
 
 from src.core.config import settings
 
-# Créer le moteur de base de données
-engine = create_async_engine(
-    settings.DATABASE_URL,
+_ENGINE_KWARGS = dict(
     echo=True if settings.DEBUG else False,
     future=True,
     pool_size=settings.DB_POOL_SIZE,
@@ -22,7 +20,9 @@ engine = create_async_engine(
     connect_args={"prepared_statement_cache_size": 0},
 )
 
-# Session maker
+# Write engine — primary (all mutations)
+engine = create_async_engine(settings.DATABASE_URL, **_ENGINE_KWARGS)
+
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
@@ -31,18 +31,38 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False,
 )
 
+# Read engine — replica when DATABASE_READ_REPLICA_URL is set, otherwise reuses write engine
+if settings.DATABASE_READ_REPLICA_URL:
+    read_engine = create_async_engine(settings.DATABASE_READ_REPLICA_URL, **_ENGINE_KWARGS)
+    ReadAsyncSessionLocal = async_sessionmaker(
+        read_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
+    _separate_read_engine = True
+else:
+    read_engine = engine
+    ReadAsyncSessionLocal = AsyncSessionLocal
+    _separate_read_engine = False
+
 # Base pour les modèles
 Base = declarative_base()
 
 
 async def get_db() -> AsyncSession:
-    """
-    Dependency pour obtenir une session de base de données
-
-    Yields:
-        AsyncSession: Session de base de données
-    """
+    """Dependency for write/transactional endpoints (primary)."""
     async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
+
+
+async def get_read_db() -> AsyncSession:
+    """Dependency for analytics/read-only endpoints. Routes to read replica when configured."""
+    async with ReadAsyncSessionLocal() as session:
         try:
             yield session
         finally:
@@ -56,8 +76,13 @@ async def init_db():
     """
     async with engine.connect() as conn:
         await conn.execute(text("SELECT 1"))
+    if _separate_read_engine:
+        async with read_engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
 
 
 async def close_db():
     """Ferme les connexions à la base de données"""
     await engine.dispose()
+    if _separate_read_engine:
+        await read_engine.dispose()

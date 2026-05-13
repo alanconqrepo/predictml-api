@@ -100,7 +100,7 @@ import tempfile
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.pool import NullPool
 
-from src.db.database import get_db, Base
+from src.db.database import get_db, get_read_db, Base
 from src.db.models import GoldenTest, User, Prediction, ModelMetadata, ObservedResult  # noqa: F401 — enregistre les modèles dans Base
 from src.main import app
 
@@ -144,5 +144,6 @@ async def _override_get_db():
             await session.close()
 
 
-# Remplacer la dépendance DB par la version NullPool
+# Remplacer les dépendances DB par la version NullPool (lecture + écriture → même SQLite)
 app.dependency_overrides[get_db] = _override_get_db
+app.dependency_overrides[get_read_db] = _override_get_db
