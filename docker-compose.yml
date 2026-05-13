@@ -64,17 +64,101 @@ services:
     networks:
       - internal
 
-  # Cache Redis — partagé entre les instances API (multi-pod)
-  redis:
+  # Redis Sentinel — haute disponibilité (1 master + 2 replicas + 3 sentinels)
+  # Basculement automatique en < 10 s si le master tombe (quorum : 2 sentinels).
+  redis-master:
     image: redis:7-alpine
-    container_name: predictml-redis
+    container_name: predictml-redis-master
     command: redis-server --requirepass ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
-    environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
     ports:
       - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD-SHELL", "redis-cli --no-auth-warning -a $$REDIS_PASSWORD ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  redis-replica-1:
+    image: redis:7-alpine
+    command: >-
+      redis-server
+      --replicaof redis-master 6379
+      --requirepass ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+      --masterauth ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
+  redis-replica-2:
+    image: redis:7-alpine
+    command: >-
+      redis-server
+      --replicaof redis-master 6379
+      --requirepass ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+      --masterauth ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
+  redis-sentinel-1:
+    image: redis:7-alpine
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+    volumes:
+      - ./docker/sentinel-entrypoint.sh:/docker-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  redis-sentinel-2:
+    image: redis:7-alpine
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+    volumes:
+      - ./docker/sentinel-entrypoint.sh:/docker-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  redis-sentinel-3:
+    image: redis:7-alpine
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+    volumes:
+      - ./docker/sentinel-entrypoint.sh:/docker-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -162,7 +246,8 @@ services:
       - ENABLE_OTEL=${ENABLE_OTEL:-true}
       - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-predictml-api}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://grafana:4317}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis-master:6379/0
+      - REDIS_SENTINEL_HOSTS=redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
       - REDIS_CACHE_TTL=${REDIS_CACHE_TTL:-3600}
       - METRICS_TOKEN=${METRICS_TOKEN:-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
@@ -190,7 +275,7 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      redis:
+      redis-sentinel-1:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
