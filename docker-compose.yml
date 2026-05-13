@@ -115,7 +115,15 @@ services:
   # API FastAPI
   api:
     build: .
-    container_name: predictml-api
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
     env_file:
       - .env
     environment:
@@ -159,10 +167,10 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
+      interval: 15s
+      timeout: 5s
       retries: 3
-      start_period: 40s
+      start_period: 30s
     networks:
       - internal
       - frontend
