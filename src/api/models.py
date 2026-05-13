@@ -47,7 +47,7 @@ from src.core.audit import audit_log
 from src.core.config import settings
 from src.core.rate_limit import limiter
 from src.core.security import require_admin, verify_token
-from src.db.database import get_db, get_read_db
+from src.db.database import AsyncSessionLocal, get_db, get_read_db
 from src.db.models import HistoryActionType, ModelMetadata, User
 from src.db.models.model_metadata import DeploymentMode
 from src.schemas.golden_test import GoldenTestCreate, GoldenTestResponse, GoldenTestRunResponse
@@ -1239,7 +1239,7 @@ async def retrain_model(
 
     Réservé aux administrateurs.
     """
-    # 1. Vérifier le modèle source
+    # 1. Vérifier le modèle source et extraire les champs en mémoire
     result = await db.execute(
         select(ModelMetadata)
         .options(selectinload(ModelMetadata.creator))
@@ -1277,13 +1277,35 @@ async def retrain_model(
             detail=f"La version '{new_version}' existe déjà pour le modèle '{name}'.",
         )
 
+    # Extraire les champs nécessaires en mémoire puis libérer la connexion DB
+    # avant le subprocess (600 s max) pour ne pas monopoliser le pool.
+    source_fields = {
+        "train_script_object_key": source_model.train_script_object_key,
+        "description": source_model.description,
+        "algorithm": source_model.algorithm,
+        "features_count": source_model.features_count,
+        "classes": source_model.classes,
+        "training_params": source_model.training_params,
+        "training_dataset": source_model.training_dataset,
+        "feature_baseline": source_model.feature_baseline,
+        "confidence_threshold": source_model.confidence_threshold,
+        "tags": source_model.tags,
+        "webhook_url": source_model.webhook_url,
+        "promotion_policy": source_model.promotion_policy,
+        "accuracy": source_model.accuracy,
+        "f1_score": source_model.f1_score,
+    }
+    await db.close()  # Libère la connexion avant le subprocess de 600 s
+
     # 3. Télécharger train.py depuis MinIO
     try:
-        script_bytes = minio_service.download_file_bytes(source_model.train_script_object_key)
+        script_bytes = await minio_service.async_download_file_bytes(
+            source_fields["train_script_object_key"]
+        )
     except Exception as e:
         logger.error(
             "Impossible de télécharger le script d'entraînement",
-            object_key=source_model.train_script_object_key,
+            object_key=source_fields["train_script_object_key"],
             error=str(e),
         )
         raise HTTPException(
@@ -1471,94 +1493,62 @@ async def retrain_model(
     # 7. Uploader le nouveau modèle dans MinIO
     new_object_key = f"{name}/v{new_version}.pkl"
     new_pkl_hmac_signature = compute_model_hmac(new_model_bytes)
-    upload_info = minio_service.upload_model_bytes(new_model_bytes, new_object_key)
+    upload_info = await minio_service.async_upload_model_bytes(new_model_bytes, new_object_key)
 
     # 8. Copier le script train.py pour la nouvelle version (pour chaîner les ré-entraînements)
     new_train_key = f"{name}/v{new_version}_train.py"
-    minio_service.upload_file_bytes(script_bytes, new_train_key, content_type="text/x-python")
-
-    # 9. Créer la nouvelle entrée ModelMetadata
-    new_metadata = ModelMetadata(
-        name=name,
-        version=new_version,
-        minio_bucket=upload_info["bucket"],
-        minio_object_key=new_object_key,
-        file_size_bytes=upload_info["size"],
-        pkl_hmac_signature=new_pkl_hmac_signature,
-        train_script_object_key=new_train_key,
-        description=source_model.description,
-        algorithm=source_model.algorithm,
-        mlflow_run_id=_mlflow_run_id,
-        accuracy=new_accuracy,
-        f1_score=new_f1,
-        features_count=source_model.features_count,
-        classes=source_model.classes,
-        training_params=source_model.training_params,
-        training_dataset=(
-            f"{source_model.training_dataset or name} "
-            f"[{payload.start_date} → {payload.end_date}]"
-        ),
-        feature_baseline=source_model.feature_baseline,
-        confidence_threshold=source_model.confidence_threshold,
-        tags=source_model.tags,
-        webhook_url=source_model.webhook_url,
-        promotion_policy=source_model.promotion_policy,
-        trained_by=user.username,
-        training_date=datetime.now(timezone.utc),
-        user_id_creator=user.id,
-        is_active=True,
-        is_production=False,
-        parent_version=version,
-        training_stats=training_stats,
-    )
-    db.add(new_metadata)
-    await db.flush()
-    await DBService.log_model_history(
-        db, new_metadata, HistoryActionType.CREATED, user.id, user.username
+    await minio_service.async_upload_file_bytes(
+        script_bytes, new_train_key, content_type="text/x-python"
     )
 
-    # 10. Passer en production si demandé manuellement
-    auto_promoted = False
-    auto_promote_reason: Optional[str] = None
-
-    if payload.set_production:
-        other_result = await db.execute(
-            select(ModelMetadata).where(
-                and_(
-                    ModelMetadata.name == name,
-                    ModelMetadata.version != new_version,
-                    ModelMetadata.is_production.is_(True),
-                )
-            )
+    # --- Session 2 : écriture post-subprocess ---
+    async with AsyncSessionLocal() as write_db:
+        # 9. Créer la nouvelle entrée ModelMetadata
+        new_metadata = ModelMetadata(
+            name=name,
+            version=new_version,
+            minio_bucket=upload_info["bucket"],
+            minio_object_key=new_object_key,
+            file_size_bytes=upload_info["size"],
+            pkl_hmac_signature=new_pkl_hmac_signature,
+            train_script_object_key=new_train_key,
+            description=source_fields["description"],
+            algorithm=source_fields["algorithm"],
+            mlflow_run_id=_mlflow_run_id,
+            accuracy=new_accuracy,
+            f1_score=new_f1,
+            features_count=source_fields["features_count"],
+            classes=source_fields["classes"],
+            training_params=source_fields["training_params"],
+            training_dataset=(
+                f"{source_fields['training_dataset'] or name} "
+                f"[{payload.start_date} → {payload.end_date}]"
+            ),
+            feature_baseline=source_fields["feature_baseline"],
+            confidence_threshold=source_fields["confidence_threshold"],
+            tags=source_fields["tags"],
+            webhook_url=source_fields["webhook_url"],
+            promotion_policy=source_fields["promotion_policy"],
+            trained_by=user.username,
+            training_date=datetime.now(timezone.utc),
+            user_id_creator=user.id,
+            is_active=True,
+            is_production=False,
+            parent_version=version,
+            training_stats=training_stats,
         )
-        for other in other_result.scalars().all():
-            other.is_production = False
-            await DBService.log_model_history(
-                db,
-                other,
-                HistoryActionType.SET_PRODUCTION,
-                user.id,
-                user.username,
-                ["is_production"],
-            )
-        new_metadata.is_production = True
-        await db.flush()
+        write_db.add(new_metadata)
+        await write_db.flush()
         await DBService.log_model_history(
-            db,
-            new_metadata,
-            HistoryActionType.SET_PRODUCTION,
-            user.id,
-            user.username,
-            ["is_production"],
+            write_db, new_metadata, HistoryActionType.CREATED, user.id, user.username
         )
-    elif source_model.promotion_policy and source_model.promotion_policy.get("auto_promote"):
-        # 10b. Auto-promotion selon la politique configurée
-        should_promote, reason = await evaluate_auto_promotion(
-            db, name, source_model.promotion_policy, version=new_version
-        )
-        auto_promote_reason = reason
-        if should_promote:
-            other_result = await db.execute(
+
+        # 10. Passer en production si demandé manuellement
+        auto_promoted = False
+        auto_promote_reason: Optional[str] = None
+
+        if payload.set_production:
+            other_result = await write_db.execute(
                 select(ModelMetadata).where(
                     and_(
                         ModelMetadata.name == name,
@@ -1570,7 +1560,7 @@ async def retrain_model(
             for other in other_result.scalars().all():
                 other.is_production = False
                 await DBService.log_model_history(
-                    db,
+                    write_db,
                     other,
                     HistoryActionType.SET_PRODUCTION,
                     user.id,
@@ -1578,50 +1568,102 @@ async def retrain_model(
                     ["is_production"],
                 )
             new_metadata.is_production = True
-            auto_promoted = True
-            await db.flush()
+            await write_db.flush()
             await DBService.log_model_history(
-                db,
+                write_db,
                 new_metadata,
                 HistoryActionType.SET_PRODUCTION,
                 user.id,
                 user.username,
                 ["is_production"],
             )
-        logger.info(
-            "Évaluation auto-promotion",
-            model=name,
-            new_version=new_version,
-            auto_promoted=auto_promoted,
-            reason=reason,
-        )
-
-    # Persist auto_promoted outcome in training_stats so retrain-history can surface it
-    if source_model.promotion_policy and not payload.set_production:
-        new_metadata.training_stats = {
-            **(new_metadata.training_stats or {}),
-            "auto_promoted": auto_promoted,
-            "auto_promote_reason": auto_promote_reason,
-        }
-
-    # Mettre à jour les tags MLflow avec le résultat final de promotion
-    if _mlflow_run_id:
-        try:
-            mlflow_service.update_run_tags(
-                _mlflow_run_id,
-                {
-                    "auto_promoted": str(auto_promoted),
-                    "auto_promote_reason": auto_promote_reason or "",
-                    "is_production": str(new_metadata.is_production),
-                },
+        elif source_fields["promotion_policy"] and source_fields["promotion_policy"].get(
+            "auto_promote"
+        ):
+            # 10b. Auto-promotion selon la politique configurée
+            should_promote, reason = await evaluate_auto_promotion(
+                write_db, name, source_fields["promotion_policy"], version=new_version
             )
-        except Exception as _exc:
-            logger.warning("MLflow tag update échoué", error=str(_exc))
+            auto_promote_reason = reason
+            if should_promote:
+                other_result = await write_db.execute(
+                    select(ModelMetadata).where(
+                        and_(
+                            ModelMetadata.name == name,
+                            ModelMetadata.version != new_version,
+                            ModelMetadata.is_production.is_(True),
+                        )
+                    )
+                )
+                for other in other_result.scalars().all():
+                    other.is_production = False
+                    await DBService.log_model_history(
+                        write_db,
+                        other,
+                        HistoryActionType.SET_PRODUCTION,
+                        user.id,
+                        user.username,
+                        ["is_production"],
+                    )
+                new_metadata.is_production = True
+                auto_promoted = True
+                await write_db.flush()
+                await DBService.log_model_history(
+                    write_db,
+                    new_metadata,
+                    HistoryActionType.SET_PRODUCTION,
+                    user.id,
+                    user.username,
+                    ["is_production"],
+                )
+            logger.info(
+                "Évaluation auto-promotion",
+                model=name,
+                new_version=new_version,
+                auto_promoted=auto_promoted,
+                reason=reason,
+            )
 
-    await db.commit()
-    await db.refresh(new_metadata)
+        # Persist auto_promoted outcome in training_stats so retrain-history can surface it
+        if source_fields["promotion_policy"] and not payload.set_production:
+            new_metadata.training_stats = {
+                **(new_metadata.training_stats or {}),
+                "auto_promoted": auto_promoted,
+                "auto_promote_reason": auto_promote_reason,
+            }
 
-    _wh = new_metadata.webhook_url
+        # Mettre à jour les tags MLflow avec le résultat final de promotion
+        if _mlflow_run_id:
+            try:
+                mlflow_service.update_run_tags(
+                    _mlflow_run_id,
+                    {
+                        "auto_promoted": str(auto_promoted),
+                        "auto_promote_reason": auto_promote_reason or "",
+                        "is_production": str(new_metadata.is_production),
+                    },
+                )
+            except Exception as _exc:
+                logger.warning("MLflow tag update échoué", error=str(_exc))
+
+        await write_db.commit()
+        await write_db.refresh(new_metadata)
+
+        # 11. Invalider le cache Redis et pré-chauffer la nouvelle version si en production
+        await model_service.invalidate_model_cache(name)
+        if new_metadata.is_production:
+            try:
+                async with AsyncSessionLocal() as warmup_db:
+                    await model_service.load_model(warmup_db, name, new_version)
+                logger.info(
+                    "Cache pré-chauffé pour la nouvelle version",
+                    model=name,
+                    new_version=new_version,
+                )
+            except Exception as _exc:
+                logger.warning("Pré-chauffe cache échouée (non bloquant)", error=str(_exc))
+
+    _wh = source_fields["webhook_url"]
     if _wh:
         _ts = datetime.now(timezone.utc).isoformat()
         asyncio.create_task(
@@ -1683,7 +1725,7 @@ async def retrain_model(
         ),
         auto_promoted=(
             auto_promoted
-            if (source_model.promotion_policy and not payload.set_production)
+            if (source_fields["promotion_policy"] and not payload.set_production)
             else None
         ),
         auto_promote_reason=auto_promote_reason,
