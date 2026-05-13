@@ -38,5 +38,5 @@ ENV PYTHONPATH=/app
 # Exécuter en tant qu'utilisateur non-root
 USER appuser
 
-# Lance init_db.py puis démarre l'API
+# Démarre l'API (migrations gérées par le service migrate)
 CMD ["/app/entrypoint.sh"]
