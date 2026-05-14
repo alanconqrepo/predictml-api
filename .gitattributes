@@ -1,0 +1,15 @@
+# Force LF line endings for all shell scripts and config files executed in Linux containers.
+# Without this, Git on Windows converts LF→CRLF on checkout, which breaks shebangs
+# and causes "illegal option -" errors inside Docker containers.
+*.sh        text eol=lf
+*.py        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.ini       text eol=lf
+*.cfg       text eol=lf
+*.toml      text eol=lf
+*.txt       text eol=lf
+*.md        text eol=lf
+*.env*      text eol=lf
+*.sql       text eol=lf
+Dockerfile* text eol=lf

@@ -63,11 +63,11 @@ replace METRICS_TOKEN       "$METRICS_TOKEN"
 # Les DATABASE_URL contiennent le mot de passe — on les réécrit entièrement.
 # Ces valeurs sont pour le DEV LOCAL sans Docker (l'API accède à postgres directement).
 # En Docker, docker-compose.yml reconstruit ces URLs via pgbouncer.
-_pg_port=$(grep -E '^POSTGRES_PORT=' "$ENV_FILE" | cut -d= -f2 | tr -d '[:space:]#' | awk '{print $1}')
+_pg_port=$(grep -E '^POSTGRES_PORT=' "$ENV_FILE" | cut -d= -f2 | sed 's/#.*//' | tr -d '[:space:]')
 _pg_port="${_pg_port:-5433}"
-_pg_db=$(grep -E '^POSTGRES_DB=' "$ENV_FILE" | cut -d= -f2 | tr -d '[:space:]')
+_pg_db=$(grep -E '^POSTGRES_DB=' "$ENV_FILE" | cut -d= -f2 | sed 's/#.*//' | tr -d '[:space:]')
 _pg_db="${_pg_db:-sklearn_api}"
-_pg_user=$(grep -E '^POSTGRES_USER=' "$ENV_FILE" | cut -d= -f2 | tr -d '[:space:]')
+_pg_user=$(grep -E '^POSTGRES_USER=' "$ENV_FILE" | cut -d= -f2 | sed 's/#.*//' | tr -d '[:space:]')
 _pg_user="${_pg_user:-postgres}"
 
 replace DATABASE_URL \
