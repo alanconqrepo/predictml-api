@@ -2,14 +2,19 @@
 
 ## Stack
 
-| Service | Technologie | Port |
+| Service | Technologie | Port externe |
 |---|---|---|
-| API | FastAPI (async) | 8000 |
+| Reverse proxy / Load balancer | Nginx 1.27 | **80** |
+| API (3 réplicas) | FastAPI (async) | — (interne uniquement) |
 | Dashboard Admin | Streamlit | 8501 |
-| Base de données | PostgreSQL 16 | 5433 |
+| Base de données (primary) | PostgreSQL 16 | 5433 |
+| Base de données (replica) | PostgreSQL 16 (streaming replication) | — |
+| Connection pooler (write) | PgBouncer 1.23 (transaction mode) | — |
+| Connection pooler (read) | PgBouncer 1.23 (transaction mode) | — |
 | Stockage modèles | MinIO (S3-compatible) | 9000 / console 9001 |
 | Experiment tracking | MLflow | 5000 |
-| Cache distribué | Redis 7 | 6379 |
+| Cache distribué | Redis 7 Sentinel (1 master + 2 réplicas + 3 sentinels) | 6379 (master) |
+| Queue prédictions | Redis Streams + worker `prediction-writer` | — |
 | Observabilité | Grafana LGTM (Loki + Tempo + Prometheus + OTLP) | 3000 |
 
 ---
@@ -27,8 +32,12 @@ predictml-api/
 │   │   └── monitoring.py           # /monitoring/overview, /monitoring/model/{name}
 │   ├── core/
 │   │   ├── config.py               # Settings (variables d'env via dotenv)
-│   │   ├── security.py             # Auth Bearer token + rate limiting
+│   │   ├── security.py             # Auth Bearer token
+│   │   ├── rate_limit.py           # Rate limiting per-IP via slowapi (Redis backend)
+│   │   ├── ml_metrics.py           # Métriques Prometheus ML métier (predictions, inference, drift, retrain)
 │   │   └── telemetry.py            # OpenTelemetry → Grafana LGTM
+│   ├── workers/
+│   │   └── prediction_writer.py    # Consommateur Redis Streams — batch INSERT prédictions
 │   ├── db/
 │   │   ├── models/                 # ORM SQLAlchemy
 │   │   │   ├── user.py             # Table users
@@ -83,6 +92,11 @@ predictml-api/
 ├── notebooks/                      # Jupyter notebooks
 ├── alembic/                        # Migrations DB
 ├── docker-compose.yml
+├── nginx.conf                          # Configuration reverse proxy / load balancer
+├── docker/
+│   ├── pg_hba.conf                     # Authentification PostgreSQL (réplication)
+│   ├── postgres-replica-entrypoint.sh  # Init replica via pg_basebackup
+│   └── sentinel-entrypoint.sh          # Génère sentinel.conf au démarrage
 └── .env
 ```
 
@@ -94,28 +108,42 @@ predictml-api/
 Client
   │  POST /predict + Bearer Token
   ▼
+Nginx (port 80, least_conn)
+  → distribue vers l'un des 3 réplicas API
+  ▼
 security.py
   → vérifie le token en DB
-  → contrôle le rate limit (quota journalier)
+  → contrôle le rate limit per-IP via slowapi (Redis DB 1)
+  → contrôle le quota journalier (DB)
   ▼
 predict.py
   → valide la requête (Pydantic)
   ▼
 model_service.py
   → select_routing_versions() : A/B test / shadow / production
-  → charge le modèle (cache Redis → MinIO → MLflow)
+  → charge le modèle (cache Redis DB 0 → MinIO)
   ▼
 model.predict(X)  ← sklearn
   ▼
 [si shadow] background_task → prédiction shadow loguée séparément
   ▼
-db_service.py
-  → log la prédiction en PostgreSQL (features, résultat, latence, user)
+[PREDICTION_STREAM_ENABLED=true]
+  → publie dans Redis Stream "predictions:new" (<1 ms)
+  → prediction-writer consomme en batch (100 lignes / 500 ms)
+  → INSERT en PostgreSQL (via pgbouncer)
+[fallback synchrone si Redis indisponible]
   ▼
 [si webhook_url configuré] webhook_service.send_webhook()
   ▼
 Client ← JSON { prediction, probability, low_confidence, selected_version }
 ```
+
+### Routage read/write PostgreSQL
+
+- **Écritures** (prédictions, modèles, utilisateurs) → `pgbouncer` → `postgres` (primary)
+- **Lectures analytiques** (`/predictions/stats`, `/monitoring`, agrégations) → `pgbouncer-read` → `postgres-replica`
+
+Plafonds de sécurité sur les requêtes analytiques : `MAX_ROWS_ANALYTICS` (50 000 lignes) et `ANALYTICS_MAX_DAYS` (90 jours) pour éviter les agrégations illimitées.
 
 ### Routage A/B / Shadow
 
@@ -257,6 +285,28 @@ requests.post("http://localhost:8000/models", headers=HEADERS, data={
 ```
 
 ---
+
+## Haute disponibilité Redis (Sentinel)
+
+Redis tourne en mode Sentinel : 1 master + 2 réplicas + 3 sentinels (quorum : 2).
+
+```
+redis-master (écriture + lecture)
+  ├── redis-replica-1  (réplication asynchrone)
+  └── redis-replica-2
+
+redis-sentinel-1 }
+redis-sentinel-2 } → quorum de 2 suffit pour élire un nouveau master
+redis-sentinel-3 }   basculement automatique en < 10 s
+```
+
+- **DB 0** — cache des instances de modèles (TTL configurable via `REDIS_CACHE_TTL`)
+- **DB 1** — compteurs de rate limiting per-IP (`slowapi`)
+- **Stream** `predictions:new` — queue async des writes de prédictions
+- **Stream** `predictions:dlq` — dead letter queue (après `MAX_RETRIES` échecs)
+
+Le verrou `retrain_lock:{name}:{version}` (SET NX EX 700) garantit qu'un seul réplica API
+exécute le job de ré-entraînement planifié à la fois.
 
 ## Authentification
 

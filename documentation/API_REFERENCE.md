@@ -1287,13 +1287,29 @@ for item in data["predictions"]:
     print(f"{item['id_obs']} → {item['prediction']} (conf: {item['probability']})")
 ```
 
+**Query parameter `strict_validation`** (optionnel, défaut `false`) :
+
+Ajouter `?strict_validation=true` pour rejeter les requêtes contenant des features **inattendues** dans n'importe quel item du lot. Retourne un `422` avec le détail des erreurs si la validation échoue, sans exécuter aucune prédiction.
+
+```python
+# Mode strict : rejette si une feature inattendue est présente dans le batch
+response = requests.post(
+    f"{BASE_URL}/predict-batch?strict_validation=true",
+    headers=headers,
+    json={"model_name": "iris_model", "inputs": [
+        {"features": {"sepal length (cm)": 5.1, "extra_col": 99}}
+    ]}
+)
+# → 422 avec detail.errors listant les features inattendues
+```
+
 **Schéma `BatchPredictionInput`**
 
 | Champ | Type | Requis | Description |
 |---|---|---|---|
 | `model_name` | str | Oui | Nom du modèle |
 | `model_version` | str | Non | Version ; sinon auto-sélection |
-| `inputs` | list | Oui | Liste d'items `{features, id_obs}` (min 1) |
+| `inputs` | list | Oui | Liste d'items `{features, id_obs}` (min 1, max limité par rate limiting) |
 
 **Schéma `BatchPredictionOutput`**
 
