@@ -1,6 +1,7 @@
-# Force LF line endings for all shell scripts and config files executed in Linux containers.
-# Without this, Git on Windows converts LF→CRLF on checkout, which breaks shebangs
-# and causes "illegal option -" errors inside Docker containers.
+# Force LF for all text files — prevents CRLF on Windows checkouts (Docker/Linux targets)
+* text=auto eol=lf
+
+# Explicit overrides for common types
 *.sh        text eol=lf
 *.py        text eol=lf
 *.yml       text eol=lf
@@ -12,4 +13,20 @@
 *.md        text eol=lf
 *.env*      text eol=lf
 *.sql       text eol=lf
+*.json      text eol=lf
+*.conf      text eol=lf
+*.mako      text eol=lf
+*.lock      text eol=lf
+*.ipynb     text eol=lf
 Dockerfile* text eol=lf
+
+# Binary files — never convert
+*.pkl       binary
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.zip       binary
+*.gz        binary
+*.tar       binary
