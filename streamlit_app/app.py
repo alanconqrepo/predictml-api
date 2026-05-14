@@ -3,12 +3,51 @@ Page d'accueil et login — PredictML Admin Dashboard
 """
 
 import os
+import time
+import uuid
 from urllib.parse import urlparse
 
 import streamlit as st
 from utils.api_client import APIClient
 from utils.auth import logout
 from utils.ui_helpers import show_token_with_copy
+
+# Stockage de session persistant entre les rechargements (F5).
+# Clé = session_id (dans st.query_params), valeur = dict credentials + expiry.
+_SESSION_STORE: dict[str, dict] = {}
+_SESSION_TTL = 8 * 3600  # 8 heures
+
+
+def _save_session(token: str, api_url: str, is_admin: bool) -> str:
+    sid = str(uuid.uuid4())
+    _SESSION_STORE[sid] = {
+        "token": token,
+        "api_url": api_url,
+        "is_admin": is_admin,
+        "expires_at": time.time() + _SESSION_TTL,
+    }
+    # Nettoyage des sessions expirées
+    expired = [k for k, v in _SESSION_STORE.items() if v["expires_at"] < time.time()]
+    for k in expired:
+        del _SESSION_STORE[k]
+    return sid
+
+
+def _restore_session(sid: str) -> bool:
+    data = _SESSION_STORE.get(sid)
+    if not data or data["expires_at"] < time.time():
+        return False
+    st.session_state["api_token"] = data["token"]
+    st.session_state["api_url"] = data["api_url"]
+    st.session_state["is_admin"] = data["is_admin"]
+    return True
+
+
+def _clear_session() -> None:
+    sid = st.query_params.get("sid")
+    if sid:
+        _SESSION_STORE.pop(sid, None)
+        st.query_params.clear()
 
 
 def _is_valid_api_url(url: str) -> bool:
@@ -53,6 +92,7 @@ def show_login():
                 st.session_state["api_token"] = token
                 st.session_state["api_url"] = api_url
                 st.session_state["is_admin"] = is_admin
+                st.query_params["sid"] = _save_session(token, api_url, is_admin)
                 st.rerun()
 
     st.divider()
@@ -112,6 +152,12 @@ def show_home():
 
 
 # Router principal — navigation conditionnelle selon l'état de connexion
+# Restauration de session après F5 si un sid valide est dans l'URL
+if not st.session_state.get("api_token"):
+    _sid = st.query_params.get("sid")
+    if _sid:
+        _restore_session(_sid)
+
 _logged_in = bool(st.session_state.get("api_token"))
 
 _DARK_CSS = """
@@ -183,6 +229,7 @@ if _logged_in:
                 st.error("Impossible de charger le token.")
 
         if st.button("Se déconnecter", type="secondary", use_container_width=True):
+            _clear_session()
             logout()
 
         if st.session_state.get("is_admin"):
