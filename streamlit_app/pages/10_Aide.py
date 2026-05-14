@@ -22,6 +22,20 @@ from utils.tools import (
 st.set_page_config(page_title="Aide & Assistant IA — PredictML", page_icon="💬", layout="wide")
 require_auth()
 
+
+@st.dialog("📚 Documentation", width="large")
+def _doc_popup(content: str, label: str) -> None:
+    st.caption(label)
+    st.divider()
+    st.markdown(content)
+
+
+@st.dialog("🔧 Code source", width="large")
+def _src_popup(filename: str, content: str) -> None:
+    st.caption(filename)
+    st.divider()
+    st.code(content, language="python")
+
 # ── Constantes ────────────────────────────────────────────────────────────────
 
 MODEL_ID = "claude-sonnet-4-6"
@@ -305,16 +319,23 @@ with col_docs:
         display_names = [labels.get(n, n) for n in doc_names]
         name_map = dict(zip(display_names, doc_names))
 
-        selected_label = st.selectbox("Choisir un document", display_names, key="help_doc_select")
+        col_sel, col_btn = st.columns([4, 1])
+        selected_label = col_sel.selectbox("Choisir un document", display_names, key="help_doc_select")
         selected_key = name_map[selected_label]
 
         with st.container(height=620, border=True):
             st.markdown(docs[selected_key])
 
+        if col_btn.button("⛶ Agrandir", key="open_doc_popup", use_container_width=True):
+            _doc_popup(docs[selected_key], selected_label)
+
     if snippets:
         with st.expander(f"🔧 Code source ({len(snippets)} fichiers)", expanded=False):
             src_names = list(snippets.keys())
-            selected_src = st.selectbox("Fichier", src_names, key="help_src_select")
+            col_src, col_src_btn = st.columns([4, 1])
+            selected_src = col_src.selectbox("Fichier", src_names, key="help_src_select")
+            if col_src_btn.button("⛶ Agrandir", key="open_src_popup", use_container_width=True):
+                _src_popup(selected_src, snippets[selected_src])
             st.code(snippets[selected_src], language="python")
 
 # ═══════════════════════════════════════════════════════════
