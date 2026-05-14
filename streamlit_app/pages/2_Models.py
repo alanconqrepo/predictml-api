@@ -5,6 +5,7 @@ Gestion des modèles ML
 import json as _json
 import os
 import time
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -28,6 +29,43 @@ _ACTION_ICONS = {
 def _action_badge(action: str) -> str:
     icon = _ACTION_ICONS.get(action, "⬜")
     return f"{icon} `{action}`"
+
+
+# ── Scripts d'exemple ─────────────────────────────────────────────────────────
+
+_SCRIPTS_DIR = Path(__file__).parent.parent / "documentation" / "Scripts"
+
+_EXAMPLE_SCRIPTS = [
+    (
+        "train_iris.py",
+        "Script `train.py` compatible PredictML — à uploader avec votre modèle pour activer le ré-entraînement automatique",
+    ),
+    (
+        "upload_iris_model.py",
+        "Script autonome — entraîne un modèle Iris localement et l'uploade via l'API (à exécuter sur votre machine)",
+    ),
+]
+
+
+def _read_script(filename: str) -> str:
+    try:
+        return (_SCRIPTS_DIR / filename).read_text(encoding="utf-8")
+    except Exception:
+        return f"# Fichier introuvable : {filename}"
+
+
+@st.dialog("Aperçu du script", width="large")
+def _view_script_dialog(filename: str) -> None:
+    content = _read_script(filename)
+    st.code(content, language="python", line_numbers=True)
+    st.download_button(
+        "⬇️ Télécharger",
+        data=content,
+        file_name=filename,
+        mime="text/x-python",
+        key=f"dl_dialog_{filename}",
+        use_container_width=True,
+    )
 
 
 st.set_page_config(page_title="Models — PredictML", page_icon="🤖", layout="wide")
@@ -113,6 +151,26 @@ if is_admin:
     cached_model_keys = fetch_cached_models(
         st.session_state.get("api_url"), st.session_state.get("api_token")
     )
+
+if is_admin:
+    with st.expander("📋 Scripts d'exemple — Iris", expanded=False):
+        st.caption(
+            "Scripts de référence pour prendre en main l'upload et le ré-entraînement. "
+            "Téléchargez-les ou visualisez-les directement ici."
+        )
+        for _script_name, _script_desc in _EXAMPLE_SCRIPTS:
+            _col_desc, _col_view, _col_dl = st.columns([5, 1.5, 1.5])
+            _col_desc.markdown(f"**`{_script_name}`**  \n{_script_desc}")
+            if _col_view.button("👁 Visualiser", key=f"view_{_script_name}", use_container_width=True):
+                _view_script_dialog(_script_name)
+            _col_dl.download_button(
+                "⬇️ Télécharger",
+                data=_read_script(_script_name),
+                file_name=_script_name,
+                mime="text/x-python",
+                key=f"dl_{_script_name}",
+                use_container_width=True,
+            )
 
 if is_admin:
     with st.expander("➕ Uploader un nouveau modèle", expanded=not models):
