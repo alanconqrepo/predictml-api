@@ -81,7 +81,7 @@ Demandez un accès à votre administrateur, ou soumettez une demande via la page
 **"Demande d'accès"** dans le menu latéral — un admin vous communiquera votre token
 une fois approuvé.
 """)
-        st.page_link("pages/0_Demande_Acces.py", label="Soumettre une demande d'accès", icon="📝")
+        st.markdown("📝 [Soumettre une demande d'accès](/Demande_Acces)")
 
 
 def show_home():
