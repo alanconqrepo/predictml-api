@@ -40,14 +40,15 @@ def _restore_session(sid: str) -> bool:
     st.session_state["api_token"] = data["token"]
     st.session_state["api_url"] = data["api_url"]
     st.session_state["is_admin"] = data["is_admin"]
+    st.session_state["_sid"] = sid
     return True
 
 
 def _clear_session() -> None:
-    sid = st.query_params.get("sid")
+    sid = st.session_state.pop("_sid", None) or st.query_params.get("sid")
     if sid:
         _SESSION_STORE.pop(sid, None)
-        st.query_params.clear()
+    st.query_params.clear()
 
 
 def _is_valid_api_url(url: str) -> bool:
@@ -92,7 +93,9 @@ def show_login():
                 st.session_state["api_token"] = token
                 st.session_state["api_url"] = api_url
                 st.session_state["is_admin"] = is_admin
-                st.query_params["sid"] = _save_session(token, api_url, is_admin)
+                sid = _save_session(token, api_url, is_admin)
+                st.session_state["_sid"] = sid
+                st.query_params["sid"] = sid
                 st.rerun()
 
     st.divider()
@@ -152,13 +155,18 @@ def show_home():
 
 
 # Router principal — navigation conditionnelle selon l'état de connexion
-# Restauration de session après F5 si un sid valide est dans l'URL
+# Restauration de session après F5 : sid dans session_state ou dans l'URL
 if not st.session_state.get("api_token"):
-    _sid = st.query_params.get("sid")
+    _sid = st.session_state.get("_sid") or st.query_params.get("sid")
     if _sid:
         _restore_session(_sid)
 
 _logged_in = bool(st.session_state.get("api_token"))
+
+# Ré-écrire le sid dans l'URL à chaque render (la navigation le supprime)
+if _logged_in and st.session_state.get("_sid"):
+    if st.query_params.get("sid") != st.session_state["_sid"]:
+        st.query_params["sid"] = st.session_state["_sid"]
 
 _DARK_CSS = """
 <style>
