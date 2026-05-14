@@ -298,6 +298,8 @@ services:
   # API FastAPI
   api:
     build: .
+    volumes:
+      - ./src:/app/src
     deploy:
       replicas: 3
       resources:
@@ -371,6 +373,8 @@ services:
   prediction-writer:
     build: .
     command: python -m src.workers.prediction_writer
+    volumes:
+      - ./src:/app/src
     deploy:
       replicas: 1
       resources:
@@ -415,6 +419,7 @@ services:
       - MLFLOW_PORT=${MLFLOW_PORT:-5000}
       - MLFLOW_ADMIN_USER=${MLFLOW_ADMIN_USER:-admin}
       - MLFLOW_ADMIN_PASSWORD=${MLFLOW_ADMIN_PASSWORD:?Définissez MLFLOW_ADMIN_PASSWORD dans .env}
+      - MLFLOW_FLASK_SERVER_SECRET_KEY=${MLFLOW_FLASK_SERVER_SECRET_KEY:?Définissez MLFLOW_FLASK_SERVER_SECRET_KEY dans .env}
     volumes:
       - ./docker/mlflow-entrypoint.sh:/docker/mlflow-entrypoint.sh:ro
     ports:

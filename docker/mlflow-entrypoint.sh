@@ -3,7 +3,7 @@
 # with basic-auth enabled. MLFLOW_ADMIN_PASSWORD must be set in the container environment.
 set -e
 
-pip install psycopg2-binary boto3 --quiet
+pip install psycopg2-binary boto3 "mlflow[auth]" --quiet
 
 mkdir -p /tmp/mlflow-auth
 

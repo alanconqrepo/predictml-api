@@ -1,24 +1,25 @@
 """
-upload_iris_model.py — Entraîne et uploade un modèle Iris via l'API PredictML
-==============================================================================
+upload_iris_model_GradientBoosting.py — Entraîne et uploade un modèle Iris (GradientBoosting) via l'API PredictML
+=================================================================================================================
 
 Ce script tourne LOCALEMENT. Il :
-  1. Exécute train_iris.py en subprocess pour produire le .pkl
-  2. Uploade le .pkl + train_iris.py via POST /models
+  1. Exécute train_iris_GradientBoosting.py en subprocess pour produire le .pkl
+  2. Uploade le .pkl + train_iris_GradientBoosting.py via POST /models (version 1.2.0)
+  3. Ajoute le tag "Example" — le modèle n'est PAS mis en production
 
 Usage :
-  API_URL=http://localhost:8000 API_TOKEN=<token> python upload_iris_model.py
+  API_URL=http://localhost:8000 API_TOKEN=<token> python upload_iris_model_GradientBoosting.py
 
 Variables d'environnement :
   API_URL        URL de l'API          (défaut : http://localhost:8000)
   API_TOKEN      Token Bearer — requis
   MODEL_NAME     Nom du modèle         (défaut : iris-classifier)
-  MODEL_VERSION  Version               (défaut : 1.0.0)
+  MODEL_VERSION  Version               (défaut : 1.2.0)
   TRAIN_START    Date début training   (défaut : 2024-01-01)
   TRAIN_END      Date fin training     (défaut : 2024-12-31)
 
 Prérequis Python :
-  pip install requests scikit-learn numpy
+  pip install requests scikit-learn numpy pandas
 """
 
 import json
@@ -35,9 +36,9 @@ API_URL   = os.environ.get("API_URL",   "http://localhost:8000")
 API_TOKEN = os.environ.get("API_TOKEN", os.environ.get("ADMIN_TOKEN", ""))
 
 MODEL_NAME    = os.environ.get("MODEL_NAME",    "iris-classifier")
-MODEL_VERSION = os.environ.get("MODEL_VERSION", "1.0.0")
-DESCRIPTION   = "RandomForestClassifier entraîné sur le dataset Iris (exemple)"
-ALGORITHM     = "RandomForest"
+MODEL_VERSION = os.environ.get("MODEL_VERSION", "1.2.0")
+DESCRIPTION   = "GradientBoostingClassifier entraîné sur le dataset Iris (exemple)"
+ALGORITHM     = "GradientBoosting"
 
 TRAIN_START = os.environ.get("TRAIN_START", "2024-01-01")
 TRAIN_END   = os.environ.get("TRAIN_END",   "2024-12-31")
@@ -52,17 +53,17 @@ MINIO_ACCESS_KEY = os.environ.get("AWS_ACCESS_KEY_ID",     os.environ.get("MINIO
 MINIO_SECRET_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", os.environ.get("MINIO_ROOT_PASSWORD", ""))
 
 SCRIPT_DIR        = os.path.dirname(os.path.abspath(__file__))
-TRAIN_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "train_iris.py")
+TRAIN_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "train_iris_GradientBoosting.py")
 
 # ── Validation ────────────────────────────────────────────────────────────────
 
 if not API_TOKEN:
     print("❌  API_TOKEN non défini.")
-    print("    Lancez : API_TOKEN=<votre_token> python upload_iris_model.py")
+    print("    Lancez : API_TOKEN=<votre_token> python upload_iris_model_GradientBoosting.py")
     sys.exit(1)
 
 if not os.path.exists(TRAIN_SCRIPT_PATH):
-    print(f"❌  train_iris.py introuvable : {TRAIN_SCRIPT_PATH}")
+    print(f"❌  train_iris_GradientBoosting.py introuvable : {TRAIN_SCRIPT_PATH}")
     sys.exit(1)
 
 HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
@@ -77,12 +78,12 @@ except Exception as e:
     print(f"❌  API inaccessible ({API_URL}) : {e}")
     sys.exit(1)
 
-# ── 2. Exécution de train_iris.py ─────────────────────────────────────────────
+# ── 2. Exécution de train_iris_GradientBoosting.py ────────────────────────────
 
 tmp_pkl = tempfile.NamedTemporaryFile(suffix=".pkl", delete=False)
 tmp_pkl.close()
 
-print(f"⏳  Entraînement via train_iris.py ({TRAIN_START} → {TRAIN_END})…")
+print(f"⏳  Entraînement via train_iris_GradientBoosting.py ({TRAIN_START} → {TRAIN_END})…")
 
 train_env = {
     **os.environ,
@@ -107,7 +108,7 @@ result = subprocess.run(
 )
 
 if result.returncode != 0:
-    print("❌  train_iris.py a échoué :")
+    print("❌  train_iris_GradientBoosting.py a échoué :")
     print(result.stderr)
     os.unlink(tmp_pkl.name)
     sys.exit(1)
@@ -154,7 +155,7 @@ try:
             headers=HEADERS,
             files={
                 "file":       (f"{MODEL_NAME}.pkl", pkl_fh,   "application/octet-stream"),
-                "train_file": ("train_iris.py",      train_fh, "text/plain"),
+                "train_file": ("train_iris_GradientBoosting.py", train_fh, "text/plain"),
             },
             data=data,
             timeout=30,
@@ -175,15 +176,16 @@ if response.status_code not in (200, 201):
 
 res = response.json()
 print(f"\n✅  Modèle uploadé avec succès !")
-print(f"   Nom     : {res.get('name')}")
-print(f"   Version : {res.get('version')}")
-print(f"   ID      : {res.get('id')}")
+print(f"   Nom       : {res.get('name')}")
+print(f"   Version   : {res.get('version')}")
+print(f"   ID        : {res.get('id')}")
+print(f"   Algorithme: {ALGORITHM}")
 
-# ── 5. Mise en production + tag "Example" + feature_baseline ─────────────────
+# ── 5. Ajout du tag "Example" + feature_baseline (sans mise en production) ────
 
-print(f"⏳  Mise en production, tag 'Example' et baseline des features…")
+print(f"⏳  Ajout du tag 'Example' et baseline des features…")
 
-patch_body = {"is_production": True, "tags": ["Example"]}
+patch_body = {"tags": ["Example"]}
 if metrics.get("feature_stats"):
     patch_body["feature_baseline"] = metrics["feature_stats"]
 
@@ -196,11 +198,13 @@ patch = requests.patch(
 
 if patch.status_code == 200:
     baseline_ok = "feature_baseline" in patch_body
-    print(f"✅  Modèle passé en production avec le tag 'Example'"
-          f"{' et baseline des features' if baseline_ok else ''}.")
+    print(f"✅  Tag 'Example' ajouté{' avec baseline des features' if baseline_ok else ''}"
+          f" (modèle non mis en production).")
 else:
     print(f"⚠️   PATCH échoué ({patch.status_code}) : {patch.text[:200]}")
 
 print(f"\n   → Dashboard : {API_URL.replace(':8000', ':8501')}/Models")
+print(f"   → Mettre en production :")
+print(f"       PATCH {API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}  {{\"is_production\": true}}")
 print(f"   → Ré-entraîner :")
 print(f"       POST {API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}/retrain")
