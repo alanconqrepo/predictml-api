@@ -14,11 +14,8 @@ scrape_configs:
     # Authentification Bearer — requise seulement si METRICS_TOKEN est défini dans .env.
     #
     # Contexte réseau : Prometheus s'exécute DANS le container grafana/otel-lgtm, sur le
-    # réseau Docker interne. Le port de l'API n'est pas exposé publiquement.
+    # réseau Docker interne. Le port 8000#PortuvicorninterneETexpos�(h�te?Nginx) de l'API n'est pas exposé publiquement.
     # → Laisser METRICS_TOKEN vide dans .env est sûr pour ce cas d'usage.
-    #
-    # Ce fichier est généré automatiquement par scripts/init_env.sh depuis
-    # monitoring/prometheus.yml.template — relancez init_env.sh si API_PORT change.
     #
     # Si vous définissez METRICS_TOKEN dans .env pour sécuriser /metrics vis-à-vis
     # de l'extérieur, décommentez les lignes ci-dessous et remplacez <token> par la
