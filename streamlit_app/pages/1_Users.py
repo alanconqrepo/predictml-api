@@ -222,14 +222,17 @@ with tab_users:
 
     # Modifier rôle
     new_roles = [r for r in ["user", "admin", "readonly"] if r != selected["role"]]
-    new_role = col_c.selectbox("Changer rôle", new_roles, key="role_select")
+    _role_val = st.session_state.get("role_select", new_roles[0] if new_roles else None)
+    if _role_val not in new_roles and new_roles:
+        _role_val = new_roles[0]
     if col_c.button("✏️ Appliquer rôle", use_container_width=True):
         try:
-            client.update_user(selected["id"], {"role": new_role})
-            st.toast(f"Rôle mis à jour → {new_role}", icon="✅")
+            client.update_user(selected["id"], {"role": _role_val})
+            st.toast(f"Rôle mis à jour → {_role_val}", icon="✅")
             reload()
         except Exception as e:
             st.toast(f"Erreur : {e}", icon="❌")
+    col_c.selectbox("Changer rôle", new_roles, key="role_select")
 
     # Supprimer
     with col_d:

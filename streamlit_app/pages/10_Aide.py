@@ -22,6 +22,20 @@ from utils.tools import (
 st.set_page_config(page_title="Aide & Assistant IA — PredictML", page_icon="💬", layout="wide")
 require_auth()
 
+
+@st.dialog("📚 Documentation", width="large")
+def _doc_popup(content: str, label: str) -> None:
+    st.caption(label)
+    st.divider()
+    st.markdown(content)
+
+
+@st.dialog("🔧 Code source", width="large")
+def _src_popup(filename: str, content: str) -> None:
+    st.caption(filename)
+    st.divider()
+    st.code(content, language="python")
+
 # ── Constantes ────────────────────────────────────────────────────────────────
 
 MODEL_ID = "claude-sonnet-4-6"
@@ -270,17 +284,13 @@ st.caption(f"Outils disponibles : {' · '.join(ctx_parts)}")
 
 st.divider()
 
-# ── Layout principal ──────────────────────────────────────────────────────────
-
-col_docs, col_chat = st.columns([4, 6], gap="large")
+# ── Layout principal — 3 sections pleine largeur ─────────────────────────────
 
 # ═══════════════════════════════════════════════════════════
-# COLONNE GAUCHE — Visualiseur de documentation
+# SECTION 1 — Documentation
 # ═══════════════════════════════════════════════════════════
 
-with col_docs:
-    st.subheader("📚 Documentation")
-
+with st.expander("📚 Documentation", expanded=True):
     if not docs:
         st.warning(
             "Les fichiers de documentation ne sont pas accessibles.\n\n"
@@ -305,53 +315,67 @@ with col_docs:
         display_names = [labels.get(n, n) for n in doc_names]
         name_map = dict(zip(display_names, doc_names))
 
-        selected_label = st.selectbox("Choisir un document", display_names, key="help_doc_select")
+        col_sel, col_btn, col_dl = st.columns([6, 1, 1], vertical_alignment="bottom")
+        selected_label = col_sel.selectbox("Choisir un document", display_names, key="help_doc_select")
         selected_key = name_map[selected_label]
 
-        with st.container(height=620, border=True):
+        if col_btn.button("⛶ Agrandir", key="open_doc_popup", use_container_width=True):
+            _doc_popup(docs[selected_key], selected_label)
+
+        col_dl.download_button(
+            "⬇ .md",
+            data=docs[selected_key].encode("utf-8"),
+            file_name=f"{selected_key.lower()}.md",
+            mime="text/markdown",
+            use_container_width=True,
+            key="dl_doc",
+        )
+
+        with st.container(height=500, border=True):
             st.markdown(docs[selected_key])
 
-    if snippets:
-        with st.expander(f"🔧 Code source ({len(snippets)} fichiers)", expanded=False):
-            src_names = list(snippets.keys())
-            selected_src = st.selectbox("Fichier", src_names, key="help_src_select")
-            st.code(snippets[selected_src], language="python")
-
 # ═══════════════════════════════════════════════════════════
-# COLONNE DROITE — Chatbot LLM avec tools
+# SECTION 2 — Code source
 # ═══════════════════════════════════════════════════════════
 
-with col_chat:
-    st.subheader("💬 Assistant IA")
+if snippets:
+    with st.expander(f"🔧 Code source ({len(snippets)} fichiers)", expanded=False):
+        col_src, col_src_btn, col_src_dl = st.columns([6, 1, 1], vertical_alignment="bottom")
+        selected_src = col_src.selectbox("Fichier", list(snippets.keys()), key="help_src_select")
+        if col_src_btn.button("⛶ Agrandir", key="open_src_popup", use_container_width=True):
+            _src_popup(selected_src, snippets[selected_src])
+        col_src_dl.download_button(
+            "⬇ .py",
+            data=snippets[selected_src].encode("utf-8"),
+            file_name=selected_src.split("/")[-1],
+            mime="text/x-python",
+            use_container_width=True,
+            key="dl_src",
+        )
+        st.code(snippets[selected_src], language="python")
 
-    # ── Avertissement si clé absente ──────────────────────
+# ═══════════════════════════════════════════════════════════
+# SECTION 3 — Chatbot LLM
+# ═══════════════════════════════════════════════════════════
+
+with st.expander("💬 Assistant IA", expanded=True):
     if anthropic_client is None:
         st.warning(
             "**La clé `ANTHROPIC_API_KEY` n'est pas configurée.**\n\n"
-            "Pour activer le chatbot :\n\n"
-            "1. Éditez le fichier **`.env`** à la racine du projet :\n"
-            "   ```\n"
-            "   ANTHROPIC_API_KEY=sk-ant-...\n"
-            "   ```\n"
-            "2. Relancez le container Streamlit :\n"
-            "   ```bash\n"
-            "   docker-compose up -d streamlit\n"
-            "   ```\n\n"
-            "En attendant, la documentation est disponible dans la colonne de gauche."
+            "Ajoutez `ANTHROPIC_API_KEY=sk-ant-...` dans le fichier `.env` "
+            "puis relancez le container Streamlit."
         )
 
-    # ── Sujets rapides ────────────────────────────────────
     with st.expander(
         "⚡ Sujets rapides",
         expanded=(len(st.session_state["help_messages"]) == 0),
     ):
-        cols = st.columns(2)
+        cols = st.columns(3)
         for i, (label, prompt) in enumerate(QUICK_TOPICS):
-            if cols[i % 2].button(label, key=f"quick_{i}", use_container_width=True):
+            if cols[i % 3].button(label, key=f"quick_{i}", use_container_width=True):
                 st.session_state["help_pending_prompt"] = prompt
 
-    # ── Actions ───────────────────────────────────────────
-    btn_col1, btn_col2 = st.columns([2, 3])
+    btn_col1, btn_col2 = st.columns([2, 5])
     if btn_col1.button("🗑️ Nouvelle conversation", key="help_clear"):
         st.session_state["help_messages"] = []
         st.session_state["help_pending_prompt"] = None
@@ -363,7 +387,6 @@ with col_chat:
 
     st.divider()
 
-    # ── Historique ────────────────────────────────────────
     render_chat_history()
 
     # ── Traitement du message (prompt rapide ou saisie) ───

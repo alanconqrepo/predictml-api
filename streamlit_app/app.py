@@ -2,13 +2,66 @@
 Page d'accueil et login — PredictML Admin Dashboard
 """
 
+import json
 import os
+import tempfile
+import time
+import uuid
 from urllib.parse import urlparse
 
 import streamlit as st
 from utils.api_client import APIClient
 from utils.auth import logout
 from utils.ui_helpers import show_token_with_copy
+
+# Sessions stockées dans /tmp — survive aux hot-reloads Streamlit.
+_SESSION_DIR = os.path.join(tempfile.gettempdir(), "predictml_sessions")
+os.makedirs(_SESSION_DIR, exist_ok=True)
+_SESSION_TTL = 8 * 3600  # 8 heures
+
+
+def _session_path(sid: str) -> str:
+    return os.path.join(_SESSION_DIR, f"{sid}.json")
+
+
+def _save_session(token: str, api_url: str, is_admin: bool) -> str:
+    sid = str(uuid.uuid4())
+    with open(_session_path(sid), "w") as f:
+        json.dump({
+            "token": token,
+            "api_url": api_url,
+            "is_admin": is_admin,
+            "expires_at": time.time() + _SESSION_TTL,
+        }, f)
+    return sid
+
+
+def _restore_session(sid: str) -> bool:
+    path = _session_path(sid)
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception:
+        return False
+    if data.get("expires_at", 0) < time.time():
+        os.remove(path)
+        return False
+    st.session_state["api_token"] = data["token"]
+    st.session_state["api_url"] = data["api_url"]
+    st.session_state["is_admin"] = data["is_admin"]
+    st.session_state["_sid"] = sid
+    return True
+
+
+def _clear_session() -> None:
+    sid = st.session_state.pop("_sid", None) or st.query_params.get("sid")
+    if sid:
+        path = _session_path(sid)
+        if os.path.exists(path):
+            os.remove(path)
+    st.query_params.clear()
 
 
 def _is_valid_api_url(url: str) -> bool:
@@ -53,6 +106,9 @@ def show_login():
                 st.session_state["api_token"] = token
                 st.session_state["api_url"] = api_url
                 st.session_state["is_admin"] = is_admin
+                sid = _save_session(token, api_url, is_admin)
+                st.session_state["_sid"] = sid
+                st.query_params["sid"] = sid
                 st.rerun()
 
     st.divider()
@@ -61,25 +117,14 @@ def show_login():
         st.markdown("""
 **Premier accès admin**
 
-Le compte admin initial est créé au démarrage de l'API. Récupérez le token via :
-
-```bash
-# Vérifier les logs de démarrage
-docker-compose logs api | grep -i "token\|admin"
-
-# Ou lancer manuellement l'initialisation
-docker exec predictml-api python init_data/init_db.py
-```
-
-La variable d'environnement `ADMIN_TOKEN` permet aussi de forcer le token à l'init.
+Le token admin est défini par la variable d'environnement **`ADMIN_TOKEN`**.
 
 ---
 
 **Nouvel utilisateur**
 
-Demandez un accès à votre administrateur, ou soumettez une demande via la page
-**"Demande d'accès"** dans le menu latéral — un admin vous communiquera votre token
-une fois approuvé.
+Soumettez une demande via la page **"Demande d'accès"** dans le menu — un admin vous
+communiquera votre token une fois approuvé.
 """)
         st.markdown("📝 [Soumettre une demande d'accès](/Demande_Acces)")
 
@@ -94,39 +139,6 @@ def show_home():
         base_url=st.session_state["api_url"],
         token=st.session_state["api_token"],
     )
-
-    with st.sidebar:
-        st.subheader("Mon compte")
-        try:
-            quota = client.get_my_quota()
-            used = quota["used_today"]
-            limit = quota["rate_limit_per_day"]
-            remaining = quota["remaining_today"]
-            st.progress(used / limit if limit > 0 else 0)
-            st.caption(f"{used} / {limit} aujourd'hui")
-            if remaining == 0:
-                st.warning("Quota épuisé pour aujourd'hui.")
-        except Exception:
-            pass
-
-        with st.expander("🔑 Mon token API"):
-            try:
-                me = client.get_me()
-                show_token_with_copy(me["api_token"])
-            except Exception:
-                st.error("Impossible de charger le token.")
-
-        # Badge demandes en attente (admin uniquement)
-        if st.session_state.get("is_admin"):
-            try:
-                n_pending = client.get_pending_account_requests_count()
-                if n_pending > 0:
-                    st.warning(f"🔔 {n_pending} demande(s) d'accès en attente")
-                    st.page_link("pages/1_Users.py", label="Gérer les demandes →")
-            except Exception:
-                pass
-
-        st.divider()
 
     # Statut API
     try:
@@ -153,45 +165,127 @@ def show_home():
     except Exception:
         pass
 
-    st.divider()
-    st.subheader("Navigation")
-    st.markdown("""
-| Page | Description |
-|------|-------------|
-| **1 - Users** | Gérer les utilisateurs, créer des comptes, renouveler les tokens *(admin)* |
-| **2 - Models** | Consulter et administrer les modèles ML |
-| **3 - Predictions** | Historique des prédictions avec filtres |
-| **4 - Stats** | Statistiques et graphiques d'utilisation |
-| **5 - Code Example** | Exemple de code MLflow + API |
-| **6 - A/B Testing** | Configurer les tests A/B, déploiement shadow, comparer les métriques par version |
-""")
-
-    st.divider()
-    if st.button("Se déconnecter", type="secondary"):
-        logout()
 
 
 # Router principal — navigation conditionnelle selon l'état de connexion
+# Restauration de session après F5 : sid dans session_state ou dans l'URL
+if not st.session_state.get("api_token"):
+    _sid = st.session_state.get("_sid") or st.query_params.get("sid")
+    if _sid:
+        if not _restore_session(_sid):
+            st.query_params.clear()
+
 _logged_in = bool(st.session_state.get("api_token"))
 
+# Ré-écrire le sid dans l'URL à chaque render (la navigation le supprime)
+if _logged_in and st.session_state.get("_sid"):
+    if st.query_params.get("sid") != st.session_state["_sid"]:
+        st.query_params["sid"] = st.session_state["_sid"]
+
+_DARK_CSS = """
+<style>
+[data-testid="stApp"] { background-color: #0e1117; }
+[data-testid="stHeader"] { background-color: #0e1117; }
+[data-testid="stSidebar"] { background-color: #262730; }
+body, p, span, label { color: #fafafa; }
+h1, h2, h3, h4, h5, h6 { color: #fafafa; }
+.stMarkdown, .stText, .stCaption { color: #fafafa; }
+input[type="text"], input[type="password"], textarea {
+    background-color: #262730 !important;
+    color: #fafafa !important;
+    border-color: #555 !important;
+}
+[data-baseweb="input"] { background-color: #262730 !important; }
+[data-baseweb="select"] > div { background-color: #262730 !important; color: #fafafa !important; }
+[data-testid="stForm"] { border-color: #555; }
+/* Spécificité élevée pour battre les classes générées st-emotion-cache-xxx */
+html body [data-testid="stApp"] button {
+    background-color: #262730 !important;
+    color: #fafafa !important;
+    border-color: #555 !important;
+}
+html body [data-testid="stApp"] button:hover {
+    background-color: #3a3c4a !important;
+    border-color: #888 !important;
+}
+html body [data-testid="stApp"] button[kind="primary"] {
+    background-color: #c0392b !important;
+    border-color: #c0392b !important;
+}
+html body [data-testid="stApp"] button p {
+    color: #fafafa !important;
+}
+code { background-color: #262730; color: #e6e6e6; }
+pre { background-color: #1a1c23 !important; }
+hr { border-color: #555; }
+[data-testid="stMetricValue"] { color: #fafafa; }
+[data-testid="stMetricLabel"] { color: #a0a0a0; }
+</style>
+"""
+
 if _logged_in:
+    # Sidebar "Mon compte" — affiché sur toutes les pages
+    _client = APIClient(
+        base_url=st.session_state["api_url"],
+        token=st.session_state["api_token"],
+    )
+    with st.sidebar:
+        st.subheader("Mon compte")
+        try:
+            quota = _client.get_my_quota()
+            used = quota["used_today"]
+            limit = quota["rate_limit_per_day"]
+            remaining = quota["remaining_today"]
+            st.progress(used / limit if limit > 0 else 0)
+            st.caption(f"{used} / {limit} aujourd'hui")
+            if remaining == 0:
+                st.warning("Quota épuisé pour aujourd'hui.")
+        except Exception:
+            pass
+
+        with st.expander("🔑 Mon token API"):
+            try:
+                me = _client.get_me()
+                show_token_with_copy(me["api_token"])
+            except Exception:
+                st.error("Impossible de charger le token.")
+
+        if st.button("Se déconnecter", type="secondary", use_container_width=True):
+            _clear_session()
+            logout()
+
+        if st.session_state.get("is_admin"):
+            try:
+                n_pending = _client.get_pending_account_requests_count()
+                if n_pending > 0:
+                    st.warning(f"🔔 {n_pending} demande(s) d'accès en attente")
+                    st.page_link("pages/1_Users.py", label="Gérer les demandes →")
+            except Exception:
+                pass
+
+        st.divider()
+
     _pg = st.navigation([
         st.Page(show_home, title="Accueil", default=True),
         st.Page("pages/1_Users.py", title="Users"),
         st.Page("pages/2_Models.py", title="Models"),
         st.Page("pages/3_Predictions.py", title="Predictions"),
         st.Page("pages/4_Stats.py", title="Stats"),
-        st.Page("pages/5_Code_Example.py", title="Code Example"),
         st.Page("pages/6_AB_Testing.py", title="AB Testing"),
         st.Page("pages/7_Supervision.py", title="Supervision"),
         st.Page("pages/8_Retrain.py", title="Retrain"),
         st.Page("pages/9_Golden_Tests.py", title="Golden Tests"),
         st.Page("pages/10_Aide.py", title="Aide"),
+        st.Page("pages/5_Code_Example.py", title="Code Example"),
     ])
 else:
     _pg = st.navigation([
         st.Page(show_login, title="Connexion", default=True),
         st.Page("pages/0_Demande_Acces.py", title="Demande d'accès"),
     ])
+
+# Dark mode toggle — visible sur toutes les pages
+if st.sidebar.toggle("Mode sombre", key="dark_mode"):
+    st.markdown(_DARK_CSS, unsafe_allow_html=True)
 
 _pg.run()
