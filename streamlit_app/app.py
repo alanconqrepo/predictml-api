@@ -2,7 +2,9 @@
 Page d'accueil et login — PredictML Admin Dashboard
 """
 
+import json
 import os
+import tempfile
 import time
 import uuid
 from urllib.parse import urlparse
@@ -12,30 +14,39 @@ from utils.api_client import APIClient
 from utils.auth import logout
 from utils.ui_helpers import show_token_with_copy
 
-# Stockage de session persistant entre les rechargements (F5).
-# Clé = session_id (dans st.query_params), valeur = dict credentials + expiry.
-_SESSION_STORE: dict[str, dict] = {}
+# Sessions stockées dans /tmp — survive aux hot-reloads Streamlit.
+_SESSION_DIR = os.path.join(tempfile.gettempdir(), "predictml_sessions")
+os.makedirs(_SESSION_DIR, exist_ok=True)
 _SESSION_TTL = 8 * 3600  # 8 heures
+
+
+def _session_path(sid: str) -> str:
+    return os.path.join(_SESSION_DIR, f"{sid}.json")
 
 
 def _save_session(token: str, api_url: str, is_admin: bool) -> str:
     sid = str(uuid.uuid4())
-    _SESSION_STORE[sid] = {
-        "token": token,
-        "api_url": api_url,
-        "is_admin": is_admin,
-        "expires_at": time.time() + _SESSION_TTL,
-    }
-    # Nettoyage des sessions expirées
-    expired = [k for k, v in _SESSION_STORE.items() if v["expires_at"] < time.time()]
-    for k in expired:
-        del _SESSION_STORE[k]
+    with open(_session_path(sid), "w") as f:
+        json.dump({
+            "token": token,
+            "api_url": api_url,
+            "is_admin": is_admin,
+            "expires_at": time.time() + _SESSION_TTL,
+        }, f)
     return sid
 
 
 def _restore_session(sid: str) -> bool:
-    data = _SESSION_STORE.get(sid)
-    if not data or data["expires_at"] < time.time():
+    path = _session_path(sid)
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception:
+        return False
+    if data.get("expires_at", 0) < time.time():
+        os.remove(path)
         return False
     st.session_state["api_token"] = data["token"]
     st.session_state["api_url"] = data["api_url"]
@@ -47,7 +58,9 @@ def _restore_session(sid: str) -> bool:
 def _clear_session() -> None:
     sid = st.session_state.pop("_sid", None) or st.query_params.get("sid")
     if sid:
-        _SESSION_STORE.pop(sid, None)
+        path = _session_path(sid)
+        if os.path.exists(path):
+            os.remove(path)
     st.query_params.clear()
 
 
@@ -159,7 +172,8 @@ def show_home():
 if not st.session_state.get("api_token"):
     _sid = st.session_state.get("_sid") or st.query_params.get("sid")
     if _sid:
-        _restore_session(_sid)
+        if not _restore_session(_sid):
+            st.query_params.clear()
 
 _logged_in = bool(st.session_state.get("api_token"))
 
