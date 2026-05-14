@@ -315,12 +315,21 @@ with st.expander("📚 Documentation", expanded=True):
         display_names = [labels.get(n, n) for n in doc_names]
         name_map = dict(zip(display_names, doc_names))
 
-        col_sel, col_btn = st.columns([6, 1])
+        col_sel, col_btn, col_dl = st.columns([6, 1, 1], vertical_alignment="bottom")
         selected_label = col_sel.selectbox("Choisir un document", display_names, key="help_doc_select")
         selected_key = name_map[selected_label]
 
         if col_btn.button("⛶ Agrandir", key="open_doc_popup", use_container_width=True):
             _doc_popup(docs[selected_key], selected_label)
+
+        col_dl.download_button(
+            "⬇ .md",
+            data=docs[selected_key].encode("utf-8"),
+            file_name=f"{selected_key.lower()}.md",
+            mime="text/markdown",
+            use_container_width=True,
+            key="dl_doc",
+        )
 
         with st.container(height=500, border=True):
             st.markdown(docs[selected_key])
@@ -331,10 +340,18 @@ with st.expander("📚 Documentation", expanded=True):
 
 if snippets:
     with st.expander(f"🔧 Code source ({len(snippets)} fichiers)", expanded=False):
-        col_src, col_src_btn = st.columns([6, 1])
+        col_src, col_src_btn, col_src_dl = st.columns([6, 1, 1], vertical_alignment="bottom")
         selected_src = col_src.selectbox("Fichier", list(snippets.keys()), key="help_src_select")
         if col_src_btn.button("⛶ Agrandir", key="open_src_popup", use_container_width=True):
             _src_popup(selected_src, snippets[selected_src])
+        col_src_dl.download_button(
+            "⬇ .py",
+            data=snippets[selected_src].encode("utf-8"),
+            file_name=selected_src.split("/")[-1],
+            mime="text/x-python",
+            use_container_width=True,
+            key="dl_src",
+        )
         st.code(snippets[selected_src], language="python")
 
 # ═══════════════════════════════════════════════════════════
