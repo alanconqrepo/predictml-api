@@ -27,6 +27,25 @@ from src.services.db_service import DBService
 router = APIRouter(prefix="/users", tags=["users"])
 
 
+@router.post("/me/regenerate-token", response_model=UserResponse)
+@limiter.limit("3/minute")
+async def regenerate_my_token(
+    request: Request,
+    current_user: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Régénère le token Bearer de l'utilisateur authentifié (self-service).
+
+    L'ancien token est immédiatement invalidé. Le nouveau token est retourné une seule fois.
+
+    Accessible par tous les rôles.
+    """
+    user = await DBService.update_user(db, current_user.id, regenerate_token=True)
+    audit_log("user.token_self_regen", actor_id=current_user.id, resource=f"user:{current_user.id}")
+    return user
+
+
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(verify_token)):
     """
