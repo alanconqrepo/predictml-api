@@ -71,12 +71,8 @@ cd predictml-api
 
 ```bash
 # 1. Configurer les variables obligatoires dans .env
-cp .env.example .env 2>/dev/null || touch .env
-python -c "import secrets; print('SECRET_KEY=' + secrets.token_urlsafe(32))" >> .env
-echo "REDIS_PASSWORD=$(python -c \"import secrets; print(secrets.token_urlsafe(24))\")" >> .env
-echo "MINIO_ROOT_USER=minioadmin" >> .env
-echo "MINIO_ROOT_PASSWORD=$(python -c \"import secrets; print(secrets.token_urlsafe(24))\")" >> .env
-echo "GRAFANA_ADMIN_PASSWORD=admin" >> .env
+New terminal > Git bash 
+bash scripts/init_env.sh
 
 # 2. Lancer tous les services
 docker-compose up -d --build
