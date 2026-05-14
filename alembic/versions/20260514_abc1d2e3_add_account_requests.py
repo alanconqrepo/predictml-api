@@ -10,6 +10,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
 
 revision: str = "abc1d2e3"
 down_revision: Union[str, None] = "eff1a2b3"
@@ -18,10 +19,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    accountrequeststatus_enum = sa.Enum(
-        "pending", "approved", "rejected", name="accountrequeststatus"
+    op.execute(
+        "DO $$ BEGIN CREATE TYPE accountrequeststatus AS ENUM ('pending', 'approved', 'rejected');"
+        " EXCEPTION WHEN duplicate_object THEN NULL; END $$"
     )
-    accountrequeststatus_enum.create(op.get_bind(), checkfirst=True)
 
     op.create_table(
         "account_requests",
@@ -32,7 +33,7 @@ def upgrade() -> None:
         sa.Column("role_requested", sa.String(20), nullable=False, server_default="user"),
         sa.Column(
             "status",
-            sa.Enum("pending", "approved", "rejected", name="accountrequeststatus"),
+            PG_ENUM("pending", "approved", "rejected", name="accountrequeststatus", create_type=False),
             nullable=False,
             server_default="pending",
         ),

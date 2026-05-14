@@ -25,29 +25,24 @@ docker compose version  # Docker Compose version v2+
 git clone https://github.com/alanconqrepo/predictml-api.git
 cd predictml-api
 
-# 2. Créer le fichier .env avec les variables obligatoires
-cp .env.example .env 2>/dev/null || touch .env
+# 2. Générer les secrets dans .env (SECRET_KEY, ADMIN_TOKEN, REDIS_PASSWORD, MINIO, GRAFANA…)
+#    Ouvrir un terminal Git Bash, puis :
+bash scripts/init_env.sh
 
-# SECRET_KEY : signature HMAC des modèles (obligatoire)
-python -c "import secrets; print('SECRET_KEY=' + secrets.token_urlsafe(32))" >> .env
+# 3. (Optionnel) Supprimer les volumes Postgres existants avant le premier déploiement
+#    Utile si vous aviez déjà lancé le projet avec un autre mot de passe,
+#    ou si vous repartez de zéro (données inutilisables avec un nouveau POSTGRES_PASSWORD).
+docker-compose -p predictml-api down -v 2>&1 && echo "=== Volumes supprimés ==="
 
-# REDIS_PASSWORD : auth Redis master + sentinels (obligatoire)
-python -c "import secrets; print('REDIS_PASSWORD=' + secrets.token_urlsafe(24))" >> .env
-
-# MINIO_ROOT_USER / MINIO_ROOT_PASSWORD : stockage modèles (obligatoire)
-echo "MINIO_ROOT_USER=minioadmin" >> .env
-python -c "import secrets; print('MINIO_ROOT_PASSWORD=' + secrets.token_urlsafe(24))" >> .env
-
-# GRAFANA_ADMIN_PASSWORD : interface Grafana (obligatoire)
-echo "GRAFANA_ADMIN_PASSWORD=admin" >> .env
-
-# 3. Lancer tous les services (Nginx, API ×3, DB, MinIO, MLflow, Redis Sentinel, Grafana, Streamlit)
-docker-compose up -d --build
-
-# 4. Initialiser la base de données (premier déploiement uniquement)
-#    L'API tourne sur plusieurs réplicas — utiliser docker-compose exec
-docker-compose exec api python init_data/init_db.py
+# 4. Lancer tous les services (Nginx, API ×3, DB, MinIO, MLflow, Redis Sentinel, Grafana, Streamlit)
+docker-compose -p predictml-api up -d --build
 ```
+
+> **Note :** L'utilisateur admin est créé automatiquement au démarrage si `ADMIN_TOKEN` est défini
+> dans `.env`. Aucune commande supplémentaire n'est requise pour l'initialisation de base.
+>
+> Si vous souhaitez uploader des modèles `.pkl` locaux depuis le dossier `Models/`, lancez
+> manuellement : `docker-compose -p predictml-api exec api python init_data/init_db.py`
 
 ---
 
@@ -73,7 +68,7 @@ curl http://localhost/models
 | MinIO console | http://localhost:9001 | valeurs `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` du `.env` |
 | Grafana | http://localhost:3000 | `admin` / valeur `GRAFANA_ADMIN_PASSWORD` du `.env` |
 
-**Token admin :** visible dans la sortie de `docker-compose exec api python init_data/init_db.py`
+**Token admin :** valeur de `ADMIN_TOKEN` dans votre fichier `.env` (généré par `scripts/init_env.sh`)
 
 ---
 
@@ -347,16 +342,16 @@ python smoke-tests/test_multimodel_api.py
 
 ```bash
 # Démarrage
-docker-compose up -d
+docker-compose -p predictml-api up -d
 
 # Voir les logs
-docker-compose logs -f api
-docker-compose logs -f streamlit
-docker-compose logs -f prediction-writer   # worker queue prédictions
+docker-compose -p predictml-api logs -f api
+docker-compose -p predictml-api logs -f streamlit
+docker-compose -p predictml-api logs -f prediction-writer   # worker queue prédictions
 
 # Rebuild après modification du code
-docker-compose up -d --build api prediction-writer
-docker-compose up -d --build streamlit
+docker-compose -p predictml-api up -d --build api prediction-writer
+docker-compose -p predictml-api up -d --build streamlit
 
 # Accès services
 # Dashboard admin  : http://localhost:8501

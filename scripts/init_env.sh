@@ -30,6 +30,7 @@ MINIO_ROOT_PASSWORD=$(gen 32)
 MINIO_SECRET_KEY=$(gen 32)
 REDIS_PASSWORD=$(gen 24)
 GRAFANA_ADMIN_PASSWORD=$(gen 24)
+METRICS_TOKEN=$(gen 32)
 
 # Utilisateur MinIO fixe (pas un secret)
 MINIO_USER="minioadmin"
@@ -57,12 +58,33 @@ replace MINIO_SECRET_KEY    "$MINIO_SECRET_KEY"
 replace REDIS_PASSWORD      "$REDIS_PASSWORD"
 replace GRAFANA_ADMIN_USER  "admin"
 replace GRAFANA_ADMIN_PASSWORD "$GRAFANA_ADMIN_PASSWORD"
+replace METRICS_TOKEN       "$METRICS_TOKEN"
 
-# Les DATABASE_URL contiennent le mot de passe — on les réécrit entièrement
+# Les DATABASE_URL contiennent le mot de passe — on les réécrit entièrement.
+# Ces valeurs sont pour le DEV LOCAL sans Docker (l'API accède à postgres directement).
+# En Docker, docker-compose.yml reconstruit ces URLs via pgbouncer.
+_pg_port=$(grep -E '^POSTGRES_PORT=' "$ENV_FILE" | cut -d= -f2 | tr -d '[:space:]#' | awk '{print $1}')
+_pg_port="${_pg_port:-5433}"
+_pg_db=$(grep -E '^POSTGRES_DB=' "$ENV_FILE" | cut -d= -f2 | tr -d '[:space:]')
+_pg_db="${_pg_db:-sklearn_api}"
+_pg_user=$(grep -E '^POSTGRES_USER=' "$ENV_FILE" | cut -d= -f2 | tr -d '[:space:]')
+_pg_user="${_pg_user:-postgres}"
+
 replace DATABASE_URL \
-  "postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@pgbouncer:5432/sklearn_api"
+  "postgresql+asyncpg://${_pg_user}:${POSTGRES_PASSWORD}@localhost:${_pg_port}/${_pg_db}"
 replace DATABASE_READ_REPLICA_URL \
-  "postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@pgbouncer-read:5432/sklearn_api"
+  "postgresql+asyncpg://${_pg_user}:${POSTGRES_PASSWORD}@localhost:${_pg_port}/${_pg_db}"
+
+# ── Génération de monitoring/prometheus.yml depuis le template ─────────────────
+PROMETHEUS_TEMPLATE="$ROOT_DIR/monitoring/prometheus.yml.template"
+PROMETHEUS_OUT="$ROOT_DIR/monitoring/prometheus.yml"
+if [ -f "$PROMETHEUS_TEMPLATE" ]; then
+  _api_port=$(grep -E '^API_PORT=' "$ENV_FILE" | cut -d= -f2 | tr -d '[:space:]')
+  _api_port="${_api_port:-8000}"
+  export API_PORT="$_api_port"
+  envsubst '${API_PORT}' < "$PROMETHEUS_TEMPLATE" > "$PROMETHEUS_OUT"
+  echo "✅  monitoring/prometheus.yml généré (API_PORT=${_api_port})"
+fi
 
 # ── Résumé ─────────────────────────────────────────────────────────────────────
 echo ""

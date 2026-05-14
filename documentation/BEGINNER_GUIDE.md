@@ -55,13 +55,23 @@ L'API tourne dans Docker avec 7 services :
 git clone https://github.com/alanconqrepo/predictml-api.git
 cd predictml-api
 
-docker-compose up -d --build
-docker exec predictml-api python init_data/init_db.py
+# Générer les secrets dans .env (ouvrir un terminal Git Bash)
+bash scripts/init_env.sh
 
-# Vérifier
-curl http://localhost:8000/health
-# {"status": "ok", "models_available": 2, "models_cached": 1}
+# (Optionnel) Repartir de zéro — supprime les volumes Postgres existants
+# Utile si vous aviez déjà lancé le projet avec un autre mot de passe
+docker-compose -p predictml-api down -v 2>&1 && echo "=== Volumes supprimés ==="
+
+# Lancer tous les services
+docker-compose -p predictml-api up -d --build
+
+# Vérifier (via Nginx port 80)
+curl http://localhost/health
+# {"status": "healthy", "database": "connected", "models_available": 0, "models_cached": 0}
 ```
+
+> L'utilisateur admin est créé automatiquement au démarrage si `ADMIN_TOKEN` est défini dans `.env`.
+> Le token admin est la valeur de `ADMIN_TOKEN` dans votre fichier `.env`.
 
 Installez les dépendances Python pour les exemples ci-dessous :
 
@@ -638,8 +648,8 @@ result = requests.post(f"{BASE_URL}/predict", headers=app_headers,
 
 | Service | URL |
 |---|---|
-| API | http://localhost:8000 |
-| Documentation interactive | http://localhost:8000/docs |
+| API (via Nginx) | http://localhost |
+| Documentation interactive | http://localhost/docs |
 | Dashboard admin | http://localhost:8501 |
 | MLflow | http://localhost:5000 |
 | MinIO (gestion fichiers) | http://localhost:9001 |

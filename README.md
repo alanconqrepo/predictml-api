@@ -70,16 +70,15 @@ cd predictml-api
 ## Démarrage rapide
 
 ```bash
-# 1. Configurer les variables obligatoires dans .env
-New terminal > Git bash 
+# 1. Générer les secrets dans .env (ouvrir un terminal Git Bash)
 bash scripts/init_env.sh
 
-# 2. Lancer tous les services
-docker-compose up -d --build
+# 2. (Optionnel) Supprimer les volumes Postgres existants avant le premier déploiement
+#    À faire si vous repartez de zéro ou si le mot de passe a changé
+docker-compose -p predictml-api down -v 2>&1 && echo "=== Volumes supprimés ==="
 
-# 3. Initialiser la base de données et l'utilisateur admin (premier déploiement uniquement)
-#    L'API tourne en 3 réplicas — utiliser docker-compose exec
-docker-compose exec api python init_data/init_db.py
+# 3. Lancer tous les services
+docker-compose -p predictml-api up -d --build
 
 # 4. Accéder au dashboard admin
 open http://localhost:8501
@@ -88,12 +87,16 @@ open http://localhost:8501
 curl http://localhost/health
 ```
 
+> L'utilisateur admin est créé automatiquement au démarrage grâce à `ADMIN_TOKEN` dans `.env`.
+> Si vous souhaitez uploader des modèles `.pkl` locaux depuis `Models/`, lancez :
+> `docker-compose -p predictml-api exec api python init_data/init_db.py`
+
 **Credentials**
 
 | Service | Identifiants |
 |---|---|
-| Token admin API | `<ADMIN_TOKEN>` (voir logs init_db.py) |
-| PostgreSQL | `postgres / postgres` |
+| Token admin API | valeur de `ADMIN_TOKEN` dans `.env` |
+| PostgreSQL | `postgres / <POSTGRES_PASSWORD>` (voir `.env`) |
 | MinIO | valeurs de `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` dans `.env` |
 | Redis | valeur de `REDIS_PASSWORD` dans `.env` |
 | MLflow UI | http://localhost:5000 |

@@ -4,11 +4,13 @@
 set -e
 
 cat > /tmp/sentinel.conf <<EOF
-sentinel monitor mymaster redis-master 6379 2
+sentinel resolve-hostnames yes
+sentinel monitor mymaster redis-master ${REDIS_PORT:-6379} 2
 sentinel auth-pass mymaster ${REDIS_PASSWORD}
 sentinel down-after-milliseconds mymaster 5000
 sentinel failover-timeout mymaster 10000
 sentinel parallel-syncs mymaster 1
+port ${REDIS_SENTINEL_PORT:-26379}
 EOF
 
 exec redis-sentinel /tmp/sentinel.conf

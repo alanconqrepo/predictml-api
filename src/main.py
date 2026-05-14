@@ -62,6 +62,44 @@ def _check_metrics_config() -> None:
             )
 
 
+async def _bootstrap_admin_user() -> None:
+    """Crée l'utilisateur admin au premier démarrage s'il n'existe pas.
+
+    Idempotent et race-safe : IntegrityError ignorée si un autre réplica
+    a déjà inséré la ligne en parallèle.
+    Ne fait rien si ADMIN_TOKEN n'est pas défini.
+    """
+    if not settings.ADMIN_TOKEN:
+        logger.warning("ADMIN_TOKEN non défini — utilisateur admin non créé automatiquement")
+        return
+
+    from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
+
+    from src.db.models import User
+
+    try:
+        async with AsyncSessionLocal() as db:
+            existing = await db.execute(select(User).where(User.username == "admin"))
+            if existing.scalar_one_or_none():
+                return
+            user = User(
+                username="admin",
+                email=settings.ADMIN_EMAIL,
+                api_token=settings.ADMIN_TOKEN,
+                role="admin",
+                rate_limit_per_day=10000,
+                is_active=True,
+            )
+            db.add(user)
+            await db.commit()
+            logger.info("Utilisateur admin créé", email=settings.ADMIN_EMAIL)
+    except IntegrityError:
+        logger.debug("Utilisateur admin déjà présent (race ignorée)")
+    except Exception as e:
+        logger.warning("Bootstrap admin ignoré", error=str(e))
+
+
 async def _warmup_production_models() -> None:
     """Précharge en Redis les modèles marqués is_production=True."""
     try:
@@ -102,6 +140,8 @@ async def lifespan(app: FastAPI):
         logger.info("Base de données connectée")
     except Exception as e:
         logger.warning("Avertissement DB", error=str(e))
+
+    await _bootstrap_admin_user()
 
     await _warmup_production_models()
 

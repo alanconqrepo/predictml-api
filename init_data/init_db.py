@@ -32,7 +32,7 @@ async def create_default_user():
 
         user = User(
             username="admin",
-            email="admin@sklearn-api.local",
+            email=os.environ.get("ADMIN_EMAIL", "admin@predictml.local"),
             api_token=admin_token,
             role="admin",
             rate_limit_per_day=10000,
@@ -122,12 +122,21 @@ async def main():
     # 1. Appliquer les migrations Alembic (crée ou met à jour le schéma)
     print("\n1. Application des migrations Alembic...")
     import os
-    from alembic import command as alembic_command
-    from alembic.config import Config as AlembicConfig
+    import subprocess
+    import sys
 
     _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    alembic_cfg = AlembicConfig(os.path.join(_root, "alembic.ini"))
-    alembic_command.upgrade(alembic_cfg, "head")
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout:
+        print(result.stdout)
+    if result.returncode != 0:
+        print(result.stderr)
+        raise RuntimeError(f"Alembic upgrade failed (code {result.returncode})")
     print("   Migrations appliquees")
 
     # 2. Créer l'utilisateur admin

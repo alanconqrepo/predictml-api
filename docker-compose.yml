@@ -18,7 +18,7 @@ services:
       - ./init_data/create_mlflow_db.sql:/docker-entrypoint-initdb.d/create_mlflow_db.sql:ro
       - ./docker/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:${POSTGRES_INTERNAL_PORT:-5432}"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
@@ -36,7 +36,7 @@ services:
       PGUSER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_MASTER_HOST: postgres
-      POSTGRES_MASTER_PORT: "5432"
+      POSTGRES_MASTER_PORT: "${POSTGRES_INTERNAL_PORT:-5432}"
     entrypoint: ["/bin/sh", "/docker/postgres-replica-entrypoint.sh"]
     volumes:
       - postgres_replica_data:/var/lib/postgresql/data
@@ -57,17 +57,19 @@ services:
   minio:
     image: minio/minio:latest
     container_name: predictml-minio
-    command: server /data --console-address ":9001"
+    command: server /data --address ":${MINIO_INTERNAL_PORT:-9000}" --console-address ":${MINIO_CONSOLE_INTERNAL_PORT:-9001}"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
+      MINIO_INTERNAL_PORT: ${MINIO_INTERNAL_PORT:-9000}
+      MINIO_CONSOLE_INTERNAL_PORT: ${MINIO_CONSOLE_INTERNAL_PORT:-9001}
     volumes:
       - minio_data:/data
     ports:
-      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
-      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9002}:9001"
+      - "127.0.0.1:${MINIO_PORT:-9000}:${MINIO_INTERNAL_PORT:-9000}"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9002}:${MINIO_CONSOLE_INTERNAL_PORT:-9001}"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD-SHELL", "curl -f http://localhost:${MINIO_INTERNAL_PORT:-9000}/minio/health/live"]
       interval: 30s
       timeout: 20s
       retries: 3
@@ -84,9 +86,9 @@ services:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?Définissez GRAFANA_ADMIN_PASSWORD dans .env}
     ports:
-      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"                       # Grafana UI
-      - "127.0.0.1:${GRAFANA_GRPC_PORT:-4317}:${GRAFANA_GRPC_PORT:-4317}"   # OTLP gRPC receiver
-      - "127.0.0.1:${GRAFANA_OTLP_HTTP_PORT:-4318}:4318"             # OTLP HTTP receiver
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"                                              # Grafana UI
+      - "127.0.0.1:${GRAFANA_GRPC_PORT:-4317}:${GRAFANA_GRPC_PORT:-4317}"                   # OTLP gRPC receiver
+      - "127.0.0.1:${GRAFANA_OTLP_HTTP_PORT:-4318}:${GRAFANA_OTLP_HTTP_PORT:-4318}"         # OTLP HTTP receiver
     volumes:
       - grafana_data:/data
       - ./monitoring/prometheus.yml:/otel-lgtm/prometheus.yaml:ro
@@ -101,11 +103,13 @@ services:
   redis-master:
     image: redis:7-alpine
     container_name: predictml-redis-master
-    command: redis-server --requirepass ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+    command: redis-server --requirepass ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env} --port ${REDIS_PORT:-6379}
+    environment:
+      - REDIS_PORT=${REDIS_PORT:-6379}
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:${REDIS_PORT:-6379}"
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a $$REDIS_PASSWORD ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a $$REDIS_PASSWORD -p ${REDIS_PORT:-6379} ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -117,7 +121,8 @@ services:
     image: redis:7-alpine
     command: >-
       redis-server
-      --replicaof redis-master 6379
+      --port ${REDIS_PORT:-6379}
+      --replicaof redis-master ${REDIS_PORT:-6379}
       --requirepass ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
       --masterauth ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
     depends_on:
@@ -131,7 +136,8 @@ services:
     image: redis:7-alpine
     command: >-
       redis-server
-      --replicaof redis-master 6379
+      --port ${REDIS_PORT:-6379}
+      --replicaof redis-master ${REDIS_PORT:-6379}
       --requirepass ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
       --masterauth ${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
     depends_on:
@@ -145,6 +151,8 @@ services:
     image: redis:7-alpine
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_SENTINEL_PORT=${REDIS_SENTINEL_PORT:-26379}
     volumes:
       - ./docker/sentinel-entrypoint.sh:/docker-entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
@@ -152,7 +160,7 @@ services:
       redis-master:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      test: ["CMD-SHELL", "redis-cli -p ${REDIS_SENTINEL_PORT:-26379} ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -164,6 +172,8 @@ services:
     image: redis:7-alpine
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_SENTINEL_PORT=${REDIS_SENTINEL_PORT:-26379}
     volumes:
       - ./docker/sentinel-entrypoint.sh:/docker-entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
@@ -171,7 +181,7 @@ services:
       redis-master:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      test: ["CMD-SHELL", "redis-cli -p ${REDIS_SENTINEL_PORT:-26379} ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -183,6 +193,8 @@ services:
     image: redis:7-alpine
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_SENTINEL_PORT=${REDIS_SENTINEL_PORT:-26379}
     volumes:
       - ./docker/sentinel-entrypoint.sh:/docker-entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
@@ -190,7 +202,7 @@ services:
       redis-master:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      test: ["CMD-SHELL", "redis-cli -p ${REDIS_SENTINEL_PORT:-26379} ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -204,10 +216,11 @@ services:
     container_name: predictml-pgbouncer
     environment:
       DATABASES_HOST: postgres
-      DATABASES_PORT: "5432"
+      DATABASES_PORT: "${POSTGRES_INTERNAL_PORT:-5432}"
       DATABASES_USER: ${POSTGRES_USER:-postgres}
       DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       DATABASES_DBNAME: ${POSTGRES_DB:-sklearn_api}
+      PGBOUNCER_PORT: "${PGBOUNCER_PORT:-6432}"
       POOL_MODE: transaction
       MAX_CLIENT_CONN: "200"
       DEFAULT_POOL_SIZE: "20"
@@ -216,7 +229,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 ${PGBOUNCER_PORT:-6432} || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -229,10 +242,11 @@ services:
     image: pgbouncer/pgbouncer:latest
     environment:
       DATABASES_HOST: postgres-replica
-      DATABASES_PORT: "5432"
+      DATABASES_PORT: "${POSTGRES_INTERNAL_PORT:-5432}"
       DATABASES_USER: ${POSTGRES_USER:-postgres}
       DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       DATABASES_DBNAME: ${POSTGRES_DB:-sklearn_api}
+      PGBOUNCER_PORT: "${PGBOUNCER_PORT:-6432}"
       POOL_MODE: transaction
       MAX_CLIENT_CONN: "100"
       DEFAULT_POOL_SIZE: "10"
@@ -241,7 +255,7 @@ services:
       postgres-replica:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 ${PGBOUNCER_PORT:-6432} || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -256,7 +270,9 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-sklearn_api}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:${POSTGRES_INTERNAL_PORT:-5432}/${POSTGRES_DB:-sklearn_api}
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -269,7 +285,7 @@ services:
     image: nginx:1.27-alpine
     container_name: predictml-nginx
     ports:
-      - "80:80"
+      - "${NGINX_PORT:-80}:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
@@ -294,24 +310,24 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:5432/${POSTGRES_DB:-sklearn_api}
-      - DATABASE_READ_REPLICA_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer-read:5432/${POSTGRES_DB:-sklearn_api}
-      - MINIO_ENDPOINT=minio:9000
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:${PGBOUNCER_PORT:-6432}/${POSTGRES_DB:-sklearn_api}
+      - DATABASE_READ_REPLICA_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer-read:${PGBOUNCER_PORT:-6432}/${POSTGRES_DB:-sklearn_api}
+      - MINIO_ENDPOINT=minio:${MINIO_INTERNAL_PORT:-9000}
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
       - MINIO_BUCKET=${MINIO_BUCKET:-models}
       - ADMIN_TOKEN=${ADMIN_TOKEN:-}
       - ENABLE_OTEL=${ENABLE_OTEL:-true}
       - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-predictml-api}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://grafana:4317}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis-master:6379/0
-      - REDIS_SENTINEL_HOSTS=redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://grafana:${GRAFANA_GRPC_PORT:-4317}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis-master:${REDIS_PORT:-6379}/0
+      - REDIS_SENTINEL_HOSTS=redis-sentinel-1:${REDIS_SENTINEL_PORT:-26379},redis-sentinel-2:${REDIS_SENTINEL_PORT:-26379},redis-sentinel-3:${REDIS_SENTINEL_PORT:-26379}
       - REDIS_CACHE_TTL=${REDIS_CACHE_TTL:-3600}
       - PREDICTION_STREAM_ENABLED=true
       - METRICS_TOKEN=${METRICS_TOKEN:-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      - MLFLOW_TRACKING_URI=http://mlflow:${MLFLOW_PORT:-5000}
       # --- Alertes e-mail (optionnel — configurer dans .env pour activer) ---
       - ENABLE_EMAIL_ALERTS=${ENABLE_EMAIL_ALERTS:-false}
       - WEEKLY_REPORT_ENABLED=${WEEKLY_REPORT_ENABLED:-false}
@@ -322,7 +338,7 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD:-}
       - SMTP_FROM=${SMTP_FROM:-}
       - ALERT_EMAIL_TO=${ALERT_EMAIL_TO:-}
-      - STREAMLIT_URL=${STREAMLIT_URL:-http://localhost:${STREAMLIT_PORT:-8501}}
+      - STREAMLIT_URL=http://localhost:${STREAMLIT_PORT:-8501}
       - WEEKLY_REPORT_DAY=${WEEKLY_REPORT_DAY:-monday}
       - WEEKLY_REPORT_HOUR=${WEEKLY_REPORT_HOUR:-8}
       - PERFORMANCE_DRIFT_ALERT_THRESHOLD=${PERFORMANCE_DRIFT_ALERT_THRESHOLD:-0.10}
@@ -340,7 +356,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:${API_PORT:-8000}/health"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -365,9 +381,9 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:5432/${POSTGRES_DB:-sklearn_api}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis-master:6379/0
-      - REDIS_SENTINEL_HOSTS=redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:${PGBOUNCER_PORT:-6432}/${POSTGRES_DB:-sklearn_api}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis-master:${REDIS_PORT:-6379}/0
+      - REDIS_SENTINEL_HOSTS=redis-sentinel-1:${REDIS_SENTINEL_PORT:-26379},redis-sentinel-2:${REDIS_SENTINEL_PORT:-26379},redis-sentinel-3:${REDIS_SENTINEL_PORT:-26379}
       - SECRET_KEY=${SECRET_KEY:?Définissez SECRET_KEY dans .env}
       - PREDICTION_STREAM_ENABLED=true
       - PREDICTION_STREAM_BATCH_SIZE=${PREDICTION_STREAM_BATCH_SIZE:-100}
@@ -389,16 +405,16 @@ services:
     command: >
       bash -c "pip install psycopg2-binary boto3 --quiet &&
       mlflow server
-      --backend-store-uri postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/mlflow
+      --backend-store-uri postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:${POSTGRES_INTERNAL_PORT:-5432}/mlflow
       --default-artifact-root s3://mlflow/
       --host 0.0.0.0
-      --port 5000"
+      --port ${MLFLOW_PORT:-5000}"
     environment:
-      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:${MINIO_INTERNAL_PORT:-9000}
       - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
       - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
     ports:
-      - "127.0.0.1:${MLFLOW_PORT:-5000}:5000"
+      - "127.0.0.1:${MLFLOW_PORT:-5000}:${MLFLOW_PORT:-5000}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -417,12 +433,12 @@ services:
     ports:
       - "${STREAMLIT_PORT:-8501}:${STREAMLIT_PORT:-8501}"
     environment:
-      - API_URL=http://api:8000
-      - MLFLOW_URL=http://mlflow:5000
+      - API_URL=http://api:${API_PORT:-8000}
+      - MLFLOW_URL=http://mlflow:${MLFLOW_PORT:-5000}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # Connexion PostgreSQL pour le tool SQL du chatbot
       - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
+      - POSTGRES_PORT=${POSTGRES_INTERNAL_PORT:-5432}
       - POSTGRES_DB=${POSTGRES_DB:-sklearn_api}
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
