@@ -1,9 +1,8 @@
 """
-train_iris.py — Script de ré-entraînement PredictML — Exemple Iris
-====================================================================
+train_iris_GradientBoosting.py — Script de ré-entraînement PredictML — Exemple Iris (GradientBoosting)
+=============================================================================================
 
-Ce script est conçu pour être uploadé avec votre modèle (champ "Script d'entraînement")
-afin de permettre le ré-entraînement automatique ou planifié depuis le dashboard.
+Identique à train_iris.py mais utilise un GradientBoostingClassifier au lieu du RandomForest.
 
 CONTRAT D'INTERFACE (variables d'environnement injectées automatiquement par l'API)
 -------------------------------------------------------------------------------------
@@ -40,7 +39,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 from sklearn.datasets import load_iris
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
 
@@ -112,13 +111,13 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 
 print(
-    f"[{MODEL_NAME}] Entraînement sur {len(X_train)} exemples, "
+    f"[{MODEL_NAME}] Entraînement GradientBoosting sur {len(X_train)} exemples, "
     f"évaluation sur {len(X_test)}…",
     file=sys.stderr,
 )
 
-HYPERPARAMS = {"n_estimators": 100, "random_state": 42}
-model = RandomForestClassifier(**HYPERPARAMS)
+HYPERPARAMS = {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 3, "random_state": 42}
+model = GradientBoostingClassifier(**HYPERPARAMS)
 model.fit(X_train, y_train)
 
 # ── 4. Évaluation ─────────────────────────────────────────────────────────────
@@ -163,7 +162,6 @@ mlflow_run_id = None
 
 if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
     try:
-        # Auth basique si les credentials sont fournis
         if MLFLOW_TRACKING_USERNAME:
             os.environ["MLFLOW_TRACKING_USERNAME"] = MLFLOW_TRACKING_USERNAME
             os.environ["MLFLOW_TRACKING_PASSWORD"] = MLFLOW_TRACKING_PASSWORD
@@ -171,12 +169,14 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
         mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
         mlflow.set_experiment(f"predictml/{MODEL_NAME}")
 
-        run_name = f"{MODEL_NAME}_{TRAIN_START_DATE}_{TRAIN_END_DATE}"
+        run_name = f"{MODEL_NAME}_{TRAIN_START_DATE}_{TRAIN_END_DATE}_gb"
         with mlflow.start_run(run_name=run_name) as run:
             # Params — hyperparamètres + contexte temporel
             mlflow.log_params({
-                "algorithm":        "RandomForest",
+                "algorithm":        "GradientBoosting",
                 "n_estimators":     HYPERPARAMS["n_estimators"],
+                "learning_rate":    HYPERPARAMS["learning_rate"],
+                "max_depth":        HYPERPARAMS["max_depth"],
                 "random_state":     HYPERPARAMS["random_state"],
                 "train_start_date": TRAIN_START_DATE,
                 "train_end_date":   TRAIN_END_DATE,
@@ -203,7 +203,7 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
             # Tags
             mlflow.set_tags({
                 "model_name":  MODEL_NAME,
-                "algorithm":   "RandomForest",
+                "algorithm":   "GradientBoosting",
                 "trigger":     "script",
                 "n_features":  str(len(feature_names)),
                 "n_classes":   str(len(iris.target_names)),

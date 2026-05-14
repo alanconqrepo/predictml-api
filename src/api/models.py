@@ -187,6 +187,7 @@ _ALLOWED_IMPORT_MODULES = {
     "pandas",
     "numpy",
     "sklearn",
+    "mlflow",
     "datetime",
     "pathlib",
     "math",

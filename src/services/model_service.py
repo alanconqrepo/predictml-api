@@ -188,6 +188,7 @@ class ModelService:
                 "traffic_weight": m.traffic_weight,
                 "deployment_mode": m.deployment_mode,
                 "train_script_object_key": m.train_script_object_key,
+                "feature_baseline": m.feature_baseline,
                 "created_at": m.created_at,
                 "user_id_creator": m.user_id_creator,
                 "creator_username": m.creator.username if m.creator else None,
