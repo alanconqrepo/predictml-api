@@ -2472,9 +2472,7 @@ class DBService:
     async def get_account_request_by_id(
         db: AsyncSession, request_id: int
     ) -> Optional[AccountRequest]:
-        result = await db.execute(
-            select(AccountRequest).where(AccountRequest.id == request_id)
-        )
+        result = await db.execute(select(AccountRequest).where(AccountRequest.id == request_id))
         return result.scalar_one_or_none()
 
     @staticmethod
@@ -2506,9 +2504,7 @@ class DBService:
     @staticmethod
     async def count_pending_account_requests(db: AsyncSession) -> int:
         result = await db.execute(
-            select(func.count()).where(
-                AccountRequest.status == AccountRequestStatus.PENDING
-            )
+            select(func.count()).where(AccountRequest.status == AccountRequestStatus.PENDING)
         )
         return result.scalar_one()
 

@@ -34,9 +34,7 @@ class AccountRequest(Base):
     rejection_reason = Column(String(300), nullable=True)
     requested_at = Column(DateTime, default=_utcnow, nullable=False)
     reviewed_at = Column(DateTime, nullable=True)
-    reviewer_id = Column(
-        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
+    reviewer_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     def __repr__(self) -> str:
         return f"<AccountRequest(id={self.id}, username='{self.username}', status='{self.status}')>"

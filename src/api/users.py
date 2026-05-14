@@ -42,9 +42,7 @@ async def regenerate_my_token(
     Accessible par tous les rôles.
     """
     user = await DBService.update_user(db, current_user.id, regenerate_token=True)
-    audit_log(
-        "user.token_self_regen", actor_id=current_user.id, resource=f"user:{current_user.id}"
-    )
+    audit_log("user.token_self_regen", actor_id=current_user.id, resource=f"user:{current_user.id}")
     return user
 
 
