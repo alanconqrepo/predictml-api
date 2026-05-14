@@ -26,7 +26,7 @@ class AccountRequest(Base):
     message = Column(String(500), nullable=True)
     role_requested = Column(String(20), nullable=False, default="user")
     status = Column(
-        SQLEnum(AccountRequestStatus),
+        SQLEnum(AccountRequestStatus, values_callable=lambda obj: [e.value for e in obj]),
         default=AccountRequestStatus.PENDING,
         nullable=False,
         index=True,
