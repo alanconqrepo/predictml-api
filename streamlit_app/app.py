@@ -155,8 +155,9 @@ _DARK_CSS = """
 [data-testid="stApp"] { background-color: #0e1117; }
 [data-testid="stHeader"] { background-color: #0e1117; }
 [data-testid="stSidebar"] { background-color: #262730; }
-body, p, span, label, div { color: #fafafa; }
+body, p, span, label { color: #fafafa; }
 h1, h2, h3, h4, h5, h6 { color: #fafafa; }
+.stMarkdown, .stText, .stCaption { color: #fafafa; }
 input[type="text"], input[type="password"], textarea {
     background-color: #262730 !important;
     color: #fafafa !important;
@@ -165,7 +166,19 @@ input[type="text"], input[type="password"], textarea {
 [data-baseweb="input"] { background-color: #262730 !important; }
 [data-baseweb="select"] > div { background-color: #262730 !important; color: #fafafa !important; }
 [data-testid="stForm"] { border-color: #555; }
-[data-testid="baseButton-secondary"] { background-color: #262730; color: #fafafa; border-color: #555; }
+button {
+    background-color: #262730 !important;
+    color: #fafafa !important;
+    border-color: #555 !important;
+}
+button:hover {
+    background-color: #3a3c4a !important;
+    border-color: #888 !important;
+}
+button[kind="primary"] {
+    background-color: #c0392b !important;
+    border-color: #c0392b !important;
+}
 code { background-color: #262730; color: #e6e6e6; }
 pre { background-color: #1a1c23 !important; }
 hr { border-color: #555; }
