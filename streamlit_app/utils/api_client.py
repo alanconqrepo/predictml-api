@@ -759,3 +759,42 @@ class APIClient:
         r = self._post(f"/models/{name}/{version}/golden-tests/run")
         r.raise_for_status()
         return r.json()
+
+    # --- Gestion du token (self-service) ---
+
+    def regenerate_my_token(self) -> dict:
+        r = self._post("/users/me/regenerate-token")
+        r.raise_for_status()
+        return r.json()
+
+    # --- Demandes de création de compte ---
+
+    def submit_account_request(self, data: dict) -> dict:
+        r = requests.post(
+            f"{self.base_url}/account-requests",
+            json=data,
+            timeout=10,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def get_account_requests(self, status: Optional[str] = None) -> list:
+        params = {"status": status} if status else None
+        r = self._get("/account-requests", params=params)
+        r.raise_for_status()
+        return r.json()
+
+    def get_pending_account_requests_count(self) -> int:
+        r = self._get("/account-requests/pending-count")
+        r.raise_for_status()
+        return r.json().get("pending_count", 0)
+
+    def approve_account_request(self, request_id: int) -> dict:
+        r = self._patch(f"/account-requests/{request_id}/approve")
+        r.raise_for_status()
+        return r.json()
+
+    def reject_account_request(self, request_id: int, reason: Optional[str] = None) -> dict:
+        r = self._patch(f"/account-requests/{request_id}/reject", json={"reason": reason})
+        r.raise_for_status()
+        return r.json()

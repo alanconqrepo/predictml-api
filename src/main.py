@@ -26,7 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src.api import models, monitoring, observed_results, predict, users
+from src.api import account_requests, models, monitoring, observed_results, predict, users
 from src.core.config import settings
 from src.core.logging import setup_logging
 from src.core.rate_limit import limiter
@@ -215,6 +215,7 @@ if settings.ENABLE_OTEL:
 app.include_router(predict.router)
 app.include_router(models.router)
 app.include_router(users.router)
+app.include_router(account_requests.router)
 app.include_router(observed_results.router)
 app.include_router(monitoring.router)
 

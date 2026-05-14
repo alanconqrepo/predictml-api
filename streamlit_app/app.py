@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import streamlit as st
 from utils.api_client import APIClient
 from utils.auth import logout
+from utils.ui_helpers import show_token_with_copy
 
 
 def _is_valid_api_url(url: str) -> bool:
@@ -40,22 +41,47 @@ def show_login():
     if submitted:
         if not token:
             st.error("Veuillez saisir un token.")
-            return
-        if not _is_valid_api_url(api_url):
+        elif not _is_valid_api_url(api_url):
             st.error("URL invalide. Elle doit commencer par http:// ou https://")
-            return
+        else:
+            client = APIClient(base_url=api_url, token=token)
+            is_valid, is_admin = client.check_auth()
 
-        client = APIClient(base_url=api_url, token=token)
-        is_valid, is_admin = client.check_auth()
+            if not is_valid:
+                st.error("Token invalide ou API inaccessible.")
+            else:
+                st.session_state["api_token"] = token
+                st.session_state["api_url"] = api_url
+                st.session_state["is_admin"] = is_admin
+                st.rerun()
 
-        if not is_valid:
-            st.error("Token invalide ou API inaccessible.")
-            return
+    st.divider()
 
-        st.session_state["api_token"] = token
-        st.session_state["api_url"] = api_url
-        st.session_state["is_admin"] = is_admin
-        st.rerun()
+    with st.expander("Vous n'avez pas encore de token ?"):
+        st.markdown("""
+**Premier accès admin**
+
+Le compte admin initial est créé au démarrage de l'API. Récupérez le token via :
+
+```bash
+# Vérifier les logs de démarrage
+docker-compose logs api | grep -i "token\|admin"
+
+# Ou lancer manuellement l'initialisation
+docker exec predictml-api python init_data/init_db.py
+```
+
+La variable d'environnement `ADMIN_TOKEN` permet aussi de forcer le token à l'init.
+
+---
+
+**Nouvel utilisateur**
+
+Demandez un accès à votre administrateur, ou soumettez une demande via la page
+**"Demande d'accès"** dans le menu latéral — un admin vous communiquera votre token
+une fois approuvé.
+""")
+        st.page_link("pages/0_Demande_Acces.py", label="Soumettre une demande d'accès", icon="📝")
 
 
 def show_home():
@@ -82,6 +108,24 @@ def show_home():
                 st.warning("Quota épuisé pour aujourd'hui.")
         except Exception:
             pass
+
+        with st.expander("🔑 Mon token API"):
+            try:
+                me = client.get_me()
+                show_token_with_copy(me["api_token"])
+            except Exception:
+                st.error("Impossible de charger le token.")
+
+        # Badge demandes en attente (admin uniquement)
+        if st.session_state.get("is_admin"):
+            try:
+                n_pending = client.get_pending_account_requests_count()
+                if n_pending > 0:
+                    st.warning(f"🔔 {n_pending} demande(s) d'accès en attente")
+                    st.page_link("pages/1_Users.py", label="Gérer les demandes →")
+            except Exception:
+                pass
+
         st.divider()
 
     # Statut API

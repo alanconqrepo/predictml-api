@@ -17,6 +17,8 @@ from sqlalchemy.orm import selectinload
 from src.core.config import settings
 from src.core.utils import _utcnow
 from src.db.models import (
+    AccountRequest,
+    AccountRequestStatus,
     HistoryActionType,
     ModelHistory,
     ModelMetadata,
@@ -2443,6 +2445,104 @@ class DBService:
             if len(seen) >= limit:
                 break
         return seen
+
+    # === Account Requests ===
+
+    @staticmethod
+    async def create_account_request(
+        db: AsyncSession,
+        username: str,
+        email: str,
+        message: Optional[str],
+        role_requested: str = "user",
+    ) -> AccountRequest:
+        req = AccountRequest(
+            username=username,
+            email=email,
+            message=message,
+            role_requested=role_requested,
+            status=AccountRequestStatus.PENDING,
+        )
+        db.add(req)
+        await db.commit()
+        await db.refresh(req)
+        return req
+
+    @staticmethod
+    async def get_account_request_by_id(
+        db: AsyncSession, request_id: int
+    ) -> Optional[AccountRequest]:
+        result = await db.execute(
+            select(AccountRequest).where(AccountRequest.id == request_id)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_pending_request_by_email(
+        db: AsyncSession, email: str
+    ) -> Optional[AccountRequest]:
+        result = await db.execute(
+            select(AccountRequest).where(
+                AccountRequest.email == email,
+                AccountRequest.status == AccountRequestStatus.PENDING,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_account_requests(
+        db: AsyncSession,
+        status: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[AccountRequest]:
+        q = select(AccountRequest).order_by(AccountRequest.requested_at.desc())
+        if status:
+            q = q.where(AccountRequest.status == status)
+        q = q.offset(skip).limit(limit)
+        result = await db.execute(q)
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def count_pending_account_requests(db: AsyncSession) -> int:
+        result = await db.execute(
+            select(func.count()).where(
+                AccountRequest.status == AccountRequestStatus.PENDING
+            )
+        )
+        return result.scalar_one()
+
+    @staticmethod
+    async def approve_account_request(
+        db: AsyncSession, request_id: int, reviewer_id: int
+    ) -> Optional[AccountRequest]:
+        req = await DBService.get_account_request_by_id(db, request_id)
+        if not req:
+            return None
+        req.status = AccountRequestStatus.APPROVED
+        req.reviewed_at = _utcnow()
+        req.reviewer_id = reviewer_id
+        await db.commit()
+        await db.refresh(req)
+        return req
+
+    @staticmethod
+    async def reject_account_request(
+        db: AsyncSession,
+        request_id: int,
+        reviewer_id: int,
+        reason: Optional[str] = None,
+    ) -> Optional[AccountRequest]:
+        req = await DBService.get_account_request_by_id(db, request_id)
+        if not req:
+            return None
+        req.status = AccountRequestStatus.REJECTED
+        req.reviewed_at = _utcnow()
+        req.reviewer_id = reviewer_id
+        req.rejection_reason = reason
+        await db.commit()
+        await db.refresh(req)
+        return req
 
 
 # ===========================================================================
