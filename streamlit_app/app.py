@@ -171,8 +171,27 @@ def show_home():
         logout()
 
 
-# Router principal
-if "api_token" not in st.session_state or not st.session_state["api_token"]:
-    show_login()
+# Router principal — navigation conditionnelle selon l'état de connexion
+_logged_in = bool(st.session_state.get("api_token"))
+
+if _logged_in:
+    _pg = st.navigation([
+        st.Page(show_home, title="Accueil", default=True),
+        st.Page("pages/1_Users.py", title="Users"),
+        st.Page("pages/2_Models.py", title="Models"),
+        st.Page("pages/3_Predictions.py", title="Predictions"),
+        st.Page("pages/4_Stats.py", title="Stats"),
+        st.Page("pages/5_Code_Example.py", title="Code Example"),
+        st.Page("pages/6_AB_Testing.py", title="AB Testing"),
+        st.Page("pages/7_Supervision.py", title="Supervision"),
+        st.Page("pages/8_Retrain.py", title="Retrain"),
+        st.Page("pages/9_Golden_Tests.py", title="Golden Tests"),
+        st.Page("pages/10_Aide.py", title="Aide"),
+    ])
 else:
-    show_home()
+    _pg = st.navigation([
+        st.Page(show_login, title="Connexion", default=True),
+        st.Page("pages/0_Demande_Acces.py", title="Demande d'accès"),
+    ])
+
+_pg.run()
