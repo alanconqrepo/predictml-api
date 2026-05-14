@@ -58,14 +58,19 @@ class Settings:
     API_VERSION: str = "2.0.0"
     SECRET_KEY: str = _require_env("SECRET_KEY", insecure_values=set())
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
+    ADMIN_TOKEN: str = os.getenv("ADMIN_TOKEN", "")
+    ADMIN_EMAIL: str = os.getenv("ADMIN_EMAIL", "admin@predictml.local")
 
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = int(os.getenv("API_PORT", "8000"))
 
     # Database
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/sklearn_api"
+    DATABASE_URL: str = os.getenv("DATABASE_URL") or (
+        "postgresql+asyncpg://postgres:postgres@localhost:{port}/{db}".format(
+            port=os.getenv("POSTGRES_INTERNAL_PORT", "5432"),
+            db=os.getenv("POSTGRES_DB", "sklearn_api"),
+        )
     )
     # Empty string = no replica configured; falls back to DATABASE_URL
     DATABASE_READ_REPLICA_URL: str = os.getenv("DATABASE_READ_REPLICA_URL", "")
@@ -74,7 +79,7 @@ class Settings:
 
     # MinIO Object Storage
     MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "localhost:9000")
-    MINIO_ACCESS_KEY: str = _require_env("MINIO_ACCESS_KEY", "minioadmin", {"minioadmin"})
+    MINIO_ACCESS_KEY: str = _require_env("MINIO_ACCESS_KEY", "minioadmin")
     MINIO_SECRET_KEY: str = _require_env("MINIO_SECRET_KEY", "minioadmin", {"minioadmin"})
     MINIO_BUCKET: str = os.getenv("MINIO_BUCKET", "models")
     MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "false").lower() == "true"
@@ -84,9 +89,12 @@ class Settings:
 
     # Redis Cache
     REDIS_URL: str = os.getenv("REDIS_URL") or (
-        "redis://:{pw}@localhost:6379/0".format(pw=os.getenv("REDIS_PASSWORD", ""))
+        "redis://:{pw}@localhost:{port}/0".format(
+            pw=os.getenv("REDIS_PASSWORD", ""),
+            port=os.getenv("REDIS_PORT", "6379"),
+        )
         if os.getenv("REDIS_PASSWORD")
-        else "redis://localhost:6379/0"
+        else "redis://localhost:{}/0".format(os.getenv("REDIS_PORT", "6379"))
     )
     REDIS_CACHE_TTL: int = int(os.getenv("REDIS_CACHE_TTL", "3600"))
     # Sentinel hosts — "sentinel1:26379,sentinel2:26379,sentinel3:26379"
@@ -94,7 +102,9 @@ class Settings:
     REDIS_SENTINEL_HOSTS: str = os.getenv("REDIS_SENTINEL_HOSTS", "")
 
     # MLflow Experiment Tracking
-    MLFLOW_TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+    MLFLOW_TRACKING_URI: str = os.getenv("MLFLOW_TRACKING_URI") or "http://mlflow:{}".format(
+        os.getenv("MLFLOW_PORT", "5000")
+    )
     MLFLOW_EXPERIMENT_PREFIX: str = os.getenv("MLFLOW_EXPERIMENT_PREFIX", "predictml")
     MLFLOW_S3_ENDPOINT_URL: str = os.getenv("MLFLOW_S3_ENDPOINT_URL", "")
     MLFLOW_REGISTER_MODELS: bool = os.getenv("MLFLOW_REGISTER_MODELS", "true").lower() == "true"
@@ -106,8 +116,8 @@ class Settings:
     # OpenTelemetry
     ENABLE_OTEL: bool = os.getenv("ENABLE_OTEL", "false").lower() == "true"
     OTEL_SERVICE_NAME: str = os.getenv("OTEL_SERVICE_NAME", "predictml-api")
-    OTEL_EXPORTER_OTLP_ENDPOINT: str = os.getenv(
-        "OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or (
+        "http://localhost:{}".format(os.getenv("GRAFANA_GRPC_PORT", "4317"))
     )
 
     # SMTP / Alertes e-mail (désactivées par défaut — configurer via variables d'env)
@@ -120,7 +130,9 @@ class Settings:
     ALERT_EMAIL_TO: list = [
         e.strip() for e in os.getenv("ALERT_EMAIL_TO", "").split(",") if e.strip()
     ]
-    STREAMLIT_URL: str = os.getenv("STREAMLIT_URL", "http://localhost:8501")
+    STREAMLIT_URL: str = os.getenv("STREAMLIT_URL") or "http://localhost:{}".format(
+        os.getenv("STREAMLIT_PORT", "8501")
+    )
     ENABLE_EMAIL_ALERTS: bool = os.getenv("ENABLE_EMAIL_ALERTS", "false").lower() == "true"
     WEEKLY_REPORT_ENABLED: bool = os.getenv("WEEKLY_REPORT_ENABLED", "false").lower() == "true"
     WEEKLY_REPORT_DAY: str = os.getenv("WEEKLY_REPORT_DAY", "monday")

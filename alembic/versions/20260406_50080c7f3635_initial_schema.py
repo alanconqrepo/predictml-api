@@ -10,6 +10,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
 
 # revision identifiers, used by Alembic.
 revision: str = "50080c7f3635"
@@ -21,9 +22,11 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Crée le schéma initial : tables users, model_metadata, predictions, observed_results."""
 
-    # Enum PostgreSQL pour les rôles utilisateur
-    userrole_enum = sa.Enum("admin", "user", "readonly", name="userrole")
-    userrole_enum.create(op.get_bind(), checkfirst=True)
+    # Enum PostgreSQL pour les rôles utilisateur (idempotent)
+    op.execute(
+        "DO $$ BEGIN CREATE TYPE userrole AS ENUM ('admin', 'user', 'readonly');"
+        " EXCEPTION WHEN duplicate_object THEN NULL; END $$"
+    )
 
     # Table users
     op.create_table(
@@ -34,7 +37,7 @@ def upgrade() -> None:
         sa.Column("api_token", sa.String(255), nullable=False),
         sa.Column(
             "role",
-            sa.Enum("admin", "user", "readonly", name="userrole"),
+            PG_ENUM("admin", "user", "readonly", name="userrole", create_type=False),
             nullable=False,
         ),
         sa.Column("is_active", sa.Boolean(), nullable=False),
