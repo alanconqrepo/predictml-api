@@ -79,7 +79,7 @@ replace DATABASE_READ_REPLICA_URL \
 PROMETHEUS_TEMPLATE="$ROOT_DIR/monitoring/prometheus.yml.template"
 PROMETHEUS_OUT="$ROOT_DIR/monitoring/prometheus.yml"
 if [ -f "$PROMETHEUS_TEMPLATE" ]; then
-  _api_port=$(grep -E '^API_PORT=' "$ENV_FILE" | cut -d= -f2 | tr -d '[:space:]')
+  _api_port=$(grep -E '^API_PORT=' "$ENV_FILE" | cut -d= -f2 | sed 's/#.*//' | tr -d '[:space:]')
   _api_port="${_api_port:-8000}"
   export API_PORT="$_api_port"
   envsubst '${API_PORT}' < "$PROMETHEUS_TEMPLATE" > "$PROMETHEUS_OUT"
