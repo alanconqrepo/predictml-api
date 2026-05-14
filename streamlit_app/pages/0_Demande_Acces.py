@@ -7,11 +7,8 @@ import os
 import requests
 import streamlit as st
 
-st.set_page_config(
-    page_title="Demande d'accès — PredictML",
-    page_icon="📝",
-    layout="centered",
-)
+if st.session_state.get("api_token"):
+    st.switch_page("app.py")
 
 DEFAULT_API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
