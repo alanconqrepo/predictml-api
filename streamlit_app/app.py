@@ -61,25 +61,14 @@ def show_login():
         st.markdown("""
 **Premier accès admin**
 
-Le compte admin initial est créé au démarrage de l'API. Récupérez le token via :
-
-```bash
-# Vérifier les logs de démarrage
-docker-compose logs api | grep -i "token\|admin"
-
-# Ou lancer manuellement l'initialisation
-docker exec predictml-api python init_data/init_db.py
-```
-
-La variable d'environnement `ADMIN_TOKEN` permet aussi de forcer le token à l'init.
+Le token admin est défini par la variable d'environnement **`ADMIN_TOKEN`**.
 
 ---
 
 **Nouvel utilisateur**
 
-Demandez un accès à votre administrateur, ou soumettez une demande via la page
-**"Demande d'accès"** dans le menu latéral — un admin vous communiquera votre token
-une fois approuvé.
+Soumettez une demande via la page **"Demande d'accès"** dans le menu — un admin vous
+communiquera votre token une fois approuvé.
 """)
         st.markdown("📝 [Soumettre une demande d'accès](/Demande_Acces)")
 
@@ -115,6 +104,9 @@ def show_home():
                 show_token_with_copy(me["api_token"])
             except Exception:
                 st.error("Impossible de charger le token.")
+
+        if st.button("Se déconnecter", type="secondary", use_container_width=True):
+            logout()
 
         # Badge demandes en attente (admin uniquement)
         if st.session_state.get("is_admin"):
@@ -153,26 +145,34 @@ def show_home():
     except Exception:
         pass
 
-    st.divider()
-    st.subheader("Navigation")
-    st.markdown("""
-| Page | Description |
-|------|-------------|
-| **1 - Users** | Gérer les utilisateurs, créer des comptes, renouveler les tokens *(admin)* |
-| **2 - Models** | Consulter et administrer les modèles ML |
-| **3 - Predictions** | Historique des prédictions avec filtres |
-| **4 - Stats** | Statistiques et graphiques d'utilisation |
-| **5 - Code Example** | Exemple de code MLflow + API |
-| **6 - A/B Testing** | Configurer les tests A/B, déploiement shadow, comparer les métriques par version |
-""")
-
-    st.divider()
-    if st.button("Se déconnecter", type="secondary"):
-        logout()
 
 
 # Router principal — navigation conditionnelle selon l'état de connexion
 _logged_in = bool(st.session_state.get("api_token"))
+
+_DARK_CSS = """
+<style>
+[data-testid="stApp"] { background-color: #0e1117; }
+[data-testid="stHeader"] { background-color: #0e1117; }
+[data-testid="stSidebar"] { background-color: #262730; }
+body, p, span, label, div { color: #fafafa; }
+h1, h2, h3, h4, h5, h6 { color: #fafafa; }
+input[type="text"], input[type="password"], textarea {
+    background-color: #262730 !important;
+    color: #fafafa !important;
+    border-color: #555 !important;
+}
+[data-baseweb="input"] { background-color: #262730 !important; }
+[data-baseweb="select"] > div { background-color: #262730 !important; color: #fafafa !important; }
+[data-testid="stForm"] { border-color: #555; }
+[data-testid="baseButton-secondary"] { background-color: #262730; color: #fafafa; border-color: #555; }
+code { background-color: #262730; color: #e6e6e6; }
+pre { background-color: #1a1c23 !important; }
+hr { border-color: #555; }
+[data-testid="stMetricValue"] { color: #fafafa; }
+[data-testid="stMetricLabel"] { color: #a0a0a0; }
+</style>
+"""
 
 if _logged_in:
     _pg = st.navigation([
@@ -181,17 +181,21 @@ if _logged_in:
         st.Page("pages/2_Models.py", title="Models"),
         st.Page("pages/3_Predictions.py", title="Predictions"),
         st.Page("pages/4_Stats.py", title="Stats"),
-        st.Page("pages/5_Code_Example.py", title="Code Example"),
         st.Page("pages/6_AB_Testing.py", title="AB Testing"),
         st.Page("pages/7_Supervision.py", title="Supervision"),
         st.Page("pages/8_Retrain.py", title="Retrain"),
         st.Page("pages/9_Golden_Tests.py", title="Golden Tests"),
         st.Page("pages/10_Aide.py", title="Aide"),
+        st.Page("pages/5_Code_Example.py", title="Code Example"),
     ])
 else:
     _pg = st.navigation([
         st.Page(show_login, title="Connexion", default=True),
         st.Page("pages/0_Demande_Acces.py", title="Demande d'accès"),
     ])
+
+# Dark mode toggle — visible sur toutes les pages
+if st.sidebar.toggle("Mode sombre", key="dark_mode"):
+    st.markdown(_DARK_CSS, unsafe_allow_html=True)
 
 _pg.run()
