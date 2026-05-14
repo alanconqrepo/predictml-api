@@ -25,20 +25,28 @@ docker compose version  # Docker Compose version v2+
 git clone https://github.com/alanconqrepo/predictml-api.git
 cd predictml-api
 
-# 2. Créer le fichier .env avec la SECRET_KEY obligatoire
-#    L'API refuse de démarrer si SECRET_KEY est absente.
+# 2. Créer le fichier .env avec les variables obligatoires
 cp .env.example .env 2>/dev/null || touch .env
+
+# SECRET_KEY : signature HMAC des modèles (obligatoire)
 python -c "import secrets; print('SECRET_KEY=' + secrets.token_urlsafe(32))" >> .env
 
-# En production, changer aussi les credentials MinIO (ne pas utiliser les valeurs par défaut) :
-# echo "MINIO_ROOT_USER=votre-user" >> .env
-# echo "MINIO_ROOT_PASSWORD=votre-mot-de-passe-fort" >> .env
+# REDIS_PASSWORD : auth Redis master + sentinels (obligatoire)
+python -c "import secrets; print('REDIS_PASSWORD=' + secrets.token_urlsafe(24))" >> .env
 
-# 3. Lancer tous les services (API, DB, MinIO, MLflow, Redis, Grafana, Streamlit)
+# MINIO_ROOT_USER / MINIO_ROOT_PASSWORD : stockage modèles (obligatoire)
+echo "MINIO_ROOT_USER=minioadmin" >> .env
+python -c "import secrets; print('MINIO_ROOT_PASSWORD=' + secrets.token_urlsafe(24))" >> .env
+
+# GRAFANA_ADMIN_PASSWORD : interface Grafana (obligatoire)
+echo "GRAFANA_ADMIN_PASSWORD=admin" >> .env
+
+# 3. Lancer tous les services (Nginx, API ×3, DB, MinIO, MLflow, Redis Sentinel, Grafana, Streamlit)
 docker-compose up -d --build
 
 # 4. Initialiser la base de données (premier déploiement uniquement)
-docker exec predictml-api python init_data/init_db.py
+#    L'API tourne sur plusieurs réplicas — utiliser docker-compose exec
+docker-compose exec api python init_data/init_db.py
 ```
 
 ---
@@ -46,26 +54,26 @@ docker exec predictml-api python init_data/init_db.py
 ## Vérifier que tout fonctionne
 
 ```bash
-# Health check de l'API
-curl http://localhost:8000/health
+# Health check de l'API (via Nginx port 80)
+curl http://localhost/health
 # {"status": "ok", "models_available": 2, "models_cached": 1}
 
 # Lister les modèles disponibles
-curl http://localhost:8000/models
+curl http://localhost/models
 ```
 
 **Services disponibles**
 
 | Service | URL | Identifiants |
 |---|---|---|
-| API | http://localhost:8000 | — |
-| Swagger UI | http://localhost:8000/docs | — |
+| **API** (via Nginx) | http://localhost | — |
+| Swagger UI | http://localhost/docs | — |
 | Dashboard admin | http://localhost:8501 | token admin (voir ci-dessous) |
 | MLflow | http://localhost:5000 | — |
-| MinIO console | http://localhost:9001 | minioadmin / minioadmin |
-| Grafana | http://localhost:3000 | admin / admin |
+| MinIO console | http://localhost:9001 | valeurs `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` du `.env` |
+| Grafana | http://localhost:3000 | `admin` / valeur `GRAFANA_ADMIN_PASSWORD` du `.env` |
 
-**Token admin par défaut :** `<ADMIN_TOKEN>`
+**Token admin :** visible dans la sortie de `docker-compose exec api python init_data/init_db.py`
 
 ---
 
@@ -251,14 +259,14 @@ Le dashboard permet de :
 ```bash
 export TOKEN="<ADMIN_TOKEN>"
 
-# Statut
-curl http://localhost:8000/
+# Statut (via Nginx port 80)
+curl http://localhost/
 
 # Lister les modèles
-curl http://localhost:8000/models
+curl http://localhost/models
 
 # Prédiction unitaire
-curl -X POST http://localhost:8000/predict \
+curl -X POST http://localhost/predict \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -273,7 +281,7 @@ curl -X POST http://localhost:8000/predict \
   }'
 
 # Explicabilité SHAP
-curl -X POST http://localhost:8000/explain \
+curl -X POST http://localhost/explain \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -288,34 +296,34 @@ curl -X POST http://localhost:8000/explain \
 
 # Dérive des données
 curl -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:8000/models/iris_model/drift"
+  "http://localhost/models/iris_model/drift"
 
 # Performance réelle
 curl -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:8000/models/iris_model/performance?start=2025-01-01T00:00:00&end=2025-12-31T23:59:59"
+  "http://localhost/models/iris_model/performance?start=2025-01-01T00:00:00&end=2025-12-31T23:59:59"
 
 # Monitoring global
 curl -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:8000/monitoring/overview"
+  "http://localhost/monitoring/overview"
 
 # Historique des prédictions (pagination curseur)
 curl -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:8000/predictions?name=iris_model&start=2025-01-01T00:00:00&end=2025-12-31T23:59:59"
+  "http://localhost/predictions?name=iris_model&start=2025-01-01T00:00:00&end=2025-12-31T23:59:59"
 
 # Créer un utilisateur (admin)
-curl -X POST http://localhost:8000/users \
+curl -X POST http://localhost/users \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"username": "alice", "email": "alice@example.com", "role": "user", "rate_limit": 500}'
 
 # Passer un modèle en production
-curl -X PATCH http://localhost:8000/models/iris_model/1.0.0 \
+curl -X PATCH http://localhost/models/iris_model/1.0.0 \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"is_production": true}'
 
 # Renouveler un token (admin)
-curl -X PATCH http://localhost:8000/users/2 \
+curl -X PATCH http://localhost/users/2 \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"regenerate_token": true}'
@@ -344,17 +352,18 @@ docker-compose up -d
 # Voir les logs
 docker-compose logs -f api
 docker-compose logs -f streamlit
+docker-compose logs -f prediction-writer   # worker queue prédictions
 
 # Rebuild après modification du code
-docker-compose up -d --build api
+docker-compose up -d --build api prediction-writer
 docker-compose up -d --build streamlit
 
 # Accès services
 # Dashboard admin  : http://localhost:8501
-# API Swagger      : http://localhost:8000/docs
+# API Swagger      : http://localhost/docs       (via Nginx port 80)
 # MLflow           : http://localhost:5000
-# MinIO console    : http://localhost:9001  (minioadmin / minioadmin)
-# Grafana          : http://localhost:3000  (admin / admin)
+# MinIO console    : http://localhost:9001
+# Grafana          : http://localhost:3000
 ```
 
 ---

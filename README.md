@@ -44,12 +44,15 @@ PredictML API résout ce problème :
 
 | Composant | Technologie | Port |
 |---|---|---|
-| API | FastAPI (async) | 8000 |
+| Reverse proxy | Nginx 1.27 | **80** |
+| API (3 réplicas) | FastAPI (async) | — (interne) |
 | Dashboard admin | Streamlit | 8501 |
-| Base de données | PostgreSQL 16 | 5433 |
+| Base de données | PostgreSQL 16 (primary + replica) | 5433 |
+| Connection pooling | PgBouncer 1.23 | — |
 | Stockage modèles | MinIO (compatible S3) | 9000 / console 9001 |
 | Experiment tracking | MLflow | 5000 |
-| Cache distribué | Redis 7 | 6379 |
+| Cache distribué | Redis 7 Sentinel (1 master + 2 réplicas + 3 sentinels) | 6379 |
+| Queue prédictions | Redis Streams + worker dédié | — |
 | Observabilité | Grafana LGTM (Loki + Tempo + Prometheus) | 3000 |
 
 ---
@@ -67,28 +70,38 @@ cd predictml-api
 ## Démarrage rapide
 
 ```bash
-# 1. Lancer tous les services
+# 1. Configurer les variables obligatoires dans .env
+cp .env.example .env 2>/dev/null || touch .env
+python -c "import secrets; print('SECRET_KEY=' + secrets.token_urlsafe(32))" >> .env
+echo "REDIS_PASSWORD=$(python -c \"import secrets; print(secrets.token_urlsafe(24))\")" >> .env
+echo "MINIO_ROOT_USER=minioadmin" >> .env
+echo "MINIO_ROOT_PASSWORD=$(python -c \"import secrets; print(secrets.token_urlsafe(24))\")" >> .env
+echo "GRAFANA_ADMIN_PASSWORD=admin" >> .env
+
+# 2. Lancer tous les services
 docker-compose up -d --build
 
-# 2. Initialiser la base de données et l'utilisateur admin (premier déploiement uniquement)
-docker exec predictml-api python init_data/init_db.py
+# 3. Initialiser la base de données et l'utilisateur admin (premier déploiement uniquement)
+#    L'API tourne en 3 réplicas — utiliser docker-compose exec
+docker-compose exec api python init_data/init_db.py
 
-# 3. Accéder au dashboard admin
+# 4. Accéder au dashboard admin
 open http://localhost:8501
 
-# 4. Tester l'API
-curl http://localhost:8000/health
+# 5. Tester l'API (via Nginx port 80)
+curl http://localhost/health
 ```
 
-**Credentials par défaut**
+**Credentials**
 
 | Service | Identifiants |
 |---|---|
-| Token admin API | `<ADMIN_TOKEN>` |
+| Token admin API | `<ADMIN_TOKEN>` (voir logs init_db.py) |
 | PostgreSQL | `postgres / postgres` |
-| MinIO | `minioadmin / minioadmin` ⚠️ À changer en production (`MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`) |
+| MinIO | valeurs de `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` dans `.env` |
+| Redis | valeur de `REDIS_PASSWORD` dans `.env` |
 | MLflow UI | http://localhost:5000 |
-| Grafana | http://localhost:3000 (admin / admin) |
+| Grafana | http://localhost:3000 (`admin` / valeur de `GRAFANA_ADMIN_PASSWORD`) |
 
 ---
 
@@ -110,8 +123,8 @@ curl http://localhost:8000/health
 - `POST /predict?strict_validation=true` — mode strict : rejette avec 422 les features inattendues
 
 ### Prédictions
-- `POST /predict` — prédiction unitaire avec routage intelligent (A/B, shadow)
-- `POST /predict-batch` — prédictions en lot (modèle chargé une seule fois)
+- `POST /predict` — prédiction unitaire avec routage intelligent (A/B, shadow) ; `?strict_validation=true` pour rejeter les features inattendues
+- `POST /predict-batch` — prédictions en lot (modèle chargé une seule fois) ; `?strict_validation=true` disponible également
 - Sortie des probabilités de classe si disponibles (`predict_proba`)
 - Flag `low_confidence` si la probabilité max est sous le seuil configuré
 - Identifiant `id_obs` pour lier une prédiction à un résultat observé
@@ -234,10 +247,10 @@ curl http://localhost:8000/health
 - **HMAC-SHA256** — chaque `.pkl` est signé à l'upload et vérifié avant `pickle.loads()` (clé : `SECRET_KEY`)
 - **Audit logging** — opérations admin sensibles (création/suppression de modèle, retrain, gestion utilisateurs) loguées en JSON via `structlog` avec `user_id`, IP et action
 - **Token expiration** — les tokens Bearer expirent après `TOKEN_LIFETIME_DAYS` jours (HTTP 401 au-delà) ; renouvellement possible via `PATCH /users/{id}`
-- **Rate limiting per-IP** — limite par IP et par minute via `slowapi` (HTTP 429 si dépassé), en plus du quota journalier par utilisateur
+- **Rate limiting per-IP** — limite par IP et par minute via `slowapi` avec backend Redis partagé entre réplicas (HTTP 429 si dépassé), en plus du quota journalier par utilisateur
 - **Validation des noms** — les formats de `name` et `version` sont validés (prévention path traversal)
 - **`/health/dependencies`** — protégé par auth admin (santé interne des dépendances, non exposée publiquement)
-- **`SECRET_KEY` obligatoire** — l'API refuse de démarrer si absente ; générez-la avec `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+- **Variables obligatoires** — `SECRET_KEY`, `REDIS_PASSWORD`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `GRAFANA_ADMIN_PASSWORD` — l'API ou docker-compose refuse de démarrer si absentes
 
 ---
 

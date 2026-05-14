@@ -9,17 +9,28 @@
 ```bash
 git clone https://github.com/alanconqrepo/predictml-api.git
 cd predictml-api
+
+# Créer le .env avec les variables obligatoires
+touch .env
+python -c "import secrets; print('SECRET_KEY=' + secrets.token_urlsafe(32))" >> .env
+python -c "import secrets; print('REDIS_PASSWORD=' + secrets.token_urlsafe(24))" >> .env
+echo "MINIO_ROOT_USER=minioadmin" >> .env
+python -c "import secrets; print('MINIO_ROOT_PASSWORD=' + secrets.token_urlsafe(24))" >> .env
+echo "GRAFANA_ADMIN_PASSWORD=admin" >> .env
+
 docker-compose up -d --build
-docker exec predictml-api python init_data/init_db.py
+
+# L'API tourne sur 3 réplicas — utiliser docker-compose exec
+docker-compose exec api python init_data/init_db.py
 ```
 
-Vérifiez que tout fonctionne :
+Vérifiez que tout fonctionne (l'API est accessible via Nginx sur le port 80) :
 ```bash
-curl http://localhost:8000/health
-# {"status": "healthy", "database": "connected", ...}
+curl http://localhost/health
+# {"status": "ok", "models_available": 0, "models_cached": 0}
 ```
 
-Le dashboard est sur http://localhost:8501, le token admin par défaut est `<ADMIN_TOKEN>`.
+Le dashboard est sur http://localhost:8501.
 
 ---
 
@@ -29,9 +40,14 @@ Le dashboard est sur http://localhost:8501, le token admin par défaut est `<ADM
 # Voir les logs en détail
 docker-compose logs api
 docker-compose logs postgres
+docker-compose logs nginx
+docker-compose logs redis-master
 
 # Vérifier que les ports ne sont pas déjà utilisés
-netstat -tlnp | grep -E '8000|8501|5433|9000|5000'
+netstat -tlnp | grep -E '80|8501|5433|9000|5000|6379|3000'
+
+# Si une variable obligatoire est manquante dans .env, docker-compose affiche une erreur
+# (ex : "Définissez REDIS_PASSWORD dans .env")
 
 # Rebuild complet
 docker-compose down && docker-compose up -d --build
@@ -370,21 +386,38 @@ Il vous permet de modifier les valeurs des features avec des sliders et de voir 
 
 ## Variables d'environnement importantes
 
+**Obligatoires** (docker-compose ou l'API refusent de démarrer si absentes) :
+
+| Variable | Description |
+|---|---|
+| `SECRET_KEY` | Clé HMAC pour la signature des modèles. `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `REDIS_PASSWORD` | Mot de passe Redis (master + réplicas + sentinels) |
+| `MINIO_ROOT_USER` | Login MinIO |
+| `MINIO_ROOT_PASSWORD` | Mot de passe MinIO |
+| `GRAFANA_ADMIN_PASSWORD` | Mot de passe admin Grafana |
+
+**Optionnelles** :
+
 | Variable | Description | Défaut |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Clé API Anthropic pour le chatbot d'aide | `` (désactivé) |
-| `ADMIN_TOKEN` | Token admin personnalisé | `` (généré auto) |
+| `ADMIN_TOKEN` | Token admin personnalisé | généré auto |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` | Credentials PostgreSQL | `postgres` / `postgres` |
-| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | Credentials MinIO | `minioadmin` / `minioadmin` |
 | `REDIS_CACHE_TTL` | TTL du cache des modèles en secondes | `3600` |
-| `ENABLE_OTEL` | Activer les traces OpenTelemetry vers Grafana | `false` |
+| `ENABLE_OTEL` | Activer OpenTelemetry vers Grafana | `true` |
 | `ENABLE_EMAIL_ALERTS` | Activer les alertes email | `false` |
+| `PREDICTION_STREAM_ENABLED` | Queue async Redis Streams pour les prédictions | `true` |
+| `MAX_ROWS_ANALYTICS` | Limite de lignes par requête analytique | `50000` |
+| `ANALYTICS_MAX_DAYS` | Fenêtre max des agrégations | `90` |
+| `TOKEN_LIFETIME_DAYS` | Validité des tokens Bearer en jours | `90` |
 | `ANTHROPIC_API_KEY` | Clé pour le chatbot Claude (page Aide) | `` |
 
 Ces variables se définissent dans le fichier `.env` à la racine du projet :
-```
-ANTHROPIC_API_KEY=sk-ant-api03-xxxxx
-ADMIN_TOKEN=mon-token-securise
+```bash
+SECRET_KEY=<générez avec secrets.token_urlsafe(32)>
+REDIS_PASSWORD=<générez avec secrets.token_urlsafe(24)>
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=<générez avec secrets.token_urlsafe(24)>
+GRAFANA_ADMIN_PASSWORD=admin
 ```
 
 ---
