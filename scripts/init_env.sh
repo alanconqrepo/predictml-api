@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# New terminal > git bash > bash scripts/init_env.sh
 # init_env.sh — Génère un .env avec des secrets forts à partir de .env.example
 set -euo pipefail
 
@@ -38,13 +39,11 @@ MINIO_USER="minioadmin"
 cp "$EXAMPLE_FILE" "$ENV_FILE"
 
 replace() {
-  # replace <key> <value> — remplace la ligne KEY=... dans .env
   local key="$1" val="$2"
-  # Compatible macOS (sed -i '') et Linux/Git Bash (sed -i)
   if sed --version &>/dev/null 2>&1; then
-    sed -i "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
+    sed -i "s|^#\?[[:space:]]*${key}=.*|${key}=${val}|" "$ENV_FILE"
   else
-    sed -i '' "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
+    sed -i '' "s|^#\?[[:space:]]*${key}=.*|${key}=${val}|" "$ENV_FILE"
   fi
 }
 
