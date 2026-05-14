@@ -4,11 +4,46 @@ Historique des prédictions avec filtres
 
 import io
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
+
+_SCRIPTS_DIR = Path(__file__).parent.parent / "documentation" / "Scripts"
+
+_EXAMPLE_SCRIPTS = [
+    (
+        "send_predictions_iris.py",
+        "Envoie 5 observations Iris en mode unitaire puis en lot (`POST /predict` + `POST /predict-batch`)",
+    ),
+    (
+        "send_ground_truth.py",
+        "Envoie les labels réels (ground truth) pour calculer la performance réelle du modèle (`POST /observed-results`)",
+    ),
+]
+
+
+def _read_script(filename: str) -> str:
+    try:
+        return (_SCRIPTS_DIR / filename).read_text(encoding="utf-8")
+    except Exception:
+        return f"# Fichier introuvable : {filename}"
+
+
+@st.dialog("Aperçu du script", width="large")
+def _view_script_dialog(filename: str) -> None:
+    st.code(_read_script(filename), language="python", line_numbers=True)
+    st.download_button(
+        "⬇️ Télécharger",
+        data=_read_script(filename),
+        file_name=filename,
+        mime="text/x-python",
+        key=f"dl_dialog_{filename}",
+        use_container_width=True,
+    )
+
 
 st.set_page_config(page_title="Predictions — PredictML", page_icon="📊", layout="wide")
 require_auth()
@@ -20,6 +55,25 @@ if col_refresh.button("🔄 Rafraîchir", key="pred_refresh", use_container_widt
     st.rerun()
 
 client = get_client()
+
+with st.expander("📋 Scripts d'exemple — Iris", expanded=False):
+    st.caption(
+        "Scripts de référence pour envoyer des prédictions et des résultats observés "
+        "vers votre modèle Iris. À exécuter localement après avoir uploadé le modèle."
+    )
+    for _script_name, _script_desc in _EXAMPLE_SCRIPTS:
+        _col_desc, _col_view, _col_dl = st.columns([5, 1.5, 1.5])
+        _col_desc.markdown(f"**`{_script_name}`**  \n{_script_desc}")
+        if _col_view.button("👁 Visualiser", key=f"view_{_script_name}", use_container_width=True):
+            _view_script_dialog(_script_name)
+        _col_dl.download_button(
+            "⬇️ Télécharger",
+            data=_read_script(_script_name),
+            file_name=_script_name,
+            mime="text/x-python",
+            key=f"dl_{_script_name}",
+            use_container_width=True,
+        )
 
 tab_history, tab_batch = st.tabs(["📋 Historique", "📦 Prédictions batch"])
 

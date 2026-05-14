@@ -24,13 +24,14 @@ def _session_path(sid: str) -> str:
     return os.path.join(_SESSION_DIR, f"{sid}.json")
 
 
-def _save_session(token: str, api_url: str, is_admin: bool) -> str:
+def _save_session(token: str, api_url: str, is_admin: bool, role: str = "user") -> str:
     sid = str(uuid.uuid4())
     with open(_session_path(sid), "w") as f:
         json.dump({
             "token": token,
             "api_url": api_url,
             "is_admin": is_admin,
+            "role": role,
             "expires_at": time.time() + _SESSION_TTL,
         }, f)
     return sid
@@ -51,6 +52,7 @@ def _restore_session(sid: str) -> bool:
     st.session_state["api_token"] = data["token"]
     st.session_state["api_url"] = data["api_url"]
     st.session_state["is_admin"] = data["is_admin"]
+    st.session_state["role"] = data.get("role", "user")
     st.session_state["_sid"] = sid
     return True
 
@@ -103,10 +105,16 @@ def show_login():
             if not is_valid:
                 st.error("Token invalide ou API inaccessible.")
             else:
+                try:
+                    me = client.get_me()
+                    role = me.get("role", "admin" if is_admin else "user")
+                except Exception:
+                    role = "admin" if is_admin else "user"
                 st.session_state["api_token"] = token
                 st.session_state["api_url"] = api_url
                 st.session_state["is_admin"] = is_admin
-                sid = _save_session(token, api_url, is_admin)
+                st.session_state["role"] = role
+                sid = _save_session(token, api_url, is_admin, role)
                 st.session_state["_sid"] = sid
                 st.query_params["sid"] = sid
                 st.rerun()
@@ -220,6 +228,39 @@ pre { background-color: #1a1c23 !important; }
 hr { border-color: #555; }
 [data-testid="stMetricValue"] { color: #fafafa; }
 [data-testid="stMetricLabel"] { color: #a0a0a0; }
+/* Expanders — ciblage large car Streamlit génère des classes aléatoires */
+details {
+    background-color: #1e2029 !important;
+    border-color: #555 !important;
+}
+details summary {
+    background-color: #1e2029 !important;
+    color: #fafafa !important;
+}
+details summary svg, details summary p {
+    fill: #fafafa !important;
+    color: #fafafa !important;
+}
+details > div, details > section {
+    background-color: #1e2029 !important;
+}
+[data-testid="stExpander"],
+[data-testid="stExpanderDetails"] {
+    background-color: #1e2029 !important;
+    border-color: #555 !important;
+}
+/* Inputs dans les expanders */
+details input, details textarea, details select {
+    background-color: #262730 !important;
+    color: #fafafa !important;
+    border-color: #555 !important;
+}
+/* Tous les inputs numériques */
+input[type="number"] {
+    background-color: #262730 !important;
+    color: #fafafa !important;
+    border-color: #555 !important;
+}
 </style>
 """
 
@@ -264,6 +305,15 @@ if _logged_in:
                 pass
 
         st.divider()
+        if st.session_state.get("role") != "readonly":
+            st.subheader("Services")
+            st.markdown(
+                "🔗 [Swagger](http://localhost/docs)  \n"
+                "📊 [Grafana](http://127.0.0.1:3000/dashboards)  \n"
+                "🪣 [MinIO](http://127.0.0.1:9011/login)  \n"
+                "🧪 [MLflow](http://127.0.0.1:5000/)"
+            )
+            st.divider()
 
     _pg = st.navigation([
         st.Page(show_home, title="Accueil", default=True),

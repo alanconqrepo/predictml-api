@@ -30,6 +30,7 @@ MINIO_ROOT_PASSWORD=$(gen 32)
 MINIO_SECRET_KEY=$(gen 32)
 REDIS_PASSWORD=$(gen 24)
 GRAFANA_ADMIN_PASSWORD=$(gen 24)
+MLFLOW_ADMIN_PASSWORD=$(gen 24)
 METRICS_TOKEN=$(gen 32)
 
 # Utilisateur MinIO fixe (pas un secret)
@@ -58,6 +59,8 @@ replace MINIO_SECRET_KEY    "$MINIO_SECRET_KEY"
 replace REDIS_PASSWORD      "$REDIS_PASSWORD"
 replace GRAFANA_ADMIN_USER  "admin"
 replace GRAFANA_ADMIN_PASSWORD "$GRAFANA_ADMIN_PASSWORD"
+replace MLFLOW_ADMIN_USER   "admin"
+replace MLFLOW_ADMIN_PASSWORD  "$MLFLOW_ADMIN_PASSWORD"
 replace METRICS_TOKEN       "$METRICS_TOKEN"
 
 # Les DATABASE_URL contiennent le mot de passe — on les réécrit entièrement.
@@ -90,8 +93,9 @@ fi
 echo ""
 echo "✅  .env généré avec succès dans : $ENV_FILE"
 echo ""
-echo "   ADMIN_TOKEN          : $ADMIN_TOKEN"
+echo "   ADMIN_TOKEN            : $ADMIN_TOKEN"
 echo "   GRAFANA_ADMIN_PASSWORD : $GRAFANA_ADMIN_PASSWORD"
+echo "   MLFLOW_ADMIN_PASSWORD  : $MLFLOW_ADMIN_PASSWORD"
 echo ""
 echo "⚠️  Ces valeurs ne s'affichent qu'une seule fois — conservez-les."
 echo "   Ne committez jamais .env dans git."

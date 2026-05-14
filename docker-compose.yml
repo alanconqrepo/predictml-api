@@ -328,6 +328,8 @@ services:
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - MLFLOW_TRACKING_URI=http://mlflow:${MLFLOW_PORT:-5000}
+      - MLFLOW_TRACKING_USERNAME=${MLFLOW_ADMIN_USER:-admin}
+      - MLFLOW_TRACKING_PASSWORD=${MLFLOW_ADMIN_PASSWORD:-}
       # --- Alertes e-mail (optionnel — configurer dans .env pour activer) ---
       - ENABLE_EMAIL_ALERTS=${ENABLE_EMAIL_ALERTS:-false}
       - WEEKLY_REPORT_ENABLED=${WEEKLY_REPORT_ENABLED:-false}
@@ -402,17 +404,19 @@ services:
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.20.2
     container_name: predictml-mlflow
-    command: >
-      bash -c "pip install psycopg2-binary boto3 --quiet &&
-      mlflow server
-      --backend-store-uri postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:${POSTGRES_INTERNAL_PORT:-5432}/mlflow
-      --default-artifact-root s3://mlflow/
-      --host 0.0.0.0
-      --port ${MLFLOW_PORT:-5000}"
+    entrypoint: ["/bin/sh", "/docker/mlflow-entrypoint.sh"]
     environment:
       - MLFLOW_S3_ENDPOINT_URL=http://minio:${MINIO_INTERNAL_PORT:-9000}
       - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
       - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_INTERNAL_PORT=${POSTGRES_INTERNAL_PORT:-5432}
+      - MLFLOW_PORT=${MLFLOW_PORT:-5000}
+      - MLFLOW_ADMIN_USER=${MLFLOW_ADMIN_USER:-admin}
+      - MLFLOW_ADMIN_PASSWORD=${MLFLOW_ADMIN_PASSWORD:?Définissez MLFLOW_ADMIN_PASSWORD dans .env}
+    volumes:
+      - ./docker/mlflow-entrypoint.sh:/docker/mlflow-entrypoint.sh:ro
     ports:
       - "127.0.0.1:${MLFLOW_PORT:-5000}:${MLFLOW_PORT:-5000}"
     depends_on:
