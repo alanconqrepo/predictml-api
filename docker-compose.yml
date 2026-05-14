@@ -4,9 +4,9 @@ services:
     image: postgres:16-alpine
     container_name: predictml-postgres
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-sklearn_api}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     command: >
       postgres
       -c hba_file=/etc/postgresql/pg_hba.conf
@@ -18,9 +18,9 @@ services:
       - ./init_data/create_mlflow_db.sql:/docker-entrypoint-initdb.d/create_mlflow_db.sql:ro
       - ./docker/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -33,8 +33,8 @@ services:
     image: postgres:16-alpine
     environment:
       PGDATA: /var/lib/postgresql/data
-      PGUSER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGUSER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_MASTER_HOST: postgres
       POSTGRES_MASTER_PORT: "5432"
     entrypoint: ["/bin/sh", "/docker/postgres-replica-entrypoint.sh"]
@@ -45,7 +45,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -64,8 +64,8 @@ services:
     volumes:
       - minio_data:/data
     ports:
-      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
-      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "127.0.0.1:${MINIO_PORT}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT}:9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
@@ -81,7 +81,7 @@ services:
     image: grafana/otel-lgtm:latest
     container_name: predictml-grafana
     environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?Définissez GRAFANA_ADMIN_PASSWORD dans .env}
     ports:
       - "127.0.0.1:3000:3000"   # Grafana UI
@@ -205,9 +205,9 @@ services:
     environment:
       DATABASES_HOST: postgres
       DATABASES_PORT: "5432"
-      DATABASES_USER: ${POSTGRES_USER:-postgres}
-      DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      DATABASES_DBNAME: ${POSTGRES_DB:-sklearn_api}
+      DATABASES_USER: ${POSTGRES_USER}
+      DATABASES_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASES_DBNAME: ${POSTGRES_DB}
       POOL_MODE: transaction
       MAX_CLIENT_CONN: "200"
       DEFAULT_POOL_SIZE: "20"
@@ -216,7 +216,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -230,9 +230,9 @@ services:
     environment:
       DATABASES_HOST: postgres-replica
       DATABASES_PORT: "5432"
-      DATABASES_USER: ${POSTGRES_USER:-postgres}
-      DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      DATABASES_DBNAME: ${POSTGRES_DB:-sklearn_api}
+      DATABASES_USER: ${POSTGRES_USER}
+      DATABASES_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASES_DBNAME: ${POSTGRES_DB}
       POOL_MODE: transaction
       MAX_CLIENT_CONN: "100"
       DEFAULT_POOL_SIZE: "10"
@@ -241,7 +241,7 @@ services:
       postgres-replica:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -256,7 +256,7 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-sklearn_api}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     depends_on:
       postgres:
         condition: service_healthy
@@ -294,24 +294,24 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:5432/${POSTGRES_DB:-sklearn_api}
-      - DATABASE_READ_REPLICA_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer-read:5432/${POSTGRES_DB:-sklearn_api}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
+      - DATABASE_READ_REPLICA_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer-read:5432/${POSTGRES_DB}
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
-      - MINIO_BUCKET=${MINIO_BUCKET:-models}
+      - MINIO_BUCKET=${MINIO_BUCKET}
       - ADMIN_TOKEN=${ADMIN_TOKEN:-}
-      - ENABLE_OTEL=${ENABLE_OTEL:-true}
-      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-predictml-api}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://grafana:4317}
+      - ENABLE_OTEL=${ENABLE_OTEL}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT}
       - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis-master:6379/0
       - REDIS_SENTINEL_HOSTS=redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
-      - REDIS_CACHE_TTL=${REDIS_CACHE_TTL:-3600}
+      - REDIS_CACHE_TTL=${REDIS_CACHE_TTL}
       - PREDICTION_STREAM_ENABLED=true
       - METRICS_TOKEN=${METRICS_TOKEN:-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI}
       # --- Alertes e-mail (optionnel — décommentez et configurez pour activer) ---
       # - ENABLE_EMAIL_ALERTS=false
       # - WEEKLY_REPORT_ENABLED=false
@@ -365,14 +365,14 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:5432/${POSTGRES_DB:-sklearn_api}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
       - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis-master:6379/0
       - REDIS_SENTINEL_HOSTS=redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
       - SECRET_KEY=${SECRET_KEY:?Définissez SECRET_KEY dans .env}
       - PREDICTION_STREAM_ENABLED=true
-      - PREDICTION_STREAM_BATCH_SIZE=${PREDICTION_STREAM_BATCH_SIZE:-100}
-      - PREDICTION_STREAM_FLUSH_MS=${PREDICTION_STREAM_FLUSH_MS:-500}
-      - PREDICTION_STREAM_MAX_RETRIES=${PREDICTION_STREAM_MAX_RETRIES:-3}
+      - PREDICTION_STREAM_BATCH_SIZE=${PREDICTION_STREAM_BATCH_SIZE}
+      - PREDICTION_STREAM_FLUSH_MS=${PREDICTION_STREAM_FLUSH_MS}
+      - PREDICTION_STREAM_MAX_RETRIES=${PREDICTION_STREAM_MAX_RETRIES}
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -389,7 +389,7 @@ services:
     command: >
       bash -c "pip install psycopg2-binary boto3 --quiet &&
       mlflow server
-      --backend-store-uri postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/mlflow
+      --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/mlflow
       --default-artifact-root s3://mlflow/
       --host 0.0.0.0
       --port 5000"
@@ -415,7 +415,7 @@ services:
       dockerfile: Dockerfile
     container_name: predictml-streamlit
     ports:
-      - "${STREAMLIT_PORT:-8501}:8501"
+      - "${STREAMLIT_PORT}:8501"
     environment:
       - API_URL=http://api:8000
       - MLFLOW_URL=http://mlflow:5000
@@ -423,9 +423,9 @@ services:
       # Connexion PostgreSQL pour le tool SQL du chatbot
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
-      - POSTGRES_DB=${POSTGRES_DB:-sklearn_api}
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     volumes:
       - ./documentation:/app/documentation:ro
       - ./src:/app/src:ro
