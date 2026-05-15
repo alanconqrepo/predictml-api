@@ -106,6 +106,11 @@ class GoldenTestService:
 
         details: List[GoldenTestRunDetail] = []
 
+        # Classes du modèle pour résoudre index → label (ex: 0 → "setosa")
+        classes_list: list = metadata.classes or []
+        if not classes_list and hasattr(model, "classes_"):
+            classes_list = [str(c) for c in model.classes_]
+
         for gt in tests:
             features: dict = gt.input_features
 
@@ -119,8 +124,22 @@ class GoldenTestService:
                     x = np.array([list(features.values())], dtype=object)
 
                 raw = model.predict(x)[0]
-                actual = str(raw.item() if hasattr(raw, "item") else raw)
-                passed = actual == str(gt.expected_output)
+                actual_raw = str(raw.item() if hasattr(raw, "item") else raw)
+
+                # Résoudre l'index numérique → label si le modèle retourne un entier
+                # et que les classes sont connues (ex: 0 → "setosa")
+                actual = actual_raw
+                if classes_list and actual_raw.lstrip("-").isdigit():
+                    try:
+                        idx = int(actual_raw)
+                        if 0 <= idx < len(classes_list):
+                            actual = str(classes_list[idx])
+                    except (ValueError, IndexError):
+                        pass
+
+                expected_str = str(gt.expected_output)
+                # Comparaison : label résolu OU valeur brute (pour expected_output = "1")
+                passed = actual == expected_str or actual_raw == expected_str
             except Exception as exc:
                 logger.warning(
                     "Erreur lors du golden test",
@@ -138,7 +157,7 @@ class GoldenTestService:
                     description=gt.description,
                     input=features,
                     expected=str(gt.expected_output),
-                    actual=actual,
+                    actual=actual,          # label résolu (ex: "versicolor") pas l'index brut
                     passed=passed,
                 )
             )

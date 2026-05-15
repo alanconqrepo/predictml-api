@@ -98,9 +98,11 @@ def fetch_feature_importance(api_url, token, name, version, last_n, days):
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def fetch_model_performance(api_url, token, name, version):
+def fetch_model_performance(api_url, token, name, version, period_days=30):
+    from datetime import datetime, timedelta, timezone
+    start = (datetime.now(timezone.utc) - timedelta(days=period_days)).strftime("%Y-%m-%dT%H:%M:%S")
     c = get_client()
-    return c.get_model_performance(name, version=version)
+    return c.get_model_performance(name, version=version, start=start)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -547,14 +549,48 @@ with st.expander("📋 Détails complets", expanded=True):
         if parent_v:
             st.markdown(f"**Dérivé de :** `v{parent_v}`")
         tags = selected.get("tags")
-        st.markdown(f"**Tags :** {', '.join(tags) if tags else '—'}")
+        if tags:
+            _tag_colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+                           "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+            _tag_html = " ".join(
+                f'<span style="background:{_tag_colors[i % len(_tag_colors)]};color:white;'
+                f'padding:2px 10px;border-radius:12px;font-size:0.82em;font-weight:600;'
+                f'white-space:nowrap;">{t}</span>'
+                for i, t in enumerate(tags)
+            )
+            st.markdown(f"**Tags :** {_tag_html}", unsafe_allow_html=True)
+        else:
+            st.markdown("**Tags :** —")
         webhook = selected.get("webhook_url")
         st.markdown(f"**Webhook URL :** `{webhook}`" if webhook else "**Webhook URL :** —")
+
+        mlflow_id = selected.get("mlflow_run_id")
+        if mlflow_id:
+            mlflow_link = f"{MLFLOW_URL}/#/experiments/0/runs/{mlflow_id}"
+            st.markdown(f"**MLflow run :** [{mlflow_id}]({mlflow_link})")
+        else:
+            st.markdown("**MLflow run :** —")
+
+        minio_key = selected.get("minio_object_key")
+        if minio_key:
+            st.markdown(f"**MinIO object :** `{selected.get('minio_bucket')}/{minio_key}`")
+            size = selected.get("file_size_bytes")
+            if size:
+                st.markdown(f"**Taille fichier :** {size / 1024:.1f} KB")
+            if is_admin:
+                size_label = f" ({size / 1024:.1f} KB)" if size else ""
+                try:
+                    pkl_bytes = client.download_model(selected["name"], selected["version"])
+                    st.download_button(
+                        label=f"⬇️ Télécharger le .pkl{size_label}",
+                        data=pkl_bytes,
+                        file_name=f"{selected['name']}_{selected['version']}.pkl",
+                        mime="application/octet-stream",
+                    )
+                except Exception as e:
+                    st.error(f"Erreur lors du téléchargement : {e}")
+
     with col_r:
-        st.markdown(f"**Accuracy :** {selected.get('accuracy') or '—'}")
-        st.markdown(f"**F1 Score :** {selected.get('f1_score') or '—'}")
-        st.markdown(f"**Precision :** {selected.get('precision') or '—'}")
-        st.markdown(f"**Recall :** {selected.get('recall') or '—'}")
         st.markdown(f"**Nb features :** {selected.get('features_count') or '—'}")
         last_seen = selected.get("last_seen")
         st.markdown(
@@ -565,35 +601,55 @@ with st.expander("📋 Détails complets", expanded=True):
         ct = selected.get("confidence_threshold")
         st.markdown(f"**Confidence threshold :** {f'{ct:.2f}' if ct is not None else '—'}")
 
-    if selected.get("training_params"):
-        st.markdown("**Hyperparamètres :**")
-        st.json(selected["training_params"])
+# ── Métriques en 2 blocs côte à côte ─────────────────────────────────────────
+_tm = selected.get("training_metrics") or {}
+_is_regression = any(k in _tm for k in ("mae", "rmse", "r2"))
 
-    mlflow_id = selected.get("mlflow_run_id")
-    if mlflow_id:
-        mlflow_link = f"{MLFLOW_URL}/#/experiments/0/runs/{mlflow_id}"
-        st.markdown(f"**MLflow run :** [{mlflow_id}]({mlflow_link})")
+_mcol_train, _mcol_gt = st.columns(2)
+
+with _mcol_train:
+    st.markdown("##### Métriques d'entraînement")
+    if _is_regression:
+        st.markdown(f"**MAE :** {_tm.get('mae') or '—'}")
+        st.markdown(f"**RMSE :** {_tm.get('rmse') or '—'}")
+        st.markdown(f"**R² :** {_tm.get('r2') or '—'}")
     else:
-        st.markdown("**MLflow run :** —")
+        st.markdown(f"**Accuracy :** {_tm.get('accuracy') or selected.get('accuracy') or '—'}")
+        st.markdown(f"**F1 Score :** {_tm.get('f1_score') or selected.get('f1_score') or '—'}")
+        st.markdown(f"**Precision :** {_tm.get('precision') or '—'}")
+        st.markdown(f"**Recall :** {_tm.get('recall') or '—'}")
 
-    minio_key = selected.get("minio_object_key")
-    if minio_key:
-        st.markdown(f"**MinIO object :** `{selected.get('minio_bucket')}/{minio_key}`")
-        size = selected.get("file_size_bytes")
-        if size:
-            st.markdown(f"**Taille fichier :** {size / 1024:.1f} KB")
-        if is_admin:
-            size_label = f" ({size / 1024:.1f} KB)" if size else ""
-            try:
-                pkl_bytes = client.download_model(selected["name"], selected["version"])
-                st.download_button(
-                    label=f"⬇️ Télécharger le .pkl{size_label}",
-                    data=pkl_bytes,
-                    file_name=f"{selected['name']}_{selected['version']}.pkl",
-                    mime="application/octet-stream",
-                )
-            except Exception as e:
-                st.error(f"Erreur lors du téléchargement : {e}")
+_GT_PERIOD_DAYS = 30
+
+with _mcol_gt:
+    st.markdown(f"##### Performance observée (ground truth)")
+    st.caption(f"Fenêtre : {_GT_PERIOD_DAYS} derniers jours")
+    try:
+        _perf = fetch_model_performance(
+            st.session_state.get("api_url"),
+            st.session_state.get("api_token"),
+            selected["name"],
+            selected["version"],
+            period_days=_GT_PERIOD_DAYS,
+        )
+        if _perf and _perf.get("matched_predictions", 0) > 0:
+            _gt_type = _perf.get("model_type", "classification")
+            if _gt_type == "regression":
+                st.markdown(f"**MAE :** {round(_perf['mae'], 4) if _perf.get('mae') is not None else '—'}")
+                st.markdown(f"**RMSE :** {round(_perf['rmse'], 4) if _perf.get('rmse') is not None else '—'}")
+                st.markdown(f"**R² :** {round(_perf['r2'], 4) if _perf.get('r2') is not None else '—'}")
+            else:
+                st.markdown(f"**Accuracy :** {round(_perf['accuracy'], 4) if _perf.get('accuracy') is not None else '—'}")
+                st.markdown(f"**F1 Score :** {round(_perf['f1_weighted'], 4) if _perf.get('f1_weighted') is not None else '—'}")
+                st.markdown(f"**Precision :** {round(_perf['precision_weighted'], 4) if _perf.get('precision_weighted') is not None else '—'}")
+                st.markdown(f"**Recall :** {round(_perf['recall_weighted'], 4) if _perf.get('recall_weighted') is not None else '—'}")
+            _n = _perf.get("matched_predictions", 0)
+            st.caption(f"{_n} observation(s) labelisée(s) sur cette période")
+        else:
+            st.markdown("*Aucune donnée de ground truth.*")
+            st.caption("Envoyez des résultats via `POST /observed-results`")
+    except Exception:
+        st.markdown("*Indisponible*")
 
 # Model card export — accessible to all authenticated users
 try:
@@ -868,205 +924,101 @@ with st.expander("📊 Drift de sortie (label shift)", expanded=False):
     except Exception as e:
         st.warning(f"Impossible de calculer le drift de sortie : {e}")
 
-# Test interactif de prédiction
-with st.expander("🧪 Tester le modèle", expanded=False):
-    api_url_key = st.session_state.get("api_url")
-    api_token_key = st.session_state.get("api_token")
+# Résolution des features pour les blocs Valider / Golden Tests
+feature_baseline = selected.get("feature_baseline") or {}
+feature_names_list: list = []
+if feature_baseline:
+    feature_names_list = list(feature_baseline.keys())
+else:
+    try:
+        _feat_detail = fetch_model_detail(
+            st.session_state.get("api_url"),
+            st.session_state.get("api_token"),
+            selected["name"],
+            selected["version"],
+        )
+        feature_names_list = _feat_detail.get("feature_names") or []
+        feature_baseline = _feat_detail.get("feature_baseline") or {}
+    except Exception:
+        pass
 
-    # Resolve feature list: prefer feature_baseline from list cache, else call get_model
-    feature_baseline = selected.get("feature_baseline") or {}
-    feature_names_list: list = []
+with st.expander("🔍 Valider le schéma JSON", expanded=False):
+    st.markdown(
+        "Testez un payload JSON avant d'envoyer une prédiction pour détecter "
+        "les features manquantes, inattendues ou mal typées."
+    )
 
+    # Build example JSON from feature_baseline or feature_names_list
     if feature_baseline:
-        feature_names_list = list(feature_baseline.keys())
+        example_payload = {
+            feat: float(info.get("mean") or 0.0) for feat, info in feature_baseline.items()
+        }
+    elif feature_names_list:
+        example_payload = {feat: 0.0 for feat in feature_names_list}
     else:
+        example_payload = {}
+
+    raw_json = st.text_area(
+        "Payload JSON à valider",
+        value=_json.dumps(example_payload, indent=2),
+        height=180,
+        key=f"validate_json_{selected['name']}_{selected['version']}",
+    )
+
+    if st.button(
+        "✅ Valider",
+        key=f"validate_btn_{selected['name']}_{selected['version']}",
+    ):
         try:
-            detail = fetch_model_detail(
-                api_url_key, api_token_key, selected["name"], selected["version"]
-            )
-            feature_names_list = detail.get("feature_names") or []
-            feature_baseline = detail.get("feature_baseline") or {}
-        except Exception as e:
-            st.warning(f"Impossible de charger les features : {e}")
+            parsed = _json.loads(raw_json)
+        except _json.JSONDecodeError as exc:
+            st.error(f"JSON invalide : {exc}")
+            parsed = None
 
-    classes = selected.get("classes") or []
-
-    if not feature_names_list:
-        st.info(
-            "Aucune information de features disponible pour ce modèle. "
-            "Uploadez le modèle avec un `feature_baseline` ou entraînez-le avec un DataFrame pandas."
-        )
-    else:
-        st.markdown(f"**{len(feature_names_list)} features attendues**")
-
-        with_shap = st.checkbox(
-            "Avec explication SHAP",
-            value=False,
-            key=f"shap_cb_{selected['name']}_{selected['version']}",
-        )
-
-        n_cols = 3 if len(feature_names_list) > 4 else 2
-        cols = st.columns(n_cols)
-        feature_values: dict = {}
-        for i, feat in enumerate(feature_names_list):
-            with cols[i % n_cols]:
-                baseline_info = feature_baseline.get(feat)
-                if baseline_info is not None:
-                    default_val = float(baseline_info.get("mean") or 0.0)
-                    feature_values[feat] = st.number_input(
-                        feat,
-                        value=default_val,
-                        key=f"feat_{selected['name']}_{selected['version']}_{feat}",
-                        format="%.4f",
-                    )
-                else:
-                    raw = st.text_input(
-                        feat,
-                        value="",
-                        key=f"feat_{selected['name']}_{selected['version']}_{feat}",
-                    )
-                    try:
-                        feature_values[feat] = float(raw) if raw != "" else 0.0
-                    except ValueError:
-                        feature_values[feat] = raw
-
-        if st.button(
-            "🔮 Prédire",
-            key=f"predict_btn_{selected['name']}_{selected['version']}",
-            type="primary",
-        ):
-            with st.spinner("Prédiction en cours…"):
+        if parsed is not None:
+            with st.spinner("Validation en cours…"):
                 try:
-                    t0 = time.time()
-                    result = client.predict(
-                        model_name=selected["name"],
-                        model_version=selected["version"],
-                        features=feature_values,
-                        explain=with_shap,
+                    result = client.validate_input(
+                        selected["name"], selected["version"], parsed
                     )
-                    latency_ms = (time.time() - t0) * 1000
 
-                    col_pred, col_ver, col_lat = st.columns(3)
-                    col_pred.metric("Prédiction", str(result.get("prediction", "—")))
-                    col_ver.metric(
-                        "Version utilisée",
-                        result.get("selected_version") or result.get("model_version", "—"),
-                    )
-                    col_lat.metric("Latence", f"{latency_ms:.0f} ms")
+                    if result.get("valid"):
+                        st.success("✅ Schéma valide")
+                    else:
+                        st.error("❌ Schéma invalide")
 
-                    if result.get("low_confidence"):
-                        st.warning("⚠️ Confiance faible (en dessous du seuil configuré)")
+                    errors = result.get("errors") or []
+                    warnings = result.get("warnings") or []
+                    expected = result.get("expected_features")
 
-                    probs = result.get("probability")
-                    if probs:
-                        st.markdown("**Probabilités par classe :**")
-                        if classes and len(classes) == len(probs):
-                            prob_rows = [
-                                {"Classe": str(c), "Probabilité": f"{p:.4f}"}
-                                for c, p in zip(classes, probs)
-                            ]
+                    for err in errors:
+                        etype = err.get("type", "")
+                        feat = err.get("feature", "")
+                        if etype == "missing_feature":
+                            st.markdown(f"❌ **Feature manquante** : `{feat}`")
+                        elif etype == "unexpected_feature":
+                            st.markdown(f"❌ **Feature inattendue** : `{feat}`")
                         else:
-                            prob_rows = [
-                                {"Classe": f"Classe {i}", "Probabilité": f"{p:.4f}"}
-                                for i, p in enumerate(probs)
-                            ]
-                        st.dataframe(
-                            pd.DataFrame(prob_rows),
-                            use_container_width=True,
-                            hide_index=True,
-                        )
+                            st.markdown(f"❌ `{feat}` — {etype}")
 
-                    shap_vals = result.get("shap_values")
-                    if with_shap and shap_vals:
-                        st.markdown("**Contributions SHAP :**")
-                        sorted_shap = dict(
-                            sorted(shap_vals.items(), key=lambda x: abs(x[1]), reverse=True)
-                        )
-                        st.bar_chart(pd.DataFrame({"SHAP": sorted_shap}))
-                    elif with_shap:
-                        st.info("Les valeurs SHAP ne sont pas disponibles pour ce type de modèle.")
+                    for warn in warnings:
+                        wtype = warn.get("type", "")
+                        feat = warn.get("feature", "")
+                        from_t = warn.get("from_type", "")
+                        to_t = warn.get("to_type", "")
+                        if wtype == "type_coercion":
+                            st.markdown(
+                                f"⚠️ **Coercition de type** : `{feat}` " f"({from_t} → {to_t})"
+                            )
+                        else:
+                            st.markdown(f"⚠️ `{feat}` — {wtype}")
+
+                    if expected:
+                        st.markdown("**Features attendues :**")
+                        st.markdown(" ".join(f"`{f}`" for f in expected))
 
                 except Exception as e:
-                    st.error(f"Erreur lors de la prédiction : {e}")
-
-    st.divider()
-    with st.expander("🔍 Valider le schéma JSON", expanded=False):
-        st.markdown(
-            "Testez un payload JSON avant d'envoyer une prédiction pour détecter "
-            "les features manquantes, inattendues ou mal typées."
-        )
-
-        # Build example JSON from feature_baseline or feature_names_list
-        if feature_baseline:
-            example_payload = {
-                feat: float(info.get("mean") or 0.0) for feat, info in feature_baseline.items()
-            }
-        elif feature_names_list:
-            example_payload = {feat: 0.0 for feat in feature_names_list}
-        else:
-            example_payload = {}
-
-        raw_json = st.text_area(
-            "Payload JSON à valider",
-            value=_json.dumps(example_payload, indent=2),
-            height=180,
-            key=f"validate_json_{selected['name']}_{selected['version']}",
-        )
-
-        if st.button(
-            "✅ Valider",
-            key=f"validate_btn_{selected['name']}_{selected['version']}",
-        ):
-            try:
-                parsed = _json.loads(raw_json)
-            except _json.JSONDecodeError as exc:
-                st.error(f"JSON invalide : {exc}")
-                parsed = None
-
-            if parsed is not None:
-                with st.spinner("Validation en cours…"):
-                    try:
-                        result = client.validate_input(
-                            selected["name"], selected["version"], parsed
-                        )
-
-                        if result.get("valid"):
-                            st.success("✅ Schéma valide")
-                        else:
-                            st.error("❌ Schéma invalide")
-
-                        errors = result.get("errors") or []
-                        warnings = result.get("warnings") or []
-                        expected = result.get("expected_features")
-
-                        for err in errors:
-                            etype = err.get("type", "")
-                            feat = err.get("feature", "")
-                            if etype == "missing_feature":
-                                st.markdown(f"❌ **Feature manquante** : `{feat}`")
-                            elif etype == "unexpected_feature":
-                                st.markdown(f"❌ **Feature inattendue** : `{feat}`")
-                            else:
-                                st.markdown(f"❌ `{feat}` — {etype}")
-
-                        for warn in warnings:
-                            wtype = warn.get("type", "")
-                            feat = warn.get("feature", "")
-                            from_t = warn.get("from_type", "")
-                            to_t = warn.get("to_type", "")
-                            if wtype == "type_coercion":
-                                st.markdown(
-                                    f"⚠️ **Coercition de type** : `{feat}` " f"({from_t} → {to_t})"
-                                )
-                            else:
-                                st.markdown(f"⚠️ `{feat}` — {wtype}")
-
-                        if expected:
-                            st.markdown("**Features attendues :**")
-                            st.markdown(" ".join(f"`{f}`" for f in expected))
-
-                    except Exception as e:
-                        st.error(f"Erreur lors de la validation : {e}")
+                    st.error(f"Erreur lors de la validation : {e}")
 
 # Tests de régression (Golden Test Set)
 with st.expander("🧪 Tests de régression", expanded=False):
@@ -1081,21 +1033,46 @@ with st.expander("🧪 Tests de régression", expanded=False):
 
     # --- Liste des cas existants ---
     if golden_tests:
-        st.markdown(f"**{len(golden_tests)} cas enregistrés**")
+        import pandas as _pd_gt
+        st.markdown(f"**{len(golden_tests)} cas enregistré(s)**")
         for t in golden_tests:
-            col_info, col_del = st.columns([5, 1])
-            desc = t.get("description") or "—"
-            col_info.markdown(
-                f"**#{t['id']}** `→ {t['expected_output']}` &nbsp; {desc}"
-            )
-            if is_admin_gt:
-                if col_del.button("🗑", key=f"del_gt_{t['id']}"):
-                    try:
-                        client.delete_golden_test(gt_model_name, t["id"])
-                        st.success(f"Test #{t['id']} supprimé.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erreur : {e}")
+            tid = t["id"]
+            expected = t.get("expected_output", "—")
+            desc = t.get("description") or ""
+            features = t.get("input_features") or {}
+            created_at = t.get("created_at", "")
+
+            label = f"#{tid}  →  {expected}"
+            if desc:
+                label += f"  —  {desc}"
+            try:
+                label += f"  ·  {_pd_gt.to_datetime(created_at).strftime('%Y-%m-%d %H:%M')}"
+            except Exception:
+                pass
+
+            with st.expander(label, expanded=False):
+                c_feat, c_meta = st.columns([3, 1])
+                with c_feat:
+                    st.markdown("**Features d'entrée**")
+                    st.json(features)
+                with c_meta:
+                    st.markdown("**Sortie attendue**")
+                    st.code(expected, language=None)
+                    if desc:
+                        st.markdown(f"*{desc}*")
+                    if created_at:
+                        try:
+                            st.caption(_pd_gt.to_datetime(created_at).strftime("%Y-%m-%d %H:%M"))
+                        except Exception:
+                            st.caption(str(created_at)[:16])
+                    if is_admin_gt:
+                        if st.button("🗑 Supprimer", key=f"del_gt_{tid}", type="secondary"):
+                            try:
+                                client.delete_golden_test(gt_model_name, tid)
+                                st.toast(f"Test #{tid} supprimé.", icon="✅")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erreur : {e}")
     else:
         st.info("Aucun cas de test golden enregistré pour ce modèle.")
 
@@ -1103,54 +1080,67 @@ with st.expander("🧪 Tests de régression", expanded=False):
         st.divider()
 
         # --- Ajouter un cas ---
-        with st.form("add_golden_test_form", clear_on_submit=True):
-            st.markdown("**Ajouter un cas de test**")
-            raw_features_gt = st.text_area(
-                "Features (JSON)",
-                value='{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}',
-                height=90,
-                key="gt_features_input",
-            )
-            expected_gt = st.text_input("Expected output", placeholder="setosa", key="gt_expected")
-            desc_gt = st.text_input("Description (optionnel)", value="", key="gt_desc")
-            submitted_gt = st.form_submit_button("Ajouter")
-
-        if submitted_gt:
-            try:
-                import json as _json
-
-                features_gt = _json.loads(raw_features_gt)
-                client.create_golden_test(
-                    gt_model_name,
-                    {
-                        "input_features": features_gt,
-                        "expected_output": expected_gt.strip(),
-                        "description": desc_gt.strip() or None,
-                    },
+        with st.expander("➕ Ajouter un cas de test", expanded=False):
+            if feature_baseline:
+                _gt_default = _json.dumps(
+                    {feat: float(info.get("mean") or 0.0) for feat, info in feature_baseline.items()},
+                    indent=2,
                 )
-                st.success("Cas de test ajouté.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Erreur : {e}")
+            elif feature_names_list:
+                _gt_default = _json.dumps({feat: 0.0 for feat in feature_names_list}, indent=2)
+            else:
+                _gt_default = '{\n  "feature1": 0.0\n}'
+
+            with st.form("add_golden_test_form", clear_on_submit=True):
+                raw_features_gt = st.text_area(
+                    "Features (JSON)",
+                    value=_gt_default,
+                    height=130,
+                    key="gt_features_input",
+                )
+                expected_gt = st.text_input("Expected output", placeholder="setosa", key="gt_expected")
+                desc_gt = st.text_input("Description (optionnel)", value="", key="gt_desc")
+                submitted_gt = st.form_submit_button("Ajouter")
+
+            if submitted_gt:
+                if not expected_gt.strip():
+                    st.error("La sortie attendue (Expected output) est obligatoire.")
+                else:
+                    try:
+                        import json as _json
+
+                        features_gt = _json.loads(raw_features_gt)
+                        client.create_golden_test(
+                            gt_model_name,
+                            {
+                                "input_features": features_gt,
+                                "expected_output": expected_gt.strip(),
+                                "description": desc_gt.strip() or None,
+                            },
+                        )
+                        st.success("Cas de test ajouté.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erreur : {e}")
 
         # --- Upload CSV ---
-        st.markdown("**Importer depuis un CSV**")
-        st.caption(
-            "Format : colonnes features + `expected_output` (requis) + `description` (optionnel). "
-            "Exemple : `sepal_length,sepal_width,petal_length,petal_width,expected_output,description`"
-        )
-        csv_file_gt = st.file_uploader("Choisir un fichier CSV", type=["csv"], key="gt_csv_upload")
-        if csv_file_gt and st.button("Importer", key="import_gt_csv"):
-            try:
-                result_csv = client.upload_golden_tests_csv(
-                    gt_model_name, csv_file_gt.read(), csv_file_gt.name
-                )
-                st.success(f"{result_csv.get('created', 0)} cas importés.")
-                if result_csv.get("errors"):
-                    st.warning(f"Erreurs : {result_csv['errors']}")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Erreur lors de l'import : {e}")
+        with st.expander("📥 Importer depuis un CSV", expanded=False):
+            st.caption(
+                "Format : colonnes features + `expected_output` (requis) + `description` (optionnel). "
+                "Exemple : `sepal_length,sepal_width,petal_length,petal_width,expected_output,description`"
+            )
+            csv_file_gt = st.file_uploader("Choisir un fichier CSV", type=["csv"], key="gt_csv_upload")
+            if csv_file_gt and st.button("Importer", key="import_gt_csv"):
+                try:
+                    result_csv = client.upload_golden_tests_csv(
+                        gt_model_name, csv_file_gt.read(), csv_file_gt.name
+                    )
+                    st.success(f"{result_csv.get('created', 0)} cas importés.")
+                    if result_csv.get("errors"):
+                        st.warning(f"Erreurs : {result_csv['errors']}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erreur lors de l'import : {e}")
 
     st.divider()
 
@@ -1167,12 +1157,24 @@ with st.expander("🧪 Tests de régression", expanded=False):
                 st.info("Aucun cas de test enregistré.")
             else:
                 for d in gt_result["details"]:
-                    icon = "✅" if d["passed"] else "❌"
+                    passed = d["passed"]
+                    icon = "✅" if passed else "❌"
                     desc_str = f" — {d['description']}" if d.get("description") else ""
-                    st.markdown(
-                        f"{icon} **#{d['test_id']}**{desc_str} &nbsp; "
-                        f"attendu : `{d['expected']}` / obtenu : `{d['actual']}`"
-                    )
+                    label = f"{icon} #{d['test_id']}{desc_str} &nbsp; attendu : `{d['expected']}` / obtenu : `{d['actual']}`"
+                    with st.expander(label, expanded=not passed):
+                        c_l, c_r = st.columns(2)
+                        with c_l:
+                            st.markdown("**Attendu**")
+                            st.code(str(d.get("expected", "—")), language=None)
+                        with c_r:
+                            st.markdown("**Obtenu**")
+                            if passed:
+                                st.code(str(d.get("actual", "—")), language=None)
+                            else:
+                                st.error(str(d.get("actual", "—")))
+                        if d.get("input"):
+                            st.markdown("**Features utilisées**")
+                            st.json(d["input"])
         except Exception as e:
             st.error(f"Erreur lors de l'exécution des tests : {e}")
 
@@ -1265,8 +1267,22 @@ with st.expander("🔮 Explorateur What-if", expanded=False):
                     )
 
                     _wc1, _wc2, _wc3 = st.columns(3)
-                    _wc1.metric("Prédiction", str(wif_result.get("prediction", "—")))
+                    _wif_raw_pred = wif_result.get("prediction", "—")
                     _wif_probs = wif_result.get("probability")
+
+                    # Résoudre index → label si le modèle retourne un entier
+                    _wif_pred_label = str(_wif_raw_pred)
+                    if wif_classes:
+                        _wif_raw_str = str(_wif_raw_pred)
+                        if _wif_raw_str.lstrip("-").isdigit():
+                            try:
+                                _wif_idx = int(_wif_raw_str)
+                                if 0 <= _wif_idx < len(wif_classes):
+                                    _wif_pred_label = f"{wif_classes[_wif_idx]}"
+                            except (ValueError, IndexError):
+                                pass
+
+                    _wc1.metric("Prédiction", _wif_pred_label)
                     if _wif_probs:
                         _wc2.metric("Probabilité max", f"{max(_wif_probs):.2%}")
                     if wif_result.get("low_confidence"):
@@ -1618,6 +1634,11 @@ if is_admin:
             "récentes et sauvegarde le résultat comme **feature_baseline** du modèle, "
             "activant ainsi la détection de drift."
         )
+        if selected.get("feature_baseline"):
+            st.warning(
+                "⚠️ Une baseline existe déjà pour ce modèle. "
+                "Recalculer écrasera les valeurs actuelles et réinitialisera la détection de drift."
+            )
         baseline_days = st.slider("Fenêtre temporelle (jours)", 7, 180, 30, key="baseline_days")
         baseline_dry_run = st.checkbox(
             "dry_run (simuler sans sauvegarder)", value=True, key="baseline_dry_run"

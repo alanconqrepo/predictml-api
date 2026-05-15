@@ -316,10 +316,10 @@ class DBService:
         status_filter: Optional[str] = None,
         limit: int = 500,
         cursor: Optional[int] = None,
-    ) -> List[Prediction]:
+    ) -> List[tuple]:
         """
         Récupère une page de prédictions pour l'export streaming (cursor keyset DESC).
-        Contrairement à get_predictions, model_name est optionnel et le user est eager-loaded.
+        Retourne des tuples (Prediction, observed_result_value | None).
         """
         filters = [
             Prediction.timestamp >= start,
@@ -333,7 +333,14 @@ class DBService:
             filters.append(Prediction.id < cursor)
 
         query = (
-            select(Prediction)
+            select(Prediction, ObservedResult.observed_result)
+            .outerjoin(
+                ObservedResult,
+                and_(
+                    ObservedResult.id_obs == Prediction.id_obs,
+                    ObservedResult.model_name == Prediction.model_name,
+                ),
+            )
             .where(and_(*filters))
             .options(selectinload(Prediction.user))
             .order_by(Prediction.id.desc())
@@ -341,7 +348,7 @@ class DBService:
         )
 
         result = await db.execute(query)
-        return list(result.scalars().all())
+        return list(result.all())
 
     @staticmethod
     async def get_predictions_with_features(
@@ -543,7 +550,11 @@ class DBService:
             start = max_start
 
         if _pg(db):
-            sql = text("""
+            version_clause = "AND p.model_version = :version" if model_version else ""
+            params: dict = {"name": model_name, "start": start, "end": end}
+            if model_version:
+                params["version"] = model_version
+            sql = text(f"""
                 SELECT
                     DATE_TRUNC('day', p.timestamp)::date::text AS day,
                     COUNT(*) AS matched_count,
@@ -574,13 +585,11 @@ class DBService:
                   AND p.id_obs      IS NOT NULL
                   AND p.timestamp   >= :start
                   AND p.timestamp   <= :end
-                  AND (:version IS NULL OR p.model_version = :version)
+                  {version_clause}
                 GROUP BY DATE_TRUNC('day', p.timestamp)
                 ORDER BY day
             """)
-            result = await db.execute(
-                sql, {"name": model_name, "start": start, "end": end, "version": model_version}
-            )
+            result = await db.execute(sql, params)
             rows = result.all()
             output = []
             for row in rows:
@@ -679,20 +688,22 @@ class DBService:
         cutoff = _utcnow() - timedelta(days=days)
 
         if _pg(db):
-            base_where = """
+            version_clause = "AND model_version = :version" if version else ""
+            base_where = f"""
                 model_name  = :name
                 AND status  = 'success'
                 AND is_shadow = false
                 AND max_confidence IS NOT NULL
                 AND timestamp >= :cutoff
-                AND (:version IS NULL OR model_version = :version)
+                {version_clause}
             """
-            params = {
+            params: dict = {
                 "name": model_name,
                 "cutoff": cutoff,
-                "version": version,
                 "threshold": confidence_threshold,
             }
+            if version:
+                params["version"] = version
 
             daily_sql = text(f"""
                 SELECT
@@ -900,14 +911,19 @@ class DBService:
         cutoff = _utcnow() - timedelta(days=days)
 
         if _pg(db):
-            sql = text("""
+            version_clause = "AND model_version = :version" if model_version else ""
+            version_clause_p = "AND p.model_version = :version" if model_version else ""
+            pg_params: dict = {"name": model_name, "cutoff": cutoff}
+            if model_version:
+                pg_params["version"] = model_version
+            sql = text(f"""
                 WITH base AS (
                     SELECT COUNT(*) AS total_rows
                     FROM predictions
                     WHERE model_name = :name
                       AND status     = 'success'
                       AND timestamp  >= :cutoff
-                      AND (:version IS NULL OR model_version = :version)
+                      {version_clause}
                 )
                 SELECT
                     kv.key                                         AS feature,
@@ -922,13 +938,11 @@ class DBService:
                 WHERE p.model_name = :name
                   AND p.status     = 'success'
                   AND p.timestamp  >= :cutoff
-                  AND (:version IS NULL OR p.model_version = :version)
+                  {version_clause_p}
                   AND kv.value     ~ '^-?[0-9]+\\.?[0-9]*$'
                 GROUP BY kv.key
             """)
-            result = await db.execute(
-                sql, {"name": model_name, "cutoff": cutoff, "version": model_version}
-            )
+            result = await db.execute(sql, pg_params)
             rows = result.all()
             stats: dict = {}
             for row in rows:
@@ -1003,19 +1017,21 @@ class DBService:
         days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
 
-        sql = text("""
+        version_clause = "AND model_version = :version" if model_version else ""
+        label_params: dict = {"name": model_name, "cutoff": cutoff}
+        if model_version:
+            label_params["version"] = model_version
+        sql = text(f"""
             SELECT prediction_result::text AS label, COUNT(*) AS cnt
             FROM predictions
             WHERE model_name = :name
               AND status = 'success'
               AND timestamp >= :cutoff
               AND prediction_result IS NOT NULL
-              AND (:version IS NULL OR model_version = :version)
+              {version_clause}
             GROUP BY prediction_result::text
         """)
-        result = await db.execute(
-            sql, {"name": model_name, "cutoff": cutoff, "version": model_version}
-        )
+        result = await db.execute(sql, label_params)
         rows = result.all()
         counts = {row.label: int(row.cnt) for row in rows}
         return counts, sum(counts.values())
@@ -1136,6 +1152,17 @@ class DBService:
                 }
             )
         return stats
+
+    @staticmethod
+    async def delete_prediction(db: AsyncSession, prediction_id: int) -> bool:
+        """Supprime une prédiction par son ID. Retourne True si trouvée et supprimée."""
+        result = await db.execute(select(Prediction).where(Prediction.id == prediction_id))
+        pred = result.scalar_one_or_none()
+        if pred is None:
+            return False
+        await db.delete(pred)
+        await db.flush()
+        return True
 
     @staticmethod
     async def purge_predictions(

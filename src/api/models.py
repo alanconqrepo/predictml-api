@@ -874,12 +874,14 @@ async def get_feature_importance(
 
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
+    end_naive = end.replace(tzinfo=None)
+    start_naive = start.replace(tzinfo=None)
 
     predictions, _ = await DBService.get_predictions(
         db,
         model_name=name,
-        start=start,
-        end=end,
+        start=start_naive,
+        end=end_naive,
         model_version=metadata.version,
         limit=last_n,
     )
@@ -2502,6 +2504,8 @@ async def get_performance_report(
     version = metadata.version
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=days)
+    now_naive = now.replace(tzinfo=None)
+    start_naive = start.replace(tzinfo=None)
 
     # All DB I/O in one parallel gather (same pattern as compare_model_versions)
     (
@@ -2512,13 +2516,13 @@ async def get_performance_report(
         agreement_by_version,
         predictions_result,
     ) = await asyncio.gather(
-        DBService.count_predictions(db, name, start, now, version),
-        DBService.get_performance_pairs(db, name, start, now, version),
+        DBService.count_predictions(db, name, start_naive, now_naive, version),
+        DBService.get_performance_pairs(db, name, start_naive, now_naive, version),
         DBService.get_feature_production_stats(db, name, version, days),
         DBService.get_ab_comparison_stats(db, name, days=days),
         DBService.get_shadow_agreement_rate(db, name, days=days),
         DBService.get_predictions(
-            db, model_name=name, start=start, end=now, model_version=version, limit=100
+            db, model_name=name, start=start_naive, end=now_naive, model_version=version, limit=100
         ),
     )
 
@@ -2906,6 +2910,7 @@ async def get_model_card(
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=days)
     now_naive = now.replace(tzinfo=None)
+    start_naive = start.replace(tzinfo=None)
 
     (
         total_count,
@@ -2914,12 +2919,12 @@ async def get_model_card(
         coverage_stats,
         predictions_result,
     ) = await asyncio.gather(
-        DBService.count_predictions(db, name, start, now, version),
-        DBService.get_performance_pairs(db, name, start, now, version),
+        DBService.count_predictions(db, name, start_naive, now_naive, version),
+        DBService.get_performance_pairs(db, name, start_naive, now_naive, version),
         DBService.get_feature_production_stats(db, name, version, days),
         DBService.get_observed_results_stats(db, model_name=name),
         DBService.get_predictions(
-            db, model_name=name, start=start, end=now, model_version=version, limit=50
+            db, model_name=name, start=start_naive, end=now_naive, model_version=version, limit=50
         ),
     )
     predictions, _ = predictions_result
@@ -3216,6 +3221,7 @@ async def create_model(
     features_count: Optional[int] = Form(None),
     classes: Optional[str] = Form(None, description="JSON array ex: [0, 1, 2]"),
     training_params: Optional[str] = Form(None, description="JSON object"),
+    training_metrics: Optional[str] = Form(None, description="JSON object — métriques d'entraînement (precision, recall, mae, rmse, r2…)"),
     training_dataset: Optional[str] = Form(None),
     feature_baseline: Optional[str] = Form(
         None,
@@ -3343,6 +3349,7 @@ async def create_model(
     # Désérialiser les champs JSON optionnels
     classes_parsed = _parse_json_field(classes, "classes")
     training_params_parsed = _parse_json_field(training_params, "training_params")
+    training_metrics_parsed = _parse_json_field(training_metrics, "training_metrics")
     feature_baseline_parsed = _parse_json_field(feature_baseline, "feature_baseline")
     tags_parsed = _parse_json_field(tags, "tags")
 
@@ -3362,6 +3369,7 @@ async def create_model(
         features_count=features_count,
         classes=classes_parsed,
         training_params=training_params_parsed,
+        training_metrics=training_metrics_parsed,
         training_dataset=training_dataset,
         feature_baseline=feature_baseline_parsed,
         tags=tags_parsed,

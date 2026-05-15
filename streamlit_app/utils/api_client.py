@@ -341,11 +341,14 @@ class APIClient:
         model_version: Optional[str] = None,
         features: Optional[dict] = None,
         explain: bool = False,
+        store: bool = False,
     ) -> dict:
         payload: dict = {"model_name": model_name, "features": features or {}}
         if model_version:
             payload["model_version"] = model_version
-        params = {"explain": "true"} if explain else None
+        params: dict = {"store": "true" if store else "false"}
+        if explain:
+            params["explain"] = "true"
         r = self._post("/predict", json=payload, params=params)
         r.raise_for_status()
         return r.json()
@@ -649,6 +652,10 @@ class APIClient:
         )
         r.raise_for_status()
         return r.content
+
+    def delete_prediction(self, prediction_id: int) -> None:
+        r = self._delete(f"/predictions/{prediction_id}")
+        r.raise_for_status()
 
     def purge_predictions(
         self,

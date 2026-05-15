@@ -106,76 +106,6 @@ with tab_history:
         except Exception:
             st.caption("Données de couverture non disponibles.")
 
-    # --- Import CSV résultats observés ---
-    CSV_TEMPLATE = "id_obs,model_name,observed_result,date_time\n"
-
-    with st.expander("📤 Importer des résultats observés (CSV)"):
-        st.download_button(
-            "⬇️ Télécharger un template CSV",
-            data=CSV_TEMPLATE,
-            file_name="template_observed_results.csv",
-            mime="text/csv",
-        )
-        uploaded_file = st.file_uploader("Fichier CSV", type=["csv"], key="csv_obs_upload")
-        model_name_override = st.text_input(
-            "Modèle (override colonne CSV — optionnel)",
-            key="csv_obs_model_override",
-        )
-        if uploaded_file is not None and st.button("Importer", key="csv_obs_submit"):
-            try:
-                result = client.upload_observed_results_csv(
-                    file_bytes=uploaded_file.read(),
-                    filename=uploaded_file.name,
-                    model_name=model_name_override.strip() or None,
-                )
-                st.toast(
-                    f"{result['upserted']} résultats importés depuis {result['filename']}.",
-                    icon="✅",
-                )
-                if result.get("skipped_rows", 0) > 0:
-                    st.warning(f"{result['skipped_rows']} ligne(s) ignorée(s)")
-                    errors = result.get("parse_errors", [])
-                    if errors:
-                        st.dataframe(
-                            pd.DataFrame(errors),
-                            use_container_width=True,
-                            hide_index=True,
-                        )
-            except Exception as exc:
-                st.error(f"Erreur lors de l'import : {exc}")
-
-    # --- Export résultats observés ---
-    with st.expander("📥 Exporter les résultats observés (ground truth)"):
-        col_ex1, col_ex2, col_ex3, col_ex4 = st.columns(4)
-        ex_model = col_ex1.text_input("Modèle (optionnel)", key="ex_obs_model")
-        ex_start = col_ex2.date_input(
-            "Date début", value=date.today() - timedelta(days=30), key="ex_obs_start"
-        )
-        ex_end = col_ex3.date_input("Date fin", value=date.today(), key="ex_obs_end")
-        ex_format = col_ex4.selectbox("Format", ["csv", "jsonl"], key="ex_obs_format")
-
-        if st.button("Préparer l'export", key="ex_obs_btn"):
-            if ex_start > ex_end:
-                st.error("La date de début doit être avant la date de fin.")
-            else:
-                try:
-                    content = client.export_observed_results(
-                        start=datetime.combine(ex_start, datetime.min.time()).isoformat(),
-                        end=datetime.combine(ex_end, datetime.max.time()).isoformat(),
-                        model_name=ex_model.strip() or None,
-                        export_format=ex_format,
-                    )
-                    mime = "text/csv" if ex_format == "csv" else "application/x-ndjson"
-                    st.download_button(
-                        label=f"⬇️ Télécharger observed_results_export.{ex_format}",
-                        data=content,
-                        file_name=f"observed_results_export.{ex_format}",
-                        mime=mime,
-                        key="ex_obs_download",
-                    )
-                except Exception as exc:
-                    st.error(f"Erreur lors de l'export : {exc}")
-
     # --- Filtres ---
     with st.expander("🔍 Filtres", expanded=True):
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -215,7 +145,7 @@ with tab_history:
             for m in models
         ) if model_name else False
 
-        col_conf1, col_conf2 = st.columns(2)
+        col_conf1, col_conf2, col_conf3 = st.columns(3)
         conf_min = col_conf1.slider(
             "Confiance min",
             min_value=0.0,
@@ -238,6 +168,11 @@ with tab_history:
             disabled=not is_classifier,
             help="Filtrer les prédictions avec une confiance ≤ à ce seuil (classifieurs uniquement)",
         )
+        filter_mismatch_only = col_conf3.checkbox(
+            "Prédictions incorrectes uniquement",
+            key="hist_mismatch_only",
+            help="N'afficher que les lignes où la prédiction diffère du ground truth",
+        )
         # N'envoyer les filtres que si le modèle est un classifieur et les valeurs non-défaut
         filter_min_conf = conf_min if (is_classifier and conf_min > 0.0) else None
         filter_max_conf = conf_max if (is_classifier and conf_max < 1.0) else None
@@ -247,10 +182,6 @@ with tab_history:
     elif start_date > end_date:
         st.error("La date de début doit être avant la date de fin.")
     else:
-        # Pagination via session state
-        if "pred_offset" not in st.session_state:
-            st.session_state["pred_offset"] = 0
-
         start_iso = datetime.combine(start_date, datetime.min.time()).isoformat()
         end_iso = datetime.combine(end_date, datetime.max.time()).isoformat()
 
@@ -261,7 +192,7 @@ with tab_history:
                 start=start_iso,
                 end=end_iso,
                 limit=limit,
-                offset=st.session_state["pred_offset"],
+                offset=0,
                 min_confidence=filter_min_conf,
                 max_confidence=filter_max_conf,
             )
@@ -276,16 +207,33 @@ with tab_history:
         if status_filter != "Tous":
             predictions = [p for p in predictions if p.get("status") == status_filter]
 
-        st.caption(
-            f"**{total}** prédictions trouvées — affichage {st.session_state['pred_offset'] + 1}–{min(st.session_state['pred_offset'] + limit, total)}"
-        )
+        st.caption(f"**{total}** prédictions trouvées — {len(predictions)} affichées")
 
         if not predictions:
             st.info("Aucune prédiction pour ces critères.")
         else:
+            # Fetch ground truth for visible id_obs values
+            gt_lookup: dict = {}
+            id_obs_list = [p["id_obs"] for p in predictions if p.get("id_obs")]
+            if id_obs_list:
+                try:
+                    obs_data = client.get_observed_results(
+                        model_name=model_name or None,
+                        limit=len(id_obs_list) + 50,
+                    )
+                    for obs in obs_data.get("results", obs_data if isinstance(obs_data, list) else []):
+                        if obs.get("id_obs"):
+                            gt_lookup[obs["id_obs"]] = str(obs.get("observed_result", ""))
+                except Exception:
+                    pass
+
             rows = []
             for p in predictions:
                 mc = p.get("max_confidence")
+                id_obs_val = p.get("id_obs")
+                gt_val = gt_lookup.get(id_obs_val, "—") if id_obs_val else "—"
+                pred_val = str(p.get("prediction_result", ""))
+                mismatch = gt_val != "—" and pred_val != gt_val
                 rows.append(
                     {
                         "ID": p.get("id"),
@@ -296,8 +244,9 @@ with tab_history:
                         ),
                         "Modèle": p.get("model_name", ""),
                         "Version": p.get("model_version") or "—",
-                        "id_obs": p.get("id_obs") or "—",
-                        "Résultat": str(p.get("prediction_result", "")),
+                        "id_obs": id_obs_val or "—",
+                        "Résultat": pred_val,
+                        "Ground Truth": gt_val,
                         "Confiance": f"{mc:.2%}" if mc is not None else "—",
                         "Temps (ms)": (
                             f"{p['response_time_ms']:.1f}"
@@ -307,11 +256,180 @@ with tab_history:
                         "Statut": "✅" if p.get("status") == "success" else "❌",
                         "Shadow": "🔮" if p.get("is_shadow") else "—",
                         "Utilisateur": p.get("username") or "—",
+                        "_mismatch": mismatch,
                     }
                 )
 
             df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+
+            if filter_mismatch_only:
+                df = df[df["_mismatch"]].reset_index(drop=True)
+                if df.empty:
+                    st.info("Aucune prédiction incorrecte sur cette page.")
+
+            mismatch_flags = df["_mismatch"].to_numpy()
+            df_display = df.drop(columns=["_mismatch"])
+
+            def _highlight_mismatch(row):
+                return (
+                    ["background-color: #ffcccc"] * len(row)
+                    if mismatch_flags[row.name]
+                    else [""] * len(row)
+                )
+
+            styled = df_display.style.apply(_highlight_mismatch, axis=1)
+            sel = st.dataframe(
+                styled,
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+            )
+
+            # ── Panneau détail (ligne sélectionnée) ───────────────────────────
+            selected_rows = sel.selection.rows if sel.selection else []
+            if selected_rows:
+                import plotly.graph_objects as go
+
+                row_idx = selected_rows[0]
+                pred_id_at_row = df_display.iloc[row_idx]["ID"]
+                p = next((x for x in predictions if x.get("id") == pred_id_at_row), None)
+                if p is None:
+                    st.info("Prédiction introuvable.")
+                    st.stop()
+                pred_id = pred_id_at_row
+                st.divider()
+                st.markdown(f"#### 🔍 Prédiction #{pred_id}")
+
+                col_l, col_r = st.columns(2)
+                with col_l:
+                    st.markdown("**Features d'entrée :**")
+                    st.json(p.get("input_features", {}))
+                with col_r:
+                    st.markdown("**Résultat :**")
+                    st.json({
+                        "prediction": p.get("prediction_result"),
+                        "probabilities": p.get("probabilities"),
+                    })
+                    if p.get("error_message"):
+                        st.error(f"Erreur : {p['error_message']}")
+
+                # Ground truth
+                st.divider()
+                st.markdown("**── Résultat observé ──**")
+                id_obs_val = p.get("id_obs")
+                if not id_obs_val:
+                    st.caption("Pas d'`id_obs` — impossible de soumettre un résultat observé.")
+                else:
+                    obs_cache_key = f"obs_result_{pred_id}"
+                    if obs_cache_key not in st.session_state:
+                        try:
+                            resp = client.get_observed_results(
+                                model_name=p.get("model_name"), id_obs=id_obs_val, limit=1
+                            )
+                            results = resp.get("results", [])
+                            st.session_state[obs_cache_key] = results[0] if results else None
+                        except Exception:
+                            st.session_state[obs_cache_key] = None
+
+                    existing = st.session_state.get(obs_cache_key)
+                    if existing is not None:
+                        st.success(f"✅ Résultat enregistré : **{existing['observed_result']}**")
+                    else:
+                        obs_input_val = st.text_input(
+                            "Valeur observée",
+                            key=f"obs_input_{pred_id}",
+                            placeholder="Ex: 0, 1.5, setosa…",
+                        )
+                        if st.button("Enregistrer le résultat réel", key=f"obs_btn_{pred_id}"):
+                            if not obs_input_val.strip():
+                                st.warning("Veuillez saisir une valeur.")
+                            else:
+                                try:
+                                    parsed_val = int(obs_input_val)
+                                except ValueError:
+                                    try:
+                                        parsed_val = float(obs_input_val)
+                                    except ValueError:
+                                        parsed_val = obs_input_val
+                                try:
+                                    client.submit_observed_result(
+                                        id_obs=id_obs_val,
+                                        model_name=p.get("model_name"),
+                                        observed_result=parsed_val,
+                                    )
+                                    st.session_state[obs_cache_key] = {"observed_result": parsed_val}
+                                    st.rerun()
+                                except Exception as exc:
+                                    st.error(f"Erreur : {exc}")
+
+                # SHAP
+                if p.get("status") == "success":
+                    st.divider()
+                    st.markdown("**── Explication SHAP ──**")
+                    if st.button("🧠 Calculer l'explication SHAP", key=f"shap_btn_{pred_id}"):
+                        with st.spinner("Calcul SHAP en cours…"):
+                            try:
+                                st.session_state[f"shap_{pred_id}"] = client.explain_prediction(pred_id)
+                            except Exception as exc:
+                                st.error(f"Impossible de calculer : {exc}")
+
+                    shap_data = st.session_state.get(f"shap_{pred_id}")
+                    if shap_data:
+                        shap_values: dict = shap_data.get("shap_values", {})
+                        base_value: float = shap_data.get("base_value", 0.0)
+                        model_type: str = shap_data.get("model_type", "")
+                        col_s1, col_s2, col_s3 = st.columns(3)
+                        col_s1.metric("E[f(X)]", f"{base_value:.4f}")
+                        col_s2.metric("Prédiction", str(shap_data.get("prediction")))
+                        col_s3.metric("Type", model_type)
+                        if shap_values:
+                            sorted_features = sorted(
+                                shap_values.items(), key=lambda x: abs(x[1]), reverse=True
+                            )[:10]
+                            feat_names = [f for f, _ in sorted_features]
+                            shap_vals = [v for _, v in sorted_features]
+                            fig = go.Figure(go.Bar(
+                                x=shap_vals, y=feat_names, orientation="h",
+                                marker_color=["#e05252" if v >= 0 else "#5282e0" for v in shap_vals],
+                                text=[f"{v:+.4f}" for v in shap_vals],
+                                textposition="outside",
+                            ))
+                            fig.update_layout(
+                                title="Contributions SHAP (top 10)",
+                                xaxis_title="Contribution SHAP",
+                                yaxis={"autorange": "reversed"},
+                                height=max(300, len(sorted_features) * 40 + 100),
+                                margin={"l": 20, "r": 60, "t": 50, "b": 40},
+                                showlegend=False,
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                            if len(shap_values) > 10:
+                                with st.expander("Voir toutes les features"):
+                                    st.dataframe(
+                                        pd.DataFrame(
+                                            sorted(shap_values.items(), key=lambda x: abs(x[1]), reverse=True),
+                                            columns=["Feature", "SHAP"],
+                                        ),
+                                        use_container_width=True, hide_index=True,
+                                    )
+                        else:
+                            st.info("Aucune valeur SHAP retournée.")
+
+                # Suppression
+                if st.session_state.get("is_admin", False):
+                    st.divider()
+                    if st.button(
+                        f"🗑️ Supprimer la prédiction #{pred_id}",
+                        key=f"del_pred_{pred_id}",
+                        type="primary",
+                    ):
+                        try:
+                            client.delete_prediction(pred_id)
+                            st.toast(f"Prédiction #{pred_id} supprimée.", icon="✅")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Erreur : {exc}")
 
             with st.expander("⬇️ Exporter toutes les prédictions (serveur)", expanded=False):
                 st.caption(
@@ -350,281 +468,166 @@ with tab_history:
                         except Exception as exc:
                             st.error(f"Erreur lors de l'export : {exc}")
 
-            # Détail features
-            with st.expander("🔍 Voir les features d'une prédiction"):
-                pred_ids = {str(p["id"]): p for p in predictions}
-                selected_id = st.selectbox("Prédiction ID", list(pred_ids.keys()))
-                if selected_id:
-                    p = pred_ids[selected_id]
-                    col_l, col_r = st.columns(2)
-                    with col_l:
-                        st.markdown("**Features d'entrée :**")
-                        st.json(p.get("input_features", {}))
-                    with col_r:
-                        st.markdown("**Résultat :**")
-                        st.json(
-                            {
-                                "prediction": p.get("prediction_result"),
-                                "probabilities": p.get("probabilities"),
-                            }
-                        )
-                        if p.get("error_message"):
-                            st.error(f"Erreur : {p['error_message']}")
+        # --- Import / Export résultats observés ---
+        CSV_TEMPLATE = "id_obs,model_name,observed_result,date_time\n"
 
-                    st.divider()
-                    st.markdown("**── Résultat observé ──**")
-                    id_obs_val = p.get("id_obs")
-                    if not id_obs_val or id_obs_val == "—":
-                        st.caption(
-                            "Cette prédiction n'a pas d'identifiant d'observation (`id_obs`). "
-                            "Impossible de soumettre un résultat observé."
-                        )
-                    else:
-                        obs_cache_key = f"obs_result_{selected_id}"
-                        if obs_cache_key not in st.session_state:
-                            try:
-                                resp = client.get_observed_results(
-                                    model_name=p.get("model_name"),
-                                    id_obs=id_obs_val,
-                                    limit=1,
-                                )
-                                results = resp.get("results", [])
-                                st.session_state[obs_cache_key] = results[0] if results else None
-                            except Exception:
-                                st.session_state[obs_cache_key] = None
-
-                        existing = st.session_state.get(obs_cache_key)
-
-                        if existing is not None:
-                            st.success(
-                                f"✅ Résultat déjà enregistré : **{existing['observed_result']}**"
-                            )
-                        else:
-                            obs_input_val = st.text_input(
-                                "Valeur observée",
-                                key=f"obs_input_{selected_id}",
-                                placeholder="Ex: 0, 1.5, setosa…",
-                            )
-                            if st.button(
-                                "Enregistrer le résultat réel",
-                                key=f"obs_btn_{selected_id}",
-                            ):
-                                if not obs_input_val.strip():
-                                    st.warning("Veuillez saisir une valeur.")
-                                else:
-                                    try:
-                                        parsed_val = int(obs_input_val)
-                                    except ValueError:
-                                        try:
-                                            parsed_val = float(obs_input_val)
-                                        except ValueError:
-                                            parsed_val = obs_input_val
-                                    try:
-                                        client.submit_observed_result(
-                                            id_obs=id_obs_val,
-                                            model_name=p.get("model_name"),
-                                            observed_result=parsed_val,
-                                        )
-                                        st.session_state[obs_cache_key] = {
-                                            "observed_result": parsed_val
-                                        }
-                                        st.rerun()
-                                    except Exception as exc:
-                                        st.error(f"Erreur lors de l'enregistrement : {exc}")
-
-            # Explication SHAP par prédiction
-            with st.expander("🧠 Explication SHAP d'une prédiction"):
-                import plotly.graph_objects as go
-
-                shap_pred_ids = {
-                    str(p["id"]): p for p in predictions if p.get("status") == "success"
-                }
-                if not shap_pred_ids:
-                    st.info(
-                        "Aucune prédiction réussie sur cette page — sélectionnez une autre plage de dates."
-                    )
-                else:
-                    shap_sel_id = st.selectbox(
-                        "Prédiction ID",
-                        list(shap_pred_ids.keys()),
-                        key="shap_pred_sel",
-                    )
-                    if st.button("🔍 Expliquer", key="shap_explain_btn"):
-                        with st.spinner("Calcul de l'explication SHAP en cours…"):
-                            try:
-                                explanation = client.explain_prediction(int(shap_sel_id))
-                            except Exception as exc:
-                                st.error(f"Impossible de calculer l'explication : {exc}")
-                                explanation = None
-
-                        if explanation:
-                            shap_values: dict = explanation.get("shap_values", {})
-                            base_value: float = explanation.get("base_value", 0.0)
-                            prediction = explanation.get("prediction")
-                            model_type: str = explanation.get("model_type", "")
-
-                            col_m1, col_m2, col_m3 = st.columns(3)
-                            col_m1.metric("Valeur de base E[f(X)]", f"{base_value:.4f}")
-                            col_m2.metric("Prédiction finale", str(prediction))
-                            col_m3.metric("Type de modèle", model_type)
-
-                            if shap_values:
-                                # Top 10 features par valeur absolue
-                                sorted_features = sorted(
-                                    shap_values.items(), key=lambda x: abs(x[1]), reverse=True
-                                )[:10]
-                                features_names = [f for f, _ in sorted_features]
-                                shap_vals = [v for _, v in sorted_features]
-                                colors = ["#e05252" if v >= 0 else "#5282e0" for v in shap_vals]
-
-                                fig = go.Figure(
-                                    go.Bar(
-                                        x=shap_vals,
-                                        y=features_names,
-                                        orientation="h",
-                                        marker_color=colors,
-                                        text=[f"{v:+.4f}" for v in shap_vals],
-                                        textposition="outside",
-                                    )
-                                )
-                                fig.update_layout(
-                                    title="Contributions SHAP (top 10 features)",
-                                    xaxis_title="Contribution SHAP",
-                                    yaxis={"autorange": "reversed"},
-                                    height=max(300, len(sorted_features) * 40 + 100),
-                                    margin={"l": 20, "r": 60, "t": 50, "b": 40},
-                                    showlegend=False,
-                                )
-                                st.plotly_chart(fig, use_container_width=True)
-
-                                # Tableau complet si plus de 10 features
-                                if len(shap_values) > 10:
-                                    with st.expander("Voir toutes les features"):
-                                        all_sorted = sorted(
-                                            shap_values.items(),
-                                            key=lambda x: abs(x[1]),
-                                            reverse=True,
-                                        )
-                                        st.dataframe(
-                                            pd.DataFrame(all_sorted, columns=["Feature", "SHAP"]),
-                                            use_container_width=True,
-                                            hide_index=True,
-                                        )
-                            else:
-                                st.info("Aucune valeur SHAP retournée pour cette prédiction.")
-
-        # --- Pagination ---
-        st.divider()
-        col_prev, col_info, col_next = st.columns([1, 2, 1])
-        with col_prev:
-            if st.session_state["pred_offset"] > 0:
-                if st.button("← Précédent", use_container_width=True):
-                    st.session_state["pred_offset"] = max(
-                        0, st.session_state["pred_offset"] - limit
-                    )
-                    st.rerun()
-        with col_info:
-            current_page = st.session_state["pred_offset"] // limit + 1
-            total_pages = max(1, (total + limit - 1) // limit)
-            st.caption(f"Page {current_page} / {total_pages}")
-        with col_next:
-            if st.session_state["pred_offset"] + limit < total:
-                if st.button("Suivant →", use_container_width=True):
-                    st.session_state["pred_offset"] += limit
-                    st.rerun()
-
-    # --- Maintenance RGPD (admin uniquement) ---
-    if st.session_state.get("is_admin", False):
-        st.divider()
-        with st.expander("🗑️ Maintenance RGPD — Purge des prédictions"):
-            st.caption(
-                "Supprime définitivement les prédictions anciennes. "
-                "Utilisez **Simuler** avant de confirmer."
+        with st.expander("📤 Importer des résultats observés (CSV)"):
+            st.download_button(
+                "⬇️ Télécharger un template CSV",
+                data=CSV_TEMPLATE,
+                file_name="template_observed_results.csv",
+                mime="text/csv",
             )
-
-            col_m1, col_m2 = st.columns(2)
-            purge_days = col_m1.slider(
-                "Purger les prédictions antérieures à",
-                min_value=7,
-                max_value=365,
-                value=90,
-                format="%d jours",
-                key="purge_days_slider",
+            uploaded_file = st.file_uploader("Fichier CSV", type=["csv"], key="csv_obs_upload")
+            model_name_override = st.text_input(
+                "Modèle (override colonne CSV — optionnel)",
+                key="csv_obs_model_override",
             )
-            purge_model_sel = col_m2.selectbox(
-                "Filtrer par modèle (optionnel)",
-                ["(tous)"] + (model_names if model_names else []),
-                key="purge_model_sel",
-            )
-            purge_model_name = None if purge_model_sel == "(tous)" else purge_model_sel
-
-            col_sim, col_purge = st.columns(2)
-
-            if col_sim.button(
-                "🔍 Simuler (dry_run)", key="purge_simulate", use_container_width=True
-            ):
+            if uploaded_file is not None and st.button("Importer", key="csv_obs_submit"):
                 try:
-                    result = client.purge_predictions(
-                        older_than_days=purge_days,
-                        model_name=purge_model_name,
-                        dry_run=True,
+                    result = client.upload_observed_results_csv(
+                        file_bytes=uploaded_file.read(),
+                        filename=uploaded_file.name,
+                        model_name=model_name_override.strip() or None,
                     )
-                    st.info(
-                        f"Simulation : **{result['deleted_count']}** prédiction(s) seraient supprimées."
+                    st.toast(
+                        f"{result['upserted']} résultats importés depuis {result['filename']}.",
+                        icon="✅",
                     )
-                    if result.get("oldest_remaining"):
-                        st.caption(
-                            f"Prédiction la plus ancienne restante : {result['oldest_remaining']}"
-                        )
-                    if result.get("models_affected"):
-                        st.caption(f"Modèles affectés : {', '.join(result['models_affected'])}")
-                    if result.get("linked_observed_results_count", 0) > 0:
-                        st.warning(
-                            f"⚠️ {result['linked_observed_results_count']} résultat(s) observé(s) "
-                            "lié(s) seraient perdus (perte de données de performance historiques)."
-                        )
+                    if result.get("skipped_rows", 0) > 0:
+                        st.warning(f"{result['skipped_rows']} ligne(s) ignorée(s)")
+                        errors = result.get("parse_errors", [])
+                        if errors:
+                            st.dataframe(
+                                pd.DataFrame(errors),
+                                use_container_width=True,
+                                hide_index=True,
+                            )
                 except Exception as exc:
-                    st.error(f"Erreur lors de la simulation : {exc}")
+                    st.error(f"Erreur lors de l'import : {exc}")
 
-            @st.dialog("⚠️ Confirmer la purge définitive")
-            def _confirm_purge_dialog():
-                st.warning(
-                    f"Vous allez **supprimer définitivement** toutes les prédictions "
-                    f"antérieures à **{purge_days} jours**."
-                )
-                if purge_model_name:
-                    st.info(f"Modèle ciblé : **{purge_model_name}**")
+        with st.expander("📥 Exporter les résultats observés (ground truth)"):
+            col_ex1, col_ex2, col_ex3, col_ex4 = st.columns(4)
+            ex_model = col_ex1.text_input("Modèle (optionnel)", key="ex_obs_model")
+            ex_start = col_ex2.date_input(
+                "Date début", value=date.today() - timedelta(days=30), key="ex_obs_start"
+            )
+            ex_end = col_ex3.date_input("Date fin", value=date.today(), key="ex_obs_end")
+            ex_format = col_ex4.selectbox("Format", ["csv", "jsonl"], key="ex_obs_format")
+
+            if st.button("Préparer l'export", key="ex_obs_btn"):
+                if ex_start > ex_end:
+                    st.error("La date de début doit être avant la date de fin.")
                 else:
-                    st.info("Tous les modèles sont ciblés.")
-                st.markdown("Cette action est **irréversible**.")
-                if st.button(
-                    "Confirmer la suppression", type="primary", key="purge_dialog_confirm"
+                    try:
+                        content = client.export_observed_results(
+                            start=datetime.combine(ex_start, datetime.min.time()).isoformat(),
+                            end=datetime.combine(ex_end, datetime.max.time()).isoformat(),
+                            model_name=ex_model.strip() or None,
+                            export_format=ex_format,
+                        )
+                        mime = "text/csv" if ex_format == "csv" else "application/x-ndjson"
+                        st.download_button(
+                            label=f"⬇️ Télécharger observed_results_export.{ex_format}",
+                            data=content,
+                            file_name=f"observed_results_export.{ex_format}",
+                            mime=mime,
+                            key="ex_obs_download",
+                        )
+                    except Exception as exc:
+                        st.error(f"Erreur lors de l'export : {exc}")
+
+        # --- Maintenance RGPD (admin uniquement) ---
+        if st.session_state.get("is_admin", False):
+            with st.expander("🗑️ Maintenance RGPD — Purge des prédictions"):
+                st.caption(
+                    "Supprime définitivement les prédictions anciennes. "
+                    "Utilisez **Simuler** avant de confirmer."
+                )
+
+                col_m1, col_m2 = st.columns(2)
+                purge_days = col_m1.slider(
+                    "Purger les prédictions antérieures à",
+                    min_value=7,
+                    max_value=365,
+                    value=90,
+                    format="%d jours",
+                    key="purge_days_slider",
+                )
+                purge_model_sel = col_m2.selectbox(
+                    "Filtrer par modèle (optionnel)",
+                    ["(tous)"] + (model_names if model_names else []),
+                    key="purge_model_sel",
+                )
+                purge_model_name = None if purge_model_sel == "(tous)" else purge_model_sel
+
+                col_sim, col_purge = st.columns(2)
+
+                if col_sim.button(
+                    "🔍 Simuler (dry_run)", key="purge_simulate", use_container_width=True
                 ):
                     try:
                         result = client.purge_predictions(
                             older_than_days=purge_days,
                             model_name=purge_model_name,
-                            dry_run=False,
+                            dry_run=True,
                         )
-                        st.toast(
-                            f"{result['deleted_count']} prédiction(s) supprimée(s).", icon="✅"
+                        st.info(
+                            f"Simulation : **{result['deleted_count']}** prédiction(s) seraient supprimées."
                         )
+                        if result.get("oldest_remaining"):
+                            st.caption(
+                                f"Prédiction la plus ancienne restante : {result['oldest_remaining']}"
+                            )
+                        if result.get("models_affected"):
+                            st.caption(f"Modèles affectés : {', '.join(result['models_affected'])}")
                         if result.get("linked_observed_results_count", 0) > 0:
                             st.warning(
-                                f"{result['linked_observed_results_count']} résultat(s) observé(s) "
-                                "liés ont été perdus."
+                                f"⚠️ {result['linked_observed_results_count']} résultat(s) observé(s) "
+                                "lié(s) seraient perdus (perte de données de performance historiques)."
                             )
-                        st.rerun()
                     except Exception as exc:
-                        st.toast(f"Erreur lors de la purge : {exc}", icon="❌")
+                        st.error(f"Erreur lors de la simulation : {exc}")
 
-            if col_purge.button(
-                "⚠️ Confirmer la purge",
-                key="purge_open_dialog",
-                type="primary",
-                use_container_width=True,
-            ):
-                _confirm_purge_dialog()
+                @st.dialog("⚠️ Confirmer la purge définitive")
+                def _confirm_purge_dialog():
+                    st.warning(
+                        f"Vous allez **supprimer définitivement** toutes les prédictions "
+                        f"antérieures à **{purge_days} jours**."
+                    )
+                    if purge_model_name:
+                        st.info(f"Modèle ciblé : **{purge_model_name}**")
+                    else:
+                        st.info("Tous les modèles sont ciblés.")
+                    st.markdown("Cette action est **irréversible**.")
+                    if st.button(
+                        "Confirmer la suppression", type="primary", key="purge_dialog_confirm"
+                    ):
+                        try:
+                            result = client.purge_predictions(
+                                older_than_days=purge_days,
+                                model_name=purge_model_name,
+                                dry_run=False,
+                            )
+                            st.toast(
+                                f"{result['deleted_count']} prédiction(s) supprimée(s).", icon="✅"
+                            )
+                            if result.get("linked_observed_results_count", 0) > 0:
+                                st.warning(
+                                    f"{result['linked_observed_results_count']} résultat(s) observé(s) "
+                                    "liés ont été perdus."
+                                )
+                            st.rerun()
+                        except Exception as exc:
+                            st.toast(f"Erreur lors de la purge : {exc}", icon="❌")
+
+                if col_purge.button(
+                    "⚠️ Confirmer la purge",
+                    key="purge_open_dialog",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    _confirm_purge_dialog()
 
 
 # ───────────────────────────────────────────────────────────────────────────────
