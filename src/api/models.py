@@ -206,6 +206,7 @@ _ALLOWED_IMPORT_MODULES = {
     "enum",
     "dataclasses",
     "csv",
+    "dotenv"
 }
 
 
@@ -251,7 +252,7 @@ def _validate_train_script(source: str) -> Optional[str]:
                 if top not in _ALLOWED_IMPORT_MODULES:
                     return (
                         f"Import non autorisé : '{alias.name}'. "
-                        f"Modules autorisés : {sorted(_ALLOWED_IMPORT_MODULES)}"
+                        f"Modules autorisés in _ALLOWED_IMPORT_MODULES: {sorted(_ALLOWED_IMPORT_MODULES)}"
                     )
         elif isinstance(node, ast.ImportFrom):
             if node.module:
@@ -259,7 +260,7 @@ def _validate_train_script(source: str) -> Optional[str]:
                 if top not in _ALLOWED_IMPORT_MODULES:
                     return (
                         f"Import non autorisé : '{node.module}'. "
-                        f"Modules autorisés : {sorted(_ALLOWED_IMPORT_MODULES)}"
+                        f"Modules autorisés in _ALLOWED_IMPORT_MODULES : {sorted(_ALLOWED_IMPORT_MODULES)}"
                     )
 
     required_tokens = {

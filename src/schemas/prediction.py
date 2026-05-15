@@ -327,6 +327,10 @@ class PurgeResponse(BaseModel):
     deleted_count: int = Field(
         ..., description="Nombre de prédictions supprimées (ou à supprimer en dry_run)"
     )
+    deleted_observed_results_count: int = Field(
+        0,
+        description="Nombre d'observed_results supprimés en cascade (0 en dry_run)",
+    )
     oldest_remaining: Optional[datetime] = Field(
         None,
         description="Timestamp de la prédiction la plus ancienne restante après la purge",
@@ -335,8 +339,8 @@ class PurgeResponse(BaseModel):
     linked_observed_results_count: int = Field(
         ...,
         description=(
-            "Nombre de prédictions supprimées liées à des observed_results. "
-            "Avertissement si > 0 : des données de performance historiques seront perdues."
+            "Nombre d'observed_results liés aux prédictions à purger "
+            "(en dry_run : estimation ; après suppression : correspond à deleted_observed_results_count)."
         ),
     )
 

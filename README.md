@@ -75,7 +75,7 @@ bash scripts/init_env.sh
 
 # 2. (Optionnel) Supprimer les volumes Postgres existants avant le premier déploiement
 #    À faire si vous repartez de zéro ou si le mot de passe a changé
-docker-compose -p predictml-api down -v 2>&1 && echo "=== Volumes supprimés ==="
+docker-compose -p predictml-api down -v 2>&1
 
 # 3. Lancer tous les services
 docker-compose -p predictml-api up -d --build

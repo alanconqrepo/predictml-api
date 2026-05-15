@@ -28,10 +28,11 @@ import sys
 from datetime import datetime, timezone
 
 import requests
-
+from dotenv import find_dotenv, load_dotenv
+load_dotenv(find_dotenv())
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-API_URL   = os.environ.get("API_URL",   "http://localhost:8000")
+API_URL   = os.environ.get("API_URL",   "http://localhost:80")
 API_TOKEN = os.environ.get("API_TOKEN", os.environ.get("ADMIN_TOKEN", ""))
 
 MODEL_NAME    = os.environ.get("MODEL_NAME",    "iris-classifier")

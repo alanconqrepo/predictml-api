@@ -148,12 +148,16 @@ def test_purge_missing_older_than_days_returns_422():
     assert response.status_code == 422
 
 
-def test_purge_older_than_days_zero_returns_422():
+def test_purge_older_than_days_zero_is_valid():
+    """older_than_days=0 est désormais autorisé — purge tout (dry_run par défaut)."""
     response = client.delete(
         "/predictions/purge?older_than_days=0",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     )
-    assert response.status_code == 422
+    assert response.status_code == 200
+    data = response.json()
+    assert data["dry_run"] is True
+    assert "deleted_observed_results_count" in data
 
 
 # ---------------------------------------------------------------------------
