@@ -126,11 +126,19 @@ for line in reversed(result.stdout.strip().splitlines()):
     except json.JSONDecodeError:
         continue
 
-acc            = metrics.get("accuracy")
-f1             = metrics.get("f1_score")
-mlflow_run_id  = metrics.get("mlflow_run_id")
-print(f"✅  Entraînement terminé — Accuracy : {acc} | F1 : {f1}"
-      + (f" | MLflow run : {mlflow_run_id}" if mlflow_run_id else ""))
+acc              = metrics.get("accuracy")
+f1               = metrics.get("f1_score")
+precision        = metrics.get("precision")
+recall           = metrics.get("recall")
+features_count   = metrics.get("features_count")
+classes          = metrics.get("classes")
+training_dataset = metrics.get("training_dataset")
+mlflow_run_id    = metrics.get("mlflow_run_id")
+print(
+    f"✅  Entraînement terminé — Accuracy : {acc} | F1 : {f1}"
+    f" | Precision : {precision} | Recall : {recall}"
+    + (f" | MLflow run : {mlflow_run_id}" if mlflow_run_id else "")
+)
 
 # ── 3. Upload via POST /models ────────────────────────────────────────────────
 
@@ -148,6 +156,26 @@ try:
             data["accuracy"] = str(round(acc, 4))
         if f1 is not None:
             data["f1_score"] = str(round(f1, 4))
+        if features_count is not None:
+            data["features_count"] = str(features_count)
+        if classes is not None:
+            data["classes"] = json.dumps(classes)
+        if training_dataset:
+            data["training_dataset"] = training_dataset
+        # training_metrics : toutes les métriques issues du training set (classification ou
+        # régression). Stocké en JSON — affiché séparément du ground truth dans le dashboard.
+        _tm = {k: round(v, 4) for k, v in {
+            "accuracy":  acc,
+            "f1_score":  f1,
+            "precision": precision,
+            "recall":    recall,
+        }.items() if v is not None}
+        # Métriques de régression (mae, rmse, r2) si présentes dans le script d'entraînement
+        for _reg_key in ("mae", "rmse", "r2"):
+            if metrics.get(_reg_key) is not None:
+                _tm[_reg_key] = round(metrics[_reg_key], 4)
+        if _tm:
+            data["training_metrics"] = json.dumps(_tm)
         if mlflow_run_id:
             data["mlflow_run_id"] = mlflow_run_id
 
@@ -188,6 +216,15 @@ print(f"⏳  Mise en production, tag 'Example' et baseline des features…")
 patch_body = {"is_production": True, "tags": ["Example"]}
 if metrics.get("feature_stats"):
     patch_body["feature_baseline"] = metrics["feature_stats"]
+if metrics.get("confidence_threshold") is not None:
+    patch_body["confidence_threshold"] = metrics["confidence_threshold"]
+
+# webhook_url : URL appelée en POST après chaque prédiction (background task, non bloquant).
+# Le payload reçu contient : model_name, model_version, id_obs, prediction, probability,
+# low_confidence. Remplacer par une vraie URL pour notifier un système externe en temps réel
+# (ex: Slack, Datadog, ERP) ou déclencher une action métier sur chaque résultat.
+# https://webhook.site génère des URLs de test temporaires pour inspecter les payloads.
+patch_body["webhook_url"] = "https://webhook.site/00000000-0000-0000-0000-000000000000"
 
 patch = requests.patch(
     f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",

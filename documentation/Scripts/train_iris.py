@@ -46,7 +46,7 @@ import numpy as np
 import pandas as pd
 from sklearn.datasets import load_iris
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import train_test_split
 
 try:
@@ -225,11 +225,17 @@ _ts("après fit")
 
 # ── 4. Évaluation ─────────────────────────────────────────────────────────────
 
-y_pred = model.predict(X_test)
-acc = float(accuracy_score(y_test, y_pred))
-f1  = float(f1_score(y_test, y_pred, average="weighted", zero_division=0))
+y_pred    = model.predict(X_test)
+acc       = float(accuracy_score(y_test, y_pred))
+f1        = float(f1_score(y_test,        y_pred, average="weighted", zero_division=0))
+precision = float(precision_score(y_test, y_pred, average="weighted", zero_division=0))
+recall    = float(recall_score(y_test,    y_pred, average="weighted", zero_division=0))
 
-print(f"[{MODEL_NAME}] Accuracy : {acc:.4f} | F1 : {f1:.4f}", file=sys.stderr)
+print(
+    f"[{MODEL_NAME}] Accuracy : {acc:.4f} | F1 : {f1:.4f}"
+    f" | Precision : {precision:.4f} | Recall : {recall:.4f}",
+    file=sys.stderr,
+)
 _ts("après évaluation")
 
 # ── 5. Sauvegarde du modèle (OBLIGATOIRE) ─────────────────────────────────────
@@ -361,7 +367,19 @@ else:
 output = {
     "accuracy":           round(acc, 4),
     "f1_score":           round(f1, 4),
+    "precision":          round(precision, 4),
+    "recall":             round(recall, 4),
     "n_rows":             len(X_train),
+    "features_count":     len(iris.feature_names),
+    "classes":            list(iris.target_names),
+    "training_dataset":   "scikit-learn Iris dataset (Fisher, 1936) - 150 observations, 3 classes",
+    # confidence_threshold : si la probabilité max prédite par le modèle est inférieure
+    # à ce seuil, l'API marque la prédiction avec low_confidence=True.
+    # Cela permet aux appelants de traiter différemment les prédictions incertaines
+    # (ex : routing vers un humain, refus de la prédiction, alerte monitoring).
+    # 0.60 est un point de départ raisonnable pour Iris : le modèle est très calibré
+    # sur ce dataset, donc les cas sous 60 % de confiance sont de vrais cas limites.
+    "confidence_threshold": 0.60,
     "feature_stats":      feature_stats,
     "label_distribution": label_distribution,
 }

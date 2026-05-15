@@ -337,6 +337,7 @@ async def export_predictions(
         "username",
         "id_obs",
         "prediction_result",
+        "observed_result",
         "probabilities",
         "response_time_ms",
         "status",
@@ -374,7 +375,7 @@ async def export_predictions(
                     csv.writer(buf).writerow(csv_cols)
                     yield buf.getvalue()
                     header_written = True
-                for row in rows:
+                for row, obs_result in rows:
                     buf = io.StringIO()
                     vals = [
                         row.id,
@@ -384,6 +385,7 @@ async def export_predictions(
                         row.user.username if row.user else None,
                         row.id_obs,
                         json.dumps(row.prediction_result),
+                        obs_result,
                         json.dumps(row.probabilities),
                         row.response_time_ms,
                         row.status,
@@ -395,7 +397,7 @@ async def export_predictions(
                     csv.writer(buf).writerow(vals)
                     yield buf.getvalue()
             else:
-                for row in rows:
+                for row, obs_result in rows:
                     record: dict = {
                         "id": row.id,
                         "timestamp": row.timestamp.isoformat() if row.timestamp else None,
@@ -404,6 +406,7 @@ async def export_predictions(
                         "username": row.user.username if row.user else None,
                         "id_obs": row.id_obs,
                         "prediction_result": row.prediction_result,
+                        "observed_result": obs_result,
                         "probabilities": row.probabilities,
                         "response_time_ms": row.response_time_ms,
                         "status": row.status,
@@ -433,7 +436,7 @@ async def export_predictions(
             )
             if not rows:
                 break
-            for row in rows:
+            for row, obs_result in rows:
                 record: dict = {
                     "id": row.id,
                     "timestamp": row.timestamp.isoformat() if row.timestamp else None,
@@ -442,6 +445,7 @@ async def export_predictions(
                     "username": row.user.username if row.user else None,
                     "id_obs": row.id_obs,
                     "prediction_result": json.dumps(row.prediction_result),
+                    "observed_result": obs_result,
                     "probabilities": json.dumps(row.probabilities),
                     "response_time_ms": row.response_time_ms,
                     "status": row.status,
@@ -591,6 +595,18 @@ async def get_anomalous_predictions(
         anomaly_rate=anomaly_rate,
         predictions=anomalous,
     )
+
+
+@router.delete("/predictions/{prediction_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_prediction(
+    prediction_id: int,
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Supprime une prédiction par son ID (admin uniquement)."""
+    deleted = await DBService.delete_prediction(db, prediction_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prédiction introuvable.")
 
 
 @router.delete("/predictions/purge", response_model=PurgeResponse)
@@ -763,6 +779,13 @@ async def predict(
             "(shap_values, shap_base_value). Silencieux si le type de modèle n'est pas supporté."
         ),
     ),
+    store: bool = Query(
+        True,
+        description=(
+            "Si false, la prédiction n'est pas enregistrée en base de données "
+            "(utile pour les tests interactifs depuis l'UI ou les outils de débogage)."
+        ),
+    ),
     user: User = Depends(check_prediction_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
@@ -897,55 +920,56 @@ async def predict(
             version=_metric_version,
         ).observe(response_time_ms / 1000)
 
-        # Logger la prédiction réussie — async via Redis Stream ou sync en fallback
-        _prediction_payload = {
-            "user_id": user.id,
-            "model_name": metadata.name,
-            "model_version": metadata.version,
-            "id_obs": input_data.id_obs,
-            "input_features": input_data.features,
-            "prediction_result": prediction_result,
-            "probabilities": probability,
-            "response_time_ms": response_time_ms,
-            "client_ip": request.client.host if request.client else None,
-            "user_agent": request.headers.get("user-agent"),
-            "status": "success",
-            "max_confidence": max(probability) if probability else None,
-        }
-        if settings.PREDICTION_STREAM_ENABLED:
-            _published = await _publish_prediction_to_stream(_prediction_payload)
-            if not _published:
+        # Logger la prédiction réussie — ignoré si store=False (tests UI)
+        if store:
+            _prediction_payload = {
+                "user_id": user.id,
+                "model_name": metadata.name,
+                "model_version": metadata.version,
+                "id_obs": input_data.id_obs,
+                "input_features": input_data.features,
+                "prediction_result": prediction_result,
+                "probabilities": probability,
+                "response_time_ms": response_time_ms,
+                "client_ip": request.client.host if request.client else None,
+                "user_agent": request.headers.get("user-agent"),
+                "status": "success",
+                "max_confidence": max(probability) if probability else None,
+            }
+            if settings.PREDICTION_STREAM_ENABLED:
+                _published = await _publish_prediction_to_stream(_prediction_payload)
+                if not _published:
+                    await DBService.create_prediction(db=db, **_prediction_payload)
+            else:
                 await DBService.create_prediction(db=db, **_prediction_payload)
-        else:
-            await DBService.create_prediction(db=db, **_prediction_payload)
 
-        # --- Dispatch shadow en background (si une version shadow est active) ---
-        if shadow_meta is not None:
-            background_tasks.add_task(
-                _run_shadow_prediction,
-                model_name=metadata.name,
-                shadow_version=shadow_meta.version,
-                features=input_data.features,
-                id_obs=input_data.id_obs,
-                user_id=user.id,
-                client_ip=request.client.host if request.client else None,
-                user_agent=request.headers.get("user-agent"),
-            )
+            # --- Dispatch shadow en background (si une version shadow est active) ---
+            if shadow_meta is not None:
+                background_tasks.add_task(
+                    _run_shadow_prediction,
+                    model_name=metadata.name,
+                    shadow_version=shadow_meta.version,
+                    features=input_data.features,
+                    id_obs=input_data.id_obs,
+                    user_id=user.id,
+                    client_ip=request.client.host if request.client else None,
+                    user_agent=request.headers.get("user-agent"),
+                )
 
-        # Déclencher le webhook si configuré sur le modèle
-        if metadata.webhook_url:
-            background_tasks.add_task(
-                send_webhook,
-                metadata.webhook_url,
-                {
-                    "model_name": metadata.name,
-                    "model_version": metadata.version,
-                    "id_obs": input_data.id_obs,
-                    "prediction": prediction_result,
-                    "probability": probability,
-                    "low_confidence": low_confidence,
-                },
-            )
+            # Déclencher le webhook si configuré sur le modèle
+            if metadata.webhook_url:
+                background_tasks.add_task(
+                    send_webhook,
+                    metadata.webhook_url,
+                    {
+                        "model_name": metadata.name,
+                        "model_version": metadata.version,
+                        "id_obs": input_data.id_obs,
+                        "prediction": prediction_result,
+                        "probability": probability,
+                        "low_confidence": low_confidence,
+                    },
+                )
 
         # selected_version est renseigné uniquement si le routage A/B a été utilisé
         selected_version = metadata.version if input_data.model_version is None else None
@@ -1002,24 +1026,25 @@ async def predict(
             status="error",
         ).inc()
 
-        try:
-            await DBService.create_prediction(
-                db=db,
-                user_id=user.id,
-                model_name=input_data.model_name,
-                model_version=None,
-                input_features=input_data.features,
-                prediction_result=None,
-                probabilities=None,
-                response_time_ms=response_time_ms,
-                client_ip=request.client.host if request.client else None,
-                user_agent=request.headers.get("user-agent"),
-                status="error",
-                error_message=error_message,
-                id_obs=input_data.id_obs,
-            )
-        except Exception as log_error:
-            logger.error("Erreur lors du logging de la prédiction", error=str(log_error))
+        if store:
+            try:
+                await DBService.create_prediction(
+                    db=db,
+                    user_id=user.id,
+                    model_name=input_data.model_name,
+                    model_version=None,
+                    input_features=input_data.features,
+                    prediction_result=None,
+                    probabilities=None,
+                    response_time_ms=response_time_ms,
+                    client_ip=request.client.host if request.client else None,
+                    user_agent=request.headers.get("user-agent"),
+                    status="error",
+                    error_message=error_message,
+                    id_obs=input_data.id_obs,
+                )
+            except Exception as log_error:
+                logger.error("Erreur lors du logging de la prédiction", error=str(log_error))
 
         logger.error(
             "Erreur interne lors de la prédiction",

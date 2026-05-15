@@ -22,6 +22,7 @@ Prérequis Python :
 import json
 import os
 import sys
+import uuid
 
 import requests
 from dotenv import find_dotenv, load_dotenv
@@ -39,7 +40,7 @@ HEADERS = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/
 # Données Iris — quelques observations représentatives des 3 classes
 IRIS_SAMPLES = [
     {
-        "id_obs":  "iris-setosa-01",
+        "id_obs":  str(uuid.uuid4()),
         "label":   "setosa (attendu)",
         "features": {
             "sepal length (cm)": 5.1,
@@ -49,7 +50,7 @@ IRIS_SAMPLES = [
         },
     },
     {
-        "id_obs":  "iris-versicolor-01",
+        "id_obs":  str(uuid.uuid4()),
         "label":   "versicolor (attendu)",
         "features": {
             "sepal length (cm)": 6.4,
@@ -59,7 +60,7 @@ IRIS_SAMPLES = [
         },
     },
     {
-        "id_obs":  "iris-virginica-01",
+        "id_obs":  str(uuid.uuid4()),
         "label":   "virginica (attendu)",
         "features": {
             "sepal length (cm)": 6.3,
@@ -69,7 +70,7 @@ IRIS_SAMPLES = [
         },
     },
     {
-        "id_obs":  "iris-setosa-02",
+        "id_obs":  str(uuid.uuid4()),
         "label":   "setosa (attendu)",
         "features": {
             "sepal length (cm)": 4.6,
@@ -79,7 +80,7 @@ IRIS_SAMPLES = [
         },
     },
     {
-        "id_obs":  "iris-virginica-02",
+        "id_obs":  str(uuid.uuid4()),
         "label":   "virginica (attendu)",
         "features": {
             "sepal length (cm)": 7.7,
