@@ -280,6 +280,32 @@ services:
     networks:
       - internal
 
+  # Seed des données exemples (one-shot — ignoré si déjà présent)
+  seed-data:
+    build: .
+    command: python init_data/seed_sample_data.py
+    volumes:
+      - ./documentation/Scripts:/app/documentation/Scripts:ro
+    env_file:
+      - .env
+    environment:
+      - API_URL=http://api:${API_PORT:-8000}
+      - API_TOKEN=${ADMIN_TOKEN:-}
+      - MLFLOW_TRACKING_URI=http://mlflow:${MLFLOW_PORT:-5000}
+      - MLFLOW_TRACKING_USERNAME=${MLFLOW_ADMIN_USER:-admin}
+      - MLFLOW_TRACKING_PASSWORD=${MLFLOW_ADMIN_PASSWORD:-}
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:${MINIO_INTERNAL_PORT:-9000}
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - internal
+
   # Reverse proxy Nginx
   nginx:
     image: nginx:1.27-alpine

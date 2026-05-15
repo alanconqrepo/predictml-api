@@ -8,4 +8,4 @@ RUN addgroup --system streamlit && \
     chown -R streamlit:streamlit /app
 EXPOSE 8501
 USER streamlit
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true", "--server.runOnSave=true", "--server.fileWatcherType=poll"]
