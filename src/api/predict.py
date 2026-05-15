@@ -597,8 +597,8 @@ async def get_anomalous_predictions(
 async def purge_predictions(
     older_than_days: int = Query(
         ...,
-        ge=1,
-        description="Supprimer les prédictions plus anciennes que N jours (ex: 90)",
+        ge=0,
+        description="Supprimer les prédictions plus anciennes que N jours (0 = toutes)",
     ),
     model_name: Optional[str] = Query(
         None,
@@ -612,14 +612,13 @@ async def purge_predictions(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Purge les prédictions plus anciennes que N jours (rétention RGPD).
+    Purge les prédictions et leurs observed_results associés.
 
-    - **older_than_days** : seuil de rétention en jours — obligatoire (ex: 90)
+    - **older_than_days** : seuil de rétention en jours (0 = tout supprimer)
     - **model_name** : restreindre la purge à un seul modèle (optionnel)
     - **dry_run** : `true` par défaut — simulation sans suppression. Passer `dry_run=false` pour supprimer réellement.
 
-    La réponse inclut un avertissement (`linked_observed_results_count > 0`) si des prédictions
-    supprimées sont liées à des observed_results (perte de données de performance).
+    Supprime en cascade les observed_results (ground truth) liés aux prédictions purgées.
 
     Accès réservé aux administrateurs.
     """

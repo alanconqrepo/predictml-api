@@ -1145,14 +1145,15 @@ class DBService:
         dry_run: bool = True,
     ) -> dict:
         """
-        Purge les prédictions plus anciennes que N jours (rétention RGPD).
+        Purge les prédictions et leurs observed_results associés.
 
+        older_than_days=0 supprime tout (pas de seuil temporel).
         En mode dry_run=True : comptage sans suppression.
-        En mode dry_run=False : suppression effective et commit.
+        En mode dry_run=False : suppression des observed_results liés puis des prédictions, puis commit.
 
         Returns:
-            dict avec dry_run, deleted_count, oldest_remaining,
-            models_affected et linked_observed_results_count.
+            dict avec dry_run, deleted_count, deleted_observed_results_count,
+            oldest_remaining, models_affected et linked_observed_results_count.
         """
         cutoff = _utcnow() - timedelta(days=older_than_days)
 
@@ -1170,19 +1171,25 @@ class DBService:
         )
         models_affected = sorted(row[0] for row in models_result.all())
 
-        # Count predictions linked to observed_results (performance data loss warning)
-        linked_result = await db.execute(
-            select(func.count(Prediction.id))
-            .join(
-                ObservedResult,
-                and_(
-                    Prediction.id_obs == ObservedResult.id_obs,
-                    Prediction.model_name == ObservedResult.model_name,
-                ),
-            )
+        # Collect (id_obs, model_name) pairs of predictions to purge
+        pairs_result = await db.execute(
+            select(Prediction.id_obs, Prediction.model_name)
             .where(and_(*filters))
+            .distinct()
         )
-        linked_count = linked_result.scalar() or 0
+        pairs = pairs_result.all()
+
+        # Count observed_results linked to those predictions
+        linked_count = 0
+        if pairs:
+            or_clauses = [
+                and_(ObservedResult.id_obs == id_obs, ObservedResult.model_name == mname)
+                for id_obs, mname in pairs
+            ]
+            linked_result = await db.execute(
+                select(func.count(ObservedResult.id)).where(or_(*or_clauses))
+            )
+            linked_count = linked_result.scalar() or 0
 
         # Oldest prediction that will remain after the purge
         remaining_filters: list = [Prediction.timestamp >= cutoff]
@@ -1194,13 +1201,24 @@ class DBService:
         )
         oldest_remaining = oldest_result.scalar()
 
+        deleted_observed_results_count = 0
         if not dry_run and deleted_count > 0:
+            # Delete linked observed_results first, then predictions
+            if pairs:
+                or_clauses = [
+                    and_(ObservedResult.id_obs == id_obs, ObservedResult.model_name == mname)
+                    for id_obs, mname in pairs
+                ]
+                obs_result = await db.execute(delete(ObservedResult).where(or_(*or_clauses)))
+                deleted_observed_results_count = obs_result.rowcount or 0
+
             await db.execute(delete(Prediction).where(and_(*filters)))
             await db.commit()
 
         return {
             "dry_run": dry_run,
             "deleted_count": deleted_count,
+            "deleted_observed_results_count": deleted_observed_results_count,
             "oldest_remaining": oldest_remaining,
             "models_affected": models_affected,
             "linked_observed_results_count": linked_count,
