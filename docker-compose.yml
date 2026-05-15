@@ -332,6 +332,9 @@ services:
       - MLFLOW_TRACKING_URI=http://mlflow:${MLFLOW_PORT:-5000}
       - MLFLOW_TRACKING_USERNAME=${MLFLOW_ADMIN_USER:-admin}
       - MLFLOW_TRACKING_PASSWORD=${MLFLOW_ADMIN_PASSWORD:-}
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:${MINIO_INTERNAL_PORT:-9000}
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
       # --- Alertes e-mail (optionnel — configurer dans .env pour activer) ---
       - ENABLE_EMAIL_ALERTS=${ENABLE_EMAIL_ALERTS:-false}
       - WEEKLY_REPORT_ENABLED=${WEEKLY_REPORT_ENABLED:-false}
