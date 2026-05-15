@@ -5,6 +5,23 @@ set -e
 
 pip install psycopg2-binary boto3 "mlflow[auth]" --quiet
 
+# Créer le bucket MLflow dans MinIO s'il n'existe pas
+python - <<'PYEOF'
+import os, boto3, botocore
+s3 = boto3.client(
+    "s3",
+    endpoint_url=os.environ.get("MLFLOW_S3_ENDPOINT_URL", "http://minio:9000"),
+    aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", ""),
+    aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
+)
+try:
+    s3.head_bucket(Bucket="mlflow")
+    print("[mlflow-entrypoint] Bucket 'mlflow' existe déjà.")
+except botocore.exceptions.ClientError:
+    s3.create_bucket(Bucket="mlflow")
+    print("[mlflow-entrypoint] Bucket 'mlflow' créé dans MinIO.")
+PYEOF
+
 mkdir -p /tmp/mlflow-auth
 
 cat > /tmp/mlflow-auth/auth.ini << EOF

@@ -27,10 +27,10 @@ SECRET_KEY=$(gen 32)
 ADMIN_TOKEN=$(gen 24)
 POSTGRES_PASSWORD=$(gen 24)
 MINIO_ROOT_PASSWORD=$(gen 32)
-MINIO_SECRET_KEY=$(gen 32)
 REDIS_PASSWORD=$(gen 24)
 GRAFANA_ADMIN_PASSWORD=$(gen 24)
 MLFLOW_ADMIN_PASSWORD=$(gen 24)
+MLFLOW_FLASK_SERVER_SECRET_KEY=$(gen 32)
 METRICS_TOKEN=$(gen 32)
 
 # Utilisateur MinIO fixe (pas un secret)
@@ -55,12 +55,21 @@ replace POSTGRES_PASSWORD   "$POSTGRES_PASSWORD"
 replace MINIO_ROOT_USER     "$MINIO_USER"
 replace MINIO_ROOT_PASSWORD "$MINIO_ROOT_PASSWORD"
 replace MINIO_ACCESS_KEY    "$MINIO_USER"
-replace MINIO_SECRET_KEY    "$MINIO_SECRET_KEY"
+replace MINIO_SECRET_KEY    "$MINIO_ROOT_PASSWORD"
 replace REDIS_PASSWORD      "$REDIS_PASSWORD"
 replace GRAFANA_ADMIN_USER  "admin"
 replace GRAFANA_ADMIN_PASSWORD "$GRAFANA_ADMIN_PASSWORD"
 replace MLFLOW_ADMIN_USER   "admin"
 replace MLFLOW_ADMIN_PASSWORD  "$MLFLOW_ADMIN_PASSWORD"
+replace MLFLOW_TRACKING_USERNAME "admin"
+replace MLFLOW_TRACKING_PASSWORD "$MLFLOW_ADMIN_PASSWORD"
+replace MLFLOW_FLASK_SERVER_SECRET_KEY "$MLFLOW_FLASK_SERVER_SECRET_KEY"
+
+_minio_internal_port=$(grep -E '^MINIO_INTERNAL_PORT=' "$ENV_FILE" | cut -d= -f2 | sed 's/#.*//' | tr -d '[:space:]')
+_minio_internal_port="${_minio_internal_port:-9000}"
+replace MLFLOW_S3_ENDPOINT_URL  "http://minio:${_minio_internal_port}"
+replace AWS_ACCESS_KEY_ID       "$MINIO_USER"
+replace AWS_SECRET_ACCESS_KEY   "$MINIO_ROOT_PASSWORD"
 replace METRICS_TOKEN       "$METRICS_TOKEN"
 
 # Les DATABASE_URL contiennent le mot de passe — on les réécrit entièrement.
