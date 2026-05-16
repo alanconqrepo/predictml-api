@@ -206,14 +206,27 @@ _ALLOWED_IMPORT_MODULES = {
     "enum",
     "dataclasses",
     "csv",
-    "dotenv"
+    "dotenv",
+    "boto3",
+    "botocore",
 }
 
 
 def _set_subprocess_limits() -> None:
-    """Appelé dans le processus enfant après fork — réduit la surface d'attaque."""
-    resource.setrlimit(resource.RLIMIT_AS, (2 * 1024**3, 2 * 1024**3))  # 2 Go RAM
-    resource.setrlimit(resource.RLIMIT_NOFILE, (50, 50))  # 50 descripteurs de fichiers
+    """Appelé dans le processus enfant après fork — réduit la surface d'attaque.
+
+    RLIMIT_AS : on ne limite pas la mémoire virtuelle — mlflow + numpy + sklearn + boto3
+    nécessitent plus de 2 GB d'espace d'adressage virtuel (shared libs + compilations regex
+    de email._header_value_parser en Python 3.13). Un plafond trop bas provoque MemoryError
+    à l'import, bien avant que le script d'entraînement lui-même s'exécute.
+    La protection mémoire est assurée par les cgroups Docker du container.
+
+    RLIMIT_NOFILE : 1024 minimum requis — importlib_metadata ouvre les métadonnées de
+    tous les paquets installés à l'import de mlflow (200+ fd simultanément).
+    """
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    _fd_limit = min(1024, _hard)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (_fd_limit, _fd_limit))
 
 
 def _parse_json_field(value: str | None, field_name: str) -> dict | list | None:
@@ -413,13 +426,14 @@ def _detect_model_type(metadata: Optional[ModelMetadata], pairs: list) -> str:
 
 
 def _compute_classification_metrics(y_true: list, y_pred: list, classes: Optional[list]) -> tuple:
-    labels = (
-        sorted(set(str(c) for c in classes))
-        if classes
-        else sorted(set(str(v) for v in y_true + y_pred))
-    )
     y_true_s = [str(v) for v in y_true]
     y_pred_s = [str(v) for v in y_pred]
+    data_labels = sorted(set(y_true_s + y_pred_s))
+    if classes:
+        candidate = sorted(set(str(c) for c in classes))
+        labels = candidate if any(lbl in y_true_s for lbl in candidate) else data_labels
+    else:
+        labels = data_labels
 
     acc = accuracy_score(y_true_s, y_pred_s)
     prec = precision_score(y_true_s, y_pred_s, average="weighted", zero_division=0, labels=labels)
@@ -498,7 +512,8 @@ async def get_model_performance(
         )
 
     total = await DBService.count_predictions(db, name, start, end, version)
-    pairs = await DBService.get_performance_pairs(db, name, start, end, version)
+    _raw_pairs = await DBService.get_performance_pairs(db, name, start, end, version)
+    pairs = [p for p in _raw_pairs if p.prediction_result is not None and p.observed_result is not None]
 
     matched = len(pairs)
     model_type = _detect_model_type(metadata, pairs)
@@ -1082,6 +1097,7 @@ async def rollback_model(
     )
 
     await db.commit()
+    _leaderboard_cache.clear()
     await db.refresh(model)
     audit_log(
         "model.rollback",
@@ -1346,6 +1362,7 @@ async def retrain_model(
             "VIRTUAL_ENV",
         }
         env = {k: v for k, v in os.environ.items() if k in _safe_env_keys}
+        _minio_scheme = "https" if settings.MINIO_SECURE else "http"
         env.update(
             {
                 "TRAIN_START_DATE": payload.start_date,
@@ -1353,6 +1370,15 @@ async def retrain_model(
                 "OUTPUT_MODEL_PATH": output_model_path,
                 "MLFLOW_TRACKING_URI": mlflow_tracking_uri,
                 "MODEL_NAME": name,
+                "MINIO_ENDPOINT": settings.MINIO_ENDPOINT,
+                "MINIO_ACCESS_KEY": settings.MINIO_ACCESS_KEY,
+                "MINIO_SECRET_KEY": settings.MINIO_SECRET_KEY,
+                "MINIO_BUCKET": settings.MINIO_BUCKET,
+                "MINIO_SECURE": str(settings.MINIO_SECURE).lower(),
+                # Variables boto3/S3 pour MLflow log_artifact + upload direct
+                "MLFLOW_S3_ENDPOINT_URL": settings.MLFLOW_S3_ENDPOINT_URL or f"{_minio_scheme}://{settings.MINIO_ENDPOINT}",
+                "AWS_ACCESS_KEY_ID": settings.MINIO_ACCESS_KEY,
+                "AWS_SECRET_ACCESS_KEY": settings.MINIO_SECRET_KEY,
             }
         )
 
@@ -1431,7 +1457,7 @@ async def retrain_model(
             with open(output_model_path, "rb") as f:
                 new_model_bytes = f.read()
 
-        except RetrainResponse.__class__:
+        except HTTPException:
             raise
         except Exception as e:
             logger.error("Erreur inattendue lors du ré-entraînement", model=name, error=str(e))
@@ -1446,8 +1472,9 @@ async def retrain_model(
             )
 
     # 6. Extraire les métriques JSON depuis la dernière ligne stdout
-    new_accuracy = source_model.accuracy
-    new_f1 = source_model.f1_score
+    logger.info("Retrain post-subprocess : extraction métriques", model=name, new_version=new_version)
+    new_accuracy = source_fields["accuracy"]
+    new_f1 = source_fields["f1_score"]
     parsed_metrics: dict = {}
     for line in reversed(stdout_text.strip().splitlines()):
         stripped = line.strip()
@@ -1459,6 +1486,12 @@ async def retrain_model(
             except json.JSONDecodeError:
                 pass
             break
+    logger.info(
+        "Retrain métriques extraites",
+        model=name, new_version=new_version,
+        accuracy=new_accuracy, f1=new_f1,
+        training_dataset=parsed_metrics.get("training_dataset"),
+    )
 
     training_stats = {
         "train_start_date": str(payload.start_date),
@@ -1485,67 +1518,108 @@ async def retrain_model(
             n_rows=parsed_metrics.get("n_rows"),
             feature_stats=parsed_metrics.get("feature_stats"),
             label_distribution=parsed_metrics.get("label_distribution"),
-            algorithm=source_model.algorithm,
-            training_params=source_model.training_params,
+            algorithm=source_fields["algorithm"],
+            training_params=source_fields["training_params"],
             auto_promoted=False,
             auto_promote_reason=None,
             model_bytes=new_model_bytes,
         )
+        logger.info("MLflow run créé", model=name, new_version=new_version, run_id=_mlflow_run_id)
     except Exception as _exc:
-        logger.warning("MLflow logging échoué — ré-entraînement continue", error=str(_exc))
+        logger.warning(
+            "MLflow logging échoué — ré-entraînement continue",
+            model=name, new_version=new_version, error=str(_exc),
+        )
 
     # 7. Uploader le nouveau modèle dans MinIO
-    new_object_key = f"{name}/v{new_version}.pkl"
-    new_pkl_hmac_signature = compute_model_hmac(new_model_bytes)
-    upload_info = await minio_service.async_upload_model_bytes(new_model_bytes, new_object_key)
+    logger.info("Retrain upload .pkl MinIO", model=name, new_version=new_version)
+    try:
+        new_object_key = f"{name}/v{new_version}.pkl"
+        new_pkl_hmac_signature = compute_model_hmac(new_model_bytes)
+        upload_info = await minio_service.async_upload_model_bytes(new_model_bytes, new_object_key)
+        logger.info(
+            "Retrain upload .pkl OK",
+            model=name, new_version=new_version,
+            bucket=upload_info.get("bucket"), size=upload_info.get("size"),
+        )
+    except Exception as exc:
+        logger.error(
+            "Retrain STEP7 : upload .pkl MinIO échoué",
+            model=name, new_version=new_version, error=str(exc), exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Upload MinIO du .pkl échoué : {exc}",
+        ) from exc
 
     # 8. Copier le script train.py pour la nouvelle version (pour chaîner les ré-entraînements)
     new_train_key = f"{name}/v{new_version}_train.py"
-    await minio_service.async_upload_file_bytes(
-        script_bytes, new_train_key, content_type="text/x-python"
-    )
+    logger.info("Retrain upload train.py MinIO", model=name, new_version=new_version)
+    try:
+        await minio_service.async_upload_file_bytes(
+            script_bytes, new_train_key, content_type="text/x-python"
+        )
+        logger.info("Retrain upload train.py OK", model=name, new_version=new_version)
+    except Exception as exc:
+        logger.error(
+            "Retrain STEP8 : upload train.py MinIO échoué",
+            model=name, new_version=new_version, error=str(exc), exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Upload MinIO du train.py échoué : {exc}",
+        ) from exc
 
     # --- Session 2 : écriture post-subprocess ---
+    logger.info("Retrain écriture DB", model=name, new_version=new_version)
     async with AsyncSessionLocal() as write_db:
         # 9. Créer la nouvelle entrée ModelMetadata
-        new_metadata = ModelMetadata(
-            name=name,
-            version=new_version,
-            minio_bucket=upload_info["bucket"],
-            minio_object_key=new_object_key,
-            file_size_bytes=upload_info["size"],
-            pkl_hmac_signature=new_pkl_hmac_signature,
-            train_script_object_key=new_train_key,
-            description=source_fields["description"],
-            algorithm=source_fields["algorithm"],
-            mlflow_run_id=_mlflow_run_id,
-            accuracy=new_accuracy,
-            f1_score=new_f1,
-            features_count=source_fields["features_count"],
-            classes=source_fields["classes"],
-            training_params=source_fields["training_params"],
-            training_dataset=(
-                f"{source_fields['training_dataset'] or name} "
-                f"[{payload.start_date} → {payload.end_date}]"
-            ),
-            feature_baseline=source_fields["feature_baseline"],
-            confidence_threshold=source_fields["confidence_threshold"],
-            tags=source_fields["tags"],
-            webhook_url=source_fields["webhook_url"],
-            promotion_policy=source_fields["promotion_policy"],
-            trained_by=user.username,
-            training_date=datetime.now(timezone.utc),
-            user_id_creator=user.id,
-            is_active=True,
-            is_production=False,
-            parent_version=version,
-            training_stats=training_stats,
-        )
-        write_db.add(new_metadata)
-        await write_db.flush()
-        await DBService.log_model_history(
-            write_db, new_metadata, HistoryActionType.CREATED, user.id, user.username
-        )
+        try:
+            new_metadata = ModelMetadata(
+                name=name,
+                version=new_version,
+                minio_bucket=upload_info["bucket"],
+                minio_object_key=new_object_key,
+                file_size_bytes=upload_info["size"],
+                pkl_hmac_signature=new_pkl_hmac_signature,
+                train_script_object_key=new_train_key,
+                description=source_fields["description"],
+                algorithm=source_fields["algorithm"],
+                mlflow_run_id=_mlflow_run_id,
+                accuracy=new_accuracy,
+                f1_score=new_f1,
+                features_count=source_fields["features_count"],
+                classes=source_fields["classes"],
+                training_params=source_fields["training_params"],
+                training_dataset=(
+                    parsed_metrics.get("training_dataset")
+                    or f"{source_fields['training_dataset'] or name} [{payload.start_date} → {payload.end_date}]"
+                ),
+                feature_baseline=source_fields["feature_baseline"],
+                confidence_threshold=source_fields["confidence_threshold"],
+                tags=source_fields["tags"],
+                webhook_url=source_fields["webhook_url"],
+                promotion_policy=source_fields["promotion_policy"],
+                trained_by=user.username,
+                training_date=datetime.now(timezone.utc).replace(tzinfo=None),
+                user_id_creator=user.id,
+                is_active=True,
+                is_production=False,
+                parent_version=version,
+                training_stats=training_stats,
+            )
+            write_db.add(new_metadata)
+            await write_db.flush()
+            await DBService.log_model_history(
+                write_db, new_metadata, HistoryActionType.CREATED, user.id, user.username
+            )
+            logger.info("Retrain STEP9 : ModelMetadata créé", model=name, new_version=new_version, id=new_metadata.id)
+        except Exception as exc:
+            logger.error(
+                "Retrain STEP9 : création ModelMetadata en DB échouée",
+                model=name, new_version=new_version, error=str(exc), exc_info=True,
+            )
+            raise
 
         # 10. Passer en production si demandé manuellement
         auto_promoted = False
@@ -1650,11 +1724,27 @@ async def retrain_model(
             except Exception as _exc:
                 logger.warning("MLflow tag update échoué", error=str(_exc))
 
-        await write_db.commit()
+        try:
+            await write_db.commit()
+            logger.info("Retrain STEP10 : commit DB OK", model=name, new_version=new_version)
+        except Exception as exc:
+            logger.error(
+                "Retrain STEP10 : commit DB échoué",
+                model=name, new_version=new_version, error=str(exc), exc_info=True,
+            )
+            raise
+        _leaderboard_cache.clear()
         await write_db.refresh(new_metadata)
 
         # 11. Invalider le cache Redis et pré-chauffer la nouvelle version si en production
-        await model_service.invalidate_model_cache(name)
+        try:
+            await model_service.invalidate_model_cache(name)
+            logger.info("Retrain STEP11 : cache Redis invalidé", model=name, new_version=new_version)
+        except Exception as exc:
+            logger.warning(
+                "Retrain STEP11 : invalidation cache Redis échouée (non bloquant)",
+                model=name, new_version=new_version, error=str(exc),
+            )
         if new_metadata.is_production:
             try:
                 async with AsyncSessionLocal() as warmup_db:
@@ -3532,6 +3622,8 @@ async def update_model(
         )
 
     await db.commit()
+    if "is_production" in update_data:
+        _leaderboard_cache.clear()
     await db.refresh(model)
 
     return ModelCreateResponse(
@@ -3595,9 +3687,12 @@ async def delete_model_version(
         _delete_minio_object(model.minio_object_key)
 
     # Logger la suppression avant de supprimer l'objet ORM
+    was_production = model.is_production
     await DBService.log_model_history(db, model, HistoryActionType.DELETED, user.id, user.username)
     await db.delete(model)
     await db.commit()
+    if was_production:
+        _leaderboard_cache.clear()
     audit_log("model.delete", actor_id=user.id, resource=f"{name}:{version}")
 
 
@@ -3837,6 +3932,56 @@ async def download_model(
     return Response(
         content=model_bytes,
         media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/models/{name}/{version}/download-dataset")
+async def download_training_dataset(
+    name: ModelNamePath,
+    version: ModelVersionPath,
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_read_db),
+):
+    """
+    Télécharge le dataset d'entraînement stocké dans MinIO pour une version de modèle.
+
+    Le champ `training_dataset` doit contenir le chemin MinIO (ex: `iris-classifier/datasets/…csv`).
+    Retourne 404 si aucun dataset n'est disponible ou si le chemin n'est pas un chemin MinIO.
+    """
+    result = await db.execute(
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.version == version)
+        )
+    )
+    model_meta = result.scalar_one_or_none()
+
+    if not model_meta:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' version '{version}' introuvable.",
+        )
+
+    dataset_path = model_meta.training_dataset
+    if not dataset_path or "/" not in dataset_path or not dataset_path.endswith(".csv"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Aucun dataset d'entraînement disponible pour cette version (chemin MinIO absent ou invalide).",
+        )
+
+    try:
+        csv_bytes = await minio_service.async_download_file_bytes(dataset_path)
+    except Exception as e:
+        logger.error("Erreur téléchargement dataset", name=name, version=version, path=dataset_path, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dataset introuvable dans MinIO ({dataset_path}).",
+        )
+
+    filename = dataset_path.split("/")[-1]
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

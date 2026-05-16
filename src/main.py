@@ -26,9 +26,18 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src.api import account_requests, models, monitoring, observed_results, predict, users
+# ── Logging configuré EN PREMIER — avant tout import du projet ────────────────
+# Raison : structlog.cache_logger_on_first_use=True met en cache le logger à la
+# première utilisation. Si un module (ex : src.api.models) est importé avant
+# setup_logging(), son logger se cache dans un état non-configuré et les appels
+# logger.info() n'apparaissent jamais dans docker logs.
 from src.core.config import settings
 from src.core.logging import setup_logging
+
+setup_logging(debug=settings.DEBUG)
+# ──────────────────────────────────────────────────────────────────────────────
+
+from src.api import account_requests, models, monitoring, observed_results, predict, users
 from src.core.rate_limit import limiter
 from src.core.security import require_admin
 from src.db.database import AsyncSessionLocal, close_db, engine, get_db, init_db
@@ -36,8 +45,6 @@ from src.schemas.health import DependencyDetail, DependencyHealthResponse
 from src.services.db_service import db_service
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
-
-setup_logging(debug=settings.DEBUG)
 logger = structlog.get_logger(__name__)
 
 

@@ -543,7 +543,20 @@ with st.expander("📋 Détails complets", expanded=True):
         st.markdown(f"**Version :** `{selected.get('version')}`")
         st.markdown(f"**Description :** {selected.get('description') or '—'}")
         st.markdown(f"**Algorithme :** {selected.get('algorithm') or '—'}")
-        st.markdown(f"**Dataset d'entraînement :** {selected.get('training_dataset') or '—'}")
+        _ds = selected.get("training_dataset") or ""
+        if _ds.endswith(".csv") and "/" in _ds:
+            try:
+                _csv_bytes = client.download_training_dataset(selected["name"], selected["version"])
+                st.download_button(
+                    label="⬇ Dataset d'entraînement",
+                    data=_csv_bytes,
+                    file_name=_ds.split("/")[-1],
+                    mime="text/csv",
+                )
+            except Exception:
+                st.markdown(f"**Dataset d'entraînement :** `{_ds}`")
+        else:
+            st.markdown(f"**Dataset d'entraînement :** {_ds or '—'}")
         st.markdown(f"**Entraîné par :** {selected.get('trained_by') or '—'}")
         parent_v = selected.get("parent_version")
         if parent_v:

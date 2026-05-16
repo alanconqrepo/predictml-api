@@ -1,8 +1,10 @@
 """
 train_iris_GradientBoosting.py — Script de ré-entraînement PredictML — Exemple Iris (GradientBoosting)
+python .\train_iris_GradientBoosting.py
 =============================================================================================
 
-Identique à train_iris.py mais utilise un GradientBoostingClassifier au lieu du RandomForest.
+Ce script est conçu pour être uploadé avec votre modèle (champ "Script d'entraînement")
+afin de permettre le ré-entraînement automatique ou planifié depuis le dashboard.
 
 CONTRAT D'INTERFACE (variables d'environnement injectées automatiquement par l'API)
 -------------------------------------------------------------------------------------
@@ -26,12 +28,12 @@ SORTIE ATTENDUE
 
 MODULES AUTORISÉS par le sandbox PredictML
 -------------------------------------------
-  os, sys, json, pickle, datetime, dotenv, numpy, pandas, sklearn, mlflow
+  os, sys, json, pickle, datetime, dotenv, numpy, pandas, sklearn, mlflow, boto3
   (subprocess, requests, socket, urllib sont bloqués)
 """
 
+import io
 import json
-import logging
 import os
 import pickle
 import sys
@@ -44,19 +46,25 @@ import numpy as np
 import pandas as pd
 from sklearn.datasets import load_iris
 from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import train_test_split
 
 try:
+    import logging
     import mlflow
     import mlflow.sklearn
-    # pip version non résolue dans le sandbox → pas actionnable
     logging.getLogger("mlflow.utils.environment").setLevel(logging.ERROR)
-    # gRPC OTLP absent → tracing désactivé silencieusement
     logging.getLogger("mlflow.tracing.provider").setLevel(logging.ERROR)
     _MLFLOW_AVAILABLE = True
 except ImportError:
     _MLFLOW_AVAILABLE = False
+
+try:
+    import boto3
+    from botocore.config import Config as BotocoreConfig
+    _BOTO3_AVAILABLE = True
+except ImportError:
+    _BOTO3_AVAILABLE = False
 
 DEBUG = True
 
@@ -213,11 +221,17 @@ _ts("après fit")
 
 # ── 4. Évaluation ─────────────────────────────────────────────────────────────
 
-y_pred = model.predict(X_test)
-acc = float(accuracy_score(y_test, y_pred))
-f1  = float(f1_score(y_test, y_pred, average="weighted", zero_division=0))
+y_pred    = model.predict(X_test)
+acc       = float(accuracy_score(y_test, y_pred))
+f1        = float(f1_score(y_test,        y_pred, average="weighted", zero_division=0))
+precision = float(precision_score(y_test, y_pred, average="weighted", zero_division=0))
+recall    = float(recall_score(y_test,    y_pred, average="weighted", zero_division=0))
 
-print(f"[{MODEL_NAME}] Accuracy : {acc:.4f} | F1 : {f1:.4f}", file=sys.stderr)
+print(
+    f"[{MODEL_NAME}] Accuracy : {acc:.4f} | F1 : {f1:.4f}"
+    f" | Precision : {precision:.4f} | Recall : {recall:.4f}",
+    file=sys.stderr,
+)
 _ts("après évaluation")
 
 # ── 5. Sauvegarde du modèle (OBLIGATOIRE) ─────────────────────────────────────
@@ -227,6 +241,43 @@ with open(OUTPUT_MODEL_PATH, "wb") as fh:
 
 print(f"[{MODEL_NAME}] Modèle sauvegardé → {OUTPUT_MODEL_PATH}", file=sys.stderr)
 _ts("après sauvegarde modèle")
+
+# ── 5b. Sauvegarde du dataset d'entraînement → MinIO + artifact MLflow ────────
+
+_dataset_minio_path = None
+
+try:
+    _df_train = X_train.copy()
+    _df_train["target"] = y_train
+    _csv_filename = f"{MODEL_NAME}_{TRAIN_START_DATE}_{TRAIN_END_DATE}_train.csv"
+    _csv_local = os.path.join(os.path.dirname(OUTPUT_MODEL_PATH), _csv_filename)
+    _df_train.to_csv(_csv_local, index=False)
+    print(f"[{MODEL_NAME}] Dataset CSV créé ({len(_df_train)} lignes) → {_csv_local}", file=sys.stderr)
+
+    _minio_endpoint_url = os.environ.get("MLFLOW_S3_ENDPOINT_URL", "")
+    _aws_key    = os.environ.get("AWS_ACCESS_KEY_ID", "")
+    _aws_secret = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+    _bucket     = os.environ.get("MINIO_BUCKET", "models")
+
+    if _BOTO3_AVAILABLE and _minio_endpoint_url and _aws_key:
+        _s3 = boto3.client(
+            "s3",
+            endpoint_url=_minio_endpoint_url,
+            aws_access_key_id=_aws_key,
+            aws_secret_access_key=_aws_secret,
+            config=BotocoreConfig(signature_version="s3v4"),
+        )
+        _object_key = f"{MODEL_NAME}/datasets/{_csv_filename}"
+        _s3.upload_file(_csv_local, _bucket, _object_key)
+        _dataset_minio_path = _object_key
+        print(f"[{MODEL_NAME}] Dataset uploadé dans MinIO → {_bucket}/{_object_key}", file=sys.stderr)
+    else:
+        print(f"[{MODEL_NAME}] Dataset non uploadé dans MinIO (boto3={'ok' if _BOTO3_AVAILABLE else 'absent'}, endpoint='{_minio_endpoint_url}')", file=sys.stderr)
+
+except Exception as _ds_exc:
+    print(f"[{MODEL_NAME}] Sauvegarde dataset ignorée : {_ds_exc}", file=sys.stderr)
+
+_ts("après sauvegarde dataset")
 
 # ── 6. Statistiques pour MLflow et détection de drift ─────────────────────────
 
@@ -267,7 +318,6 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
         with mlflow.start_run(run_name=run_name) as run:
             _ts("MLflow — start_run OK")
 
-            # Params — un seul appel réseau
             _ts("MLflow — log_params (appel réseau #3)")
             mlflow.log_params({
                 "algorithm":        "GradientBoosting",
@@ -282,7 +332,6 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
             })
             _ts("MLflow — log_params OK")
 
-            # Toutes les métriques en un seul appel (au lieu de N appels individuels)
             all_metrics: dict[str, float] = {
                 "accuracy":     acc,
                 "f1_score":     f1,
@@ -300,7 +349,6 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
             mlflow.log_metrics(all_metrics)
             _ts("MLflow — log_metrics OK")
 
-            # Tags — un seul appel réseau
             _ts("MLflow — set_tags (appel réseau #5)")
             mlflow.set_tags({
                 "model_name":  MODEL_NAME,
@@ -311,9 +359,6 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
             })
             _ts("MLflow — set_tags OK")
 
-            # Artifact — modèle sklearn (dégradation gracieuse si MinIO inaccessible)
-            # Signature explicite : inputs float64 + outputs proba float (évite le warning
-            # "integer column" causé par predict() qui retourne des classes entières)
             _X_example = X_test.astype("float64")
             _signature = mlflow.models.infer_signature(
                 _X_example,
@@ -331,6 +376,15 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
             except Exception as art_exc:
                 _ts("MLflow — log_model ÉCHEC")
                 print(f"[{MODEL_NAME}] Artifact ignoré (MinIO inaccessible) : {art_exc}", file=sys.stderr)
+
+            if _dataset_minio_path and os.path.exists(_csv_local):
+                try:
+                    _ts("MLflow — log_artifact dataset (appel réseau #7 — MinIO)")
+                    mlflow.log_artifact(_csv_local, artifact_path="dataset")
+                    _ts("MLflow — log_artifact dataset OK")
+                    print(f"[{MODEL_NAME}] Dataset loggué comme artifact MLflow.", file=sys.stderr)
+                except Exception as _art_ds_exc:
+                    print(f"[{MODEL_NAME}] Artifact dataset ignoré : {_art_ds_exc}", file=sys.stderr)
 
             mlflow_run_id = run.info.run_id
 
@@ -351,7 +405,13 @@ else:
 output = {
     "accuracy":           round(acc, 4),
     "f1_score":           round(f1, 4),
+    "precision":          round(precision, 4),
+    "recall":             round(recall, 4),
     "n_rows":             len(X_train),
+    "features_count":     len(iris.feature_names),
+    "classes":            list(iris.target_names),
+    "training_dataset":   _dataset_minio_path or "scikit-learn Iris dataset (Fisher, 1936) - 150 observations, 3 classes",
+    "confidence_threshold": 0.60,
     "feature_stats":      feature_stats,
     "label_distribution": label_distribution,
 }

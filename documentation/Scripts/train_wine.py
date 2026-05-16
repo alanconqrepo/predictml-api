@@ -1,10 +1,15 @@
 """
-train_iris.py — Script de ré-entraînement PredictML — Exemple Iris
-python .\train_iris.py
-====================================================================
+train_wine.py — Script de ré-entraînement PredictML — Exemple Wine (Régression)
+python .\train_wine.py
+=================================================================================
 
 Ce script est conçu pour être uploadé avec votre modèle (champ "Script d'entraînement")
 afin de permettre le ré-entraînement automatique ou planifié depuis le dashboard.
+
+Problème : régression — prédire la teneur en alcool d'un vin (variable continue)
+à partir des 12 autres mesures chimiques du dataset Wine de scikit-learn.
+Modèle   : GradientBoostingRegressor
+Métriques: MAE, RMSE, R²
 
 CONTRAT D'INTERFACE (variables d'environnement injectées automatiquement par l'API)
 -------------------------------------------------------------------------------------
@@ -22,17 +27,17 @@ SORTIE ATTENDUE
 ---------------
   - Modèle sauvegardé à OUTPUT_MODEL_PATH via pickle.dump()
   - Dernière ligne JSON sur stdout avec au minimum :
-      {"accuracy": 0.95, "f1_score": 0.94}
+      {"accuracy": 0.91, "mae": 0.12, "rmse": 0.18, "r2": 0.91}
+    (accuracy = R² pour permettre l'affichage dans le dashboard)
   - Logs de progression sur stderr
   - Code de sortie 0 si succès
 
 MODULES AUTORISÉS par le sandbox PredictML
 -------------------------------------------
-  os, sys, json, pickle, datetime, dotenv, numpy, pandas, sklearn, mlflow
+  os, sys, json, pickle, datetime, dotenv, numpy, pandas, sklearn, mlflow, boto3
   (subprocess, requests, socket, urllib sont bloqués)
 """
 
-import io
 import json
 import os
 import pickle
@@ -44,18 +49,16 @@ load_dotenv(find_dotenv())
 
 import numpy as np
 import pandas as pd
-from sklearn.datasets import load_iris
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.datasets import load_wine
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 
 try:
     import logging
     import mlflow
     import mlflow.sklearn
-    # pip version non résolue dans le sandbox → pas actionnable
     logging.getLogger("mlflow.utils.environment").setLevel(logging.ERROR)
-    # gRPC OTLP absent → tracing désactivé silencieusement
     logging.getLogger("mlflow.tracing.provider").setLevel(logging.ERROR)
     _MLFLOW_AVAILABLE = True
 except ImportError:
@@ -70,12 +73,6 @@ except ImportError:
 
 DEBUG = True
 
-# Forcer UTF-8 sur Windows pour éviter le crash charmap sur les emojis MLflow (ex: 🏃)
-#if hasattr(sys.stdout, "buffer"):
-#    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-#if hasattr(sys.stderr, "buffer"):
-#    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-
 _T0 = datetime.now()
 
 def _ts(label: str) -> None:
@@ -83,6 +80,7 @@ def _ts(label: str) -> None:
     print(f"[TIMING] {label} — +{elapsed:.2f}s", file=sys.stderr)
 
 # ── 1. Variables d'environnement (OBLIGATOIRES) ───────────────────────────────
+
 if DEBUG:
     print(f"""
     -------------   AVANT SURCHARGE  ------------
@@ -104,23 +102,17 @@ if DEBUG:
     [ENV] MINIO_SECRET_KEY           = {os.environ.get("MINIO_SECRET_KEY")}
     """)
 
-TRAIN_START_DATE  = os.environ.get("TRAIN_START_DATE","2025-01-01")
-TRAIN_END_DATE    = os.environ.get("TRAIN_END_DATE","2025-02-01")
-OUTPUT_MODEL_PATH = os.environ.get("OUTPUT_MODEL_PATH","default_model_path.pkl")
+TRAIN_START_DATE  = os.environ.get("TRAIN_START_DATE", "2025-01-01")
+TRAIN_END_DATE    = os.environ.get("TRAIN_END_DATE",   "2025-02-01")
+OUTPUT_MODEL_PATH = os.environ.get("OUTPUT_MODEL_PATH", "default_model_path.pkl")
 
-MODEL_NAME               = os.environ.get("MODEL_NAME", "iris-classifier")
+MODEL_NAME               = os.environ.get("MODEL_NAME", "wine-regressor")
 MLFLOW_TRACKING_URI      = os.environ.get("MLFLOW_TRACKING_URI", "")
 MLFLOW_TRACKING_USERNAME = os.environ.get("MLFLOW_TRACKING_USERNAME", "")
 MLFLOW_TRACKING_PASSWORD = os.environ.get("MLFLOW_TRACKING_PASSWORD", "")
 
-
-
-# Timeout court pour tous les appels HTTP MLflow (défaut système = 120 s → timeout garanti)
 os.environ.setdefault("MLFLOW_HTTP_REQUEST_TIMEOUT", "8")
 
-# Credentials MinIO pour log_model — boto3 lit os.environ directement.
-# Sans eux, boto3 explore tous les credential providers (~15s) avant d'abandonner.
-# Priorité : AWS_* (standard boto3) > MINIO_ROOT_* (docker-compose)
 _minio_endpoint   = (os.environ.get("MLFLOW_S3_ENDPOINT_URL", "")
                      or os.environ.get("MINIO_ENDPOINT", ""))
 _minio_access_key = (os.environ.get("AWS_ACCESS_KEY_ID", "")
@@ -134,8 +126,6 @@ if _minio_access_key:
 if _minio_secret_key:
     os.environ["AWS_SECRET_ACCESS_KEY"] = _minio_secret_key
 
-# Hors Docker : substituer les hostnames internes par localhost
-# /.dockerenv est créé automatiquement par Docker dans tout container
 _in_docker = os.path.exists("/.dockerenv")
 if not _in_docker:
     if "//mlflow:" in MLFLOW_TRACKING_URI:
@@ -164,8 +154,6 @@ if DEBUG:
     [ENV] AWS_SECRET_ACCESS_KEY      = {os.environ.get("AWS_SECRET_ACCESS_KEY")}
     """)
 
-
-
 print(
     f"[{MODEL_NAME}] Ré-entraînement du {TRAIN_START_DATE} au {TRAIN_END_DATE}",
     file=sys.stderr,
@@ -175,25 +163,34 @@ _ts("démarrage")
 
 # ── 2. Chargement des données ─────────────────────────────────────────────────
 #
+# Régression : prédire la teneur en alcool (target = feature "alcohol")
+# à partir des 12 autres mesures chimiques du dataset Wine.
+#
 # REMPLACEZ CE BLOC par votre propre source de données :
 #
-#   import pandas as pd
-#   df = pd.read_csv("data/training_data.csv", parse_dates=["date"])
+#   df = pd.read_csv("data/wine_data.csv", parse_dates=["date"])
 #   df = df[(df["date"] >= TRAIN_START_DATE) & (df["date"] <= TRAIN_END_DATE)]
-#   if df.empty:
-#       print(json.dumps({"error": "Aucune donnée pour cette plage"}))
-#       sys.exit(1)
-#   X = df[["sepal_length", "sepal_width", "petal_length", "petal_width"]]
-#   y = df["species"]
+#   X = df[FEATURE_NAMES]
+#   y = df["alcohol"]
 #
 # ─────────────────────────────────────────────────────────────────────────────
 
-print(f"[{MODEL_NAME}] Chargement du dataset Iris (données synthétiques)…", file=sys.stderr)
+print(f"[{MODEL_NAME}] Chargement du dataset Wine (données synthétiques)…", file=sys.stderr)
 _ts("avant chargement données")
 
-iris = load_iris()
-X_full = pd.DataFrame(iris.data, columns=iris.feature_names)
-y_full = iris.target
+wine = load_wine()
+all_feature_names = list(wine.feature_names)
+
+# Target = alcohol (index 0) — variable continue [11.0, 14.8]
+# Features = les 12 autres mesures chimiques
+TARGET_FEATURE   = "alcohol"
+FEATURE_NAMES    = [f for f in all_feature_names if f != TARGET_FEATURE]
+TARGET_IDX       = all_feature_names.index(TARGET_FEATURE)
+FEATURE_INDICES  = [i for i, f in enumerate(all_feature_names) if f != TARGET_FEATURE]
+
+df_full = pd.DataFrame(wine.data, columns=all_feature_names)
+X_full  = df_full[FEATURE_NAMES]
+y_full  = df_full[TARGET_FEATURE].values
 
 # Simulation d'un filtre temporel : taille de l'échantillon proportionnelle à la plage
 start = datetime.strptime(TRAIN_START_DATE, "%Y-%m-%d")
@@ -215,32 +212,30 @@ if n_samples < 20:
 # ── 3. Entraînement ───────────────────────────────────────────────────────────
 
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y if n_samples >= 30 else None
+    X, y, test_size=0.2, random_state=42
 )
 
 print(
-    f"[{MODEL_NAME}] Entraînement sur {len(X_train)} exemples, "
+    f"[{MODEL_NAME}] Entraînement GradientBoostingRegressor sur {len(X_train)} exemples, "
     f"évaluation sur {len(X_test)}…",
     file=sys.stderr,
 )
 
-HYPERPARAMS = {"n_estimators": 100, "random_state": 42}
-model = RandomForestClassifier(**HYPERPARAMS)
+HYPERPARAMS = {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 3, "random_state": 42}
+model = GradientBoostingRegressor(**HYPERPARAMS)
 _ts("avant fit")
 model.fit(X_train, y_train)
 _ts("après fit")
 
 # ── 4. Évaluation ─────────────────────────────────────────────────────────────
 
-y_pred    = model.predict(X_test)
-acc       = float(accuracy_score(y_test, y_pred))
-f1        = float(f1_score(y_test,        y_pred, average="weighted", zero_division=0))
-precision = float(precision_score(y_test, y_pred, average="weighted", zero_division=0))
-recall    = float(recall_score(y_test,    y_pred, average="weighted", zero_division=0))
+y_pred = model.predict(X_test)
+mae    = float(mean_absolute_error(y_test, y_pred))
+rmse   = float(np.sqrt(mean_squared_error(y_test, y_pred)))
+r2     = float(r2_score(y_test, y_pred))
 
 print(
-    f"[{MODEL_NAME}] Accuracy : {acc:.4f} | F1 : {f1:.4f}"
-    f" | Precision : {precision:.4f} | Recall : {recall:.4f}",
+    f"[{MODEL_NAME}] MAE : {mae:.4f} | RMSE : {rmse:.4f} | R² : {r2:.4f}",
     file=sys.stderr,
 )
 _ts("après évaluation")
@@ -256,17 +251,16 @@ _ts("après sauvegarde modèle")
 # ── 5b. Sauvegarde du dataset d'entraînement → MinIO + artifact MLflow ────────
 
 _dataset_minio_path = None
+_csv_local = None
 
 try:
-    # Construire le CSV (features + target)
     _df_train = X_train.copy()
-    _df_train["target"] = y_train
+    _df_train[TARGET_FEATURE] = y_train
     _csv_filename = f"{MODEL_NAME}_{TRAIN_START_DATE}_{TRAIN_END_DATE}_train.csv"
     _csv_local = os.path.join(os.path.dirname(OUTPUT_MODEL_PATH), _csv_filename)
     _df_train.to_csv(_csv_local, index=False)
     print(f"[{MODEL_NAME}] Dataset CSV créé ({len(_df_train)} lignes) → {_csv_local}", file=sys.stderr)
 
-    # Upload vers MinIO via boto3 (S3-compatible)
     _minio_endpoint_url = os.environ.get("MLFLOW_S3_ENDPOINT_URL", "")
     _aws_key    = os.environ.get("AWS_ACCESS_KEY_ID", "")
     _aws_secret = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
@@ -294,8 +288,6 @@ _ts("après sauvegarde dataset")
 
 # ── 6. Statistiques pour MLflow et détection de drift ─────────────────────────
 
-feature_names = list(iris.feature_names)
-
 feature_stats = {
     name: {
         "mean":      round(float(X_train[name].mean()), 4),
@@ -304,13 +296,14 @@ feature_stats = {
         "max":       round(float(X_train[name].max()),  4),
         "null_rate": 0.0,
     }
-    for name in feature_names
+    for name in FEATURE_NAMES
 }
 
-total_train = len(y_train)
-label_distribution = {
-    iris.target_names[int(cls)]: round(float(np.sum(y_train == cls)) / total_train, 4)
-    for cls in np.unique(y_train)
+target_stats = {
+    "mean": round(float(y_train.mean()), 4),
+    "std":  round(float(y_train.std()),  4),
+    "min":  round(float(y_train.min()),  4),
+    "max":  round(float(y_train.max()),  4),
 }
 
 # ── 7. Logging MLflow (dégradation gracieuse si MLflow indisponible) ──────────
@@ -331,12 +324,14 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
         with mlflow.start_run(run_name=run_name) as run:
             _ts("MLflow — start_run OK")
 
-            # Params — un seul appel réseau
             _ts("MLflow — log_params (appel réseau #3)")
             mlflow.log_params({
-                "algorithm":        "RandomForest",
+                "algorithm":        "GradientBoostingRegressor",
                 "n_estimators":     HYPERPARAMS["n_estimators"],
+                "learning_rate":    HYPERPARAMS["learning_rate"],
+                "max_depth":        HYPERPARAMS["max_depth"],
                 "random_state":     HYPERPARAMS["random_state"],
+                "target":           TARGET_FEATURE,
                 "train_start_date": TRAIN_START_DATE,
                 "train_end_date":   TRAIN_END_DATE,
                 "n_samples_total":  n_samples,
@@ -344,42 +339,39 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
             })
             _ts("MLflow — log_params OK")
 
-            # Toutes les métriques en un seul appel (au lieu de N appels individuels)
             all_metrics: dict[str, float] = {
-                "accuracy":     acc,
-                "f1_score":     f1,
+                "mae":          mae,
+                "rmse":         rmse,
+                "r2":           r2,
                 "n_rows_train": float(len(X_train)),
                 "n_rows_test":  float(len(X_test)),
+                "target_mean":  target_stats["mean"],
+                "target_std":   target_stats["std"],
             }
             for feat_name, stats in feature_stats.items():
-                safe = feat_name.replace(" ", "_").replace("(", "").replace(")", "")[:40]
+                safe = feat_name.replace(" ", "_").replace("/", "_")[:40]
                 for stat_key, val in stats.items():
                     all_metrics[f"feat_{safe}_{stat_key}"] = float(val)
-            for label, ratio in label_distribution.items():
-                all_metrics[f"label_{label}_ratio"] = float(ratio)
 
             _ts(f"MLflow — log_metrics x{len(all_metrics)} (appel réseau #4)")
             mlflow.log_metrics(all_metrics)
             _ts("MLflow — log_metrics OK")
 
-            # Tags — un seul appel réseau
             _ts("MLflow — set_tags (appel réseau #5)")
             mlflow.set_tags({
-                "model_name":  MODEL_NAME,
-                "algorithm":   "RandomForest",
-                "trigger":     "script",
-                "n_features":  str(len(feature_names)),
-                "n_classes":   str(len(iris.target_names)),
+                "model_name":   MODEL_NAME,
+                "algorithm":    "GradientBoostingRegressor",
+                "task":         "regression",
+                "target":       TARGET_FEATURE,
+                "trigger":      "script",
+                "n_features":   str(len(FEATURE_NAMES)),
             })
             _ts("MLflow — set_tags OK")
 
-            # Artifact — modèle sklearn (dégradation gracieuse si MinIO inaccessible)
-            # Signature explicite : inputs float64 + outputs proba float (évite le warning
-            # "integer column" causé par predict() qui retourne des classes entières)
             _X_example = X_test.astype("float64")
             _signature = mlflow.models.infer_signature(
                 _X_example,
-                model.predict_proba(_X_example),
+                model.predict(_X_example),
             )
             _ts("MLflow — log_model début (appel réseau #6 — MinIO)")
             try:
@@ -394,8 +386,7 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
                 _ts("MLflow — log_model ÉCHEC")
                 print(f"[{MODEL_NAME}] Artifact ignoré (MinIO inaccessible) : {art_exc}", file=sys.stderr)
 
-            # Artifact — dataset d'entraînement (dégradation gracieuse)
-            if _dataset_minio_path and os.path.exists(_csv_local):
+            if _dataset_minio_path and _csv_local and os.path.exists(_csv_local):
                 try:
                     _ts("MLflow — log_artifact dataset (appel réseau #7 — MinIO)")
                     mlflow.log_artifact(_csv_local, artifact_path="dataset")
@@ -419,25 +410,22 @@ else:
     print(f"[{MODEL_NAME}] MLflow ignoré ({reason}).", file=sys.stderr)
 
 # ── 8. JSON stdout — DERNIÈRE LIGNE (lue par l'API — ne rien ajouter après) ───
+#
+# Pour un modèle de régression :
+#   "accuracy" = R² (seul champ numérique affiché par défaut dans le dashboard)
+#   "mae", "rmse", "r2" sont stockés dans training_metrics
+#   Pas de "classes" ni de "confidence_threshold" (non applicables à la régression)
 
 output = {
-    "accuracy":           round(acc, 4),
-    "f1_score":           round(f1, 4),
-    "precision":          round(precision, 4),
-    "recall":             round(recall, 4),
-    "n_rows":             len(X_train),
-    "features_count":     len(iris.feature_names),
-    "classes":            list(iris.target_names),
-    "training_dataset":   _dataset_minio_path or "scikit-learn Iris dataset (Fisher, 1936) - 150 observations, 3 classes",
-    # confidence_threshold : si la probabilité max prédite par le modèle est inférieure
-    # à ce seuil, l'API marque la prédiction avec low_confidence=True.
-    # Cela permet aux appelants de traiter différemment les prédictions incertaines
-    # (ex : routing vers un humain, refus de la prédiction, alerte monitoring).
-    # 0.60 est un point de départ raisonnable pour Iris : le modèle est très calibré
-    # sur ce dataset, donc les cas sous 60 % de confiance sont de vrais cas limites.
-    "confidence_threshold": 0.60,
-    "feature_stats":      feature_stats,
-    "label_distribution": label_distribution,
+    "accuracy":          round(r2, 4),   # R² comme proxy de l'accuracy pour l'affichage
+    "mae":               round(mae, 4),
+    "rmse":              round(rmse, 4),
+    "r2":                round(r2, 4),
+    "n_rows":            len(X_train),
+    "features_count":    len(FEATURE_NAMES),
+    "training_dataset":  _dataset_minio_path or "scikit-learn Wine dataset (UCI) - 178 observations, cible : teneur en alcool",
+    "feature_stats":     feature_stats,
+    "target_stats":      target_stats,
 }
 if mlflow_run_id:
     output["mlflow_run_id"] = mlflow_run_id

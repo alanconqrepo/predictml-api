@@ -331,10 +331,10 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 1G
+          memory: 2G
         reservations:
           cpus: "0.25"
-          memory: 256M
+          memory: 512M
     env_file:
       - .env
     environment:
@@ -352,6 +352,7 @@ services:
       - REDIS_SENTINEL_HOSTS=redis-sentinel-1:${REDIS_SENTINEL_PORT:-26379},redis-sentinel-2:${REDIS_SENTINEL_PORT:-26379},redis-sentinel-3:${REDIS_SENTINEL_PORT:-26379}
       - REDIS_CACHE_TTL=${REDIS_CACHE_TTL:-3600}
       - PREDICTION_STREAM_ENABLED=true
+      - PYTHONDONTWRITEBYTECODE=1
       - METRICS_TOKEN=${METRICS_TOKEN:-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}

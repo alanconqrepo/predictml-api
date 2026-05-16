@@ -1051,7 +1051,7 @@ class DBService:
         cutoff = _utcnow() - timedelta(days=days)
 
         if _pg(db):
-            sql = text("""
+            _base_sql = """
                 SELECT
                     model_name,
                     COUNT(*)                                                       AS total_predictions,
@@ -1066,11 +1066,13 @@ class DBService:
                                   AND response_time_ms IS NOT NULL)                AS p95_response_time_ms
                 FROM predictions
                 WHERE timestamp >= :cutoff
-                  AND (:model_name IS NULL OR model_name = :model_name)
-                GROUP BY model_name
-                ORDER BY model_name
-            """)
-            result = await db.execute(sql, {"cutoff": cutoff, "model_name": model_name})
+            """
+            if model_name:
+                sql = text(_base_sql + " AND model_name = :model_name GROUP BY model_name ORDER BY model_name")
+                result = await db.execute(sql, {"cutoff": cutoff, "model_name": model_name})
+            else:
+                sql = text(_base_sql + " GROUP BY model_name ORDER BY model_name")
+                result = await db.execute(sql, {"cutoff": cutoff})
             rows = result.all()
             stats = []
             for row in rows:

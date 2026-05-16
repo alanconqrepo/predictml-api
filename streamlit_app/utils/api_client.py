@@ -194,6 +194,15 @@ class APIClient:
         r.raise_for_status()
         return r.content
 
+    def download_training_dataset(self, name: str, version: str) -> bytes:
+        r = requests.get(
+            f"{self.base_url}/models/{name}/{version}/download-dataset",
+            headers=self._headers(),
+            timeout=60,
+        )
+        r.raise_for_status()
+        return r.content
+
     def update_model(self, name: str, version: str, data: dict) -> dict:
         r = self._patch(f"/models/{name}/{version}", json=data)
         r.raise_for_status()

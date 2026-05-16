@@ -53,9 +53,20 @@ _SAFE_ENV_KEYS = {
 
 
 def _set_subprocess_limits() -> None:
-    """Appelé dans le processus enfant après fork — réduit la surface d'attaque."""
-    resource.setrlimit(resource.RLIMIT_AS, (2 * 1024**3, 2 * 1024**3))  # 2 Go RAM
-    resource.setrlimit(resource.RLIMIT_NOFILE, (50, 50))  # 50 descripteurs de fichiers
+    """Appelé dans le processus enfant après fork — réduit la surface d'attaque.
+
+    RLIMIT_AS : on ne limite pas la mémoire virtuelle — mlflow + numpy + sklearn + boto3
+    nécessitent plus de 2 GB d'espace d'adressage virtuel (shared libs + compilations regex
+    de email._header_value_parser en Python 3.13). Un plafond trop bas provoque MemoryError
+    à l'import, bien avant que le script d'entraînement lui-même s'exécute.
+    La protection mémoire est assurée par les cgroups Docker du container.
+
+    RLIMIT_NOFILE : 1024 minimum requis — importlib_metadata ouvre les métadonnées de
+    tous les paquets installés à l'import de mlflow (200+ fd simultanément).
+    """
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    _fd_limit = min(1024, _hard)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (_fd_limit, _fd_limit))
 
 
 def _compute_next_run_at(cron: str) -> Optional[datetime]:
