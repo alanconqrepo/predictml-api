@@ -2,14 +2,19 @@
 seed_sample_data.py — Seed des données exemples au premier démarrage.
 
 Idempotent : vérifie si iris-classifier v1.0.0 existe déjà avant d'agir.
-Lance les scripts de la documentation dans l'ordre :
-  1. iris/upload_iris_model.py                    (RandomForest — mis en production)
-  2. iris/upload_iris_model_GradientBoosting.py   (GradientBoosting — non en prod)
-  3. wine/upload_wine_model.py                    (GradientBoostingRegressor — mis en production)
-  4. iris/send_predictions_iris.py                (exemples de prédictions iris)
-  5. iris/send_ground_truth_iris.py               (ground truth iris)
-  6. wine/send_predictions_wine.py                (exemples de prédictions wine)
-  7. wine/send_ground_truth_wine.py               (ground truth wine)
+
+Schéma de déploiement après le seed :
+  iris-classifier
+    v1.0.0  RandomForestClassifier    → production + ab_test
+    v1.1.0  GradientBoostingClassifier → production + ab_test
+    v1.2.0  ExtraTreesClassifier       → shadow
+    v1.3.0  LogisticRegression         → uploadé uniquement
+
+  wine-regressor
+    v1.0.0  GradientBoostingRegressor → production + ab_test
+    v1.1.0  RandomForestRegressor     → production + ab_test
+    v1.2.0  ExtraTreesRegressor       → shadow
+    v1.3.0  Ridge (Pipeline)          → uploadé uniquement
 
 Variables d'environnement :
   API_URL    URL de l'API interne  (défaut : http://api:8000)
@@ -32,14 +37,44 @@ if not API_TOKEN:
 
 SCRIPTS_DIR = Path(__file__).parent.parent / "documentation" / "Scripts"
 
+# Ordre d'exécution :
+#  1. Modèles iris (v1.0.0 → v1.3.0)
+#  2. Modèles wine (v1.0.0 → v1.3.0)
+#  3. Prédictions et ground truth pour les deux datasets
 SCRIPTS = [
-    ("iris/upload_iris_model.py",                  {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.0.0"}),
-    ("iris/upload_iris_model_GradientBoosting.py", {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.1.0"}),
-    ("wine/upload_wine_model.py",                  {"MODEL_NAME": "wine-regressor",  "MODEL_VERSION": "1.0.0"}),
-    ("iris/send_predictions_iris.py",              {"MODEL_NAME": "iris-classifier"}),
-    ("iris/send_ground_truth_iris.py",             {"MODEL_NAME": "iris-classifier"}),
-    ("wine/send_predictions_wine.py",              {"MODEL_NAME": "wine-regressor"}),
-    ("wine/send_ground_truth_wine.py",             {"MODEL_NAME": "wine-regressor"}),
+    # ── iris-classifier ──────────────────────────────────────────────────────
+    # v1.0.0 : RandomForest — production + ab_test
+    ("iris/upload_iris_model.py",
+     {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.0.0"}),
+    # v1.1.0 : GradientBoosting — production + ab_test
+    ("iris/upload_iris_model_GradientBoosting.py",
+     {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.1.0"}),
+    # v1.2.0 : ExtraTrees — shadow
+    ("iris/upload_iris_ExtraTrees_shadow.py",
+     {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.2.0"}),
+    # v1.3.0 : LogisticRegression — uploadé uniquement
+    ("iris/upload_iris_LogisticRegression_uploaded.py",
+     {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.3.0"}),
+
+    # ── wine-regressor ───────────────────────────────────────────────────────
+    # v1.0.0 : GradientBoostingRegressor — production + ab_test
+    ("wine/upload_wine_model.py",
+     {"MODEL_NAME": "wine-regressor", "MODEL_VERSION": "1.0.0"}),
+    # v1.1.0 : RandomForestRegressor — production + ab_test
+    ("wine/upload_wine_RandomForest_abtest.py",
+     {"MODEL_NAME": "wine-regressor", "MODEL_VERSION": "1.1.0"}),
+    # v1.2.0 : ExtraTreesRegressor — shadow
+    ("wine/upload_wine_ExtraTrees_shadow.py",
+     {"MODEL_NAME": "wine-regressor", "MODEL_VERSION": "1.2.0"}),
+    # v1.3.0 : Ridge — uploadé uniquement
+    ("wine/upload_wine_Ridge_uploaded.py",
+     {"MODEL_NAME": "wine-regressor", "MODEL_VERSION": "1.3.0"}),
+
+    # ── Prédictions et ground truth ──────────────────────────────────────────
+    ("iris/send_predictions_iris.py",  {"MODEL_NAME": "iris-classifier"}),
+    ("iris/send_ground_truth_iris.py", {"MODEL_NAME": "iris-classifier"}),
+    ("wine/send_predictions_wine.py",  {"MODEL_NAME": "wine-regressor"}),
+    ("wine/send_ground_truth_wine.py", {"MODEL_NAME": "wine-regressor"}),
 ]
 
 
@@ -103,6 +138,15 @@ def main():
         sys.exit(0)
 
     print("\n  Données exemples absentes — lancement du seed…\n")
+    print("  Schéma cible :")
+    print("    iris-classifier v1.0.0 RandomForest        → production + ab_test")
+    print("    iris-classifier v1.1.0 GradientBoosting    → production + ab_test")
+    print("    iris-classifier v1.2.0 ExtraTrees          → shadow")
+    print("    iris-classifier v1.3.0 LogisticRegression  → uploadé")
+    print("    wine-regressor  v1.0.0 GradientBoosting    → production + ab_test")
+    print("    wine-regressor  v1.1.0 RandomForest        → production + ab_test")
+    print("    wine-regressor  v1.2.0 ExtraTrees          → shadow")
+    print("    wine-regressor  v1.3.0 Ridge               → uploadé")
 
     for script_path_rel, extra_env in SCRIPTS:
         ok = run_script(script_path_rel, extra_env)
