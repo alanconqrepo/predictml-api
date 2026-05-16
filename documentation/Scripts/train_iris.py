@@ -61,6 +61,13 @@ try:
 except ImportError:
     _MLFLOW_AVAILABLE = False
 
+try:
+    import boto3
+    from botocore.config import Config as BotocoreConfig
+    _BOTO3_AVAILABLE = True
+except ImportError:
+    _BOTO3_AVAILABLE = False
+
 DEBUG = True
 
 # Forcer UTF-8 sur Windows pour éviter le crash charmap sur les emojis MLflow (ex: 🏃)
@@ -246,6 +253,45 @@ with open(OUTPUT_MODEL_PATH, "wb") as fh:
 print(f"[{MODEL_NAME}] Modèle sauvegardé → {OUTPUT_MODEL_PATH}", file=sys.stderr)
 _ts("après sauvegarde modèle")
 
+# ── 5b. Sauvegarde du dataset d'entraînement → MinIO + artifact MLflow ────────
+
+_dataset_minio_path = None
+
+try:
+    # Construire le CSV (features + target)
+    _df_train = X_train.copy()
+    _df_train["target"] = y_train
+    _csv_filename = f"{MODEL_NAME}_{TRAIN_START_DATE}_{TRAIN_END_DATE}_train.csv"
+    _csv_local = os.path.join(os.path.dirname(OUTPUT_MODEL_PATH), _csv_filename)
+    _df_train.to_csv(_csv_local, index=False)
+    print(f"[{MODEL_NAME}] Dataset CSV créé ({len(_df_train)} lignes) → {_csv_local}", file=sys.stderr)
+
+    # Upload vers MinIO via boto3 (S3-compatible)
+    _minio_endpoint_url = os.environ.get("MLFLOW_S3_ENDPOINT_URL", "")
+    _aws_key    = os.environ.get("AWS_ACCESS_KEY_ID", "")
+    _aws_secret = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+    _bucket     = os.environ.get("MINIO_BUCKET", "models")
+
+    if _BOTO3_AVAILABLE and _minio_endpoint_url and _aws_key:
+        _s3 = boto3.client(
+            "s3",
+            endpoint_url=_minio_endpoint_url,
+            aws_access_key_id=_aws_key,
+            aws_secret_access_key=_aws_secret,
+            config=BotocoreConfig(signature_version="s3v4"),
+        )
+        _object_key = f"{MODEL_NAME}/datasets/{_csv_filename}"
+        _s3.upload_file(_csv_local, _bucket, _object_key)
+        _dataset_minio_path = _object_key
+        print(f"[{MODEL_NAME}] Dataset uploadé dans MinIO → {_bucket}/{_object_key}", file=sys.stderr)
+    else:
+        print(f"[{MODEL_NAME}] Dataset non uploadé dans MinIO (boto3={'ok' if _BOTO3_AVAILABLE else 'absent'}, endpoint='{_minio_endpoint_url}')", file=sys.stderr)
+
+except Exception as _ds_exc:
+    print(f"[{MODEL_NAME}] Sauvegarde dataset ignorée : {_ds_exc}", file=sys.stderr)
+
+_ts("après sauvegarde dataset")
+
 # ── 6. Statistiques pour MLflow et détection de drift ─────────────────────────
 
 feature_names = list(iris.feature_names)
@@ -348,6 +394,16 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
                 _ts("MLflow — log_model ÉCHEC")
                 print(f"[{MODEL_NAME}] Artifact ignoré (MinIO inaccessible) : {art_exc}", file=sys.stderr)
 
+            # Artifact — dataset d'entraînement (dégradation gracieuse)
+            if _dataset_minio_path and os.path.exists(_csv_local):
+                try:
+                    _ts("MLflow — log_artifact dataset (appel réseau #7 — MinIO)")
+                    mlflow.log_artifact(_csv_local, artifact_path="dataset")
+                    _ts("MLflow — log_artifact dataset OK")
+                    print(f"[{MODEL_NAME}] Dataset loggué comme artifact MLflow.", file=sys.stderr)
+                except Exception as _art_ds_exc:
+                    print(f"[{MODEL_NAME}] Artifact dataset ignoré : {_art_ds_exc}", file=sys.stderr)
+
             mlflow_run_id = run.info.run_id
 
         _ts("MLflow — run fermé")
@@ -372,7 +428,7 @@ output = {
     "n_rows":             len(X_train),
     "features_count":     len(iris.feature_names),
     "classes":            list(iris.target_names),
-    "training_dataset":   "scikit-learn Iris dataset (Fisher, 1936) - 150 observations, 3 classes",
+    "training_dataset":   _dataset_minio_path or "scikit-learn Iris dataset (Fisher, 1936) - 150 observations, 3 classes",
     # confidence_threshold : si la probabilité max prédite par le modèle est inférieure
     # à ce seuil, l'API marque la prédiction avec low_confidence=True.
     # Cela permet aux appelants de traiter différemment les prédictions incertaines

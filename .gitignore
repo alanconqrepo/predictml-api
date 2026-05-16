@@ -56,3 +56,6 @@ htmlcov/
 .claude/
 =2.20.0
 mlruns/
+
+
+*.csv

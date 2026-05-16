@@ -3,10 +3,11 @@ seed_sample_data.py — Seed des données exemples au premier démarrage.
 
 Idempotent : vérifie si iris-classifier v1.0.0 existe déjà avant d'agir.
 Lance les scripts de la documentation dans l'ordre :
-  1. upload_iris_model.py          (RandomForest — mis en production)
-  2. upload_iris_model_GradientBoosting.py (GradientBoosting — non en prod)
-  3. send_predictions_iris.py      (exemples de prédictions)
-  4. send_ground_truth_iris.py     (ground truth / résultats observés)
+  1. upload_iris_model.py                    (RandomForest — mis en production)
+  2. upload_iris_model_GradientBoosting.py   (GradientBoosting — non en prod)
+  3. upload_wine_model.py                    (GradientBoostingRegressor — mis en production)
+  4. send_predictions_iris.py                (exemples de prédictions)
+  5. send_ground_truth_iris.py               (ground truth / résultats observés)
 
 Variables d'environnement :
   API_URL    URL de l'API interne  (défaut : http://api:8000)
@@ -30,10 +31,11 @@ if not API_TOKEN:
 SCRIPTS_DIR = Path(__file__).parent.parent / "documentation" / "Scripts"
 
 SCRIPTS = [
-    ("upload_iris_model.py",                {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.0.0"}),
-    ("upload_iris_model_GradientBoosting.py", {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.2.0"}),
-    ("send_predictions_iris.py",            {"MODEL_NAME": "iris-classifier"}),
-    ("send_ground_truth_iris.py",           {"MODEL_NAME": "iris-classifier"}),
+    ("upload_iris_model.py",                  {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.0.0"}),
+    ("upload_iris_model_GradientBoosting.py", {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.1.0"}),
+    ("upload_wine_model.py",                  {"MODEL_NAME": "wine-regressor",  "MODEL_VERSION": "1.0.0"}),
+    ("send_predictions_iris.py",              {"MODEL_NAME": "iris-classifier"}),
+    ("send_ground_truth_iris.py",             {"MODEL_NAME": "iris-classifier"}),
 ]
 
 

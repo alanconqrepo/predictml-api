@@ -4,7 +4,7 @@ upload_iris_model_GradientBoosting.py — Entraîne et uploade un modèle Iris (
 
 Ce script tourne LOCALEMENT. Il :
   1. Exécute train_iris_GradientBoosting.py en subprocess pour produire le .pkl
-  2. Uploade le .pkl + train_iris_GradientBoosting.py via POST /models (version 1.2.0)
+  2. Uploade le .pkl + train_iris_GradientBoosting.py via POST /models (version 1.1.0)
   3. Ajoute le tag "Example" — le modèle n'est PAS mis en production
 
 Usage :
@@ -14,7 +14,7 @@ Variables d'environnement :
   API_URL        URL de l'API          (défaut : http://localhost:8000)
   API_TOKEN      Token Bearer — requis
   MODEL_NAME     Nom du modèle         (défaut : iris-classifier)
-  MODEL_VERSION  Version               (défaut : 1.2.0)
+  MODEL_VERSION  Version               (défaut : 1.1.0)
   TRAIN_START    Date début training   (défaut : 2024-01-01)
   TRAIN_END      Date fin training     (défaut : 2024-12-31)
 
@@ -38,7 +38,7 @@ API_URL   = os.environ.get("API_URL",   "http://localhost:80")
 API_TOKEN = os.environ.get("API_TOKEN", os.environ.get("ADMIN_TOKEN", ""))
 
 MODEL_NAME    = os.environ.get("MODEL_NAME",    "iris-classifier")
-MODEL_VERSION = os.environ.get("MODEL_VERSION", "1.2.0")
+MODEL_VERSION = os.environ.get("MODEL_VERSION", "1.1.0")
 DESCRIPTION   = "GradientBoostingClassifier entraîné sur le dataset Iris (exemple)"
 ALGORITHM     = "GradientBoosting"
 
@@ -53,6 +53,7 @@ MINIO_ENDPOINT   = os.environ.get("MLFLOW_S3_ENDPOINT_URL",
                        f"http://localhost:{os.environ.get('MINIO_PORT', '9010')}")
 MINIO_ACCESS_KEY = os.environ.get("AWS_ACCESS_KEY_ID",     os.environ.get("MINIO_ROOT_USER", ""))
 MINIO_SECRET_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", os.environ.get("MINIO_ROOT_PASSWORD", ""))
+MINIO_BUCKET     = os.environ.get("MINIO_BUCKET", "models")
 
 SCRIPT_DIR        = os.path.dirname(os.path.abspath(__file__))
 TRAIN_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "train_iris_GradientBoosting.py")
@@ -92,12 +93,14 @@ train_env = {
     "TRAIN_START_DATE":          TRAIN_START,
     "TRAIN_END_DATE":            TRAIN_END,
     "OUTPUT_MODEL_PATH":         tmp_pkl.name,
+    "MODEL_NAME":                MODEL_NAME,
     "MLFLOW_TRACKING_URI":       MLFLOW_TRACKING_URI,
     "MLFLOW_TRACKING_USERNAME":  MLFLOW_TRACKING_USERNAME,
     "MLFLOW_TRACKING_PASSWORD":  MLFLOW_TRACKING_PASSWORD,
     "MLFLOW_S3_ENDPOINT_URL":    MINIO_ENDPOINT,
     "AWS_ACCESS_KEY_ID":         MINIO_ACCESS_KEY,
     "AWS_SECRET_ACCESS_KEY":     MINIO_SECRET_KEY,
+    "MINIO_BUCKET":              MINIO_BUCKET,
     "PYTHONIOENCODING":          "utf-8",
 }
 
@@ -183,13 +186,16 @@ print(f"   Version   : {res.get('version')}")
 print(f"   ID        : {res.get('id')}")
 print(f"   Algorithme: {ALGORITHM}")
 
-# ── 5. Ajout du tag "Example" + feature_baseline (sans mise en production) ────
+# ── 5. Ajout du tag "Example", feature_baseline et training_dataset ────────────
+#      Le modèle n'est PAS mis en production (is_production reste false)
 
-print(f"⏳  Ajout du tag 'Example' et baseline des features…")
+print(f"⏳  Ajout du tag 'Example', baseline des features et dataset de lineage…")
 
-patch_body = {"tags": ["Example"]}
+patch_body: dict = {"tags": ["Example"]}
 if metrics.get("feature_stats"):
     patch_body["feature_baseline"] = metrics["feature_stats"]
+if metrics.get("training_dataset"):
+    patch_body["training_dataset"] = metrics["training_dataset"]
 
 patch = requests.patch(
     f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
@@ -199,8 +205,12 @@ patch = requests.patch(
 )
 
 if patch.status_code == 200:
-    baseline_ok = "feature_baseline" in patch_body
-    print(f"✅  Tag 'Example' ajouté{' avec baseline des features' if baseline_ok else ''}"
+    extras = []
+    if "feature_baseline" in patch_body:
+        extras.append("baseline des features")
+    if "training_dataset" in patch_body:
+        extras.append(f"dataset → {patch_body['training_dataset']}")
+    print(f"✅  Tag 'Example' ajouté{(' avec ' + ', '.join(extras)) if extras else ''}"
           f" (modèle non mis en production).")
 else:
     print(f"⚠️   PATCH échoué ({patch.status_code}) : {patch.text[:200]}")
