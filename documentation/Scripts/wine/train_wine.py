@@ -36,6 +36,13 @@ MODULES AUTORISÉS par le sandbox PredictML
 -------------------------------------------
   os, sys, json, pickle, datetime, dotenv, numpy, pandas, sklearn, mlflow, boto3
   (subprocess, requests, socket, urllib sont bloqués)
+
+CAPTURE AUTOMATIQUE DES VERSIONS DE LIBRAIRIES
+-----------------------------------------------
+  L'API génère automatiquement un requirements.txt à partir des imports de ce script.
+  Il est stocké dans MinIO  : {model_name}/v{version}_requirements.txt
+  Et loggué comme artefact  : MLflow > environment/requirements.txt
+  Aucune action requise dans le script — tout se fait côté serveur à l'upload et au retrain.
 """
 
 import json
@@ -415,7 +422,18 @@ else:
     reason = "mlflow non installé" if not _MLFLOW_AVAILABLE else "MLFLOW_TRACKING_URI non défini"
     print(f"[{MODEL_NAME}] MLflow ignoré ({reason}).", file=sys.stderr)
 
-# ── 8. JSON stdout — DERNIÈRE LIGNE (lue par l'API — ne rien ajouter après) ───
+# ── 8. Capture des versions de librairies (lues par l'API pour générer requirements.txt) ──
+
+import importlib.metadata as _imeta  # noqa: E402
+
+_deps: dict = {}
+for _pkg in ["scikit-learn", "numpy", "pandas", "mlflow", "python-dotenv", "boto3", "botocore"]:
+    try:
+        _deps[_pkg] = _imeta.version(_pkg)
+    except _imeta.PackageNotFoundError:
+        pass
+
+# ── 9. JSON stdout — DERNIÈRE LIGNE (lue par l'API — ne rien ajouter après) ───
 #
 # Pour un modèle de régression :
 #   "accuracy" = R² (seul champ numérique affiché par défaut dans le dashboard)
@@ -433,6 +451,7 @@ output = {
     "feature_stats":     feature_stats,
     "target_stats":      target_stats,
     "hyperparameters":   HYPERPARAMS,
+    "dependencies":      _deps,
 }
 if mlflow_run_id:
     output["mlflow_run_id"] = mlflow_run_id

@@ -54,7 +54,7 @@ La **dernière ligne JSON** de stdout est parsée par l'API pour mettre à jour 
 {"accuracy": 0.95, "f1_score": 0.94}
 ```
 
-### Champs optionnels (enrichissent MLflow)
+### Champs optionnels (enrichissent MLflow + requirements.txt)
 ```json
 {
     "accuracy": 0.95,
@@ -65,9 +65,17 @@ La **dernière ligne JSON** de stdout est parsée par l'API pour mettre à jour 
     },
     "label_distribution": {
         "setosa": 0.33, "versicolor": 0.34, "virginica": 0.33
+    },
+    "dependencies": {
+        "scikit-learn": "1.6.1",
+        "numpy": "2.2.5",
+        "pandas": "2.3.3"
     }
 }
 ```
+
+> **`dependencies`** : utilisé par l'API pour générer le `requirements.txt` stocké dans MinIO
+> et loggué comme artefact MLflow. Si absent, l'API analyse statiquement les imports du script.
 
 > **Important** : Ne mettez rien après ce `print()`. La progression doit aller sur `stderr`.
 
@@ -402,6 +410,86 @@ L'API vérifie automatiquement que votre `train.py` :
 - Contient un appel `pickle.dump`, `joblib.dump` ou `save_model`
 
 Si la validation échoue, l'upload est rejeté avec un message d'erreur détaillé.
+
+---
+
+## Snapshot automatique des versions de librairies
+
+À chaque upload d'un modèle avec `train_file` et à chaque ré-entraînement (manuel ou planifié),
+l'API génère un `requirements.txt` reproductible à partir des versions **réellement utilisées**
+par le script dans l'environnement d'exécution (container Docker).
+
+### Comment ça marche
+
+**À l'upload** : l'API lance votre `train.py` en subprocess (timeout 120 s) avec des dates par
+défaut (J-30 → aujourd'hui). Le script output ses propres dépendances dans le champ `dependencies`
+du JSON stdout. L'API lit ce champ et génère le `requirements.txt`.
+
+**Au ré-entraînement** : le script tourne normalement. Si son stdout contient `"dependencies"`,
+ces versions sont utilisées. Sinon, fallback sur l'analyse statique des imports + `importlib.metadata`.
+
+> Si le script échoue à l'upload (données de prod non disponibles, timeout…), l'API se rabat
+> automatiquement sur l'analyse statique. L'upload n'est jamais bloqué.
+
+### Ce que le script doit outputter
+
+Ajoutez le bloc suivant dans votre script (autorisé depuis la liste blanche `importlib`) :
+
+```python
+import importlib.metadata as _imeta
+
+_deps = {}
+for _pkg in ["scikit-learn", "numpy", "pandas", "mlflow"]:  # listez vos packages
+    try:
+        _deps[_pkg] = _imeta.version(_pkg)
+    except _imeta.PackageNotFoundError:
+        pass
+```
+
+Et incluez `"dependencies": _deps` dans le JSON stdout final.
+
+Exemple — pour un script utilisant `numpy`, `pandas`, `sklearn` :
+
+```
+numpy==2.2.5
+pandas==2.2.3
+scikit-learn==1.6.1
+```
+
+### Où trouver le requirements.txt
+
+| Emplacement | Chemin |
+|---|---|
+| **MinIO** | `{model_name}/v{version}_requirements.txt` |
+| **MLflow** | Artefact `environment/requirements.txt` dans le run de ré-entraînement |
+| **API** | Champ `requirements_object_key` dans la réponse de `POST /models` et `GET /models` |
+
+### Récupérer le requirements.txt
+
+Via la console MinIO (http://localhost:9001) : naviguez dans le bucket et ouvrez le fichier.
+
+Via l'API MinIO (Python) :
+
+```python
+from minio import Minio
+
+client = Minio("localhost:9000", access_key="minioadmin", secret_key="minioadmin", secure=False)
+data = client.get_object("predictml-models", "mon_modele/v1.0.0_requirements.txt")
+print(data.read().decode())
+```
+
+Via MLflow UI (http://localhost:5000) : ouvrez le run de ré-entraînement → onglet Artifacts →
+dossier `environment/` → `requirements.txt`.
+
+### Implémentation (pour les contributeurs)
+
+| Élément | Fichier | Symbole |
+|---|---|---|
+| Extraction des imports + résolution des versions | `src/services/env_snapshot_service.py` | `generate_requirements_txt()` |
+| Upload à l'upload initial | `src/api/models.py` | POST /models, après upload train.py |
+| Upload au ré-entraînement manuel | `src/api/models.py` | step 8b dans endpoint retrain |
+| Upload au ré-entraînement planifié | `src/tasks/retrain_scheduler.py` | step 6 dans `_do_retrain()` |
+| Artifact MLflow | `src/services/mlflow_service.py` | `log_retrain_run()`, param `requirements_txt` |
 
 ---
 

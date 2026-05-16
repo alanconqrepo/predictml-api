@@ -69,6 +69,7 @@ class ModelMetadata(Base):
 
     # Script de ré-entraînement
     train_script_object_key = Column(String(255), nullable=True)  # Chemin MinIO vers train.py
+    requirements_object_key = Column(String(255), nullable=True)  # Chemin MinIO vers requirements.txt
 
     # Politique d'auto-promotion post-retrain
     promotion_policy = Column(JSON, nullable=True)

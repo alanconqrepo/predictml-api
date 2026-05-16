@@ -146,11 +146,24 @@ with open(OUTPUT_MODEL_PATH, "wb") as f:
 print(f"[train.py] Modèle sauvegardé : {OUTPUT_MODEL_PATH}", file=sys.stderr)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 6. Métriques sur stdout (dernière ligne JSON — lue par l'API pour MLflow + DB)
+# 6. Capture des versions de librairies (lues par l'API pour requirements.txt)
+# ──────────────────────────────────────────────────────────────────────────────
+import importlib.metadata as _imeta  # noqa: E402
+
+_deps: dict = {}
+for _pkg in ["scikit-learn", "numpy", "pandas", "mlflow", "python-dotenv"]:
+    try:
+        _deps[_pkg] = _imeta.version(_pkg)
+    except _imeta.PackageNotFoundError:
+        pass
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 7. Métriques sur stdout (dernière ligne JSON — lue par l'API pour MLflow + DB)
 # ──────────────────────────────────────────────────────────────────────────────
 # L'API crée automatiquement un run MLflow avec toutes les clés ci-dessous.
 # accuracy et f1_score sont obligatoires. n_rows, feature_stats et
 # label_distribution sont optionnels mais enrichissent le run MLflow.
+# dependencies est capturé automatiquement par l'API pour générer requirements.txt.
 # Ne mettez RIEN après ce print.
 
 feature_stats = {
@@ -180,6 +193,7 @@ print(
             "n_rows": len(X_train),
             "feature_stats": feature_stats,
             "label_distribution": label_distribution,
+            "dependencies": _deps,
         }
     )
 )
