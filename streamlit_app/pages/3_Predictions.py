@@ -237,6 +237,7 @@ with tab_history:
                 rows.append(
                     {
                         "ID": p.get("id"),
+                        "id_obs": id_obs_val or "—",
                         "Timestamp": (
                             pd.to_datetime(p.get("timestamp")).strftime("%Y-%m-%d %H:%M:%S")
                             if p.get("timestamp")
@@ -244,7 +245,6 @@ with tab_history:
                         ),
                         "Modèle": p.get("model_name", ""),
                         "Version": p.get("model_version") or "—",
-                        "id_obs": id_obs_val or "—",
                         "Résultat": pred_val,
                         "Ground Truth": gt_val,
                         "Confiance": f"{mc:.2%}" if mc is not None else "—",

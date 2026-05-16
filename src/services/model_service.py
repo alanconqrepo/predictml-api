@@ -193,6 +193,7 @@ class ModelService:
                 "training_dataset": m.training_dataset,
                 "trained_by": m.trained_by,
                 "training_metrics": m.training_metrics,
+                "hyperparameters": m.hyperparameters,
                 "precision": m.precision,
                 "recall": m.recall,
                 "created_at": m.created_at,

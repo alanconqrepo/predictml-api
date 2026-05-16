@@ -158,7 +158,7 @@ def show_home():
             "Statut API", "✅ En ligne" if api_status == "healthy" else f"⚠️ {api_status}"
         )
         col_db.metric("Base de données", "✅ OK" if db_status == "connected" else f"⚠️ {db_status}")
-        cached = health.get("cached_models", 0)
+        cached = health.get("models_cached", health.get("cached_models", 0))
         col_cache.metric("Modèles en cache", cached)
     except Exception:
         st.warning("Impossible de contacter l'API.")

@@ -143,7 +143,7 @@ print("  MODE 2 — Prédictions en lot (POST /predict-batch)")
 print("=" * 60)
 
 batch_inputs = [
-    {"id_obs": s["id_obs"] + "-batch", "features": s["features"]}
+    {"id_obs": s["id_obs"], "features": s["features"]}
     for s in IRIS_SAMPLES
 ]
 batch_payload = {

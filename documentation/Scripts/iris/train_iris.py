@@ -224,7 +224,16 @@ print(
     file=sys.stderr,
 )
 
-HYPERPARAMS = {"n_estimators": 100, "random_state": 42}
+HYPERPARAMS = {
+    "n_estimators":      200,    # nombre d'arbres
+    "max_depth":         10,     # profondeur max (None = illimitée)
+    "min_samples_split": 4,      # nb min d'exemples pour splitter un nœud
+    "min_samples_leaf":  2,      # nb min d'exemples dans une feuille
+    "max_features":      "sqrt", # nb de features considérées à chaque split
+    "class_weight":      "balanced",  # compense les classes déséquilibrées
+    "random_state":      42,
+    "n_jobs":            -1,     # parallélisme sur tous les cœurs disponibles
+}
 model = RandomForestClassifier(**HYPERPARAMS)
 _ts("avant fit")
 model.fit(X_train, y_train)
@@ -334,13 +343,12 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
             # Params — un seul appel réseau
             _ts("MLflow — log_params (appel réseau #3)")
             mlflow.log_params({
-                "algorithm":        "RandomForest",
-                "n_estimators":     HYPERPARAMS["n_estimators"],
-                "random_state":     HYPERPARAMS["random_state"],
-                "train_start_date": TRAIN_START_DATE,
-                "train_end_date":   TRAIN_END_DATE,
-                "n_samples_total":  n_samples,
-                "test_size":        0.2,
+                "algorithm":         "RandomForest",
+                "train_start_date":  TRAIN_START_DATE,
+                "train_end_date":    TRAIN_END_DATE,
+                "n_samples_total":   n_samples,
+                "test_size":         0.2,
+                **HYPERPARAMS,
             })
             _ts("MLflow — log_params OK")
 
@@ -428,6 +436,7 @@ output = {
     "n_rows":             len(X_train),
     "features_count":     len(iris.feature_names),
     "classes":            list(iris.target_names),
+    "hyperparameters":    HYPERPARAMS,
     "training_dataset":   _dataset_minio_path or "scikit-learn Iris dataset (Fisher, 1936) - 150 observations, 3 classes",
     # confidence_threshold : si la probabilité max prédite par le modèle est inférieure
     # à ce seuil, l'API marque la prédiction avec low_confidence=True.

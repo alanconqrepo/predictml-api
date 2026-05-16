@@ -35,35 +35,49 @@ def _action_badge(action: str) -> str:
 
 _SCRIPTS_DIR = Path(__file__).parent.parent / "documentation" / "Scripts"
 
-_EXAMPLE_SCRIPTS = [
+# (chemin relatif depuis _SCRIPTS_DIR, description)
+_EXAMPLE_SCRIPTS: list[tuple[str, str, str]] = [
     (
-        "train_iris.py",
-        "Script `train.py` compatible PredictML — à uploader avec votre modèle pour activer le ré-entraînement automatique",
+        "Iris",
+        "iris/train_iris.py",
+        "Script `train.py` RandomForest — à uploader pour activer le ré-entraînement automatique",
     ),
     (
-        "upload_iris_model.py",
-        "Script autonome — entraîne un modèle Iris localement et l'uploade via l'API (à exécuter sur votre machine)",
+        "Iris",
+        "iris/upload_iris_model.py",
+        "Upload complet RandomForest — entraîne localement et uploade via l'API",
+    ),
+    (
+        "Wine",
+        "wine/train_wine.py",
+        "Script `train.py` GradientBoostingRegressor — régression sur la teneur en alcool",
+    ),
+    (
+        "Wine",
+        "wine/upload_wine_model.py",
+        "Upload complet Wine Regressor — entraîne localement et uploade via l'API",
     ),
 ]
 
 
-def _read_script(filename: str) -> str:
+def _read_script(rel_path: str) -> str:
     try:
-        return (_SCRIPTS_DIR / filename).read_text(encoding="utf-8")
+        return (_SCRIPTS_DIR / rel_path).read_text(encoding="utf-8")
     except Exception:
-        return f"# Fichier introuvable : {filename}"
+        return f"# Fichier introuvable : {rel_path}"
 
 
 @st.dialog("Aperçu du script", width="large")
-def _view_script_dialog(filename: str) -> None:
-    content = _read_script(filename)
+def _view_script_dialog(rel_path: str) -> None:
+    content = _read_script(rel_path)
+    basename = Path(rel_path).name
     st.code(content, language="python", line_numbers=True)
     st.download_button(
         "⬇️ Télécharger",
         data=content,
-        file_name=filename,
+        file_name=basename,
         mime="text/x-python",
-        key=f"dl_dialog_{filename}",
+        key=f"dl_dialog_{rel_path}",
         use_container_width=True,
     )
 
@@ -81,6 +95,7 @@ client = get_client()
 is_admin = st.session_state.get("is_admin", False)
 
 MLFLOW_URL = os.environ.get("MLFLOW_URL", "http://localhost:5000")
+MLFLOW_PUBLIC_URL = os.environ.get("MLFLOW_PUBLIC_URL", "http://localhost:5000")
 
 
 def fetch_models(api_url, token):
@@ -155,22 +170,27 @@ if is_admin:
     )
 
 if is_admin:
-    with st.expander("📋 Scripts d'exemple — Iris", expanded=False):
+    with st.expander("📋 Scripts d'exemple", expanded=False):
         st.caption(
             "Scripts de référence pour prendre en main l'upload et le ré-entraînement. "
             "Téléchargez-les ou visualisez-les directement ici."
         )
-        for _script_name, _script_desc in _EXAMPLE_SCRIPTS:
+        _current_category = None
+        for _category, _script_rel, _script_desc in _EXAMPLE_SCRIPTS:
+            if _category != _current_category:
+                st.markdown(f"**{_category}**")
+                _current_category = _category
             _col_desc, _col_view, _col_dl = st.columns([5, 1.5, 1.5])
-            _col_desc.markdown(f"**`{_script_name}`**  \n{_script_desc}")
-            if _col_view.button("👁 Visualiser", key=f"view_{_script_name}", use_container_width=True):
-                _view_script_dialog(_script_name)
+            _script_basename = Path(_script_rel).name
+            _col_desc.markdown(f"**`{_script_basename}`**  \n{_script_desc}")
+            if _col_view.button("👁 Visualiser", key=f"view_{_script_rel}", use_container_width=True):
+                _view_script_dialog(_script_rel)
             _col_dl.download_button(
                 "⬇️ Télécharger",
-                data=_read_script(_script_name),
-                file_name=_script_name,
+                data=_read_script(_script_rel),
+                file_name=_script_basename,
                 mime="text/x-python",
-                key=f"dl_{_script_name}",
+                key=f"dl_{_script_rel}",
                 use_container_width=True,
             )
 
@@ -395,8 +415,6 @@ for m in models:
             "Version": m.get("version", ""),
             "Tags": ", ".join(m.get("tags") or []) or "—",
             "Algorithme": m.get("algorithm") or "—",
-            "Accuracy": f"{m['accuracy']:.3f}" if m.get("accuracy") is not None else "—",
-            "F1": f"{m['f1_score']:.3f}" if m.get("f1_score") is not None else "—",
             "Baseline": "✅ Baseline" if m.get("feature_baseline") else "⚠️ No baseline",
             "Cache": "🔥 En cache" if in_cache else "❄️ Non chargé",
             "Statut": statut,
@@ -411,106 +429,116 @@ for m in models:
                 if m.get("last_seen")
                 else "—"
             ),
+            "Accuracy (train)": f"{m['accuracy']:.3f}" if m.get("accuracy") is not None else "—",
+            "F1 (train)": f"{m['f1_score']:.3f}" if m.get("f1_score") is not None else "—",
+            "R² (train)": (
+                f"{(m.get('training_metrics') or {}).get('r2'):.3f}"
+                if (m.get("training_metrics") or {}).get("r2") is not None
+                else "—"
+            ),
+            "RMSE (train)": (
+                f"{(m.get('training_metrics') or {}).get('rmse'):.4f}"
+                if (m.get("training_metrics") or {}).get("rmse") is not None
+                else "—"
+            ),
         }
     )
 
 st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-st.divider()
+st.caption("Accuracy (train), F1 (train), R² (train), RMSE (train) : métriques issues de l'évaluation sur le jeu de test lors de l'entraînement.")
 
 # ---------------------------------------------------------------------------
 # Comparaison multi-versions
 # ---------------------------------------------------------------------------
 
-st.subheader("📊 Comparaison multi-versions")
+with st.expander("📊 Comparaison multi-versions", expanded=False):
+    model_names = sorted({m["name"] for m in models})
+    compare_search = st.text_input(
+        "Filtrer par nom", key="compare_search", placeholder="Rechercher un modèle…"
+    )
+    compare_filtered = (
+        [n for n in model_names if compare_search.lower() in n.lower()]
+        if compare_search
+        else model_names
+    )
+    compare_name = st.selectbox(
+        "Modèle à comparer", compare_filtered or model_names, key="compare_model_name"
+    )
 
-model_names = sorted({m["name"] for m in models})
-compare_search = st.text_input(
-    "Filtrer par nom", key="compare_search", placeholder="Rechercher un modèle…"
-)
-compare_filtered = (
-    [n for n in model_names if compare_search.lower() in n.lower()]
-    if compare_search
-    else model_names
-)
-compare_name = st.selectbox(
-    "Modèle à comparer", compare_filtered or model_names, key="compare_model_name"
-)
+    versions_for_model = [m["version"] for m in models if m["name"] == compare_name]
+    all_versions_label = f"Toutes ({len(versions_for_model)})"
+    version_options = [all_versions_label] + versions_for_model
+    selected_versions = st.multiselect(
+        "Versions à inclure (vide = toutes)",
+        versions_for_model,
+        default=[],
+        key="compare_versions_select",
+    )
+    compare_days = st.slider("Fenêtre latence (jours)", 1, 30, 7, key="compare_days")
 
-versions_for_model = [m["version"] for m in models if m["name"] == compare_name]
-all_versions_label = f"Toutes ({len(versions_for_model)})"
-version_options = [all_versions_label] + versions_for_model
-selected_versions = st.multiselect(
-    "Versions à inclure (vide = toutes)",
-    versions_for_model,
-    default=[],
-    key="compare_versions_select",
-)
-compare_days = st.slider("Fenêtre latence (jours)", 1, 30, 7, key="compare_days")
-
-if st.button("🔍 Comparer", key="compare_btn", type="primary"):
-    versions_param = ",".join(selected_versions) if selected_versions else None
-    with st.spinner("Comparaison en cours…"):
-        try:
-            cmp = client.compare_model_versions(
-                compare_name, versions=versions_param, days=compare_days
-            )
-            cmp_versions = cmp.get("versions", [])
-            if not cmp_versions:
-                st.info("Aucune version active trouvée.")
-            else:
-                _DRIFT_BADGE = {
-                    "ok": "🟢 ok",
-                    "warning": "🟡 warning",
-                    "critical": "🔴 critical",
-                    "no_baseline": "⚫ no baseline",
-                    "insufficient_data": "⬜ insuff. data",
-                }
-                cmp_rows = []
-                for v in cmp_versions:
-                    cmp_rows.append(
-                        {
-                            "Version": v["version"],
-                            "Production": "🟢 Oui" if v["is_production"] else "—",
-                            "Accuracy": (
-                                f"{v['accuracy']:.3f}" if v.get("accuracy") is not None else "—"
-                            ),
-                            "F1": f"{v['f1_score']:.3f}" if v.get("f1_score") is not None else "—",
-                            "Latence p50 (ms)": (
-                                f"{v['latency_p50_ms']:.1f}"
-                                if v.get("latency_p50_ms") is not None
-                                else "—"
-                            ),
-                            "Latence p95 (ms)": (
-                                f"{v['latency_p95_ms']:.1f}"
-                                if v.get("latency_p95_ms") is not None
-                                else "—"
-                            ),
-                            "Drift": _DRIFT_BADGE.get(v.get("drift_status") or "", "—"),
-                            "Brier score": (
-                                f"{v['brier_score']:.4f}"
-                                if v.get("brier_score") is not None
-                                else "—"
-                            ),
-                            "Entraîné le": (
-                                pd.to_datetime(v["trained_at"]).strftime("%Y-%m-%d")
-                                if v.get("trained_at")
-                                else "—"
-                            ),
-                            "Lignes entraîn.": (
-                                f"{v['n_rows_trained']:,}"
-                                if v.get("n_rows_trained") is not None
-                                else "—"
-                            ),
-                        }
-                    )
-                st.dataframe(pd.DataFrame(cmp_rows), use_container_width=True, hide_index=True)
-                st.caption(
-                    f"Comparé le {pd.to_datetime(cmp['compared_at']).strftime('%Y-%m-%d %H:%M')} UTC"
-                    f" — fenêtre latence : {compare_days} j"
+    if st.button("🔍 Comparer", key="compare_btn", type="primary"):
+        versions_param = ",".join(selected_versions) if selected_versions else None
+        with st.spinner("Comparaison en cours…"):
+            try:
+                cmp = client.compare_model_versions(
+                    compare_name, versions=versions_param, days=compare_days
                 )
-        except Exception as e:
-            st.error(f"Erreur lors de la comparaison : {e}")
+                cmp_versions = cmp.get("versions", [])
+                if not cmp_versions:
+                    st.info("Aucune version active trouvée.")
+                else:
+                    _DRIFT_BADGE = {
+                        "ok": "🟢 ok",
+                        "warning": "🟡 warning",
+                        "critical": "🔴 critical",
+                        "no_baseline": "⚫ no baseline",
+                        "insufficient_data": "⬜ insuff. data",
+                    }
+                    cmp_rows = []
+                    for v in cmp_versions:
+                        cmp_rows.append(
+                            {
+                                "Version": v["version"],
+                                "Production": "🟢 Oui" if v["is_production"] else "—",
+                                "Accuracy": (
+                                    f"{v['accuracy']:.3f}" if v.get("accuracy") is not None else "—"
+                                ),
+                                "F1": f"{v['f1_score']:.3f}" if v.get("f1_score") is not None else "—",
+                                "Latence p50 (ms)": (
+                                    f"{v['latency_p50_ms']:.1f}"
+                                    if v.get("latency_p50_ms") is not None
+                                    else "—"
+                                ),
+                                "Latence p95 (ms)": (
+                                    f"{v['latency_p95_ms']:.1f}"
+                                    if v.get("latency_p95_ms") is not None
+                                    else "—"
+                                ),
+                                "Drift": _DRIFT_BADGE.get(v.get("drift_status") or "", "—"),
+                                "Brier score": (
+                                    f"{v['brier_score']:.4f}"
+                                    if v.get("brier_score") is not None
+                                    else "—"
+                                ),
+                                "Entraîné le": (
+                                    pd.to_datetime(v["trained_at"]).strftime("%Y-%m-%d")
+                                    if v.get("trained_at")
+                                    else "—"
+                                ),
+                                "Lignes entraîn.": (
+                                    f"{v['n_rows_trained']:,}"
+                                    if v.get("n_rows_trained") is not None
+                                    else "—"
+                                ),
+                            }
+                        )
+                    st.dataframe(pd.DataFrame(cmp_rows), use_container_width=True, hide_index=True)
+                    st.caption(
+                        f"Comparé le {pd.to_datetime(cmp['compared_at']).strftime('%Y-%m-%d %H:%M')} UTC"
+                        f" — fenêtre latence : {compare_days} j"
+                    )
+            except Exception as e:
+                st.error(f"Erreur lors de la comparaison : {e}")
 
 st.divider()
 st.subheader("Détail et actions")
@@ -536,27 +564,47 @@ selected_label = st.selectbox("Sélectionner un modèle", _detail_keys, index=_d
 selected = model_options[selected_label]
 
 # Détails
+_detail_tm = selected.get("training_metrics") or {}
+_detail_is_regression = any(k in _detail_tm for k in ("mae", "rmse", "r2"))
+
 with st.expander("📋 Détails complets", expanded=True):
     col_l, col_r = st.columns(2)
+    # Pré-chargement des ressources téléchargeables
+    _ds = selected.get("training_dataset") or ""
+    _csv_bytes = None
+    if _ds.endswith(".csv") and "/" in _ds:
+        try:
+            _csv_bytes = client.download_training_dataset(selected["name"], selected["version"])
+        except Exception:
+            pass
+
+    _script_bytes = None
+    _script_filename = None
+    if selected.get("train_script_object_key"):
+        try:
+            _script_bytes = client.download_train_script(selected["name"], selected["version"])
+            _script_filename = selected["train_script_object_key"].split("/")[-1]
+        except Exception:
+            pass
+
+    _pkl_bytes = None
+    _pkl_size_label = ""
+    minio_key = selected.get("minio_object_key")
+    size = selected.get("file_size_bytes")
+    if minio_key and is_admin:
+        _pkl_size_label = f" ({size / 1024:.1f} KB)" if size else ""
+        try:
+            _pkl_bytes = client.download_model(selected["name"], selected["version"])
+        except Exception:
+            pass
+
     with col_l:
         st.markdown(f"**Nom :** `{selected.get('name')}`")
         st.markdown(f"**Version :** `{selected.get('version')}`")
         st.markdown(f"**Description :** {selected.get('description') or '—'}")
         st.markdown(f"**Algorithme :** {selected.get('algorithm') or '—'}")
-        _ds = selected.get("training_dataset") or ""
-        if _ds.endswith(".csv") and "/" in _ds:
-            try:
-                _csv_bytes = client.download_training_dataset(selected["name"], selected["version"])
-                st.download_button(
-                    label="⬇ Dataset d'entraînement",
-                    data=_csv_bytes,
-                    file_name=_ds.split("/")[-1],
-                    mime="text/csv",
-                )
-            except Exception:
-                st.markdown(f"**Dataset d'entraînement :** `{_ds}`")
-        else:
-            st.markdown(f"**Dataset d'entraînement :** {_ds or '—'}")
+        if _ds and not _csv_bytes:
+            st.markdown(f"**Dataset d'entraînement :** `{_ds}`")
         st.markdown(f"**Entraîné par :** {selected.get('trained_by') or '—'}")
         parent_v = selected.get("parent_version")
         if parent_v:
@@ -579,29 +627,15 @@ with st.expander("📋 Détails complets", expanded=True):
 
         mlflow_id = selected.get("mlflow_run_id")
         if mlflow_id:
-            mlflow_link = f"{MLFLOW_URL}/#/experiments/0/runs/{mlflow_id}"
+            mlflow_link = f"{MLFLOW_PUBLIC_URL}/#/experiments/0/runs/{mlflow_id}"
             st.markdown(f"**MLflow run :** [{mlflow_id}]({mlflow_link})")
         else:
             st.markdown("**MLflow run :** —")
 
-        minio_key = selected.get("minio_object_key")
         if minio_key:
             st.markdown(f"**MinIO object :** `{selected.get('minio_bucket')}/{minio_key}`")
-            size = selected.get("file_size_bytes")
             if size:
                 st.markdown(f"**Taille fichier :** {size / 1024:.1f} KB")
-            if is_admin:
-                size_label = f" ({size / 1024:.1f} KB)" if size else ""
-                try:
-                    pkl_bytes = client.download_model(selected["name"], selected["version"])
-                    st.download_button(
-                        label=f"⬇️ Télécharger le .pkl{size_label}",
-                        data=pkl_bytes,
-                        file_name=f"{selected['name']}_{selected['version']}.pkl",
-                        mime="application/octet-stream",
-                    )
-                except Exception as e:
-                    st.error(f"Erreur lors du téléchargement : {e}")
 
     with col_r:
         st.markdown(f"**Nb features :** {selected.get('features_count') or '—'}")
@@ -610,72 +644,151 @@ with st.expander("📋 Détails complets", expanded=True):
             f"**Dernière prédiction :** {pd.to_datetime(last_seen).strftime('%Y-%m-%d %H:%M') if last_seen else '—'}"
         )
         classes = selected.get("classes")
-        st.markdown(f"**Classes :** {classes if classes else '—'}")
+        if not _detail_is_regression or classes:
+            st.markdown(f"**Classes :** {classes if classes else '—'}")
         ct = selected.get("confidence_threshold")
-        st.markdown(f"**Confidence threshold :** {f'{ct:.2f}' if ct is not None else '—'}")
+        if not _detail_is_regression or ct is not None:
+            st.markdown(f"**Confidence threshold :** {f'{ct:.2f}' if ct is not None else '—'}")
+
+        hp = selected.get("hyperparameters")
+        if hp:
+            st.markdown("**Hyperparamètres :**")
+            st.dataframe(
+                pd.DataFrame(
+                    [{"Paramètre": k, "Valeur": str(v)} for k, v in hp.items()],
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.markdown("**Hyperparamètres :** —")
+
+    # ── 4 boutons alignés en bas de l'expander ────────────────────────────────
+    _btn_labels = []
+    if _csv_bytes:
+        _btn_labels.append("dataset")
+    if _script_bytes:
+        _btn_labels.append("script_dl")
+        _btn_labels.append("script_view")
+    if _pkl_bytes:
+        _btn_labels.append("pkl")
+
+    if _btn_labels:
+        _n_btns = len(_btn_labels)
+        _btn_cols = st.columns(_n_btns)
+        _btn_idx = 0
+        if _csv_bytes:
+            with _btn_cols[_btn_idx]:
+                st.download_button(
+                    "⬇ Dataset d'entraînement",
+                    data=_csv_bytes,
+                    file_name=_ds.split("/")[-1],
+                    mime="text/csv",
+                    use_container_width=True,
+                    key=f"dl_dataset_{selected['name']}_{selected['version']}",
+                )
+            _btn_idx += 1
+        if _script_bytes:
+            with _btn_cols[_btn_idx]:
+                st.download_button(
+                    "⬇ Script d'entraînement",
+                    data=_script_bytes,
+                    file_name=_script_filename or "train.py",
+                    mime="text/x-python",
+                    use_container_width=True,
+                    key=f"dl_script_{selected['name']}_{selected['version']}",
+                )
+            _btn_idx += 1
+            with _btn_cols[_btn_idx]:
+                _show_key = f"show_train_script_{selected['name']}_{selected['version']}"
+                _is_visible = st.session_state.get(_show_key, False)
+                if st.button(
+                    "🙈 Masquer le script" if _is_visible else "👁 Visualiser le script",
+                    use_container_width=True,
+                    key=f"toggle_script_{selected['name']}_{selected['version']}",
+                ):
+                    st.session_state[_show_key] = not _is_visible
+                    st.rerun()
+            _btn_idx += 1
+        if _pkl_bytes:
+            with _btn_cols[_btn_idx]:
+                st.download_button(
+                    f"⬇️ Télécharger le .pkl{_pkl_size_label}",
+                    data=_pkl_bytes,
+                    file_name=f"{selected['name']}_{selected['version']}.pkl",
+                    mime="application/octet-stream",
+                    use_container_width=True,
+                    key=f"dl_pkl_{selected['name']}_{selected['version']}",
+                )
+
+    _show_script_key = f"show_train_script_{selected['name']}_{selected['version']}"
+    if st.session_state.get(_show_script_key) and _script_bytes:
+        st.code(_script_bytes.decode("utf-8", errors="replace"), language="python", line_numbers=True)
 
 # ── Métriques en 2 blocs côte à côte ─────────────────────────────────────────
 _tm = selected.get("training_metrics") or {}
 _is_regression = any(k in _tm for k in ("mae", "rmse", "r2"))
 
-_mcol_train, _mcol_gt = st.columns(2)
-
-with _mcol_train:
-    st.markdown("##### Métriques d'entraînement")
-    if _is_regression:
-        st.markdown(f"**MAE :** {_tm.get('mae') or '—'}")
-        st.markdown(f"**RMSE :** {_tm.get('rmse') or '—'}")
-        st.markdown(f"**R² :** {_tm.get('r2') or '—'}")
-    else:
-        st.markdown(f"**Accuracy :** {_tm.get('accuracy') or selected.get('accuracy') or '—'}")
-        st.markdown(f"**F1 Score :** {_tm.get('f1_score') or selected.get('f1_score') or '—'}")
-        st.markdown(f"**Precision :** {_tm.get('precision') or '—'}")
-        st.markdown(f"**Recall :** {_tm.get('recall') or '—'}")
-
 _GT_PERIOD_DAYS = 30
 
-with _mcol_gt:
-    st.markdown(f"##### Performance observée (ground truth)")
-    st.caption(f"Fenêtre : {_GT_PERIOD_DAYS} derniers jours")
-    try:
-        _perf = fetch_model_performance(
-            st.session_state.get("api_url"),
-            st.session_state.get("api_token"),
-            selected["name"],
-            selected["version"],
-            period_days=_GT_PERIOD_DAYS,
-        )
-        if _perf and _perf.get("matched_predictions", 0) > 0:
-            _gt_type = _perf.get("model_type", "classification")
-            if _gt_type == "regression":
-                st.markdown(f"**MAE :** {round(_perf['mae'], 4) if _perf.get('mae') is not None else '—'}")
-                st.markdown(f"**RMSE :** {round(_perf['rmse'], 4) if _perf.get('rmse') is not None else '—'}")
-                st.markdown(f"**R² :** {round(_perf['r2'], 4) if _perf.get('r2') is not None else '—'}")
-            else:
-                st.markdown(f"**Accuracy :** {round(_perf['accuracy'], 4) if _perf.get('accuracy') is not None else '—'}")
-                st.markdown(f"**F1 Score :** {round(_perf['f1_weighted'], 4) if _perf.get('f1_weighted') is not None else '—'}")
-                st.markdown(f"**Precision :** {round(_perf['precision_weighted'], 4) if _perf.get('precision_weighted') is not None else '—'}")
-                st.markdown(f"**Recall :** {round(_perf['recall_weighted'], 4) if _perf.get('recall_weighted') is not None else '—'}")
-            _n = _perf.get("matched_predictions", 0)
-            st.caption(f"{_n} observation(s) labelisée(s) sur cette période")
-        else:
-            st.markdown("*Aucune donnée de ground truth.*")
-            st.caption("Envoyez des résultats via `POST /observed-results`")
-    except Exception:
-        st.markdown("*Indisponible*")
+with st.expander("📈 Métriques", expanded=True):
+    _mcol_train, _mcol_gt = st.columns(2)
 
-# Model card export — accessible to all authenticated users
-try:
-    md_content = client.get_model_card(selected["name"], selected["version"], format="markdown")
-    st.download_button(
-        label="📄 Exporter la model card",
-        data=md_content,
-        file_name=f"{selected['name']}_{selected['version']}_model_card.md",
-        mime="text/markdown",
-        key="dl_model_card",
-    )
-except Exception as e:
-    st.warning(f"Model card indisponible : {e}")
+    with _mcol_train:
+        st.markdown("##### Métriques d'entraînement")
+        st.caption("Évaluées sur le jeu de test lors de l'entraînement.")
+        if _is_regression:
+            st.markdown(f"**MAE :** {_tm.get('mae') or '—'}")
+            st.markdown(f"**RMSE :** {_tm.get('rmse') or '—'}")
+            st.markdown(f"**R² :** {_tm.get('r2') or '—'}")
+        else:
+            st.markdown(f"**Accuracy :** {_tm.get('accuracy') or selected.get('accuracy') or '—'}")
+            st.markdown(f"**F1 Score :** {_tm.get('f1_score') or selected.get('f1_score') or '—'}")
+            st.markdown(f"**Precision :** {_tm.get('precision') or '—'}")
+            st.markdown(f"**Recall :** {_tm.get('recall') or '—'}")
+
+    with _mcol_gt:
+        st.markdown("##### Performance observée (ground truth)")
+        st.caption(f"Fenêtre : {_GT_PERIOD_DAYS} derniers jours")
+        try:
+            _perf = fetch_model_performance(
+                st.session_state.get("api_url"),
+                st.session_state.get("api_token"),
+                selected["name"],
+                selected["version"],
+                period_days=_GT_PERIOD_DAYS,
+            )
+            if _perf and _perf.get("matched_predictions", 0) > 0:
+                _gt_type = _perf.get("model_type", "classification")
+                if _gt_type == "regression":
+                    st.markdown(f"**MAE :** {round(_perf['mae'], 4) if _perf.get('mae') is not None else '—'}")
+                    st.markdown(f"**RMSE :** {round(_perf['rmse'], 4) if _perf.get('rmse') is not None else '—'}")
+                    st.markdown(f"**R² :** {round(_perf['r2'], 4) if _perf.get('r2') is not None else '—'}")
+                else:
+                    st.markdown(f"**Accuracy :** {round(_perf['accuracy'], 4) if _perf.get('accuracy') is not None else '—'}")
+                    st.markdown(f"**F1 Score :** {round(_perf['f1_weighted'], 4) if _perf.get('f1_weighted') is not None else '—'}")
+                    st.markdown(f"**Precision :** {round(_perf['precision_weighted'], 4) if _perf.get('precision_weighted') is not None else '—'}")
+                    st.markdown(f"**Recall :** {round(_perf['recall_weighted'], 4) if _perf.get('recall_weighted') is not None else '—'}")
+                _n = _perf.get("matched_predictions", 0)
+                st.caption(f"{_n} observation(s) labelisée(s) sur cette période")
+            else:
+                st.markdown("*Aucune donnée de ground truth.*")
+                st.caption("Envoyez des résultats via `POST /observed-results`")
+        except Exception:
+            st.markdown("*Indisponible*")
+
+    # Model card export — accessible to all authenticated users
+    try:
+        md_content = client.get_model_card(selected["name"], selected["version"], format="markdown")
+        st.download_button(
+            label="📄 Exporter la model card",
+            data=md_content,
+            file_name=f"{selected['name']}_{selected['version']}_model_card.md",
+            mime="text/markdown",
+            key="dl_model_card",
+        )
+    except Exception as e:
+        st.warning(f"Model card indisponible : {e}")
 
 # Importance des features (SHAP agrégé)
 with st.expander("📊 Importance des features (SHAP)", expanded=False):
@@ -1405,352 +1518,341 @@ with st.expander("🔮 Explorateur What-if", expanded=False):
 
 # Actions
 if is_admin:
-    st.subheader("Actions admin")
-    col_p, col_d = st.columns(2)
+    with st.expander("⚙️ Actions admin", expanded=True):
+        col_p, col_d = st.columns(2)
 
-    # Readiness checklist
-    try:
-        readiness = client.get_model_readiness(selected["name"], selected["version"])
-        checks = readiness.get("checks", {})
-        check_labels = {
-            "file_accessible": "Fichier accessible dans MinIO",
-            "baseline_computed": "Baseline des features calculée",
-            "no_critical_drift": "Aucun drift critique (24h)",
-            "is_production": "Marqué en production",
-        }
-        st.markdown("**Checklist de production-readiness**")
-        for key, label in check_labels.items():
-            check = checks.get(key, {})
-            passed = check.get("pass", False)
-            detail = check.get("detail")
-            icon = "✅" if passed else "❌"
-            suffix = f" — `{detail}`" if detail else ""
-            st.markdown(f"{icon} {label}{suffix}")
-        ready = readiness.get("ready", False)
-    except Exception:
-        ready = True  # ne pas bloquer si l'endpoint échoue
+        # Readiness checklist
+        try:
+            readiness = client.get_model_readiness(selected["name"], selected["version"])
+            checks = readiness.get("checks", {})
+            check_labels = {
+                "file_accessible": "Fichier accessible dans MinIO",
+                "baseline_computed": "Baseline des features calculée",
+                "no_critical_drift": "Aucun drift critique (24h)",
+                "is_production": "Marqué en production",
+            }
+            st.markdown("**Checklist de production-readiness**")
+            for key, label in check_labels.items():
+                check = checks.get(key, {})
+                passed = check.get("pass", False)
+                detail = check.get("detail")
+                icon = "✅" if passed else "❌"
+                suffix = f" — `{detail}`" if detail else ""
+                st.markdown(f"{icon} {label}{suffix}")
+            ready = readiness.get("ready", False)
+        except Exception:
+            ready = True  # ne pas bloquer si l'endpoint échoue
 
-    # Passer en production
-    if not selected.get("is_production"):
-        promote_help = None if ready else "Résoudre les checks ❌ ci-dessus avant de promouvoir"
-        if col_p.button(
-            "🚀 Passer en production",
-            use_container_width=True,
-            type="primary",
-            disabled=not ready,
-            help=promote_help,
-        ):
-            try:
-                client.update_model(selected["name"], selected["version"], {"is_production": True})
-                st.toast(
-                    f"{selected['name']} v{selected['version']} est maintenant en production.",
-                    icon="✅",
-                )
-                reload()
-            except Exception as e:
-                st.toast(f"Erreur : {e}", icon="❌")
-    else:
-        col_p.info("🟢 Déjà en production")
-
-    # Préchauffage du cache
-    selected_cache_key = f"{selected['name']}:{selected['version']}"
-    is_selected_cached = selected_cache_key in cached_model_keys
-    col_w1, col_w2 = st.columns([1, 3])
-    if is_selected_cached:
-        col_w1.success("🔥 En cache")
-    else:
-        col_w1.warning("❄️ Non chargé")
-    if not is_selected_cached:
-        if col_w2.button(
-            "🔥 Préchauffer le cache",
-            use_container_width=True,
-            key="warmup_btn",
-            help="Charge le modèle en mémoire pour éliminer la latence de cold-start",
-        ):
-            with st.spinner("Chargement du modèle en cache…"):
+        # Passer en production
+        if not selected.get("is_production"):
+            promote_help = None if ready else "Résoudre les checks ❌ ci-dessus avant de promouvoir"
+            if col_p.button(
+                "🚀 Passer en production",
+                use_container_width=True,
+                type="primary",
+                disabled=not ready,
+                help=promote_help,
+            ):
                 try:
-                    result = client.warmup_model(selected["name"], selected["version"])
+                    client.update_model(selected["name"], selected["version"], {"is_production": True})
                     st.toast(
-                        f"Modèle chargé en {result['load_time_ms']:.0f} ms "
-                        f"— clé cache : {result['cache_key']}",
+                        f"{selected['name']} v{selected['version']} est maintenant en production.",
                         icon="✅",
                     )
                     reload()
                 except Exception as e:
-                    st.toast(f"Erreur lors du préchauffage : {e}", icon="❌")
-    else:
-        col_w2.info("Le modèle est déjà en cache — aucun préchauffage nécessaire.")
+                    st.toast(f"Erreur : {e}", icon="❌")
+        else:
+            col_p.info("🟢 Déjà en production")
 
-    # Supprimer
-    if col_d.button("🗑️ Supprimer cette version", use_container_width=True, type="secondary"):
-        st.session_state["confirm_delete_model"] = f"{selected['name']}:{selected['version']}"
+        # Préchauffage du cache
+        selected_cache_key = f"{selected['name']}:{selected['version']}"
+        is_selected_cached = selected_cache_key in cached_model_keys
+        col_w1, col_w2 = st.columns([1, 3])
+        if is_selected_cached:
+            col_w1.success("🔥 En cache")
+        else:
+            col_w1.warning("❄️ Non chargé")
+        if not is_selected_cached:
+            if col_w2.button(
+                "🔥 Préchauffer le cache",
+                use_container_width=True,
+                key="warmup_btn",
+                help="Charge le modèle en mémoire pour éliminer la latence de cold-start",
+            ):
+                with st.spinner("Chargement du modèle en cache…"):
+                    try:
+                        result = client.warmup_model(selected["name"], selected["version"])
+                        st.toast(
+                            f"Modèle chargé en {result['load_time_ms']:.0f} ms "
+                            f"— clé cache : {result['cache_key']}",
+                            icon="✅",
+                        )
+                        reload()
+                    except Exception as e:
+                        st.toast(f"Erreur lors du préchauffage : {e}", icon="❌")
+        else:
+            col_w2.info("Le modèle est déjà en cache — aucun préchauffage nécessaire.")
 
-    key = f"{selected['name']}:{selected['version']}"
-    if st.session_state.get("confirm_delete_model") == key:
-        st.warning(
-            f"Supprimer **{selected['name']} v{selected['version']}** ? (fichier MinIO + run MLflow)"
-        )
-        c1, c2 = st.columns(2)
-        if c1.button("Oui, supprimer", type="primary"):
-            try:
-                client.delete_model_version(selected["name"], selected["version"])
-                st.toast("Modèle supprimé.", icon="✅")
-                st.session_state.pop("confirm_delete_model", None)
-                reload()
-            except Exception as e:
-                st.toast(f"Erreur : {e}", icon="❌")
-        if c2.button("Annuler"):
-            st.session_state.pop("confirm_delete_model", None)
-            st.rerun()
+        # Supprimer
+        if col_d.button("🗑️ Supprimer cette version", use_container_width=True, type="secondary"):
+            st.session_state["confirm_delete_model"] = f"{selected['name']}:{selected['version']}"
 
-    # Modifier tags, webhook et déploiement
-    with st.expander("✏️ Modifier les métadonnées"):
-        new_webhook = st.text_input(
-            "Webhook URL",
-            value=selected.get("webhook_url") or "",
-            placeholder="https://example.com/webhook",
-        )
-        new_tags_raw = st.text_input(
-            "Tags (séparés par des virgules)",
-            value=", ".join(selected.get("tags") or []),
-            placeholder="production, finance, v2",
-        )
-
-        _cur_ct = selected.get("confidence_threshold")
-        new_confidence_threshold = st.slider(
-            "Confidence threshold",
-            min_value=0.0,
-            max_value=1.0,
-            value=float(_cur_ct) if _cur_ct is not None else 0.5,
-            step=0.01,
-            help="Seuil en dessous duquel la prédiction est marquée `low_confidence=True` dans la réponse.",
-        )
-
-        st.markdown("**Déploiement A/B / Shadow**")
-        deploy_options = ["(inchangé)", "ab_test", "shadow", "production"]
-        new_deploy_mode = st.selectbox(
-            "Mode de déploiement",
-            deploy_options,
-            key="deploy_mode_select",
-            help="ab_test = routage pondéré, shadow = exécution silencieuse en background",
-        )
-        new_traffic_weight = None
-        if new_deploy_mode == "ab_test":
-            new_traffic_weight = st.number_input(
-                "Poids du trafic (0.0 – 1.0)",
-                min_value=0.0,
-                max_value=1.0,
-                step=0.05,
-                value=float(selected.get("traffic_weight") or 0.5),
-                key="traffic_weight_input",
-                help="Fraction du trafic routé vers cette version (ex: 0.3 = 30%)",
+        key = f"{selected['name']}:{selected['version']}"
+        if st.session_state.get("confirm_delete_model") == key:
+            st.warning(
+                f"Supprimer **{selected['name']} v{selected['version']}** ? (fichier MinIO + run MLflow)"
             )
-
-        if st.button("💾 Enregistrer", key="save_meta"):
-            patch = {}
-            current_webhook = selected.get("webhook_url") or ""
-            if new_webhook != current_webhook:
-                patch["webhook_url"] = new_webhook if new_webhook else None
-            new_tags = [t.strip() for t in new_tags_raw.split(",") if t.strip()]
-            if new_tags != (selected.get("tags") or []):
-                patch["tags"] = new_tags if new_tags else None
-            _stored_ct = float(_cur_ct) if _cur_ct is not None else 0.5
-            if abs(new_confidence_threshold - _stored_ct) > 1e-9:
-                patch["confidence_threshold"] = new_confidence_threshold
-            if new_deploy_mode != "(inchangé)":
-                patch["deployment_mode"] = new_deploy_mode
-                if new_deploy_mode == "ab_test" and new_traffic_weight is not None:
-                    patch["traffic_weight"] = new_traffic_weight
-            if patch:
+            c1, c2 = st.columns(2)
+            if c1.button("Oui, supprimer", type="primary"):
                 try:
-                    client.update_model(selected["name"], selected["version"], patch)
-                    st.toast("Métadonnées mises à jour.", icon="✅")
+                    client.delete_model_version(selected["name"], selected["version"])
+                    st.toast("Modèle supprimé.", icon="✅")
+                    st.session_state.pop("confirm_delete_model", None)
                     reload()
                 except Exception as e:
                     st.toast(f"Erreur : {e}", icon="❌")
-            else:
-                st.info("Aucun changement détecté.")
+            if c2.button("Annuler"):
+                st.session_state.pop("confirm_delete_model", None)
+                st.rerun()
 
-    # Ré-entraînement
-    if selected.get("train_script_object_key"):
-        st.divider()
-        if st.button("🔄 Ré-entraîner", use_container_width=True, key="retrain_btn"):
-            current = st.session_state.get("show_retrain_form")
-            toggle_key = f"{selected['name']}:{selected['version']}"
-            if current == toggle_key:
-                st.session_state.pop("show_retrain_form", None)
-            else:
-                st.session_state["show_retrain_form"] = toggle_key
-
-        retrain_key = f"{selected['name']}:{selected['version']}"
-        if st.session_state.get("show_retrain_form") == retrain_key:
-            with st.form("retrain_form"):
-                st.markdown(f"**Ré-entraîner** `{selected['name']}` v`{selected['version']}`")
-                col_s, col_e = st.columns(2)
-                with col_s:
-                    start_date = st.date_input("Date de début", key="retrain_start")
-                with col_e:
-                    end_date = st.date_input("Date de fin", key="retrain_end")
-                new_version_input = st.text_input(
-                    "Nouvelle version (laisser vide = auto-généré)",
-                    value="",
-                    placeholder=f"{selected['version']}-retrain-YYYYMMDDHHMMSS",
-                    key="retrain_new_version",
-                )
-                set_prod = st.checkbox(
-                    "Mettre en production après entraînement",
-                    value=False,
-                    key="retrain_set_prod",
-                )
-                submitted = st.form_submit_button("🚀 Lancer le ré-entraînement", type="primary")
-
-            if submitted:
-                if start_date > end_date:
-                    st.error("La date de début doit être antérieure à la date de fin.")
-                else:
-                    with st.spinner("Ré-entraînement en cours… (peut prendre jusqu'à 10 minutes)"):
-                        try:
-                            result = client.retrain_model(
-                                name=selected["name"],
-                                version=selected["version"],
-                                start_date=str(start_date),
-                                end_date=str(end_date),
-                                new_version=new_version_input.strip() or None,
-                                set_production=set_prod,
-                            )
-                            st.session_state.pop("show_retrain_form", None)
-                            if result.get("success"):
-                                st.toast(
-                                    f"Ré-entraînement réussi ! "
-                                    f"Nouvelle version : {result['new_version']}",
-                                    icon="✅",
-                                )
-                            else:
-                                st.toast(
-                                    f"Échec du ré-entraînement : "
-                                    f"{result.get('error', 'Erreur inconnue')}",
-                                    icon="❌",
-                                )
-                            with st.expander("📋 Logs stdout", expanded=not result.get("success")):
-                                st.code(result.get("stdout", "(vide)"), language="text")
-                            with st.expander("⚠️ Logs stderr", expanded=not result.get("success")):
-                                st.code(result.get("stderr", "(vide)"), language="text")
-                            if result.get("success"):
-                                reload()
-                        except Exception as e:
-                            st.toast(f"Erreur lors du ré-entraînement : {e}", icon="❌")
-
-    # Calcul du baseline depuis la production
-    with st.expander("📐 Calculer le baseline depuis la production"):
-        st.markdown(
-            "Calcule `{mean, std, min, max}` par feature depuis les prédictions de production "
-            "récentes et sauvegarde le résultat comme **feature_baseline** du modèle, "
-            "activant ainsi la détection de drift."
-        )
-        if selected.get("feature_baseline"):
-            st.warning(
-                "⚠️ Une baseline existe déjà pour ce modèle. "
-                "Recalculer écrasera les valeurs actuelles et réinitialisera la détection de drift."
+        # Modifier tags, webhook et déploiement
+        with st.expander("✏️ Modifier les métadonnées"):
+            new_webhook = st.text_input(
+                "Webhook URL",
+                value=selected.get("webhook_url") or "",
+                placeholder="https://example.com/webhook",
             )
-        baseline_days = st.slider("Fenêtre temporelle (jours)", 7, 180, 30, key="baseline_days")
-        baseline_dry_run = st.checkbox(
-            "dry_run (simuler sans sauvegarder)", value=True, key="baseline_dry_run"
-        )
-        if st.button("Calculer", key="baseline_compute_btn", type="primary"):
-            with st.spinner("Calcul en cours…"):
-                try:
-                    result = client.compute_baseline(
-                        name=selected["name"],
-                        version=selected["version"],
-                        days=baseline_days,
-                        dry_run=baseline_dry_run,
-                    )
-                    st.markdown(
-                        f"**Prédictions utilisées :** {result.get('predictions_used')} "
-                        f"— fenêtre : {baseline_days} jours"
-                    )
-                    st.json(result.get("baseline", {}))
-                    if baseline_dry_run:
-                        st.info("Décochez **dry_run** pour sauvegarder le baseline.")
-                    else:
-                        st.toast("Baseline sauvegardé — drift actif pour ce modèle.", icon="✅")
-                        st.cache_data.clear()
-                except Exception as e:
-                    st.toast(f"Erreur : {e}", icon="❌")
+            new_tags_raw = st.text_input(
+                "Tags (séparés par des virgules)",
+                value=", ".join(selected.get("tags") or []),
+                placeholder="production, finance, v2",
+            )
 
-    # Historique des modifications
-    with st.expander("📜 Historique des modifications"):
-        try:
-            history_data = client.get_model_history(selected["name"], selected["version"], limit=20)
-            entries = history_data.get("entries", [])
-            total_hist = history_data.get("total", 0)
-        except Exception as e:
-            st.error(f"Impossible de charger l'historique : {e}")
-            entries = []
-            total_hist = 0
+            _cur_ct = selected.get("confidence_threshold")
+            new_confidence_threshold = st.slider(
+                "Confidence threshold",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(_cur_ct) if _cur_ct is not None else 0.5,
+                step=0.01,
+                help="Seuil en dessous duquel la prédiction est marquée `low_confidence=True` dans la réponse.",
+            )
 
-        if not entries:
-            st.info("Aucun historique disponible pour cette version.")
-        else:
-            st.caption(f"{total_hist} entrée(s) au total — affichage des 20 dernières")
-            for entry in entries:
-                ts = pd.to_datetime(entry["timestamp"]).strftime("%Y-%m-%d %H:%M:%S UTC")
-                badge = _action_badge(entry["action"])
-                changed = ", ".join(entry.get("changed_fields") or []) or "—"
-                who = entry.get("changed_by_username") or "inconnu"
-
-                col_info, col_btn = st.columns([5, 1])
-                with col_info:
-                    st.markdown(
-                        f"**{ts}** — {badge} — par **{who}**  \n" f"Champs modifiés : `{changed}`"
-                    )
-                with col_btn:
-                    if is_admin:
-                        if st.button(
-                            "↩ Rollback",
-                            key=f"rollback_btn_{entry['id']}",
-                            type="secondary",
-                            help=f"Restaurer l'état de l'entrée #{entry['id']}",
-                        ):
-                            st.session_state["confirm_rollback_id"] = entry["id"]
-                            st.session_state["confirm_rollback_model"] = selected["name"]
-                            st.session_state["confirm_rollback_version"] = selected["version"]
-
-                with st.expander(f"Snapshot #{entry['id']}", expanded=False):
-                    st.json(entry["snapshot"])
-
-                st.divider()
-
-            # Dialog de confirmation du rollback
-            confirm_id = st.session_state.get("confirm_rollback_id")
-            confirm_model = st.session_state.get("confirm_rollback_model")
-            confirm_version = st.session_state.get("confirm_rollback_version")
-            if (
-                confirm_id is not None
-                and confirm_model == selected["name"]
-                and confirm_version == selected["version"]
-            ):
-                st.warning(
-                    f"Restaurer les métadonnées de **{confirm_model} v{confirm_version}** "
-                    f"à l'état capturé dans l'entrée **#{confirm_id}** ?  \n"
-                    "Cette action est irréversible (mais loguée dans l'historique)."
+            st.markdown("**Déploiement A/B / Shadow**")
+            deploy_options = ["(inchangé)", "ab_test", "shadow", "production"]
+            new_deploy_mode = st.selectbox(
+                "Mode de déploiement",
+                deploy_options,
+                key="deploy_mode_select",
+                help="ab_test = routage pondéré, shadow = exécution silencieuse en background",
+            )
+            new_traffic_weight = None
+            if new_deploy_mode == "ab_test":
+                new_traffic_weight = st.number_input(
+                    "Poids du trafic (0.0 – 1.0)",
+                    min_value=0.0,
+                    max_value=1.0,
+                    step=0.05,
+                    value=float(selected.get("traffic_weight") or 0.5),
+                    key="traffic_weight_input",
+                    help="Fraction du trafic routé vers cette version (ex: 0.3 = 30%)",
                 )
-                c1, c2 = st.columns(2)
-                if c1.button("✅ Oui, restaurer", type="primary", key="confirm_rollback_yes"):
+
+            if st.button("💾 Enregistrer", key="save_meta"):
+                patch = {}
+                current_webhook = selected.get("webhook_url") or ""
+                if new_webhook != current_webhook:
+                    patch["webhook_url"] = new_webhook if new_webhook else None
+                new_tags = [t.strip() for t in new_tags_raw.split(",") if t.strip()]
+                if new_tags != (selected.get("tags") or []):
+                    patch["tags"] = new_tags if new_tags else None
+                _stored_ct = float(_cur_ct) if _cur_ct is not None else 0.5
+                if abs(new_confidence_threshold - _stored_ct) > 1e-9:
+                    patch["confidence_threshold"] = new_confidence_threshold
+                if new_deploy_mode != "(inchangé)":
+                    patch["deployment_mode"] = new_deploy_mode
+                    if new_deploy_mode == "ab_test" and new_traffic_weight is not None:
+                        patch["traffic_weight"] = new_traffic_weight
+                if patch:
                     try:
-                        result = client.rollback_model(confirm_model, confirm_version, confirm_id)
-                        st.toast(
-                            f"Rollback effectué — entrée #{result['new_history_id']} créée.",
-                            icon="✅",
+                        client.update_model(selected["name"], selected["version"], patch)
+                        st.toast("Métadonnées mises à jour.", icon="✅")
+                        reload()
+                    except Exception as e:
+                        st.toast(f"Erreur : {e}", icon="❌")
+                else:
+                    st.info("Aucun changement détecté.")
+
+        # Ré-entraînement
+        if selected.get("train_script_object_key"):
+            with st.expander("🔄 Ré-entraîner", expanded=False):
+                with st.form("retrain_form"):
+                    st.markdown(f"**Ré-entraîner** `{selected['name']}` v`{selected['version']}`")
+                    col_s, col_e = st.columns(2)
+                    with col_s:
+                        start_date = st.date_input("Date de début", key="retrain_start")
+                    with col_e:
+                        end_date = st.date_input("Date de fin", key="retrain_end")
+                    new_version_input = st.text_input(
+                        "Nouvelle version (laisser vide = auto-généré)",
+                        value="",
+                        placeholder=f"{selected['version']}-retrain-YYYYMMDDHHMMSS",
+                        key="retrain_new_version",
+                    )
+                    set_prod = st.checkbox(
+                        "Mettre en production après entraînement",
+                        value=False,
+                        key="retrain_set_prod",
+                    )
+                    submitted = st.form_submit_button("🚀 Lancer le ré-entraînement", type="primary")
+
+                if submitted:
+                    if start_date > end_date:
+                        st.error("La date de début doit être antérieure à la date de fin.")
+                    else:
+                        with st.spinner("Ré-entraînement en cours… (peut prendre jusqu'à 10 minutes)"):
+                            try:
+                                result = client.retrain_model(
+                                    name=selected["name"],
+                                    version=selected["version"],
+                                    start_date=str(start_date),
+                                    end_date=str(end_date),
+                                    new_version=new_version_input.strip() or None,
+                                    set_production=set_prod,
+                                )
+                                if result.get("success"):
+                                    st.toast(
+                                        f"Ré-entraînement réussi ! "
+                                        f"Nouvelle version : {result['new_version']}",
+                                        icon="✅",
+                                    )
+                                else:
+                                    st.toast(
+                                        f"Échec du ré-entraînement : "
+                                        f"{result.get('error', 'Erreur inconnue')}",
+                                        icon="❌",
+                                    )
+                                with st.expander("📋 Logs stdout", expanded=not result.get("success")):
+                                    st.code(result.get("stdout", "(vide)"), language="text")
+                                with st.expander("⚠️ Logs stderr", expanded=not result.get("success")):
+                                    st.code(result.get("stderr", "(vide)"), language="text")
+                                if result.get("success"):
+                                    reload()
+                            except Exception as e:
+                                st.toast(f"Erreur lors du ré-entraînement : {e}", icon="❌")
+
+        # Calcul du baseline depuis la production
+        with st.expander("📐 Calculer le baseline depuis la production"):
+            st.markdown(
+                "Calcule `{mean, std, min, max}` par feature depuis les prédictions de production "
+                "récentes et sauvegarde le résultat comme **feature_baseline** du modèle, "
+                "activant ainsi la détection de drift."
+            )
+            if selected.get("feature_baseline"):
+                st.warning(
+                    "⚠️ Une baseline existe déjà pour ce modèle. "
+                    "Recalculer écrasera les valeurs actuelles et réinitialisera la détection de drift."
+                )
+            baseline_days = st.slider("Fenêtre temporelle (jours)", 7, 180, 30, key="baseline_days")
+            baseline_dry_run = st.checkbox(
+                "dry_run (simuler sans sauvegarder)", value=True, key="baseline_dry_run"
+            )
+            if st.button("Calculer", key="baseline_compute_btn", type="primary"):
+                with st.spinner("Calcul en cours…"):
+                    try:
+                        result = client.compute_baseline(
+                            name=selected["name"],
+                            version=selected["version"],
+                            days=baseline_days,
+                            dry_run=baseline_dry_run,
                         )
+                        st.markdown(
+                            f"**Prédictions utilisées :** {result.get('predictions_used')} "
+                            f"— fenêtre : {baseline_days} jours"
+                        )
+                        st.json(result.get("baseline", {}))
+                        if baseline_dry_run:
+                            st.info("Décochez **dry_run** pour sauvegarder le baseline.")
+                        else:
+                            st.toast("Baseline sauvegardé — drift actif pour ce modèle.", icon="✅")
+                            st.cache_data.clear()
+                    except Exception as e:
+                        st.toast(f"Erreur : {e}", icon="❌")
+
+        # Historique des modifications
+        with st.expander("📜 Historique des modifications"):
+            try:
+                history_data = client.get_model_history(selected["name"], selected["version"], limit=20)
+                entries = history_data.get("entries", [])
+                total_hist = history_data.get("total", 0)
+            except Exception as e:
+                st.error(f"Impossible de charger l'historique : {e}")
+                entries = []
+                total_hist = 0
+
+            if not entries:
+                st.info("Aucun historique disponible pour cette version.")
+            else:
+                st.caption(f"{total_hist} entrée(s) au total — affichage des 20 dernières")
+                for entry in entries:
+                    ts = pd.to_datetime(entry["timestamp"]).strftime("%Y-%m-%d %H:%M:%S UTC")
+                    badge = _action_badge(entry["action"])
+                    changed = ", ".join(entry.get("changed_fields") or []) or "—"
+                    who = entry.get("changed_by_username") or "inconnu"
+
+                    col_info, col_btn = st.columns([5, 1])
+                    with col_info:
+                        st.markdown(
+                            f"**{ts}** — {badge} — par **{who}**  \n" f"Champs modifiés : `{changed}`"
+                        )
+                    with col_btn:
+                        if is_admin:
+                            if st.button(
+                                "↩ Rollback",
+                                key=f"rollback_btn_{entry['id']}",
+                                type="secondary",
+                                help=f"Restaurer l'état de l'entrée #{entry['id']}",
+                            ):
+                                st.session_state["confirm_rollback_id"] = entry["id"]
+                                st.session_state["confirm_rollback_model"] = selected["name"]
+                                st.session_state["confirm_rollback_version"] = selected["version"]
+
+                    with st.expander(f"Snapshot #{entry['id']}", expanded=False):
+                        st.json(entry["snapshot"])
+
+                    st.divider()
+
+                # Dialog de confirmation du rollback
+                confirm_id = st.session_state.get("confirm_rollback_id")
+                confirm_model = st.session_state.get("confirm_rollback_model")
+                confirm_version = st.session_state.get("confirm_rollback_version")
+                if (
+                    confirm_id is not None
+                    and confirm_model == selected["name"]
+                    and confirm_version == selected["version"]
+                ):
+                    st.warning(
+                        f"Restaurer les métadonnées de **{confirm_model} v{confirm_version}** "
+                        f"à l'état capturé dans l'entrée **#{confirm_id}** ?  \n"
+                        "Cette action est irréversible (mais loguée dans l'historique)."
+                    )
+                    c1, c2 = st.columns(2)
+                    if c1.button("✅ Oui, restaurer", type="primary", key="confirm_rollback_yes"):
+                        try:
+                            result = client.rollback_model(confirm_model, confirm_version, confirm_id)
+                            st.toast(
+                                f"Rollback effectué — entrée #{result['new_history_id']} créée.",
+                                icon="✅",
+                            )
+                            st.session_state.pop("confirm_rollback_id", None)
+                            st.session_state.pop("confirm_rollback_model", None)
+                            st.session_state.pop("confirm_rollback_version", None)
+                            reload()
+                        except Exception as e:
+                            st.toast(f"Erreur lors du rollback : {e}", icon="❌")
+                    if c2.button("❌ Annuler", key="confirm_rollback_no"):
                         st.session_state.pop("confirm_rollback_id", None)
                         st.session_state.pop("confirm_rollback_model", None)
                         st.session_state.pop("confirm_rollback_version", None)
-                        reload()
-                    except Exception as e:
-                        st.toast(f"Erreur lors du rollback : {e}", icon="❌")
-                if c2.button("❌ Annuler", key="confirm_rollback_no"):
-                    st.session_state.pop("confirm_rollback_id", None)
-                    st.session_state.pop("confirm_rollback_model", None)
-                    st.session_state.pop("confirm_rollback_version", None)
-                    st.rerun()
+                        st.rerun()

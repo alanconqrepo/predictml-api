@@ -194,6 +194,15 @@ class APIClient:
         r.raise_for_status()
         return r.content
 
+    def download_train_script(self, name: str, version: str) -> bytes:
+        r = requests.get(
+            f"{self.base_url}/models/{name}/{version}/download-script",
+            headers=self._headers(),
+            timeout=30,
+        )
+        r.raise_for_status()
+        return r.content
+
     def download_training_dataset(self, name: str, version: str) -> bytes:
         r = requests.get(
             f"{self.base_url}/models/{name}/{version}/download-dataset",
