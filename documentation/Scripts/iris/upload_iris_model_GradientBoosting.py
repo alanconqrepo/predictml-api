@@ -193,21 +193,20 @@ finally:
 # ── 4. Résultat upload ────────────────────────────────────────────────────────
 
 if response.status_code == 409:
-    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} existe déjà — mise à jour des hyperparamètres via PATCH…")
-    patch_payload = {}
+    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} existe déjà — mise à jour via PATCH…")
+    patch_payload = {"is_production": True, "deployment_mode": "ab_test", "traffic_weight": 0.5}
     if hyperparameters:
         patch_payload["hyperparameters"] = hyperparameters
-    if patch_payload:
-        patch_resp = requests.patch(
-            f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
-            headers={**HEADERS, "Content-Type": "application/json"},
-            json=patch_payload,
-            timeout=10,
-        )
-        if patch_resp.status_code == 200:
-            print(f"✅  Hyperparamètres mis à jour.")
-        else:
-            print(f"❌  PATCH échoué ({patch_resp.status_code}) : {patch_resp.text[:200]}")
+    patch_resp = requests.patch(
+        f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
+        headers={**HEADERS, "Content-Type": "application/json"},
+        json=patch_payload,
+        timeout=10,
+    )
+    if patch_resp.status_code == 200:
+        print(f"✅  Mode ab_test et hyperparamètres mis à jour.")
+    else:
+        print(f"❌  PATCH échoué ({patch_resp.status_code}) : {patch_resp.text[:200]}")
     sys.exit(0)
 
 if response.status_code not in (200, 201):
@@ -231,7 +230,7 @@ print(f"   Algorithme: {ALGORITHM}")
 
 print(f"⏳  Ajout du tag 'Example', baseline des features et dataset de lineage…")
 
-patch_body: dict = {"tags": ["Example"]}
+patch_body: dict = {"is_production": True, "deployment_mode": "ab_test", "traffic_weight": 0.5, "tags": ["Example"]}
 if metrics.get("feature_stats"):
     patch_body["feature_baseline"] = metrics["feature_stats"]
 if metrics.get("confidence_threshold") is not None:
@@ -248,15 +247,11 @@ if patch.status_code == 200:
     extras = []
     if "feature_baseline" in patch_body:
         extras.append("baseline des features")
-    if "training_dataset" in patch_body:
-        extras.append(f"dataset → {patch_body['training_dataset']}")
-    print(f"✅  Tag 'Example' ajouté{(' avec ' + ', '.join(extras)) if extras else ''}"
-          f" (modèle non mis en production).")
+    print(f"✅  Modèle passé en production (ab_test){(' avec ' + ', '.join(extras)) if extras else ''}.")
 else:
     print(f"⚠️   PATCH échoué ({patch.status_code}) : {patch.text[:200]}")
 
-print(f"\n   → Dashboard : {API_URL.replace(':8000', ':8501')}/Models")
-print(f"   → Mettre en production :")
-print(f"       PATCH {API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}  {{\"is_production\": true}}")
+print(f"\n   → iris-classifier v{MODEL_VERSION} en A/B test avec v1.0.0")
+print(f"   → Comparaison : GET {API_URL}/models/{MODEL_NAME}/ab-compare")
 print(f"   → Ré-entraîner :")
 print(f"       POST {API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}/retrain")

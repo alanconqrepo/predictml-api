@@ -193,21 +193,20 @@ finally:
 # ── 4. Résultat upload ────────────────────────────────────────────────────────
 
 if response.status_code == 409:
-    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} existe déjà — mise à jour des hyperparamètres via PATCH…")
-    patch_payload = {}
+    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} existe déjà — mise à jour via PATCH…")
+    patch_payload = {"is_production": True, "deployment_mode": "ab_test", "traffic_weight": 0.5}
     if hyperparameters:
         patch_payload["hyperparameters"] = hyperparameters
-    if patch_payload:
-        patch_resp = requests.patch(
-            f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
-            headers={**HEADERS, "Content-Type": "application/json"},
-            json=patch_payload,
-            timeout=10,
-        )
-        if patch_resp.status_code == 200:
-            print(f"✅  Hyperparamètres mis à jour.")
-        else:
-            print(f"❌  PATCH échoué ({patch_resp.status_code}) : {patch_resp.text[:200]}")
+    patch_resp = requests.patch(
+        f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
+        headers={**HEADERS, "Content-Type": "application/json"},
+        json=patch_payload,
+        timeout=10,
+    )
+    if patch_resp.status_code == 200:
+        print(f"✅  Mode ab_test mis à jour.")
+    else:
+        print(f"❌  PATCH échoué ({patch_resp.status_code}) : {patch_resp.text[:200]}")
     sys.exit(0)
 
 if response.status_code not in (200, 201):
@@ -230,7 +229,7 @@ print(f"   Algorithme: {ALGORITHM}")
 
 print(f"⏳  Mise en production, tag 'Example' et baseline des features…")
 
-patch_body: dict = {"is_production": True, "tags": ["Example"]}
+patch_body: dict = {"is_production": True, "deployment_mode": "ab_test", "traffic_weight": 0.5, "tags": ["Example"]}
 if metrics.get("feature_stats"):
     patch_body["feature_baseline"] = metrics["feature_stats"]
 
@@ -243,11 +242,11 @@ patch = requests.patch(
 
 if patch.status_code == 200:
     baseline_ok = "feature_baseline" in patch_body
-    print(f"✅  Modèle passé en production avec le tag 'Example'"
-          f"{' et baseline des features' if baseline_ok else ''}.")
+    print(f"✅  Modèle passé en production (ab_test)"
+          f"{' avec baseline des features' if baseline_ok else ''}.")
 else:
     print(f"⚠️   PATCH échoué ({patch.status_code}) : {patch.text[:200]}")
 
-print(f"\n   → Dashboard : {API_URL.replace(':8000', ':8501')}/Models")
+print(f"\n   → wine-regressor v{MODEL_VERSION} en A/B test (prêt pour v1.1.0)")
 print(f"   → Ré-entraîner :")
 print(f"       POST {API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}/retrain")

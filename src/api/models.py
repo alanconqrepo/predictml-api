@@ -3567,7 +3567,10 @@ async def update_model(
     pre_snapshot = _build_snapshot(model)
     demoted_versions = []
 
-    # Si is_production passe à True → retirer is_production des autres versions
+    # Si is_production passe à True → retirer is_production des autres versions,
+    # sauf celles en ab_test (elles partagent le trafic production simultanément).
+    # La version courante hérite du deployment_mode du payload ou de son état actuel.
+    incoming_mode = payload.deployment_mode if payload.deployment_mode is not None else model.deployment_mode
     if payload.is_production is True:
         other_versions = await db.execute(
             select(ModelMetadata).where(
@@ -3579,6 +3582,10 @@ async def update_model(
             )
         )
         for other in other_versions.scalars().all():
+            # Garder is_production si l'autre version est en ab_test ET que la version
+            # courante sera aussi en ab_test (coexistence A/B légale)
+            if other.deployment_mode == DeploymentMode.AB_TEST and incoming_mode == DeploymentMode.AB_TEST:
+                continue
             other.is_production = False
             demoted_versions.append(other)
 
