@@ -474,6 +474,7 @@ services:
     environment:
       - API_URL=http://api:${API_PORT:-8000}
       - MLFLOW_URL=http://mlflow:${MLFLOW_PORT:-5000}
+      - MLFLOW_PUBLIC_URL=${MLFLOW_PUBLIC_URL:-http://localhost:${MLFLOW_PORT:-5000}}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - HOME=/tmp
       # Connexion PostgreSQL pour le tool SQL du chatbot

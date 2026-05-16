@@ -130,9 +130,15 @@ for line in reversed(result.stdout.strip().splitlines()):
     except json.JSONDecodeError:
         continue
 
-acc            = metrics.get("accuracy")
-f1             = metrics.get("f1_score")
-mlflow_run_id  = metrics.get("mlflow_run_id")
+acc              = metrics.get("accuracy")
+f1               = metrics.get("f1_score")
+precision        = metrics.get("precision")
+recall           = metrics.get("recall")
+features_count   = metrics.get("features_count")
+classes          = metrics.get("classes")
+training_dataset = metrics.get("training_dataset")
+mlflow_run_id    = metrics.get("mlflow_run_id")
+hyperparameters  = metrics.get("hyperparameters")
 print(f"✅  Entraînement terminé — Accuracy : {acc} | F1 : {f1}"
       + (f" | MLflow run : {mlflow_run_id}" if mlflow_run_id else ""))
 
@@ -152,8 +158,24 @@ try:
             data["accuracy"] = str(round(acc, 4))
         if f1 is not None:
             data["f1_score"] = str(round(f1, 4))
+        if features_count is not None:
+            data["features_count"] = str(features_count)
+        if classes is not None:
+            data["classes"] = json.dumps(classes)
+        if training_dataset:
+            data["training_dataset"] = training_dataset
         if mlflow_run_id:
             data["mlflow_run_id"] = mlflow_run_id
+        _tm = {k: round(v, 4) for k, v in {
+            "accuracy":  acc,
+            "f1_score":  f1,
+            "precision": precision,
+            "recall":    recall,
+        }.items() if v is not None}
+        if _tm:
+            data["training_metrics"] = json.dumps(_tm)
+        if hyperparameters:
+            data["hyperparameters"] = json.dumps(hyperparameters)
 
         response = requests.post(
             f"{API_URL}/models",
@@ -169,6 +191,24 @@ finally:
     os.unlink(tmp_pkl.name)
 
 # ── 4. Résultat upload ────────────────────────────────────────────────────────
+
+if response.status_code == 409:
+    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} existe déjà — mise à jour des hyperparamètres via PATCH…")
+    patch_payload = {}
+    if hyperparameters:
+        patch_payload["hyperparameters"] = hyperparameters
+    if patch_payload:
+        patch_resp = requests.patch(
+            f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
+            headers={**HEADERS, "Content-Type": "application/json"},
+            json=patch_payload,
+            timeout=10,
+        )
+        if patch_resp.status_code == 200:
+            print(f"✅  Hyperparamètres mis à jour.")
+        else:
+            print(f"❌  PATCH échoué ({patch_resp.status_code}) : {patch_resp.text[:200]}")
+    sys.exit(0)
 
 if response.status_code not in (200, 201):
     print(f"\n❌  Erreur {response.status_code}")
@@ -194,8 +234,8 @@ print(f"⏳  Ajout du tag 'Example', baseline des features et dataset de lineage
 patch_body: dict = {"tags": ["Example"]}
 if metrics.get("feature_stats"):
     patch_body["feature_baseline"] = metrics["feature_stats"]
-if metrics.get("training_dataset"):
-    patch_body["training_dataset"] = metrics["training_dataset"]
+if metrics.get("confidence_threshold") is not None:
+    patch_body["confidence_threshold"] = metrics["confidence_threshold"]
 
 patch = requests.patch(
     f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",

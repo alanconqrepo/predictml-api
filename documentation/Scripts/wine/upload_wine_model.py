@@ -139,6 +139,7 @@ rmse             = metrics.get("rmse")
 features_count   = metrics.get("features_count")
 training_dataset = metrics.get("training_dataset")
 mlflow_run_id    = metrics.get("mlflow_run_id")
+hyperparameters  = metrics.get("hyperparameters")
 print(
     f"✅  Entraînement terminé — R² : {r2} | MAE : {mae} | RMSE : {rmse}"
     + (f" | MLflow run : {mlflow_run_id}" if mlflow_run_id else "")
@@ -173,6 +174,8 @@ try:
         }.items() if v is not None}
         if _tm:
             data["training_metrics"] = json.dumps(_tm)
+        if hyperparameters:
+            data["hyperparameters"] = json.dumps(hyperparameters)
 
         response = requests.post(
             f"{API_URL}/models",
@@ -188,6 +191,24 @@ finally:
     os.unlink(tmp_pkl.name)
 
 # ── 4. Résultat upload ────────────────────────────────────────────────────────
+
+if response.status_code == 409:
+    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} existe déjà — mise à jour des hyperparamètres via PATCH…")
+    patch_payload = {}
+    if hyperparameters:
+        patch_payload["hyperparameters"] = hyperparameters
+    if patch_payload:
+        patch_resp = requests.patch(
+            f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
+            headers={**HEADERS, "Content-Type": "application/json"},
+            json=patch_payload,
+            timeout=10,
+        )
+        if patch_resp.status_code == 200:
+            print(f"✅  Hyperparamètres mis à jour.")
+        else:
+            print(f"❌  PATCH échoué ({patch_resp.status_code}) : {patch_resp.text[:200]}")
+    sys.exit(0)
 
 if response.status_code not in (200, 201):
     print(f"\n❌  Erreur {response.status_code}")
