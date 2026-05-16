@@ -14,7 +14,7 @@ Tests pour les fonctionnalités #19 (tags), #20 (taille upload), #23 (webhook)
 """
 import asyncio
 import io
-import pickle
+import joblib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -61,7 +61,9 @@ def _inject_model(model_name: str, version: str, model, webhook_url=None):
             webhook_url=webhook_url,
         ),
     }
-    asyncio.run(model_service._redis.set(key, pickle.dumps(data)))
+    _jbuf = io.BytesIO()
+    joblib.dump(data, _jbuf)
+    asyncio.run(model_service._redis.set(key, _jbuf.getvalue()))
 
 
 # ---------------------------------------------------------------------------

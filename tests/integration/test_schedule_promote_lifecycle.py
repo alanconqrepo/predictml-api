@@ -12,7 +12,7 @@ Workflow testé :
 
 import asyncio
 import io
-import pickle
+import joblib
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -42,7 +42,7 @@ FEATURES = {
 
 VALID_TRAIN_SCRIPT = """\
 import os
-import pickle
+import joblib
 import json
 from sklearn.linear_model import LogisticRegression
 from sklearn.datasets import load_iris
@@ -54,7 +54,7 @@ OUTPUT_MODEL_PATH = os.environ["OUTPUT_MODEL_PATH"]
 X, y = load_iris(return_X_y=True)
 model = LogisticRegression(max_iter=200).fit(X, y)
 with open(OUTPUT_MODEL_PATH, "wb") as f:
-    pickle.dump(model, f)
+    joblib.dump(model, f)
 
 print(json.dumps({"accuracy": 0.96, "f1_score": 0.95}))
 """
@@ -62,7 +62,9 @@ print(json.dumps({"accuracy": 0.96, "f1_score": 0.95}))
 
 def _make_pkl() -> bytes:
     X, y = load_iris(return_X_y=True)
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 async def _setup():
@@ -97,7 +99,7 @@ async def _mock_exec_success(*args, **kwargs):
         X, y = load_iris(return_X_y=True)
         model = LogisticRegression(max_iter=200).fit(X, y)
         with open(output_path, "wb") as f:
-            pickle.dump(model, f)
+            joblib.dump(model, f)
 
     proc = MagicMock()
     proc.returncode = 0

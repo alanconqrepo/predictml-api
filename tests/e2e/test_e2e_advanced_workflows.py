@@ -12,7 +12,7 @@ Token admin : e2e-adv-admin-token-ll22
 
 import asyncio
 import io
-import pickle
+import joblib
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -45,13 +45,17 @@ FEATURES = {
 def _make_lr_pkl() -> bytes:
     """Modèle LogisticRegression sérialisé."""
     X, y = load_iris(return_X_y=True)
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 def _make_rf_pkl() -> bytes:
     """Modèle RandomForest sérialisé (tree-based pour SHAP TreeExplainer)."""
     X, y = load_iris(return_X_y=True)
-    return pickle.dumps(RandomForestClassifier(n_estimators=10, random_state=42).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(RandomForestClassifier(n_estimators=10, random_state=42).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 def _inject_cache(name: str, version: str, use_rf: bool = False):
@@ -73,7 +77,7 @@ def _inject_cache(name: str, version: str, use_rf: bool = False):
         ),
     }
     asyncio.run(
-        model_service._redis.set(f"model:{name}:{version}", pickle.dumps(data))
+        model_service._redis.set(f"model:{name}:{version}", (lambda _b: (joblib.dump(data, _b), _b.getvalue())[1])(io.BytesIO()))
     )
 
 

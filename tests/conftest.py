@@ -2,9 +2,19 @@
 Configuration pytest - Fixes pour asyncpg + TestClient sur Windows
 """
 import asyncio
+import io
 import sys
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import joblib
+
+
+def make_model_bytes(model) -> bytes:
+    """Sérialise un modèle sklearn en bytes joblib (remplace pickle.dumps)."""
+    buf = io.BytesIO()
+    joblib.dump(model, buf)
+    return buf.getvalue()
 
 # Fix event loop sur Windows (requis par asyncpg)
 if sys.platform == "win32":

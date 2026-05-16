@@ -4,7 +4,7 @@ Tests pour PATCH /models/{name}/{version}/deprecate
 
 import asyncio
 import io
-import pickle
+import joblib
 from types import SimpleNamespace
 
 import pandas as pd
@@ -28,7 +28,9 @@ MODEL_PREFIX = "dep_model"
 def make_pkl_bytes() -> bytes:
     X = pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": [4.0, 5.0, 6.0]})
     y = [0, 1, 0]
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 async def _setup():
@@ -90,7 +92,9 @@ def _inject_model_cache(name: str, version: str) -> None:
             webhook_url=None,
         ),
     }
-    asyncio.run(model_service._redis.set(f"model:{name}:{version}", pickle.dumps(data)))
+    _jbuf = io.BytesIO()
+    joblib.dump(data, _jbuf)
+    asyncio.run(model_service._redis.set(f"model:{name}:{version}", _jbuf.getvalue()))
 
 
 def _create_model(name: str, version: str = "1.0.0", is_production: bool = False) -> dict:

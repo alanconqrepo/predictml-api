@@ -10,7 +10,7 @@ Workflow testé :
 
 import asyncio
 import io
-import pickle
+import joblib
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -40,7 +40,9 @@ FEATURES = {
 
 def _make_pkl() -> bytes:
     X, y = load_iris(return_X_y=True)
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 def _inject_cache(model_name: str, version: str):
@@ -54,7 +56,7 @@ def _inject_cache(model_name: str, version: str):
         ),
     }
     asyncio.run(
-        model_service._redis.set(f"model:{model_name}:{version}", pickle.dumps(data))
+        model_service._redis.set(f"model:{model_name}:{version}", (lambda _b: (joblib.dump(data, _b), _b.getvalue())[1])(io.BytesIO()))
     )
 
 

@@ -15,7 +15,7 @@ Couvre :
 
 import asyncio
 import io
-import pickle
+import joblib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -38,7 +38,9 @@ WM_MODEL = "warmup_dl_model"
 
 def _make_pkl_bytes() -> bytes:
     X, y = load_iris(return_X_y=True)
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 async def _setup():
@@ -91,7 +93,9 @@ def _inject_cache(name: str, version: str):
             webhook_url=None,
         ),
     }
-    asyncio.run(model_service._redis.set(f"model:{name}:{version}", pickle.dumps(data)))
+    _jbuf = io.BytesIO()
+    joblib.dump(data, _jbuf)
+    asyncio.run(model_service._redis.set(f"model:{name}:{version}", _jbuf.getvalue()))
 
 
 # ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@ and resource string at each instrumented endpoint.
 
 import asyncio
 import io
-import pickle
+import joblib
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -58,7 +58,9 @@ asyncio.run(_setup())
 
 def make_pkl_bytes() -> bytes:
     X, y = load_iris(return_X_y=True)
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 def _create_model(name: str, version: str = "1.0.0") -> dict:
@@ -231,7 +233,7 @@ def test_audit_model_schedule_update():
 
 VALID_TRAIN_SCRIPT = """\
 import os
-import pickle
+import joblib
 import json
 from sklearn.linear_model import LogisticRegression
 from sklearn.datasets import load_iris
@@ -243,7 +245,7 @@ OUTPUT_MODEL_PATH = os.environ["OUTPUT_MODEL_PATH"]
 X, y = load_iris(return_X_y=True)
 model = LogisticRegression(max_iter=200).fit(X, y)
 with open(OUTPUT_MODEL_PATH, "wb") as f:
-    pickle.dump(model, f)
+    joblib.dump(model, f)
 print(json.dumps({"accuracy": 0.97, "f1_score": 0.96}))
 """
 
@@ -258,7 +260,7 @@ async def _mock_exec_success(*args, **kwargs):
         X, y = load_iris(return_X_y=True)
         model = LogisticRegression(max_iter=200).fit(X, y)
         with open(output_path, "wb") as f:
-            pickle.dump(model, f)
+            joblib.dump(model, f)
 
     proc = MagicMock()
     proc.returncode = 0

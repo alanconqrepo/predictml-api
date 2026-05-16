@@ -3,7 +3,7 @@ Tests pour GET /models — filtres avancés (is_production, algorithm, min_accur
 """
 import asyncio
 import io
-import pickle
+import joblib
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,7 +22,9 @@ ADMIN_TOKEN = "test-admin-token-list-filters"
 
 def _make_pkl() -> bytes:
     X, y = load_iris(return_X_y=True)
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 async def _setup():

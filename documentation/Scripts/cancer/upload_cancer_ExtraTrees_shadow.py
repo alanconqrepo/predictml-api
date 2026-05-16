@@ -61,7 +61,7 @@ except Exception as e:
     print(f"❌  API inaccessible ({API_URL}) : {e}")
     sys.exit(1)
 
-tmp_pkl = tempfile.NamedTemporaryFile(suffix=".pkl", delete=False)
+tmp_pkl = tempfile.NamedTemporaryFile(suffix=".joblib", delete=False)
 tmp_pkl.close()
 
 print(f"⏳  Entraînement ExtraTrees ({TRAIN_START} → {TRAIN_END})…")
@@ -138,7 +138,7 @@ try:
             f"{API_URL}/models",
             headers=HEADERS,
             files={
-                "file":       (f"{MODEL_NAME}.pkl",          pkl_fh,   "application/octet-stream"),
+                "file":       (f"{MODEL_NAME}.joblib",        pkl_fh,   "application/octet-stream"),
                 "train_file": ("train_cancer_ExtraTrees.py",  train_fh, "text/plain"),
             },
             data=data, timeout=30,

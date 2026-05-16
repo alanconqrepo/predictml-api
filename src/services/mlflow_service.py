@@ -6,10 +6,12 @@ retournent None au lieu de lever une exception, de façon à ne jamais bloquer u
 ré-entraînement si le serveur MLflow est indisponible (dégradation gracieuse).
 """
 
+import io
 import os
-import pickle
 import tempfile
 from typing import Optional
+
+import joblib
 
 import mlflow
 import mlflow.sklearn
@@ -145,7 +147,7 @@ class MLflowService:
                 # Artifact : log du modèle sklearn
                 if model_bytes:
                     try:
-                        model_obj = pickle.loads(model_bytes)  # noqa: S301
+                        model_obj = joblib.load(io.BytesIO(model_bytes))
                         mlflow.sklearn.log_model(model_obj, artifact_path="model")
                     except Exception as exc:
                         logger.warning("MLflow log_model échoué — artifact ignoré", error=str(exc))

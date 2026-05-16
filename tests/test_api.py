@@ -2,7 +2,8 @@
 Tests pour les endpoints de l'API
 """
 import asyncio
-import pickle
+import io
+import joblib
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -164,7 +165,9 @@ def test_cached_models_count_reflects_injected_model():
         "model": SimpleNamespace(),  # MagicMock n'est pas picklable
         "metadata": SimpleNamespace(name="cached_test_model", version="9.9.9"),
     }
-    asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
+    _jbuf = io.BytesIO()
+    joblib.dump(data, _jbuf)
+    asyncio.run(model_service._redis.set(f"model:{key}", _jbuf.getvalue()))
     try:
         response = client.get("/models/cached")
         assert response.status_code == 200

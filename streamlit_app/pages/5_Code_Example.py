@@ -30,9 +30,9 @@ with tab_python:
     st.markdown("Installez les dépendances : `pip install scikit-learn mlflow boto3`")
 
     code_mlflow = f"""\
+import joblib
 import mlflow
 import mlflow.sklearn
-import pickle
 from sklearn.datasets import load_iris
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -74,9 +74,8 @@ with mlflow.start_run() as run:
     print(f"Run ID : {{run_id}}")
     print(f"Accuracy : {{acc:.4f}} | F1 : {{f1:.4f}}")
 
-# ── Sauvegarder le .pkl localement ──────────────────────────────
-with open(f"{{MODEL_NAME}}_v{{MODEL_VERSION}}.pkl", "wb") as f:
-    pickle.dump(model, f)
+# ── Sauvegarder le modèle localement ───────────────────────────
+joblib.dump(model, f"{{MODEL_NAME}}_v{{MODEL_VERSION}}.joblib")
 
 print("Modèle sauvegardé.")
 """
@@ -93,16 +92,16 @@ API_URL = "{API_URL}"
 API_TOKEN = "{TOKEN}"
 MODEL_NAME = "iris_model"
 MODEL_VERSION = "1.0.0"
-PKL_FILE = f"{{MODEL_NAME}}_v{{MODEL_VERSION}}.pkl"
+MODEL_FILE = f"{{MODEL_NAME}}_v{{MODEL_VERSION}}.joblib"
 
 headers = {{"Authorization": f"Bearer {{API_TOKEN}}"}}
 
 # ── Upload du modèle ────────────────────────────────────────────
-with open(PKL_FILE, "rb") as f:
+with open(MODEL_FILE, "rb") as f:
     response = requests.post(
         f"{{API_URL}}/models",
         headers=headers,
-        files={{"file": (PKL_FILE, f, "application/octet-stream")}},
+        files={{"file": (MODEL_FILE, f, "application/octet-stream")}},
         data={{
             "name": MODEL_NAME,
             "version": MODEL_VERSION,
@@ -204,7 +203,7 @@ TOKEN="{TOKEN}"
 
 curl -X POST "$API_URL/models" \\
   -H "Authorization: Bearer $TOKEN" \\
-  -F "file=@iris_model_v1.0.0.pkl;type=application/octet-stream" \\
+  -F "file=@iris_model_v1.0.0.joblib;type=application/octet-stream" \\
   -F "name=iris_model" \\
   -F "version=1.0.0" \\
   -F "description=Random Forest sur Iris dataset" \\
@@ -279,7 +278,7 @@ curl -X POST "$API_URL/observed-results" \\
 with tab_js:
     st.subheader("1. Uploader le modèle")
     st.markdown(
-        "_Depuis un navigateur, le fichier `.pkl` doit provenir d'un `<input type=\"file\">`._"
+        "_Depuis un navigateur, le fichier `.joblib` doit provenir d'un `<input type=\"file\">`._"
     )
 
     code_js_upload = f"""\
@@ -290,7 +289,7 @@ const TOKEN = "{TOKEN}";
 const pklFile = fileInput.files[0];
 
 const formData = new FormData();
-formData.append("file", pklFile, "iris_model_v1.0.0.pkl");
+formData.append("file", pklFile, "iris_model_v1.0.0.joblib");
 formData.append("name", "iris_model");
 formData.append("version", "1.0.0");
 formData.append("description", "Random Forest sur Iris dataset");

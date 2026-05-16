@@ -8,7 +8,7 @@ Algorithme : ExtraTreesClassifier (splits aléatoires, max_depth=8)
 
 import json
 import os
-import pickle
+import joblib
 import sys
 from datetime import datetime
 
@@ -49,7 +49,7 @@ def _ts(label: str) -> None:
 
 TRAIN_START_DATE  = os.environ.get("TRAIN_START_DATE", "2025-01-01")
 TRAIN_END_DATE    = os.environ.get("TRAIN_END_DATE",   "2025-02-01")
-OUTPUT_MODEL_PATH = os.environ.get("OUTPUT_MODEL_PATH", "default_model_path.pkl")
+OUTPUT_MODEL_PATH = os.environ.get("OUTPUT_MODEL_PATH", "default_model_path.joblib")
 
 MODEL_NAME          = os.environ.get("MODEL_NAME", "cancer-classifier")
 MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "")
@@ -129,8 +129,7 @@ print(f"[{MODEL_NAME}] Acc={acc:.4f} F1={f1:.4f} ROC-AUC={roc_auc:.4f}", file=sy
 
 # ── 5. Sauvegarde ─────────────────────────────────────────────────────────────
 
-with open(OUTPUT_MODEL_PATH, "wb") as fh:
-    pickle.dump(model, fh)
+joblib.dump(model, OUTPUT_MODEL_PATH)
 print(f"[{MODEL_NAME}] Modèle sauvegardé → {OUTPUT_MODEL_PATH}", file=sys.stderr)
 
 _dataset_minio_path = None

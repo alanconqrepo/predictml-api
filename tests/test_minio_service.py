@@ -14,7 +14,7 @@ Couvre :
 """
 
 import io
-import pickle
+import joblib
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -144,7 +144,9 @@ class TestUploadModelBytes:
             from src.services.minio_service import MinIOService
 
             svc = MinIOService()
-            model_bytes = pickle.dumps({"model": "data"})
+            _jbuf = io.BytesIO()
+            joblib.dump({"model": "data"}, _jbuf)
+            model_bytes = _jbuf.getvalue()
             result = svc.upload_model_bytes(model_bytes, "test/v2.0.0.pkl")
             call_kwargs = mock_client.put_object.call_args
             assert call_kwargs[1].get("length") == len(model_bytes) or (
@@ -219,7 +221,9 @@ class TestDownloadModel:
             mock_client = MockMinio.return_value
             mock_client.bucket_exists.return_value = True
             original_obj = {"weights": [0.5, 1.0], "bias": 0.1}
-            pickled_bytes = pickle.dumps(original_obj)
+            _jbuf = io.BytesIO()
+            joblib.dump(original_obj, _jbuf)
+            pickled_bytes = _jbuf.getvalue()
             mock_response = MagicMock()
             mock_response.read.return_value = pickled_bytes
             mock_client.get_object.return_value = mock_response
@@ -235,7 +239,7 @@ class TestDownloadModel:
             mock_client = MockMinio.return_value
             mock_client.bucket_exists.return_value = True
             mock_response = MagicMock()
-            mock_response.read.return_value = pickle.dumps({"x": 1})
+            mock_response.read.return_value = (lambda _b: (joblib.dump({"x": 1}, _b), _b.getvalue())[1])(io.BytesIO())
             mock_client.get_object.return_value = mock_response
             from src.services.minio_service import MinIOService
 

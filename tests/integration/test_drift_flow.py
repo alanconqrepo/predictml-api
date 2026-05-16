@@ -17,7 +17,7 @@ Token admin : test-token-integ-df-admin-kk11
 import asyncio
 import io
 import json
-import pickle
+import joblib
 
 import numpy as np
 
@@ -78,7 +78,9 @@ OUTLIER_FEATURES = {
 def _make_pkl() -> bytes:
     """Crée un modèle sklearn sérialisé."""
     X, y = load_iris(return_X_y=True)
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 async def _setup():

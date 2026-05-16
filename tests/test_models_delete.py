@@ -3,7 +3,7 @@ Tests pour les endpoints DELETE /models/{name}/{version} et DELETE /models/{name
 """
 import asyncio
 import io
-import pickle
+import joblib
 
 from fastapi.testclient import TestClient
 from sklearn.datasets import load_iris
@@ -22,7 +22,9 @@ MODEL_PREFIX = "delete_model"
 
 def make_pkl_bytes() -> bytes:
     X, y = load_iris(return_X_y=True)
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 async def _setup():

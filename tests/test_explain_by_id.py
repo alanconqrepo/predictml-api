@@ -9,7 +9,8 @@ Stratégie de mock :
 """
 
 import asyncio
-import pickle
+import io
+import joblib
 from types import SimpleNamespace
 
 import pandas as pd
@@ -59,7 +60,9 @@ def _inject_cache(model_name: str, version: str, model, feature_baseline=None) -
             feature_baseline=feature_baseline,
         ),
     }
-    asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
+    _jbuf = io.BytesIO()
+    joblib.dump(data, _jbuf)
+    asyncio.run(model_service._redis.set(f"model:{key}", _jbuf.getvalue()))
     return key
 
 

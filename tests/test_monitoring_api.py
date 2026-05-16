@@ -9,7 +9,7 @@ Couvre :
 
 import asyncio
 import io
-import pickle
+import joblib
 from datetime import datetime, timedelta
 
 import pytest
@@ -39,7 +39,9 @@ MODEL_NAME = "monitor_test_model"
 
 def _make_pkl() -> bytes:
     X, y = load_iris(return_X_y=True)
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 async def _setup():
@@ -94,7 +96,7 @@ def _inject_model_in_cache(model_name: str, version: str = "1.0.0"):
         ),
     }
     asyncio.run(
-        model_service._redis.set(f"model:{model_name}:{version}", pickle.dumps(data))
+        model_service._redis.set(f"model:{model_name}:{version}", (lambda _b: (joblib.dump(data, _b), _b.getvalue())[1])(io.BytesIO()))
     )
 
 

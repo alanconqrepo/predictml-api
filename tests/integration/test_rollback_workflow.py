@@ -14,7 +14,7 @@ Token admin : test-token-integ-rb-admin-ii99
 
 import asyncio
 import io
-import pickle
+import joblib
 
 from fastapi.testclient import TestClient
 from sklearn.datasets import load_iris
@@ -34,7 +34,9 @@ RB_MODEL = "rb_rollback_integ_model"
 def _make_pkl() -> bytes:
     """Crée un modèle sklearn sérialisé."""
     X, y = load_iris(return_X_y=True)
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 async def _setup():

@@ -16,6 +16,7 @@ Chaque job :
 """
 
 import asyncio
+import csv
 import json
 import os
 import resource
@@ -211,13 +212,16 @@ async def _do_retrain(name: str, version: str) -> None:
             "accuracy": source_model.accuracy,
             "f1_score": source_model.f1_score,
         }
-    # ← connexion DB libérée ici, avant le subprocess de 600 s
 
-    # 2. Calculer la plage de dates
-    lookback_days = int(schedule.get("lookback_days", 30))
-    now_utc = datetime.now(timezone.utc)
-    end_date = now_utc.strftime("%Y-%m-%d")
-    start_date = (now_utc - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+        # 2. Calculer la plage de dates (ici pour pouvoir exporter avant de fermer la session)
+        lookback_days = int(schedule.get("lookback_days", 30))
+        now_utc = datetime.now(timezone.utc)
+        end_date = now_utc.strftime("%Y-%m-%d")
+        start_date = (now_utc - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+
+        # Exporter les données de production avant de libérer la connexion
+        retrain_rows = await DBService.export_retrain_data(db, name, start_date, end_date)
+    # ← connexion DB libérée ici, avant le subprocess de 600 s
 
     # 3. Télécharger train.py depuis MinIO
     try:
@@ -244,10 +248,46 @@ async def _do_retrain(name: str, version: str) -> None:
 
     with tempfile.TemporaryDirectory() as tmpdir:
         script_path = os.path.join(tmpdir, "train.py")
-        output_model_path = os.path.join(tmpdir, "output_model.pkl")
+        output_model_path = os.path.join(tmpdir, "output_model.joblib")
 
         with open(script_path, "wb") as f:
             f.write(script_bytes)
+
+        # Écrire le CSV de données de production si disponible
+        train_data_path = None
+        if retrain_rows:
+            train_data_path = os.path.join(tmpdir, "train_data.csv")
+            with open(train_data_path, "w", newline="", encoding="utf-8") as csvfile:
+                fieldnames = [
+                    "id_obs",
+                    "input_features",
+                    "prediction_result",
+                    "observed_result",
+                    "timestamp",
+                    "model_version",
+                    "response_time_ms",
+                ]
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                for row in retrain_rows:
+                    writer.writerow(
+                        {
+                            "id_obs": row["id_obs"],
+                            "input_features": json.dumps(row["input_features"]),
+                            "prediction_result": json.dumps(row["prediction_result"]),
+                            "observed_result": json.dumps(row["observed_result"])
+                            if row["observed_result"] is not None
+                            else "",
+                            "timestamp": row["timestamp"],
+                            "model_version": row["model_version"],
+                            "response_time_ms": row["response_time_ms"],
+                        }
+                    )
+            logger.info(
+                "Données de production exportées pour le retrain planifié",
+                model=name,
+                rows=len(retrain_rows),
+            )
 
         env = {k: v for k, v in os.environ.items() if k in _SAFE_ENV_KEYS}
         env.update(
@@ -259,6 +299,8 @@ async def _do_retrain(name: str, version: str) -> None:
                 "MODEL_NAME": name,
             }
         )
+        if train_data_path:
+            env["TRAIN_DATA_PATH"] = train_data_path
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -384,8 +426,8 @@ async def _do_retrain(name: str, version: str) -> None:
         logger.warning("MLflow logging échoué (scheduler)", error=str(_exc))
 
     # 6. Uploader le nouveau modèle, le script et le requirements.txt dans MinIO
-    new_object_key = f"{name}/v{new_version}.pkl"
-    new_pkl_hmac_signature = compute_model_hmac(new_model_bytes)
+    new_object_key = f"{name}/v{new_version}.joblib"
+    new_model_hmac_signature = compute_model_hmac(new_model_bytes)
     upload_info = await minio_service.async_upload_model_bytes(new_model_bytes, new_object_key)
     new_train_key = f"{name}/v{new_version}_train.py"
     await minio_service.async_upload_file_bytes(
@@ -410,7 +452,7 @@ async def _do_retrain(name: str, version: str) -> None:
             minio_bucket=upload_info.get("bucket"),
             minio_object_key=new_object_key,
             file_size_bytes=upload_info.get("size"),
-            pkl_hmac_signature=new_pkl_hmac_signature,
+            model_hmac_signature=new_model_hmac_signature,
             train_script_object_key=new_train_key,
             requirements_object_key=_req_object_key,
             description=source_fields["description"],

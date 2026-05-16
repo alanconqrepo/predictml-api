@@ -8,7 +8,8 @@ Stratégie de mock :
 """
 
 import asyncio
-import pickle
+import io
+import joblib
 from types import SimpleNamespace
 
 import numpy as np
@@ -60,7 +61,9 @@ def _inject_cache(model_name: str, version: str, model, feature_baseline=None) -
             webhook_url=None,
         ),
     }
-    asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
+    _jbuf = io.BytesIO()
+    joblib.dump(data, _jbuf)
+    asyncio.run(model_service._redis.set(f"model:{key}", _jbuf.getvalue()))
     return key
 
 

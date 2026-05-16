@@ -9,7 +9,7 @@ Scénario :
 
 import asyncio
 import io
-import pickle
+import joblib
 
 import pytest
 from fastapi.testclient import TestClient
@@ -36,7 +36,9 @@ FEATURES = {
 
 def _make_pkl() -> bytes:
     X, y = load_iris(return_X_y=True)
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 async def _setup():

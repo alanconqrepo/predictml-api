@@ -12,7 +12,7 @@ Couvre :
 
 import asyncio
 import io
-import pickle
+import joblib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -68,7 +68,9 @@ def _inject_model_cache(name: str, version: str, model) -> str:
             feature_baseline=None,
         ),
     }
-    asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
+    _jbuf = io.BytesIO()
+    joblib.dump(data, _jbuf)
+    asyncio.run(model_service._redis.set(f"model:{key}", _jbuf.getvalue()))
     return key
 
 

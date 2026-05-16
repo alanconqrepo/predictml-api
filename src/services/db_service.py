@@ -351,6 +351,59 @@ class DBService:
         return list(result.all())
 
     @staticmethod
+    async def export_retrain_data(
+        db: AsyncSession,
+        model_name: str,
+        start_date: str,
+        end_date: str,
+    ) -> List[dict]:
+        """
+        Exporte les prédictions + résultats observés pour la fenêtre [start_date, end_date].
+        Retourne une liste de dicts prête à être sérialisée en CSV pour le subprocess retrain.
+        """
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(
+            hour=23, minute=59, second=59
+        )
+
+        query = (
+            select(Prediction, ObservedResult.observed_result)
+            .outerjoin(
+                ObservedResult,
+                and_(
+                    ObservedResult.id_obs == Prediction.id_obs,
+                    ObservedResult.model_name == Prediction.model_name,
+                ),
+            )
+            .where(
+                and_(
+                    Prediction.model_name == model_name,
+                    Prediction.status == "success",
+                    Prediction.is_shadow.is_(False),
+                    Prediction.timestamp >= start_dt,
+                    Prediction.timestamp <= end_dt,
+                )
+            )
+            .order_by(Prediction.id.asc())
+        )
+
+        result = await db.execute(query)
+        rows = []
+        for pred, observed_result in result.all():
+            rows.append(
+                {
+                    "id_obs": pred.id_obs or "",
+                    "input_features": pred.input_features,
+                    "prediction_result": pred.prediction_result,
+                    "observed_result": observed_result,
+                    "timestamp": pred.timestamp.isoformat() if pred.timestamp else "",
+                    "model_version": pred.model_version or "",
+                    "response_time_ms": pred.response_time_ms or "",
+                }
+            )
+        return rows
+
+    @staticmethod
     async def get_predictions_with_features(
         db: AsyncSession,
         model_name: str,

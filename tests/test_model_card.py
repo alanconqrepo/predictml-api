@@ -10,7 +10,8 @@ Stratégie :
 """
 
 import asyncio
-import pickle
+import io
+import joblib
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -58,7 +59,9 @@ def _inject_cache(model_name: str, version: str, model, feature_baseline=None) -
             feature_baseline=feature_baseline,
         ),
     }
-    asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
+    _jbuf = io.BytesIO()
+    joblib.dump(data, _jbuf)
+    asyncio.run(model_service._redis.set(f"model:{key}", _jbuf.getvalue()))
 
 
 # ---------------------------------------------------------------------------

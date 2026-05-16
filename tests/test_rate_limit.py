@@ -13,7 +13,8 @@ Rate limiting par IP (slowapi) :
     limite par minute est atteinte
 """
 import asyncio
-import pickle
+import io
+import joblib
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -46,7 +47,9 @@ def _inject_cache(model_name: str, version: str, model) -> str:
         "model": model,
         "metadata": SimpleNamespace(name=model_name, version=version, confidence_threshold=None, webhook_url=None),
     }
-    asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
+    _jbuf = io.BytesIO()
+    joblib.dump(data, _jbuf)
+    asyncio.run(model_service._redis.set(f"model:{key}", _jbuf.getvalue()))
     return key
 
 
