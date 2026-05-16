@@ -47,6 +47,8 @@ class ModelUpdateInput(BaseModel):
     feature_baseline: Optional[Dict[str, FeatureStats]] = None
     training_dataset: Optional[str] = None
 
+    hyperparameters: Optional[Dict[str, Any]] = None
+
     tags: Optional[List[str]] = None
     webhook_url: Optional[str] = None
 
@@ -76,6 +78,7 @@ class ModelCreateResponse(BaseModel):
     features_count: Optional[int]
     classes: Optional[List[Any]]
     training_params: Optional[Dict[str, Any]]
+    hyperparameters: Optional[Dict[str, Any]] = None
     confidence_threshold: Optional[float] = None
     feature_baseline: Optional[Dict[str, Any]] = None
     tags: Optional[List[str]] = None
@@ -112,6 +115,7 @@ class ModelGetResponse(BaseModel):
     classes: Optional[List[Any]]
     training_params: Optional[Dict[str, Any]]
     training_metrics: Optional[Dict[str, Any]]
+    hyperparameters: Optional[Dict[str, Any]] = None
     training_dataset: Optional[str]
     trained_by: Optional[str]
     training_date: Optional[datetime]

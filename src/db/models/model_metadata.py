@@ -57,6 +57,7 @@ class ModelMetadata(Base):
     recall = Column(Float, nullable=True)
     f1_score = Column(Float, nullable=True)
     training_metrics = Column(JSON, nullable=True)  # Métriques supplémentaires
+    hyperparameters = Column(JSON, nullable=True)   # Hyperparamètres du modèle
 
     # Seuil de confiance
     confidence_threshold = Column(

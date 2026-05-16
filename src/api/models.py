@@ -1306,6 +1306,7 @@ async def retrain_model(
         "features_count": source_model.features_count,
         "classes": source_model.classes,
         "training_params": source_model.training_params,
+        "hyperparameters": source_model.hyperparameters,
         "training_dataset": source_model.training_dataset,
         "feature_baseline": source_model.feature_baseline,
         "confidence_threshold": source_model.confidence_threshold,
@@ -1520,6 +1521,7 @@ async def retrain_model(
             label_distribution=parsed_metrics.get("label_distribution"),
             algorithm=source_fields["algorithm"],
             training_params=source_fields["training_params"],
+            hyperparameters=parsed_metrics.get("hyperparameters") or source_fields["hyperparameters"],
             auto_promoted=False,
             auto_promote_reason=None,
             model_bytes=new_model_bytes,
@@ -1591,6 +1593,7 @@ async def retrain_model(
                 features_count=source_fields["features_count"],
                 classes=source_fields["classes"],
                 training_params=source_fields["training_params"],
+                hyperparameters=parsed_metrics.get("hyperparameters") or source_fields["hyperparameters"],
                 training_dataset=(
                     parsed_metrics.get("training_dataset")
                     or f"{source_fields['training_dataset'] or name} [{payload.start_date} → {payload.end_date}]"
@@ -3260,6 +3263,7 @@ async def get_model(
         classes=model_meta.classes,
         training_params=model_meta.training_params,
         training_metrics=model_meta.training_metrics,
+        hyperparameters=model_meta.hyperparameters,
         training_dataset=model_meta.training_dataset,
         trained_by=model_meta.trained_by,
         training_date=model_meta.training_date,
@@ -3312,6 +3316,7 @@ async def create_model(
     classes: Optional[str] = Form(None, description="JSON array ex: [0, 1, 2]"),
     training_params: Optional[str] = Form(None, description="JSON object"),
     training_metrics: Optional[str] = Form(None, description="JSON object — métriques d'entraînement (precision, recall, mae, rmse, r2…)"),
+    hyperparameters: Optional[str] = Form(None, description="JSON object — hyperparamètres du modèle (ex: {\"n_estimators\": 200, \"max_depth\": 10})"),
     training_dataset: Optional[str] = Form(None),
     feature_baseline: Optional[str] = Form(
         None,
@@ -3440,6 +3445,7 @@ async def create_model(
     classes_parsed = _parse_json_field(classes, "classes")
     training_params_parsed = _parse_json_field(training_params, "training_params")
     training_metrics_parsed = _parse_json_field(training_metrics, "training_metrics")
+    hyperparameters_parsed = _parse_json_field(hyperparameters, "hyperparameters")
     feature_baseline_parsed = _parse_json_field(feature_baseline, "feature_baseline")
     tags_parsed = _parse_json_field(tags, "tags")
 
@@ -3460,6 +3466,7 @@ async def create_model(
         classes=classes_parsed,
         training_params=training_params_parsed,
         training_metrics=training_metrics_parsed,
+        hyperparameters=hyperparameters_parsed,
         training_dataset=training_dataset,
         feature_baseline=feature_baseline_parsed,
         tags=tags_parsed,
@@ -3982,6 +3989,55 @@ async def download_training_dataset(
     return Response(
         content=csv_bytes,
         media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/models/{name}/{version}/download-script")
+async def download_train_script(
+    name: ModelNamePath,
+    version: ModelVersionPath,
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_read_db),
+):
+    """
+    Télécharge le script train.py stocké dans MinIO pour une version de modèle.
+
+    Retourne 404 si aucun script n'a été uploadé avec ce modèle.
+    """
+    result = await db.execute(
+        select(ModelMetadata).where(
+            and_(ModelMetadata.name == name, ModelMetadata.version == version)
+        )
+    )
+    model_meta = result.scalar_one_or_none()
+
+    if not model_meta:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Modèle '{name}' version '{version}' introuvable.",
+        )
+
+    script_key = model_meta.train_script_object_key
+    if not script_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Aucun script d'entraînement disponible pour cette version.",
+        )
+
+    try:
+        script_bytes = await minio_service.async_download_file_bytes(script_key)
+    except Exception as e:
+        logger.error("Erreur téléchargement script", name=name, version=version, path=script_key, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Script introuvable dans MinIO ({script_key}).",
+        )
+
+    filename = script_key.split("/")[-1]
+    return Response(
+        content=script_bytes,
+        media_type="text/x-python",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
