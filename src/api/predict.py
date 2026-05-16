@@ -597,18 +597,6 @@ async def get_anomalous_predictions(
     )
 
 
-@router.delete("/predictions/{prediction_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_prediction(
-    prediction_id: int,
-    _admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
-):
-    """Supprime une prédiction par son ID (admin uniquement)."""
-    deleted = await DBService.delete_prediction(db, prediction_id)
-    if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prédiction introuvable.")
-
-
 @router.delete("/predictions/purge", response_model=PurgeResponse)
 async def purge_predictions(
     older_than_days: int = Query(
@@ -645,6 +633,18 @@ async def purge_predictions(
         dry_run=dry_run,
     )
     return PurgeResponse(**result)
+
+
+@router.delete("/predictions/{prediction_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_prediction(
+    prediction_id: int,
+    _admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Supprime une prédiction par son ID (admin uniquement)."""
+    deleted = await DBService.delete_prediction(db, prediction_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prédiction introuvable.")
 
 
 @router.get("/predictions/{prediction_id}", response_model=PredictionResponse)

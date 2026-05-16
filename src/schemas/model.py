@@ -45,6 +45,7 @@ class ModelUpdateInput(BaseModel):
     classes: Optional[List[Any]] = None
     confidence_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
     feature_baseline: Optional[Dict[str, FeatureStats]] = None
+    training_dataset: Optional[str] = None
 
     tags: Optional[List[str]] = None
     webhook_url: Optional[str] = None
