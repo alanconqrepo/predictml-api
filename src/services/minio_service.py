@@ -4,8 +4,9 @@ Service de gestion du stockage MinIO
 
 import asyncio
 import io
-import pickle
 from typing import Any, List, Optional
+
+import joblib
 
 import structlog
 from minio import Minio
@@ -57,7 +58,9 @@ class MinIOService:
         """
         self._ensure_bucket_exists()
         try:
-            model_bytes = pickle.dumps(model)
+            model_stream = io.BytesIO()
+            joblib.dump(model, model_stream)
+            model_bytes = model_stream.getvalue()
             model_stream = io.BytesIO(model_bytes)
             file_size = len(model_bytes)
 
@@ -131,7 +134,7 @@ class MinIOService:
             response.close()
             response.release_conn()
 
-            model = pickle.loads(model_bytes)
+            model = joblib.load(io.BytesIO(model_bytes))
 
             logger.info("Modèle téléchargé", object_name=object_name)
             return model

@@ -201,9 +201,9 @@ if is_admin:
             col_f1, col_f2 = st.columns(2)
             with col_f1:
                 pkl_file = st.file_uploader(
-                    "Fichier modèle (.pkl) *",
-                    type=["pkl"],
-                    help="Fichier pickle sérialisé. Aucune limite de taille imposée.",
+                    "Fichier modèle (.joblib) *",
+                    type=["joblib", "pkl"],
+                    help="Fichier modèle sérialisé (joblib recommandé). Aucune limite de taille imposée.",
                 )
             with col_f2:
                 train_file = st.file_uploader(
@@ -280,7 +280,7 @@ if is_admin:
         if submitted:
             errors = []
             if not pkl_file:
-                errors.append("Le fichier .pkl est obligatoire.")
+                errors.append("Le fichier modèle (.joblib) est obligatoire.")
             if not up_name.strip():
                 errors.append("Le nom du modèle est obligatoire.")
             if not up_version.strip():
@@ -713,9 +713,9 @@ with st.expander("📋 Détails complets", expanded=True):
         if _pkl_bytes:
             with _btn_cols[_btn_idx]:
                 st.download_button(
-                    f"⬇️ Télécharger le .pkl{_pkl_size_label}",
+                    f"⬇️ Télécharger le modèle{_pkl_size_label}",
                     data=_pkl_bytes,
-                    file_name=f"{selected['name']}_{selected['version']}.pkl",
+                    file_name=f"{selected['name']}_{selected['version']}.joblib",
                     mime="application/octet-stream",
                     use_container_width=True,
                     key=f"dl_pkl_{selected['name']}_{selected['version']}",

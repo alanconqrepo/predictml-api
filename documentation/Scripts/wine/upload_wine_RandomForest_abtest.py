@@ -65,7 +65,7 @@ except Exception as e:
 
 # ── 2. Entraînement ───────────────────────────────────────────────────────────
 
-tmp_pkl = tempfile.NamedTemporaryFile(suffix=".pkl", delete=False)
+tmp_pkl = tempfile.NamedTemporaryFile(suffix=".joblib", delete=False)
 tmp_pkl.close()
 
 print(f"⏳  Entraînement RandomForestRegressor ({TRAIN_START} → {TRAIN_END})…")
@@ -136,7 +136,7 @@ try:
 
         response = requests.post(
             f"{API_URL}/models", headers=HEADERS,
-            files={"file": (f"{MODEL_NAME}.pkl", pkl_fh, "application/octet-stream"),
+            files={"file": (f"{MODEL_NAME}.joblib", pkl_fh, "application/octet-stream"),
                    "train_file": ("train_wine_RandomForest.py", train_fh, "text/plain")},
             data=data, timeout=30,
         )

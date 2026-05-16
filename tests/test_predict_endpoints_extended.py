@@ -12,7 +12,7 @@ Tests supplémentaires pour les endpoints de predict.py non couverts :
 
 import asyncio
 import io
-import pickle
+import joblib
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -70,7 +70,9 @@ def _inject_cache(name: str, version: str = MODEL_VERSION):
             feature_baseline=None,
         ),
     }
-    asyncio.run(model_service._redis.set(f"model:{name}:{version}", pickle.dumps(data)))
+    _jbuf = io.BytesIO()
+    joblib.dump(data, _jbuf)
+    asyncio.run(model_service._redis.set(f"model:{name}:{version}", _jbuf.getvalue()))
 
 
 async def _setup():

@@ -13,7 +13,7 @@ Token admin : test-token-integ-pf-admin-jj00
 
 import asyncio
 import io
-import pickle
+import joblib
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -43,7 +43,9 @@ FEATURES = {
 def _make_pkl() -> bytes:
     """Crée un modèle sklearn sérialisé."""
     X, y = load_iris(return_X_y=True)
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 def _inject_cache(name: str, version: str = MODEL_VERSION):
@@ -61,7 +63,7 @@ def _inject_cache(name: str, version: str = MODEL_VERSION):
         ),
     }
     asyncio.run(
-        model_service._redis.set(f"model:{name}:{version}", pickle.dumps(data))
+        model_service._redis.set(f"model:{name}:{version}", (lambda _b: (joblib.dump(data, _b), _b.getvalue())[1])(io.BytesIO()))
     )
 
 

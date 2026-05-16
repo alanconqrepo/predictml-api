@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script one-shot : re-signe tous les modèles MinIO existants sans pkl_hmac_signature.
+Script one-shot : re-signe tous les modèles MinIO existants sans model_hmac_signature.
 
 Contexte
 --------
@@ -8,7 +8,7 @@ Depuis l'introduction de la vérification HMAC-SHA256 sur les fichiers .pkl,
 tout chargement d'un modèle sans signature est refusé avec une HTTPException 403.
 Ce script télécharge chaque fichier .pkl depuis MinIO, calcule son HMAC-SHA256
 (avec la SECRET_KEY de l'application) et enregistre la signature dans la colonne
-`pkl_hmac_signature` de la table `model_metadata`.
+`model_hmac_signature` de la table `model_metadata`.
 
 Prérequis
 ---------
@@ -44,11 +44,11 @@ from src.services.model_service import compute_model_hmac
 
 
 async def resign_models(dry_run: bool = False, force_all: bool = False) -> None:
-    """Re-signe les modèles MinIO manquant un pkl_hmac_signature en base."""
+    """Re-signe les modèles MinIO manquant un model_hmac_signature en base."""
     async with AsyncSessionLocal() as db:
         stmt = select(ModelMetadata).where(ModelMetadata.is_active.is_(True))
         if not force_all:
-            stmt = stmt.where(ModelMetadata.pkl_hmac_signature.is_(None))
+            stmt = stmt.where(ModelMetadata.model_hmac_signature.is_(None))
         result = await db.execute(stmt)
         models = result.scalars().all()
 
@@ -67,7 +67,7 @@ async def resign_models(dry_run: bool = False, force_all: bool = False) -> None:
         label = f"{m.name} v{m.version}"
 
         if not m.minio_object_key:
-            print(f"  SKIP  {label} — modèle MLflow (pas de fichier .pkl MinIO)")
+            print(f"  SKIP  {label} — modèle MLflow (pas de fichier modèle MinIO)")
             skipped += 1
             continue
 
@@ -89,7 +89,7 @@ async def resign_models(dry_run: bool = False, force_all: bool = False) -> None:
             await db.execute(
                 update(ModelMetadata)
                 .where(ModelMetadata.id == m.id)
-                .values(pkl_hmac_signature=signature)
+                .values(model_hmac_signature=signature)
             )
             await db.commit()
 

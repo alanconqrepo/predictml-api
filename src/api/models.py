@@ -4,6 +4,7 @@ Endpoints pour la gestion des modèles
 
 import ast
 import asyncio
+import csv
 import json
 import math
 import os
@@ -326,7 +327,7 @@ async def _run_train_subprocess(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         script_path = os.path.join(tmpdir, "train.py")
-        output_path = os.path.join(tmpdir, "output_model.pkl")
+        output_path = os.path.join(tmpdir, "output_model.joblib")
 
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(train_source)
@@ -1417,6 +1418,12 @@ async def retrain_model(
         "accuracy": source_model.accuracy,
         "f1_score": source_model.f1_score,
     }
+
+    # Exporter les données de production avant de libérer la connexion
+    retrain_rows = await DBService.export_retrain_data(
+        db, name, payload.start_date, payload.end_date
+    )
+
     await db.close()  # Libère la connexion avant le subprocess de 600 s
 
     # 3. Télécharger train.py depuis MinIO
@@ -1443,10 +1450,46 @@ async def retrain_model(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         script_path = os.path.join(tmpdir, "train.py")
-        output_model_path = os.path.join(tmpdir, "output_model.pkl")
+        output_model_path = os.path.join(tmpdir, "output_model.joblib")
 
         with open(script_path, "wb") as f:
             f.write(script_bytes)
+
+        # Écrire le CSV de données de production si disponible
+        train_data_path = None
+        if retrain_rows:
+            train_data_path = os.path.join(tmpdir, "train_data.csv")
+            with open(train_data_path, "w", newline="", encoding="utf-8") as csvfile:
+                fieldnames = [
+                    "id_obs",
+                    "input_features",
+                    "prediction_result",
+                    "observed_result",
+                    "timestamp",
+                    "model_version",
+                    "response_time_ms",
+                ]
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                for row in retrain_rows:
+                    writer.writerow(
+                        {
+                            "id_obs": row["id_obs"],
+                            "input_features": json.dumps(row["input_features"]),
+                            "prediction_result": json.dumps(row["prediction_result"]),
+                            "observed_result": json.dumps(row["observed_result"])
+                            if row["observed_result"] is not None
+                            else "",
+                            "timestamp": row["timestamp"],
+                            "model_version": row["model_version"],
+                            "response_time_ms": row["response_time_ms"],
+                        }
+                    )
+            logger.info(
+                "Données de production exportées pour le retrain",
+                model=name,
+                rows=len(retrain_rows),
+            )
 
         # Construire un environnement minimal — ne pas passer os.environ entier
         # pour éviter de transmettre SECRET_KEY, DATABASE_URL, etc. au script.
@@ -1483,6 +1526,8 @@ async def retrain_model(
                 "AWS_SECRET_ACCESS_KEY": settings.MINIO_SECRET_KEY,
             }
         )
+        if train_data_path:
+            env["TRAIN_DATA_PATH"] = train_data_path
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -1652,24 +1697,24 @@ async def retrain_model(
         )
 
     # 7. Uploader le nouveau modèle dans MinIO
-    logger.info("Retrain upload .pkl MinIO", model=name, new_version=new_version)
+    logger.info("Retrain upload .joblib MinIO", model=name, new_version=new_version)
     try:
-        new_object_key = f"{name}/v{new_version}.pkl"
-        new_pkl_hmac_signature = compute_model_hmac(new_model_bytes)
+        new_object_key = f"{name}/v{new_version}.joblib"
+        new_model_hmac_signature = compute_model_hmac(new_model_bytes)
         upload_info = await minio_service.async_upload_model_bytes(new_model_bytes, new_object_key)
         logger.info(
-            "Retrain upload .pkl OK",
+            "Retrain upload .joblib OK",
             model=name, new_version=new_version,
             bucket=upload_info.get("bucket"), size=upload_info.get("size"),
         )
     except Exception as exc:
         logger.error(
-            "Retrain STEP7 : upload .pkl MinIO échoué",
+            "Retrain STEP7 : upload .joblib MinIO échoué",
             model=name, new_version=new_version, error=str(exc), exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Upload MinIO du .pkl échoué : {exc}",
+            detail=f"Upload MinIO du .joblib échoué : {exc}",
         ) from exc
 
     # 8. Copier le script train.py pour la nouvelle version (pour chaîner les ré-entraînements)
@@ -1715,7 +1760,7 @@ async def retrain_model(
                 minio_bucket=upload_info["bucket"],
                 minio_object_key=new_object_key,
                 file_size_bytes=upload_info["size"],
-                pkl_hmac_signature=new_pkl_hmac_signature,
+                model_hmac_signature=new_model_hmac_signature,
                 train_script_object_key=new_train_key,
                 requirements_object_key=_req_object_key,
                 description=source_fields["description"],
@@ -3379,10 +3424,10 @@ async def get_model(
                 "object_key": model_meta.minio_object_key,
                 "python_code": (
                     f"from minio import Minio\n"
-                    f"import pickle\n"
+                    f"import io, joblib\n"
                     f"client = Minio('localhost:9002', access_key='...', secret_key='...', secure=False)\n"
                     f"response = client.get_object('{model_meta.minio_bucket}', '{model_meta.minio_object_key}')\n"
-                    f"model = pickle.loads(response.read())"
+                    f"model = joblib.load(io.BytesIO(response.read()))"
                 ),
             }
 
@@ -3438,7 +3483,7 @@ async def create_model(
     name: str = Form(..., description="Nom unique du modèle"),
     version: str = Form(..., description="Version du modèle (ex: 1.0.0)"),
     file: Optional[UploadFile] = File(
-        None, description="Fichier .pkl (optionnel si mlflow_run_id fourni)"
+        None, description="Fichier modèle joblib/pkl (optionnel si mlflow_run_id fourni)"
     ),
     description: Optional[str] = Form(None),
     algorithm: Optional[str] = Form(None),
@@ -3488,7 +3533,7 @@ async def create_model(
     Crée un nouveau modèle et l'enregistre en base.
 
     - **name** + **version** doivent être uniques — retourne 409 si la combinaison existe déjà.
-    - **file** : fichier `.pkl` requis si `mlflow_run_id` n'est pas fourni.
+    - **file** : fichier modèle (`.joblib`) requis si `mlflow_run_id` n'est pas fourni.
       Si `mlflow_run_id` est fourni, MLflow stocke déjà le modèle dans MinIO — pas de doublon.
     - **mlflow_run_id** : ID du run MLflow. Permet de charger le modèle via MLflow à la prédiction.
     - **train_file** : script `train.py` optionnel permettant le ré-entraînement automatique.
@@ -3511,7 +3556,7 @@ async def create_model(
     minio_bucket = None
     minio_object_key = None
     file_size_bytes = None
-    pkl_hmac_signature = None
+    model_hmac_signature = None
 
     model_bytes: Optional[bytes] = None
     if file is not None:
@@ -3535,7 +3580,7 @@ async def create_model(
     elif not mlflow_run_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Fournir un fichier .pkl ou un mlflow_run_id.",
+            detail="Fournir un fichier modèle (.joblib) ou un mlflow_run_id.",
         )
 
     # --- Traitement du script d'entraînement (optionnel) ---
@@ -3593,17 +3638,17 @@ async def create_model(
             "requirements.txt uploadé", object_name=req_object_name, model=name, version=version
         )
 
-    # Choisir les bytes du modèle à stocker : subprocess pkl prioritaire, sinon pkl utilisateur
+    # Choisir les bytes du modèle à stocker : subprocess prioritaire, sinon fichier utilisateur
     model_bytes_to_store = subprocess_pkl_bytes if subprocess_pkl_bytes is not None else model_bytes
     if subprocess_pkl_bytes is not None:
-        logger.info("Pkl subprocess utilisé (Docker env)", model=name, version=version)
+        logger.info("Modèle subprocess utilisé (Docker env)", model=name, version=version)
     elif model_bytes is not None:
-        logger.info("Pkl utilisateur uploadé (subprocess absent)", model=name, version=version)
+        logger.info("Modèle utilisateur uploadé (subprocess absent)", model=name, version=version)
 
-    # Uploader le pkl final vers MinIO
+    # Uploader le modèle final vers MinIO
     if model_bytes_to_store is not None:
-        object_name = f"{name}/v{version}.pkl"
-        pkl_hmac_signature = compute_model_hmac(model_bytes_to_store)
+        object_name = f"{name}/v{version}.joblib"
+        model_hmac_signature = compute_model_hmac(model_bytes_to_store)
         upload_info = minio_service.upload_model_bytes(model_bytes_to_store, object_name)
         minio_bucket = upload_info["bucket"]
         minio_object_key = object_name
@@ -3624,7 +3669,7 @@ async def create_model(
         minio_bucket=minio_bucket,
         minio_object_key=minio_object_key,
         file_size_bytes=file_size_bytes,
-        pkl_hmac_signature=pkl_hmac_signature,
+        model_hmac_signature=model_hmac_signature,
         description=description,
         algorithm=algorithm,
         mlflow_run_id=mlflow_run_id,
@@ -4099,7 +4144,7 @@ async def download_model(
     if not model_meta.minio_object_key:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Aucun fichier .pkl disponible pour '{name}' version '{version}'.",
+            detail=f"Aucun fichier modèle disponible pour '{name}' version '{version}'.",
         )
 
     try:
@@ -4111,7 +4156,7 @@ async def download_model(
             detail="Erreur lors du téléchargement du modèle.",
         )
 
-    filename = f"{name}_{version}.pkl"
+    filename = f"{name}_{version}.joblib"
     return Response(
         content=model_bytes,
         media_type="application/octet-stream",

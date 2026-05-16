@@ -81,7 +81,7 @@ except Exception as e:
 
 # ── 2. Exécution de train_iris.py ─────────────────────────────────────────────
 
-tmp_pkl = tempfile.NamedTemporaryFile(suffix=".pkl", delete=False)
+tmp_pkl = tempfile.NamedTemporaryFile(suffix=".joblib", delete=False)
 tmp_pkl.close()
 
 print(f"⏳  Entraînement via train_iris.py ({TRAIN_START} → {TRAIN_END})…")
@@ -186,7 +186,7 @@ try:
             f"{API_URL}/models",
             headers=HEADERS,
             files={
-                "file":       (f"{MODEL_NAME}.pkl", pkl_fh,   "application/octet-stream"),
+                "file":       (f"{MODEL_NAME}.joblib", pkl_fh,   "application/octet-stream"),
                 "train_file": ("train_iris.py",      train_fh, "text/plain"),
             },
             data=data,

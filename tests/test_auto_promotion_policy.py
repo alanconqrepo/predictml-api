@@ -21,7 +21,7 @@ Couvre :
 
 import asyncio
 import io
-import pickle
+import joblib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -42,7 +42,7 @@ MODEL_PREFIX = "policy_model"
 
 VALID_TRAIN_SCRIPT = """\
 import os
-import pickle
+import joblib
 import json
 from sklearn.linear_model import LogisticRegression
 from sklearn.datasets import load_iris
@@ -55,7 +55,7 @@ X, y = load_iris(return_X_y=True)
 model = LogisticRegression(max_iter=200).fit(X, y)
 
 with open(OUTPUT_MODEL_PATH, "wb") as f:
-    pickle.dump(model, f)
+    joblib.dump(model, f)
 
 print(json.dumps({"accuracy": 0.97, "f1_score": 0.96}))
 """
@@ -68,7 +68,9 @@ print(json.dumps({"accuracy": 0.97, "f1_score": 0.96}))
 
 def make_pkl_bytes() -> bytes:
     X, y = load_iris(return_X_y=True)  # noqa: N806
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 def _create_model(name: str, version: str = "1.0.0", with_train_script: bool = False) -> dict:
@@ -140,7 +142,7 @@ async def _mock_exec_success(*args, **kwargs):
         X, y = load_iris(return_X_y=True)  # noqa: N806
         model = LogisticRegression(max_iter=200).fit(X, y)
         with open(output_path, "wb") as f:
-            pickle.dump(model, f)
+            joblib.dump(model, f)
     proc = MagicMock()
     proc.returncode = 0
     proc.communicate = AsyncMock(

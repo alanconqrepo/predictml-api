@@ -109,13 +109,14 @@ def test_confidence_distribution_no_predictions():
     """Modèle sans aucune prédiction → sample_count=0, histogram vide."""
     # Create model metadata via POST so 404 check passes
     import io
-    import pickle
 
     from sklearn.linear_model import LogisticRegression
     from sklearn.datasets import load_iris
 
     X, y = load_iris(return_X_y=True)
-    pkl = pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    pkl = _jbuf.getvalue()
 
     client.post(
         "/models",
@@ -140,7 +141,9 @@ def test_confidence_distribution_basic():
     from sklearn.datasets import load_iris
 
     X, y = load_iris(return_X_y=True)
-    pkl = pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    pkl = _jbuf.getvalue()
     client.post(
         "/models",
         data={"name": MODEL, "version": VERSION_A},
@@ -171,7 +174,9 @@ def test_confidence_distribution_pct_high_confidence():
     from sklearn.datasets import load_iris
 
     X, y = load_iris(return_X_y=True)
-    pkl = pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    pkl = _jbuf.getvalue()
 
     async def _add():
         async with _TestSessionLocal() as db:
@@ -206,7 +211,9 @@ def test_confidence_distribution_pct_uncertain():
     from sklearn.datasets import load_iris
 
     X, y = load_iris(return_X_y=True)
-    pkl = pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    pkl = _jbuf.getvalue()
 
     async def _add():
         async with _TestSessionLocal() as db:
@@ -260,7 +267,9 @@ def test_confidence_distribution_version_filter():
     from sklearn.datasets import load_iris
 
     X, y = load_iris(return_X_y=True)
-    pkl = pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    pkl = _jbuf.getvalue()
     for v in (VERSION_A, VERSION_B):
         client.post(
             "/models",
@@ -294,7 +303,9 @@ def test_confidence_distribution_days_filter():
     from sklearn.datasets import load_iris
 
     X, y = load_iris(return_X_y=True)
-    pkl = pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    pkl = _jbuf.getvalue()
     client.post(
         "/models",
         data={"name": MODEL_OLD, "version": VERSION_A},
@@ -325,7 +336,9 @@ def test_confidence_distribution_dict_probabilities():
     from sklearn.datasets import load_iris
 
     X, y = load_iris(return_X_y=True)
-    pkl = pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    pkl = _jbuf.getvalue()
     client.post(
         "/models",
         data={"name": MODEL_DICT, "version": VERSION_A},

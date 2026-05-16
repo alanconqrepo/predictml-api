@@ -6,7 +6,7 @@ scénarios : prédiction, politique de promotion, A/B compare, drift monitoring.
 """
 import asyncio
 import io
-import pickle
+import joblib
 from types import SimpleNamespace
 
 import pandas as pd
@@ -46,7 +46,9 @@ def _make_ridge_regression() -> Ridge:
 
 
 def _pkl(model) -> bytes:
-    return pickle.dumps(model)
+    _jbuf = io.BytesIO()
+    joblib.dump(model, _jbuf)
+    return _jbuf.getvalue()
 
 
 def _inject_cache(model_name: str, version: str, model, feature_baseline=None) -> str:
@@ -61,13 +63,15 @@ def _inject_cache(model_name: str, version: str, model, feature_baseline=None) -
             feature_baseline=feature_baseline,
         ),
     }
-    asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
+    _jbuf = io.BytesIO()
+    joblib.dump(data, _jbuf)
+    asyncio.run(model_service._redis.set(f"model:{key}", _jbuf.getvalue()))
     return key
 
 
 VALID_TRAIN_SCRIPT = """\
 import os
-import pickle
+import joblib
 import json
 from sklearn.linear_model import LinearRegression
 import pandas as pd
@@ -81,7 +85,7 @@ y = [150000.0, 240000.0, 360000.0]
 model = LinearRegression().fit(X, y)
 
 with open(OUTPUT_MODEL_PATH, "wb") as f:
-    pickle.dump(model, f)
+    joblib.dump(model, f)
 
 print(json.dumps({"mae": 1234.5, "rmse": 2000.0}))
 """

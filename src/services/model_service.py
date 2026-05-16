@@ -5,9 +5,11 @@ Service de gestion des modèles ML (v3 - cache Redis distribué)
 import asyncio
 import hashlib
 import hmac as _hmac_mod
-import pickle
+import io
 import random
 from typing import Any, Dict, List, Optional, Tuple
+
+import joblib
 
 import redis.asyncio as aioredis
 import structlog
@@ -77,7 +79,7 @@ def _verify_minio_hmac(raw_bytes: bytes, metadata: Any, model_name: str) -> None
     Raises HTTPException 403 if the model has no stored signature (legacy, un-signed).
     Raises HTTPException 500 if the signature does not match (tampering detected).
     """
-    if not metadata.pkl_hmac_signature:
+    if not metadata.model_hmac_signature:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(
@@ -87,7 +89,7 @@ def _verify_minio_hmac(raw_bytes: bytes, metadata: Any, model_name: str) -> None
             ),
         )
     expected = compute_model_hmac(raw_bytes)
-    if not _hmac_mod.compare_digest(expected, metadata.pkl_hmac_signature):
+    if not _hmac_mod.compare_digest(expected, metadata.model_hmac_signature):
         logger.error(
             "Signature HMAC invalide — chargement refusé",
             model=model_name,
@@ -97,7 +99,7 @@ def _verify_minio_hmac(raw_bytes: bytes, metadata: Any, model_name: str) -> None
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=(
                 f"Signature du modèle '{model_name}' v{metadata.version} invalide — "
-                "chargement refusé (possible falsification du fichier .pkl)."
+                "chargement refusé (possible falsification du fichier modèle)."
             ),
         )
 
@@ -112,7 +114,7 @@ def _extract_model_from_payload(payload: bytes) -> Any:
 
     The HMAC was already verified by the caller before this is invoked.
     """
-    loaded = pickle.loads(payload)  # noqa: S301 - caller verified HMAC
+    loaded = joblib.load(io.BytesIO(payload))  # caller verified HMAC
     if isinstance(loaded, dict) and "model" in loaded:
         return loaded["model"]
     return loaded
@@ -305,7 +307,9 @@ class ModelService:
                     import mlflow.sklearn
 
                     model = mlflow.sklearn.load_model(f"runs:/{metadata.mlflow_run_id}/model")
-                    cache_payload = pickle.dumps(model)  # noqa: S301
+                    buf = io.BytesIO()
+                    joblib.dump(model, buf)
+                    cache_payload = buf.getvalue()
                 else:
                     logger.info(
                         "Téléchargement du modèle depuis MinIO",
@@ -317,7 +321,7 @@ class ModelService:
                         metadata.minio_object_key
                     )
                     _verify_minio_hmac(raw_bytes, metadata, model_name)
-                    model = pickle.loads(raw_bytes)  # noqa: S301 - HMAC verified above
+                    model = joblib.load(io.BytesIO(raw_bytes))  # HMAC verified above
                     cache_payload = raw_bytes
 
                 # 5. Stocker en cache Redis avec enveloppe HMAC (TTL configurable)

@@ -18,7 +18,7 @@ CONTRAT D'INTERFACE
 
 import json
 import os
-import pickle
+import joblib
 import sys
 from datetime import datetime
 
@@ -61,7 +61,7 @@ def _ts(label: str) -> None:
 
 TRAIN_START_DATE  = os.environ.get("TRAIN_START_DATE", "2024-01-01")
 TRAIN_END_DATE    = os.environ.get("TRAIN_END_DATE",   "2024-12-31")
-OUTPUT_MODEL_PATH = os.environ.get("OUTPUT_MODEL_PATH", "default_model_path.pkl")
+OUTPUT_MODEL_PATH = os.environ.get("OUTPUT_MODEL_PATH", "default_model_path.joblib")
 
 MODEL_NAME               = os.environ.get("MODEL_NAME", "iris-classifier")
 MLFLOW_TRACKING_URI      = os.environ.get("MLFLOW_TRACKING_URI", "")
@@ -151,8 +151,7 @@ _ts("évaluation")
 
 # ── 5. Sauvegarde modèle ──────────────────────────────────────────────────────
 
-with open(OUTPUT_MODEL_PATH, "wb") as fh:
-    pickle.dump(model, fh)
+joblib.dump(model, OUTPUT_MODEL_PATH)
 print(f"[{MODEL_NAME}] Modèle (Pipeline) → {OUTPUT_MODEL_PATH}", file=sys.stderr)
 _ts("modèle sauvegardé")
 

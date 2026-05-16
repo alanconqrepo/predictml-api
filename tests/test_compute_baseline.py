@@ -13,7 +13,7 @@ Couvre :
 
 import asyncio
 import io
-import pickle
+import joblib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -79,7 +79,9 @@ asyncio.run(_setup())
 
 def make_pkl_bytes() -> bytes:
     X, y = load_iris(return_X_y=True)
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 def _create_model(name: str, version: str = "1.0.0") -> dict:

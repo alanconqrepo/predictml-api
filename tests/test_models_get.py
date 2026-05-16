@@ -3,7 +3,7 @@ Tests pour l'endpoint GET /models/{name}/{version}
 """
 import asyncio
 import io
-import pickle
+import joblib
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,7 +23,9 @@ TEST_MODEL_NAME = "test_model_get"
 def make_pkl_bytes() -> bytes:
     X, y = load_iris(return_X_y=True)
     model = LogisticRegression(max_iter=200).fit(X, y)
-    return pickle.dumps(model)
+    _jbuf = io.BytesIO()
+    joblib.dump(model, _jbuf)
+    return _jbuf.getvalue()
 
 
 async def _setup_user():

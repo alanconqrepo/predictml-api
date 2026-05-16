@@ -9,12 +9,15 @@ CONTRAT D'INTERFACE — variables d'environnement OBLIGATOIRES
                       (ex: "2025-01-01")
   TRAIN_END_DATE    : date de fin au format YYYY-MM-DD
                       (ex: "2025-12-31")
-  OUTPUT_MODEL_PATH : chemin absolu où sauvegarder le modèle produit (.pkl)
-                      (ex: "/tmp/abc123/output_model.pkl")
+  OUTPUT_MODEL_PATH : chemin absolu où sauvegarder le modèle produit (.joblib)
+                      (ex: "/tmp/abc123/output_model.joblib")
 
 Variables d'environnement optionnelles injectées par l'API :
   MLFLOW_TRACKING_URI : URI du serveur MLflow
   MODEL_NAME          : nom du modèle source
+  TRAIN_DATA_PATH     : chemin vers le CSV des données de production exportées
+                        par l'API (prédictions + résultats observés).
+                        Absent lors du 1er entraînement (aucune donnée en prod).
 
 IMPORTANT — MLflow est géré automatiquement par l'API :
   L'API crée elle-même le run MLflow après l'exécution de ce script.
@@ -23,10 +26,25 @@ IMPORTANT — MLflow est géré automatiquement par l'API :
   dans la sortie JSON stdout (section 6).
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FORMAT DU CSV TRAIN_DATA_PATH
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Colonnes : id_obs, input_features, prediction_result, observed_result,
+             timestamp, model_version, response_time_ms
+
+  - input_features   : dict JSON des features envoyées à /predict
+  - observed_result  : valeur réelle observée (JSON), vide si non renseignée
+  - prediction_result: ce que le modèle avait prédit (JSON)
+
+  Pour un train supervisé, filtrez les lignes où observed_result est non-vide :
+    X = [json.loads(row["input_features"]) for row if row["observed_result"]]
+    y = [json.loads(row["observed_result"]) for row if row["observed_result"]]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SORTIE ATTENDUE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  1. Le modèle DOIT être sauvegardé à OUTPUT_MODEL_PATH via pickle.dump().
+  1. Le modèle DOIT être sauvegardé à OUTPUT_MODEL_PATH via joblib.dump().
   2. Imprimer sur stdout un JSON comme DERNIÈRE ligne JSON de la sortie :
        {
          "accuracy": 0.95,          # obligatoire pour mise à jour en DB
@@ -41,24 +59,16 @@ SORTIE ATTENDUE
        }
   3. Les logs de progression peuvent être imprimés sur stderr à volonté.
   4. Quitter avec code 0 si succès, code non-nul si échec.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EXEMPLE COMPLET — RandomForestClassifier sur Iris avec filtre de dates synthétique
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Remplacez la section « Chargement des données » par votre propre logique
-(lecture CSV/Parquet, requête BDD, appel API, etc.) en filtrant sur la plage
-de dates fournie.
 """
 
+import csv
 import json
 import os
-import pickle
 import sys
 from datetime import datetime
 
+import joblib
 import numpy as np
-from sklearn.datasets import load_iris
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
@@ -73,47 +83,67 @@ OUTPUT_MODEL_PATH = os.environ["OUTPUT_MODEL_PATH"]
 # Variables optionnelles
 MODEL_NAME = os.environ.get("MODEL_NAME", "example_model")
 MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "")
+TRAIN_DATA_PATH = os.environ.get("TRAIN_DATA_PATH")  # absent lors du 1er train
 
 print(
-    f"[train.py] Ré-entraînement de '{MODEL_NAME}' " f"du {TRAIN_START_DATE} au {TRAIN_END_DATE}",
+    f"[train.py] Ré-entraînement de '{MODEL_NAME}' "
+    f"du {TRAIN_START_DATE} au {TRAIN_END_DATE}",
     file=sys.stderr,
 )
 print(f"[train.py] Sortie modèle : {OUTPUT_MODEL_PATH}", file=sys.stderr)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 2. Chargement et filtrage des données
-# ──────────────────────────────────────────────────────────────────────────────
-# ⬇ REMPLACEZ CE BLOC par votre propre chargement de données.
-#
-# Exemple avec un DataFrame réel :
-#
-#   import pandas as pd
-#   df = pd.read_csv("data/training_data.csv", parse_dates=["date"])
-#   df = df[(df["date"] >= TRAIN_START_DATE) & (df["date"] <= TRAIN_END_DATE)]
-#   if df.empty:
-#       print(json.dumps({"error": "Aucune donnée pour cette plage de dates"}))
-#       sys.exit(1)
-#   X = df.drop(columns=["target", "date"])
-#   y = df["target"]
-#
+# 2. Chargement des données
 # ──────────────────────────────────────────────────────────────────────────────
 
-print("[train.py] Chargement du dataset Iris (exemple synthétique)…", file=sys.stderr)
-iris = load_iris()
-X_full, y_full = iris.data, iris.target
+if TRAIN_DATA_PATH:
+    # ── Retrain : données de production exportées par l'API ──────────────────
+    print(f"[train.py] Chargement des données de production : {TRAIN_DATA_PATH}", file=sys.stderr)
 
-# Simulation d'un filtre temporel : la taille de l'échantillon dépend de la plage de dates.
-start = datetime.strptime(TRAIN_START_DATE, "%Y-%m-%d")
-end = datetime.strptime(TRAIN_END_DATE, "%Y-%m-%d")
-delta_days = max(1, (end - start).days)
+    features_list = []
+    labels_list = []
+    feature_names = None
 
-# Sélection d'un sous-ensemble proportionnel à la durée de la plage
-n_samples = min(len(X_full), max(30, delta_days * 2))
-rng = np.random.default_rng(seed=delta_days % 1000)
-indices = rng.choice(len(X_full), size=n_samples, replace=False)
-X, y = X_full[indices], y_full[indices]
+    with open(TRAIN_DATA_PATH, newline="", encoding="utf-8") as csvfile:
+        for row in csv.DictReader(csvfile):
+            if not row["observed_result"]:
+                continue  # ignorer les prédictions sans résultat observé
+            features = json.loads(row["input_features"])
+            label = json.loads(row["observed_result"])
+            if feature_names is None:
+                feature_names = sorted(features.keys())
+            features_list.append([features[k] for k in feature_names])
+            labels_list.append(label)
 
-print(f"[train.py] {n_samples} exemples retenus.", file=sys.stderr)
+    if not features_list:
+        print(
+            json.dumps({"error": "Aucune donnée labellisée dans la fenêtre de dates."}),
+            flush=True,
+        )
+        sys.exit(1)
+
+    X = np.array(features_list, dtype=float)
+    y = np.array(labels_list)
+    print(f"[train.py] {len(X)} exemples labellisés chargés.", file=sys.stderr)
+
+else:
+    # ── Premier train : dataset synthétique (aucune donnée prod disponible) ──
+    print("[train.py] TRAIN_DATA_PATH absent — utilisation du dataset Iris.", file=sys.stderr)
+    from sklearn.datasets import load_iris
+
+    iris = load_iris()
+    X_full, y_full = iris.data, iris.target
+    feature_names = list(iris.feature_names)
+
+    # Simulation d'un filtre temporel proportionnel à la plage de dates
+    start = datetime.strptime(TRAIN_START_DATE, "%Y-%m-%d")
+    end = datetime.strptime(TRAIN_END_DATE, "%Y-%m-%d")
+    delta_days = max(1, (end - start).days)
+    n_samples = min(len(X_full), max(30, delta_days * 2))
+    rng = np.random.default_rng(seed=delta_days % 1000)
+    indices = rng.choice(len(X_full), size=n_samples, replace=False)
+    X, y = X_full[indices], y_full[indices]
+    print(f"[train.py] {n_samples} exemples retenus.", file=sys.stderr)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 3. Entraînement
@@ -121,7 +151,8 @@ print(f"[train.py] {n_samples} exemples retenus.", file=sys.stderr)
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
 print(
-    f"[train.py] Entraînement sur {len(X_train)} exemples, " f"évaluation sur {len(X_test)}…",
+    f"[train.py] Entraînement sur {len(X_train)} exemples, "
+    f"évaluation sur {len(X_test)}…",
     file=sys.stderr,
 )
 
@@ -138,10 +169,9 @@ f1 = float(f1_score(y_test, y_pred, average="weighted", zero_division=0))
 print(f"[train.py] Accuracy : {acc:.4f} | F1 Score : {f1:.4f}", file=sys.stderr)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 5. Sauvegarde du modèle (OBLIGATOIRE — utiliser pickle.dump)
+# 5. Sauvegarde du modèle (OBLIGATOIRE — utiliser joblib.dump)
 # ──────────────────────────────────────────────────────────────────────────────
-with open(OUTPUT_MODEL_PATH, "wb") as f:
-    pickle.dump(model, f)
+joblib.dump(model, OUTPUT_MODEL_PATH)
 
 print(f"[train.py] Modèle sauvegardé : {OUTPUT_MODEL_PATH}", file=sys.stderr)
 
@@ -160,27 +190,22 @@ for _pkg in ["scikit-learn", "numpy", "pandas", "mlflow", "python-dotenv"]:
 # ──────────────────────────────────────────────────────────────────────────────
 # 7. Métriques sur stdout (dernière ligne JSON — lue par l'API pour MLflow + DB)
 # ──────────────────────────────────────────────────────────────────────────────
-# L'API crée automatiquement un run MLflow avec toutes les clés ci-dessous.
-# accuracy et f1_score sont obligatoires. n_rows, feature_stats et
-# label_distribution sont optionnels mais enrichissent le run MLflow.
-# dependencies est capturé automatiquement par l'API pour générer requirements.txt.
-# Ne mettez RIEN après ce print.
+feature_stats = {}
+if feature_names is not None:
+    for i, fname in enumerate(feature_names):
+        col = X_train[:, i] if X_train.ndim > 1 else X_train
+        feature_stats[fname] = {
+            "mean": round(float(np.mean(col)), 4),
+            "std": round(float(np.std(col)), 4),
+            "min": round(float(np.min(col)), 4),
+            "max": round(float(np.max(col)), 4),
+            "null_rate": 0.0,
+        }
 
-feature_stats = {
-    name: {
-        "mean": round(float(np.mean(X_train[:, i])), 4),
-        "std": round(float(np.std(X_train[:, i])), 4),
-        "min": round(float(np.min(X_train[:, i])), 4),
-        "max": round(float(np.max(X_train[:, i])), 4),
-        "null_rate": 0.0,
-    }
-    for i, name in enumerate(iris.feature_names)
-}
-
-classes_arr = np.unique(y)
+classes_arr = np.unique(y_train)
 total_train = len(y_train)
 label_distribution = {
-    iris.target_names[int(cls)]: round(float(np.sum(y_train == cls)) / total_train, 4)
+    str(cls): round(float(np.sum(y_train == cls)) / total_train, 4)
     for cls in classes_arr
     if total_train > 0
 }

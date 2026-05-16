@@ -8,7 +8,8 @@ Couvre les branches non exercées par les tests d'intégration existants :
 """
 
 import asyncio
-import pickle
+import io
+import joblib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -65,7 +66,9 @@ def _inject_cache(name: str, version: str, model) -> str:
             feature_baseline=None,
         ),
     }
-    asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
+    _jbuf = io.BytesIO()
+    joblib.dump(data, _jbuf)
+    asyncio.run(model_service._redis.set(f"model:{key}", _jbuf.getvalue()))
     return key
 
 

@@ -11,7 +11,7 @@ Scénarios :
 
 import asyncio
 import io
-import pickle
+import joblib
 from types import SimpleNamespace
 
 import pandas as pd
@@ -48,7 +48,9 @@ def _make_iris_model_pkl() -> bytes:
         }
     )
     y = ["setosa", "setosa", "virginica", "virginica"]
-    return pickle.dumps(LogisticRegression(max_iter=1000).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=1000).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 def _inject_cache(name: str, version: str):
@@ -72,7 +74,9 @@ def _inject_cache(name: str, version: str):
             feature_baseline=None,
         ),
     }
-    asyncio.run(model_service._redis.set(f"model:{name}:{version}", pickle.dumps(data)))
+    _jbuf = io.BytesIO()
+    joblib.dump(data, _jbuf)
+    asyncio.run(model_service._redis.set(f"model:{name}:{version}", _jbuf.getvalue()))
 
 
 async def _setup():

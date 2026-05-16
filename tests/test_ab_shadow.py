@@ -9,7 +9,8 @@ Stratégie :
   - Chaque test nettoie le cache avec try/finally
 """
 import asyncio
-import pickle
+import io
+import joblib
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -59,7 +60,9 @@ def _inject_cache(model_name: str, version: str, model) -> str:
             webhook_url=None,
         ),
     }
-    asyncio.run(model_service._redis.set(f"model:{key}", pickle.dumps(data)))
+    _jbuf = io.BytesIO()
+    joblib.dump(data, _jbuf)
+    asyncio.run(model_service._redis.set(f"model:{key}", _jbuf.getvalue()))
     return key
 
 

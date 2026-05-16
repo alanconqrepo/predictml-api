@@ -3,7 +3,8 @@ Tests unitaires pour MLflowService.
 Tous les appels au SDK mlflow sont mockés — aucun serveur MLflow requis.
 """
 
-import pickle
+import io
+import joblib
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,7 +18,9 @@ _MODULE = "src.services.mlflow_service"
 
 def _make_pkl_bytes() -> bytes:
     X, y = load_iris(return_X_y=True)
-    return pickle.dumps(LogisticRegression(max_iter=200).fit(X, y))
+    _jbuf = io.BytesIO()
+    joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
+    return _jbuf.getvalue()
 
 
 def _make_service() -> MLflowService:

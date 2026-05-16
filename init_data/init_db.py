@@ -6,7 +6,8 @@ import asyncio
 import os
 import secrets
 from pathlib import Path
-import pickle
+
+import joblib
 
 from sqlalchemy import select
 
@@ -64,31 +65,30 @@ async def upload_local_models_to_minio():
         print("Dossier Models/ introuvable")
         return
 
-    pkl_files = list(models_dir.glob("*.pkl"))
+    joblib_files = list(models_dir.glob("*.joblib")) + list(models_dir.glob("*.pkl"))
 
-    if not pkl_files:
-        print("Aucun modele .pkl trouve dans Models/")
+    if not joblib_files:
+        print("Aucun fichier modèle (.joblib ou .pkl) trouvé dans Models/")
         return
 
     async with AsyncSessionLocal() as db:
-        for pkl_file in pkl_files:
+        for model_file in joblib_files:
             try:
-                print(f"\nUpload de {pkl_file.name}...")
+                print(f"\nUpload de {model_file.name}...")
 
                 # Charger le modèle
-                with open(pkl_file, "rb") as f:
-                    model = pickle.load(f)
+                model = joblib.load(model_file)
 
                 # Nom et version
-                model_name = pkl_file.stem
+                model_name = model_file.stem
                 version = "1.0.0"
 
                 # Upload vers MinIO
-                object_key = f"{model_name}/{version}.pkl"
+                object_key = f"{model_name}/{version}.joblib"
                 upload_result = minio_service.upload_model(
                     model=model,
                     object_name=object_key,
-                    metadata={"original_filename": pkl_file.name}
+                    metadata={"original_filename": model_file.name}
                 )
 
                 # Enregistrer les métadonnées en DB
@@ -109,7 +109,7 @@ async def upload_local_models_to_minio():
                 print(f"   {model_name} v{version} uploade et enregistre")
 
             except Exception as e:
-                print(f"   Erreur pour {pkl_file.name}: {e}")
+                print(f"   Erreur pour {model_file.name}: {e}")
                 continue
 
 

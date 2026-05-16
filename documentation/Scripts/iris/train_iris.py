@@ -20,7 +20,7 @@ Variables optionnelles :
 
 SORTIE ATTENDUE
 ---------------
-  - Modèle sauvegardé à OUTPUT_MODEL_PATH via pickle.dump()
+  - Modèle sauvegardé à OUTPUT_MODEL_PATH via joblib.dump()
   - Dernière ligne JSON sur stdout avec au minimum :
       {"accuracy": 0.95, "f1_score": 0.94}
   - Logs de progression sur stderr
@@ -28,7 +28,7 @@ SORTIE ATTENDUE
 
 MODULES AUTORISÉS par le sandbox PredictML
 -------------------------------------------
-  os, sys, json, pickle, datetime, dotenv, numpy, pandas, sklearn, mlflow
+  os, sys, json, joblib, datetime, dotenv, numpy, pandas, sklearn, mlflow
   (subprocess, requests, socket, urllib sont bloqués)
 
 CAPTURE AUTOMATIQUE DES VERSIONS DE LIBRAIRIES
@@ -42,7 +42,7 @@ CAPTURE AUTOMATIQUE DES VERSIONS DE LIBRAIRIES
 import io
 import json
 import os
-import pickle
+import joblib
 import sys
 from datetime import datetime
 
@@ -113,7 +113,7 @@ if DEBUG:
 
 TRAIN_START_DATE  = os.environ.get("TRAIN_START_DATE","2025-01-01")
 TRAIN_END_DATE    = os.environ.get("TRAIN_END_DATE","2025-02-01")
-OUTPUT_MODEL_PATH = os.environ.get("OUTPUT_MODEL_PATH","default_model_path.pkl")
+OUTPUT_MODEL_PATH = os.environ.get("OUTPUT_MODEL_PATH","default_model_path.joblib")
 
 MODEL_NAME               = os.environ.get("MODEL_NAME", "iris-classifier")
 MLFLOW_TRACKING_URI      = os.environ.get("MLFLOW_TRACKING_URI", "")
@@ -263,8 +263,7 @@ _ts("après évaluation")
 
 # ── 5. Sauvegarde du modèle (OBLIGATOIRE) ─────────────────────────────────────
 
-with open(OUTPUT_MODEL_PATH, "wb") as fh:
-    pickle.dump(model, fh)
+joblib.dump(model, OUTPUT_MODEL_PATH)
 
 print(f"[{MODEL_NAME}] Modèle sauvegardé → {OUTPUT_MODEL_PATH}", file=sys.stderr)
 _ts("après sauvegarde modèle")

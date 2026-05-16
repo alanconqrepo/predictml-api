@@ -2,7 +2,8 @@
 Tests pour l'endpoint GET /predictions
 """
 import asyncio
-import pickle
+import io
+import joblib
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
@@ -25,7 +26,9 @@ END = (NOW + timedelta(hours=1)).isoformat()
 def make_pkl_bytes() -> bytes:
     X, y = load_iris(return_X_y=True)
     model = LogisticRegression(max_iter=200).fit(X, y)
-    return pickle.dumps(model)
+    _jbuf = io.BytesIO()
+    joblib.dump(model, _jbuf)
+    return _jbuf.getvalue()
 
 
 async def _setup():

@@ -2,7 +2,8 @@
 Tests pour le service de gestion des modèles ML
 """
 import asyncio
-import pickle
+import io
+import joblib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -33,7 +34,7 @@ def _fake_metadata(mlflow_run_id=None, minio_object_key="model/v1.0.0.pkl", mode
         version="1.0.0",
         mlflow_run_id=mlflow_run_id,
         minio_object_key=minio_object_key,
-        pkl_hmac_signature=sig,
+        model_hmac_signature=sig,
     )
 
 
@@ -81,7 +82,9 @@ def test_load_model_via_minio():
     """load_model sans mlflow_run_id → charge depuis MinIO via download_file_bytes"""
     service = _make_service()
     fake_model = SimpleNamespace(marker="fake_minio_model")
-    fake_pkl = pickle.dumps(fake_model)
+    _jbuf = io.BytesIO()
+    joblib.dump(fake_model, _jbuf)
+    fake_pkl = _jbuf.getvalue()
     metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
                                model_bytes=fake_pkl)
 
@@ -124,7 +127,9 @@ def test_load_model_cache_hit():
     """load_model : le second appel est servi depuis le cache Redis (MinIO non rappelé)"""
     service = _make_service()
     fake_model = SimpleNamespace(marker="cache_hit_model")
-    fake_pkl = pickle.dumps(fake_model)
+    _jbuf = io.BytesIO()
+    joblib.dump(fake_model, _jbuf)
+    fake_pkl = _jbuf.getvalue()
     metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
                                model_bytes=fake_pkl)
 
@@ -145,7 +150,9 @@ def test_load_model_forwards_explicit_version():
     """load_model avec version explicite → get_model_metadata appelé avec cette version"""
     service = _make_service()
     fake_model = SimpleNamespace(marker="fake_model")
-    fake_pkl = pickle.dumps(fake_model)
+    _jbuf = io.BytesIO()
+    joblib.dump(fake_model, _jbuf)
+    fake_pkl = _jbuf.getvalue()
     metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v2.0.0.pkl",
                                model_bytes=fake_pkl)
     metadata.version = "2.0.0"
@@ -167,7 +174,9 @@ def test_load_model_no_version_passes_none():
     """load_model sans version → get_model_metadata appelé avec version=None"""
     service = _make_service()
     fake_model = SimpleNamespace(marker="fake_model")
-    fake_pkl = pickle.dumps(fake_model)
+    _jbuf = io.BytesIO()
+    joblib.dump(fake_model, _jbuf)
+    fake_pkl = _jbuf.getvalue()
     metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
                                model_bytes=fake_pkl)
 
@@ -214,14 +223,16 @@ def test_load_model_not_found():
 # ---------------------------------------------------------------------------
 
 def test_load_model_missing_signature_raises_403():
-    """load_model sans pkl_hmac_signature → HTTPException 403 (modèle legacy non signé)"""
+    """load_model sans model_hmac_signature → HTTPException 403 (modèle legacy non signé)"""
     from fastapi import HTTPException
 
     service = _make_service()
-    fake_pkl = pickle.dumps(SimpleNamespace(marker="x"))
+    _jbuf = io.BytesIO()
+    joblib.dump(SimpleNamespace(marker="x"), _jbuf)
+    fake_pkl = _jbuf.getvalue()
     metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
                                model_bytes=fake_pkl)
-    metadata.pkl_hmac_signature = None  # simule un modèle sans signature
+    metadata.model_hmac_signature = None  # simule un modèle sans signature
 
     with patch(
         "src.services.db_service.DBService.get_model_metadata",
@@ -241,7 +252,9 @@ def test_load_model_tampered_pkl_raises_500():
     from fastapi import HTTPException
 
     service = _make_service()
-    real_pkl = pickle.dumps(SimpleNamespace(marker="real"))
+    _jbuf = io.BytesIO()
+    joblib.dump(SimpleNamespace(marker="real"), _jbuf)
+    real_pkl = _jbuf.getvalue()
     metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
                                model_bytes=real_pkl)
     tampered_pkl = b"this_is_not_the_signed_file"
@@ -266,7 +279,9 @@ def test_load_model_tampered_redis_cache_invalidated():
     """
     service = _make_service()
     fake_model = SimpleNamespace(marker="fresh_from_minio")
-    fake_pkl = pickle.dumps(fake_model)
+    _jbuf = io.BytesIO()
+    joblib.dump(fake_model, _jbuf)
+    fake_pkl = _jbuf.getvalue()
     metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
                                model_bytes=fake_pkl)
 
