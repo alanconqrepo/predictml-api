@@ -342,7 +342,21 @@ async def _do_retrain(name: str, version: str) -> None:
         "label_distribution": parsed_metrics.get("label_distribution"),
     }
 
-    # 5b. Créer le run MLflow (dégradation gracieuse si MLflow indisponible)
+    # 5b. Snapshot des versions de librairies (généré ici, uploadé MinIO en step 6)
+    # Priorité : "dependencies" dans le stdout JSON (auto-reporté par le script),
+    # fallback sur AST + importlib.metadata si absent.
+    from src.services.env_snapshot_service import (
+        dependencies_to_requirements_txt as _deps_to_req,
+        generate_requirements_txt as _gen_req,
+    )
+
+    _deps_from_stdout = parsed_metrics.get("dependencies")
+    if _deps_from_stdout and isinstance(_deps_from_stdout, dict):
+        _req_txt = _deps_to_req(_deps_from_stdout)
+    else:
+        _req_txt = _gen_req(script_bytes.decode("utf-8", errors="replace"))
+
+    # 5c. Créer le run MLflow (dégradation gracieuse si MLflow indisponible)
     _mlflow_run_id: Optional[str] = None
     try:
         _mlflow_run_id = mlflow_service.log_retrain_run(
@@ -364,11 +378,12 @@ async def _do_retrain(name: str, version: str) -> None:
             auto_promote_reason=None,
             model_bytes=new_model_bytes,
             lookback_days=lookback_days,
+            requirements_txt=_req_txt,
         )
     except Exception as _exc:
         logger.warning("MLflow logging échoué (scheduler)", error=str(_exc))
 
-    # 6. Uploader le nouveau modèle et le script dans MinIO
+    # 6. Uploader le nouveau modèle, le script et le requirements.txt dans MinIO
     new_object_key = f"{name}/v{new_version}.pkl"
     new_pkl_hmac_signature = compute_model_hmac(new_model_bytes)
     upload_info = await minio_service.async_upload_model_bytes(new_model_bytes, new_object_key)
@@ -376,6 +391,14 @@ async def _do_retrain(name: str, version: str) -> None:
     await minio_service.async_upload_file_bytes(
         script_bytes, new_train_key, content_type="text/x-python"
     )
+    _req_object_key: Optional[str] = f"{name}/v{new_version}_requirements.txt"
+    try:
+        await minio_service.async_upload_file_bytes(
+            _req_txt.encode("utf-8"), _req_object_key, content_type="text/plain"
+        )
+    except Exception as _exc:
+        logger.warning("Upload requirements.txt échoué (scheduler) — non bloquant", error=str(_exc))
+        _req_object_key = None
 
     # --- Session 2 : écriture post-subprocess ---
     now_naive = now_utc.replace(tzinfo=None)
@@ -389,6 +412,7 @@ async def _do_retrain(name: str, version: str) -> None:
             file_size_bytes=upload_info.get("size"),
             pkl_hmac_signature=new_pkl_hmac_signature,
             train_script_object_key=new_train_key,
+            requirements_object_key=_req_object_key,
             description=source_fields["description"],
             algorithm=source_fields["algorithm"],
             mlflow_run_id=_mlflow_run_id,

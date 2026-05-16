@@ -8,6 +8,7 @@ ré-entraînement si le serveur MLflow est indisponible (dégradation gracieuse)
 
 import os
 import pickle
+import tempfile
 from typing import Optional
 
 import mlflow
@@ -60,6 +61,7 @@ class MLflowService:
         auto_promote_reason: Optional[str],
         model_bytes: Optional[bytes] = None,
         lookback_days: Optional[int] = None,
+        requirements_txt: Optional[str] = None,
     ) -> Optional[str]:
         """
         Crée un run MLflow complet pour un ré-entraînement.
@@ -147,6 +149,21 @@ class MLflowService:
                         mlflow.sklearn.log_model(model_obj, artifact_path="model")
                     except Exception as exc:
                         logger.warning("MLflow log_model échoué — artifact ignoré", error=str(exc))
+
+                # Artifact : requirements.txt (snapshot des versions de librairies)
+                if requirements_txt:
+                    try:
+                        with tempfile.NamedTemporaryFile(
+                            mode="w", suffix="_requirements.txt", delete=False, encoding="utf-8"
+                        ) as tmp:
+                            tmp.write(requirements_txt)
+                            _tmp_path = tmp.name
+                        try:
+                            mlflow.log_artifact(_tmp_path, artifact_path="environment")
+                        finally:
+                            os.unlink(_tmp_path)
+                    except Exception as exc:
+                        logger.warning("MLflow log requirements.txt échoué — artifact ignoré", error=str(exc))
 
                 run_id = run.info.run_id
 

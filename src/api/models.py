@@ -209,6 +209,7 @@ _ALLOWED_IMPORT_MODULES = {
     "dotenv",
     "boto3",
     "botocore",
+    "importlib",
 }
 
 
@@ -290,6 +291,106 @@ def _validate_train_script(source: str) -> Optional[str]:
         return "Le script doit sauvegarder le modèle avec pickle.dump, joblib.dump ou save_model"
 
     return None
+
+
+_SAFE_UPLOAD_ENV_KEYS = {
+    "PATH", "HOME", "USER", "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP",
+    "PYTHONPATH", "PYTHONDONTWRITEBYTECODE", "VIRTUAL_ENV",
+}
+
+
+async def _run_train_subprocess(
+    train_source: str,
+) -> tuple[Optional[str], Optional[bytes]]:
+    """
+    Lance train.py en subprocess avec des dates par défaut (J-30 → aujourd'hui).
+
+    Retourne ``(req_txt, pkl_bytes)`` :
+    - ``req_txt``   : contenu du requirements.txt (depuis "dependencies" dans stdout JSON),
+                      ou None si le champ est absent (l'appelant fait le fallback AST).
+    - ``pkl_bytes`` : contenu du .pkl généré par le script, ou None si le subprocess a échoué
+                      ou n'a pas produit de fichier (l'appelant utilise le pkl uploadé).
+
+    Timeout : 120 s.
+    """
+    import asyncio
+    import json as _json
+    import tempfile
+    from datetime import datetime, timedelta
+
+    from src.services.env_snapshot_service import dependencies_to_requirements_txt
+
+    now = datetime.now()
+    start_date = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+    end_date = now.strftime("%Y-%m-%d")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        script_path = os.path.join(tmpdir, "train.py")
+        output_path = os.path.join(tmpdir, "output_model.pkl")
+
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(train_source)
+
+        env = {k: v for k, v in os.environ.items() if k in _SAFE_UPLOAD_ENV_KEYS}
+        env.update({
+            "TRAIN_START_DATE": start_date,
+            "TRAIN_END_DATE": end_date,
+            "OUTPUT_MODEL_PATH": output_path,
+        })
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "python",
+                script_path,
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=tmpdir,
+                preexec_fn=_set_subprocess_limits,
+            )
+            try:
+                raw_stdout, raw_stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=120.0
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.communicate()
+                logger.warning("_run_train_subprocess : timeout 120 s")
+                return None, None
+
+            stdout_text = raw_stdout.decode("utf-8", errors="replace")
+
+            # Lire le .pkl produit (si présent)
+            pkl_bytes: Optional[bytes] = None
+            if proc.returncode == 0 and os.path.exists(output_path):
+                with open(output_path, "rb") as f:
+                    pkl_bytes = f.read()
+            elif proc.returncode != 0:
+                logger.warning(
+                    "_run_train_subprocess : subprocess échoué",
+                    returncode=proc.returncode,
+                    stderr=raw_stderr.decode("utf-8", errors="replace")[:300],
+                )
+
+            # Extraire "dependencies" depuis la dernière ligne JSON de stdout
+            req_txt: Optional[str] = None
+            for line in reversed(stdout_text.strip().splitlines()):
+                stripped = line.strip()
+                if stripped.startswith("{"):
+                    try:
+                        data = _json.loads(stripped)
+                        deps = data.get("dependencies")
+                        if deps and isinstance(deps, dict):
+                            req_txt = dependencies_to_requirements_txt(deps)
+                    except _json.JSONDecodeError:
+                        pass
+                    break
+
+            return req_txt, pkl_bytes
+
+        except Exception as exc:
+            logger.warning("_run_train_subprocess : exception", error=str(exc))
+            return None, None
 
 
 @router.get("/models", response_model=List[Dict[str, Any]])
@@ -1503,7 +1604,23 @@ async def retrain_model(
         "label_distribution": parsed_metrics.get("label_distribution"),
     }
 
-    # 6b. Créer le run MLflow (dégradation gracieuse si MLflow indisponible)
+    # 6b. Snapshot des versions de librairies (généré ici, uploadé MinIO en step 8b)
+    # Priorité : "dependencies" dans le stdout JSON (auto-reporté par le script),
+    # fallback sur AST + importlib.metadata si absent.
+    from src.services.env_snapshot_service import (
+        dependencies_to_requirements_txt as _deps_to_req,
+        generate_requirements_txt as _gen_req,
+    )
+
+    _deps_from_stdout = parsed_metrics.get("dependencies")
+    if _deps_from_stdout and isinstance(_deps_from_stdout, dict):
+        _req_txt = _deps_to_req(_deps_from_stdout)
+        logger.info("requirements.txt depuis stdout JSON (dependencies)", model=name, new_version=new_version)
+    else:
+        _req_txt = _gen_req(script_bytes.decode("utf-8", errors="replace"))
+        logger.info("requirements.txt depuis fallback AST+importlib.metadata", model=name, new_version=new_version)
+
+    # 6c. Créer le run MLflow (dégradation gracieuse si MLflow indisponible)
     _mlflow_run_id: Optional[str] = None
     try:
         _mlflow_run_id = mlflow_service.log_retrain_run(
@@ -1525,6 +1642,7 @@ async def retrain_model(
             auto_promoted=False,
             auto_promote_reason=None,
             model_bytes=new_model_bytes,
+            requirements_txt=_req_txt,
         )
         logger.info("MLflow run créé", model=name, new_version=new_version, run_id=_mlflow_run_id)
     except Exception as _exc:
@@ -1572,6 +1690,20 @@ async def retrain_model(
             detail=f"Upload MinIO du train.py échoué : {exc}",
         ) from exc
 
+    # 8b. Uploader le snapshot des versions de librairies généré en step 6b (non bloquant)
+    _req_object_key = f"{name}/v{new_version}_requirements.txt"
+    try:
+        await minio_service.async_upload_file_bytes(
+            _req_txt.encode("utf-8"), _req_object_key, content_type="text/plain"
+        )
+        logger.info("Retrain requirements.txt uploadé", model=name, new_version=new_version)
+    except Exception as _exc:
+        logger.warning(
+            "Retrain STEP8b : upload requirements.txt échoué — non bloquant",
+            model=name, new_version=new_version, error=str(_exc),
+        )
+        _req_object_key = None
+
     # --- Session 2 : écriture post-subprocess ---
     logger.info("Retrain écriture DB", model=name, new_version=new_version)
     async with AsyncSessionLocal() as write_db:
@@ -1585,6 +1717,7 @@ async def retrain_model(
                 file_size_bytes=upload_info["size"],
                 pkl_hmac_signature=new_pkl_hmac_signature,
                 train_script_object_key=new_train_key,
+                requirements_object_key=_req_object_key,
                 description=source_fields["description"],
                 algorithm=source_fields["algorithm"],
                 mlflow_run_id=_mlflow_run_id,
@@ -3380,8 +3513,9 @@ async def create_model(
     file_size_bytes = None
     pkl_hmac_signature = None
 
+    model_bytes: Optional[bytes] = None
     if file is not None:
-        # Lire et uploader le fichier vers MinIO
+        # Lire et valider le fichier (upload différé après subprocess)
         model_bytes = await file.read()
         max_bytes = settings.MAX_MODEL_SIZE_MB * 1024 * 1024
         if len(model_bytes) > max_bytes:
@@ -3398,12 +3532,6 @@ async def create_model(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Le fichier est vide.",
             )
-        object_name = f"{name}/v{version}.pkl"
-        pkl_hmac_signature = compute_model_hmac(model_bytes)
-        upload_info = minio_service.upload_model_bytes(model_bytes, object_name)
-        minio_bucket = upload_info["bucket"]
-        minio_object_key = object_name
-        file_size_bytes = upload_info["size"]
     elif not mlflow_run_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -3412,6 +3540,8 @@ async def create_model(
 
     # --- Traitement du script d'entraînement (optionnel) ---
     train_script_object_key = None
+    requirements_object_key = None
+    subprocess_pkl_bytes: Optional[bytes] = None
     if train_file is not None:
         train_bytes = await train_file.read()
         if not train_bytes:
@@ -3440,6 +3570,44 @@ async def create_model(
         logger.info(
             "Script train.py uploadé", object_name=train_object_name, model=name, version=version
         )
+
+        # Lancer le subprocess pour capturer les dépendances et générer le pkl Docker.
+        # Si le subprocess réussit, son pkl est utilisé à la place du pkl uploadé par l'utilisateur
+        # (le pkl Docker est entraîné dans l'environnement API — versions de librairies cohérentes).
+        from src.services.env_snapshot_service import generate_requirements_txt
+
+        req_txt, subprocess_pkl_bytes = await _run_train_subprocess(train_source)
+        if req_txt is None:
+            logger.info(
+                "Fallback AST pour requirements.txt — subprocess sans 'dependencies'",
+                model=name, version=version,
+            )
+            req_txt = generate_requirements_txt(train_source)
+
+        req_object_name = f"{name}/v{version}_requirements.txt"
+        minio_service.upload_file_bytes(
+            req_txt.encode("utf-8"), req_object_name, content_type="text/plain"
+        )
+        requirements_object_key = req_object_name
+        logger.info(
+            "requirements.txt uploadé", object_name=req_object_name, model=name, version=version
+        )
+
+    # Choisir les bytes du modèle à stocker : subprocess pkl prioritaire, sinon pkl utilisateur
+    model_bytes_to_store = subprocess_pkl_bytes if subprocess_pkl_bytes is not None else model_bytes
+    if subprocess_pkl_bytes is not None:
+        logger.info("Pkl subprocess utilisé (Docker env)", model=name, version=version)
+    elif model_bytes is not None:
+        logger.info("Pkl utilisateur uploadé (subprocess absent)", model=name, version=version)
+
+    # Uploader le pkl final vers MinIO
+    if model_bytes_to_store is not None:
+        object_name = f"{name}/v{version}.pkl"
+        pkl_hmac_signature = compute_model_hmac(model_bytes_to_store)
+        upload_info = minio_service.upload_model_bytes(model_bytes_to_store, object_name)
+        minio_bucket = upload_info["bucket"]
+        minio_object_key = object_name
+        file_size_bytes = upload_info["size"]
 
     # Désérialiser les champs JSON optionnels
     classes_parsed = _parse_json_field(classes, "classes")
@@ -3472,6 +3640,7 @@ async def create_model(
         tags=tags_parsed,
         webhook_url=webhook_url,
         train_script_object_key=train_script_object_key,
+        requirements_object_key=requirements_object_key,
         trained_by=user.username,
         user_id_creator=user.id,
         is_active=True,

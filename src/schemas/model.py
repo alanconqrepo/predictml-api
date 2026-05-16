@@ -89,6 +89,7 @@ class ModelCreateResponse(BaseModel):
     traffic_weight: Optional[float] = None
     deployment_mode: Optional[str] = None
     train_script_object_key: Optional[str] = None
+    requirements_object_key: Optional[str] = None
     promotion_policy: Optional[Dict[str, Any]] = None
     retrain_schedule: Optional[Dict[str, Any]] = None
     parent_version: Optional[str] = None
@@ -140,6 +141,8 @@ class ModelGetResponse(BaseModel):
     minio_object_key: Optional[str]
     file_size_bytes: Optional[int]
     file_hash: Optional[str]
+    train_script_object_key: Optional[str] = None
+    requirements_object_key: Optional[str] = None
 
     # Créateur
     user_id_creator: Optional[int]

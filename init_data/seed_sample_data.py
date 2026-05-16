@@ -16,6 +16,12 @@ Schéma de déploiement après le seed :
     v1.2.0  ExtraTreesRegressor       → shadow
     v1.3.0  Ridge (Pipeline)          → uploadé uniquement
 
+  cancer-classifier  (classification binaire : malignant vs benign)
+    v1.0.0  RandomForestClassifier    → production + ab_test
+    v1.1.0  GradientBoostingClassifier → production + ab_test
+    v1.2.0  ExtraTreesClassifier       → shadow
+    v1.3.0  LogisticRegression         → uploadé uniquement
+
 Variables d'environnement :
   API_URL    URL de l'API interne  (défaut : http://api:8000)
   API_TOKEN  Token admin           (ADMIN_TOKEN en fallback)
@@ -70,11 +76,27 @@ SCRIPTS = [
     ("wine/upload_wine_Ridge_uploaded.py",
      {"MODEL_NAME": "wine-regressor", "MODEL_VERSION": "1.3.0"}),
 
+    # ── cancer-classifier ────────────────────────────────────────────────────────
+    # v1.0.0 : RandomForest — production + ab_test
+    ("cancer/upload_cancer_model.py",
+     {"MODEL_NAME": "cancer-classifier", "MODEL_VERSION": "1.0.0"}),
+    # v1.1.0 : GradientBoosting — production + ab_test
+    ("cancer/upload_cancer_GradientBoosting_abtest.py",
+     {"MODEL_NAME": "cancer-classifier", "MODEL_VERSION": "1.1.0"}),
+    # v1.2.0 : ExtraTrees — shadow
+    ("cancer/upload_cancer_ExtraTrees_shadow.py",
+     {"MODEL_NAME": "cancer-classifier", "MODEL_VERSION": "1.2.0"}),
+    # v1.3.0 : LogisticRegression — uploadé uniquement
+    ("cancer/upload_cancer_LogisticRegression_uploaded.py",
+     {"MODEL_NAME": "cancer-classifier", "MODEL_VERSION": "1.3.0"}),
+
     # ── Prédictions et ground truth ──────────────────────────────────────────
-    ("iris/send_predictions_iris.py",  {"MODEL_NAME": "iris-classifier"}),
-    ("iris/send_ground_truth_iris.py", {"MODEL_NAME": "iris-classifier"}),
-    ("wine/send_predictions_wine.py",  {"MODEL_NAME": "wine-regressor"}),
-    ("wine/send_ground_truth_wine.py", {"MODEL_NAME": "wine-regressor"}),
+    ("iris/send_predictions_iris.py",    {"MODEL_NAME": "iris-classifier"}),
+    ("iris/send_ground_truth_iris.py",   {"MODEL_NAME": "iris-classifier"}),
+    ("wine/send_predictions_wine.py",    {"MODEL_NAME": "wine-regressor"}),
+    ("wine/send_ground_truth_wine.py",   {"MODEL_NAME": "wine-regressor"}),
+    ("cancer/send_predictions_cancer.py",  {"MODEL_NAME": "cancer-classifier"}),
+    ("cancer/send_ground_truth_cancer.py", {"MODEL_NAME": "cancer-classifier"}),
 ]
 
 
@@ -139,14 +161,18 @@ def main():
 
     print("\n  Données exemples absentes — lancement du seed…\n")
     print("  Schéma cible :")
-    print("    iris-classifier v1.0.0 RandomForest        → production + ab_test")
-    print("    iris-classifier v1.1.0 GradientBoosting    → production + ab_test")
-    print("    iris-classifier v1.2.0 ExtraTrees          → shadow")
-    print("    iris-classifier v1.3.0 LogisticRegression  → uploadé")
-    print("    wine-regressor  v1.0.0 GradientBoosting    → production + ab_test")
-    print("    wine-regressor  v1.1.0 RandomForest        → production + ab_test")
-    print("    wine-regressor  v1.2.0 ExtraTrees          → shadow")
-    print("    wine-regressor  v1.3.0 Ridge               → uploadé")
+    print("    iris-classifier   v1.0.0 RandomForest        → production + ab_test")
+    print("    iris-classifier   v1.1.0 GradientBoosting    → production + ab_test")
+    print("    iris-classifier   v1.2.0 ExtraTrees          → shadow")
+    print("    iris-classifier   v1.3.0 LogisticRegression  → uploadé")
+    print("    wine-regressor    v1.0.0 GradientBoosting    → production + ab_test")
+    print("    wine-regressor    v1.1.0 RandomForest        → production + ab_test")
+    print("    wine-regressor    v1.2.0 ExtraTrees          → shadow")
+    print("    wine-regressor    v1.3.0 Ridge               → uploadé")
+    print("    cancer-classifier v1.0.0 RandomForest        → production + ab_test")
+    print("    cancer-classifier v1.1.0 GradientBoosting    → production + ab_test")
+    print("    cancer-classifier v1.2.0 ExtraTrees          → shadow")
+    print("    cancer-classifier v1.3.0 LogisticRegression  → uploadé")
 
     for script_path_rel, extra_env in SCRIPTS:
         ok = run_script(script_path_rel, extra_env)
