@@ -11,7 +11,7 @@ import joblib
 
 
 def make_model_bytes(model) -> bytes:
-    """Sérialise un modèle sklearn en bytes joblib (remplace pickle.dumps)."""
+    """Sérialise un modèle sklearn en bytes joblib."""
     buf = io.BytesIO()
     joblib.dump(model, buf)
     return buf.getvalue()
@@ -33,7 +33,7 @@ os.environ.setdefault("METRICS_TOKEN", "test-metrics-token-for-pytest")
 _minio_mock = MagicMock()
 _upload_return = {
     "bucket": "models",
-    "object_name": "mock_model/v1.0.0.pkl",
+    "object_name": "mock_model/v1.0.0.joblib",
     "size": 512,
     "etag": "mock-etag-abc123",
 }

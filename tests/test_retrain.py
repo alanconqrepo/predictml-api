@@ -77,7 +77,7 @@ def make_pkl_bytes() -> bytes:
 def _create_model(name: str, version: str = "1.0.0", with_train_script: bool = False) -> dict:
     """Crée un modèle en base via POST /models."""
     files: dict = {
-        "file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
+        "file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
     }
     if with_train_script:
         files["train_file"] = (
@@ -225,16 +225,16 @@ class TestValidateTrainScript:
         )
         error = _validate_train_script(script_no_save)
         assert error is not None
-        assert "pickle.dump" in error or "sauvegarder" in error.lower() or "save" in error.lower()
+        assert "joblib.dump" in error or "sauvegarder" in error.lower() or "save" in error.lower()
 
     def test_joblib_dump_accepted(self):
-        """joblib.dump est une alternative valide à pickle.dump."""
-        script = VALID_TRAIN_SCRIPT.replace("pickle.dump(model, f)", "joblib.dump(model, f)")
-        assert _validate_train_script(script) is None
+        """joblib.dump est accepté par le validateur."""
+        # VALID_TRAIN_SCRIPT utilise déjà joblib.dump — la validation doit passer
+        assert _validate_train_script(VALID_TRAIN_SCRIPT) is None
 
     def test_save_model_accepted(self):
-        """save_model(...) est une alternative valide."""
-        script = VALID_TRAIN_SCRIPT.replace("pickle.dump(model, f)", "save_model(model, f)")
+        """save_model(...) est une alternative valide à joblib.dump."""
+        script = VALID_TRAIN_SCRIPT.replace("joblib.dump(model, f)", "save_model(model, f)")
         assert _validate_train_script(script) is None
 
     def test_empty_string_returns_error(self):
@@ -322,7 +322,7 @@ class TestCreateModelWithTrainFile:
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
             files={
-                "file": ("m.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
+                "file": ("m.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
                 "train_file": ("train.py", io.BytesIO(VALID_TRAIN_SCRIPT.encode()), "text/x-python"),
             },
             data={"name": f"{MODEL_PREFIX}_with_script", "version": "1.0.0"},
@@ -338,7 +338,7 @@ class TestCreateModelWithTrainFile:
         r = client.post(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-            files={"file": ("m.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+            files={"file": ("m.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
             data={"name": f"{MODEL_PREFIX}_no_script", "version": "1.0.0"},
         )
         assert r.status_code == 201
@@ -351,7 +351,7 @@ class TestCreateModelWithTrainFile:
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
             files={
-                "file": ("m.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
+                "file": ("m.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
                 "train_file": ("train.py", io.BytesIO(bad_script), "text/x-python"),
             },
             data={"name": f"{MODEL_PREFIX}_bad_syntax", "version": "1.0.0"},
@@ -366,7 +366,7 @@ class TestCreateModelWithTrainFile:
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
             files={
-                "file": ("m.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
+                "file": ("m.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
                 "train_file": ("train.py", io.BytesIO(script.encode()), "text/x-python"),
             },
             data={"name": f"{MODEL_PREFIX}_no_start", "version": "1.0.0"},
@@ -381,7 +381,7 @@ class TestCreateModelWithTrainFile:
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
             files={
-                "file": ("m.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
+                "file": ("m.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
                 "train_file": ("train.py", io.BytesIO(script.encode()), "text/x-python"),
             },
             data={"name": f"{MODEL_PREFIX}_no_out", "version": "1.0.0"},
@@ -390,13 +390,13 @@ class TestCreateModelWithTrainFile:
         assert "OUTPUT_MODEL_PATH" in r.json()["detail"]
 
     def test_upload_train_file_without_save_call_returns_422(self):
-        """train.py sans pickle.dump/joblib.dump/save_model → 422."""
-        script = VALID_TRAIN_SCRIPT.replace("pickle.dump(model, f)", "# pickle.dump removed")
+        """train.py sans joblib.dump/save_model → 422."""
+        script = VALID_TRAIN_SCRIPT.replace("joblib.dump(model, f)", "# joblib.dump removed")
         r = client.post(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
             files={
-                "file": ("m.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
+                "file": ("m.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
                 "train_file": ("train.py", io.BytesIO(script.encode()), "text/x-python"),
             },
             data={"name": f"{MODEL_PREFIX}_no_save", "version": "1.0.0"},
@@ -409,7 +409,7 @@ class TestCreateModelWithTrainFile:
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
             files={
-                "file": ("m.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
+                "file": ("m.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
                 "train_file": ("train.py", io.BytesIO(b""), "text/x-python"),
             },
             data={"name": f"{MODEL_PREFIX}_empty_script", "version": "1.0.0"},
@@ -650,7 +650,7 @@ class TestRetrainEndpoint:
         assert "fichier" in data["stderr"].lower() or len(data["stderr"]) > 0
 
     def test_retrain_script_no_output_file_returns_success_false(self):
-        """Script qui retourne code 0 mais n'écrit pas le .pkl → success=False."""
+        """Script qui retourne code 0 mais n'écrit pas le .joblib → success=False."""
         with patch(
             "asyncio.create_subprocess_exec",
             new=AsyncMock(side_effect=_mock_exec_no_output_file),

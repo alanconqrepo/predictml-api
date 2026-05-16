@@ -3,8 +3,8 @@ upload_iris_model.py — Entraîne et uploade un modèle Iris via l'API PredictM
 ==============================================================================
 
 Ce script tourne LOCALEMENT. Il :
-  1. Exécute train_iris.py en subprocess pour produire le .pkl
-  2. Uploade le .pkl + train_iris.py via POST /models
+  1. Exécute train_iris.py en subprocess pour produire le .joblib
+  2. Uploade le .joblib + train_iris.py via POST /models
 
 Usage :
   API_URL=http://localhost:8000 API_TOKEN=<token> python upload_iris_model.py

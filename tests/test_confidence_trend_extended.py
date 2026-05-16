@@ -60,7 +60,7 @@ def _create_conf_model(name=CONF_MODEL, version="1.0.0"):
         headers={"Authorization": f"Bearer {USER_TOKEN}"},
         files={
             "file": (
-                "model.pkl",
+                "model.joblib",
                 io.BytesIO(_make_pkl_bytes()),
                 "application/octet-stream",
             )

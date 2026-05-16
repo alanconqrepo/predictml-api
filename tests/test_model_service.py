@@ -20,7 +20,7 @@ def _make_service() -> ModelService:
     return service
 
 
-def _fake_metadata(mlflow_run_id=None, minio_object_key="model/v1.0.0.pkl", model_bytes=None):
+def _fake_metadata(mlflow_run_id=None, minio_object_key="model/v1.0.0.joblib", model_bytes=None):
     """
     Retourne un faux objet ModelMetadata avec une signature HMAC valide.
 
@@ -85,7 +85,7 @@ def test_load_model_via_minio():
     _jbuf = io.BytesIO()
     joblib.dump(fake_model, _jbuf)
     fake_pkl = _jbuf.getvalue()
-    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.joblib",
                                model_bytes=fake_pkl)
 
     with patch(
@@ -98,8 +98,8 @@ def test_load_model_via_minio():
 
     assert result["model"].marker == "fake_minio_model"
     assert result["metadata"].name == "test_model"
-    assert result["metadata"].minio_object_key == "iris/v1.0.0.pkl"
-    minio_mock.async_download_file_bytes.assert_called_once_with("iris/v1.0.0.pkl")
+    assert result["metadata"].minio_object_key == "iris/v1.0.0.joblib"
+    minio_mock.async_download_file_bytes.assert_called_once_with("iris/v1.0.0.joblib")
 
 
 def test_load_model_via_mlflow():
@@ -130,7 +130,7 @@ def test_load_model_cache_hit():
     _jbuf = io.BytesIO()
     joblib.dump(fake_model, _jbuf)
     fake_pkl = _jbuf.getvalue()
-    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.joblib",
                                model_bytes=fake_pkl)
 
     with patch(
@@ -153,7 +153,7 @@ def test_load_model_forwards_explicit_version():
     _jbuf = io.BytesIO()
     joblib.dump(fake_model, _jbuf)
     fake_pkl = _jbuf.getvalue()
-    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v2.0.0.pkl",
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v2.0.0.joblib",
                                model_bytes=fake_pkl)
     metadata.version = "2.0.0"
 
@@ -177,7 +177,7 @@ def test_load_model_no_version_passes_none():
     _jbuf = io.BytesIO()
     joblib.dump(fake_model, _jbuf)
     fake_pkl = _jbuf.getvalue()
-    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.joblib",
                                model_bytes=fake_pkl)
 
     with patch(
@@ -230,7 +230,7 @@ def test_load_model_missing_signature_raises_403():
     _jbuf = io.BytesIO()
     joblib.dump(SimpleNamespace(marker="x"), _jbuf)
     fake_pkl = _jbuf.getvalue()
-    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.joblib",
                                model_bytes=fake_pkl)
     metadata.model_hmac_signature = None  # simule un modèle sans signature
 
@@ -255,7 +255,7 @@ def test_load_model_tampered_pkl_raises_500():
     _jbuf = io.BytesIO()
     joblib.dump(SimpleNamespace(marker="real"), _jbuf)
     real_pkl = _jbuf.getvalue()
-    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.joblib",
                                model_bytes=real_pkl)
     tampered_pkl = b"this_is_not_the_signed_file"
 
@@ -282,7 +282,7 @@ def test_load_model_tampered_redis_cache_invalidated():
     _jbuf = io.BytesIO()
     joblib.dump(fake_model, _jbuf)
     fake_pkl = _jbuf.getvalue()
-    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.pkl",
+    metadata = _fake_metadata(mlflow_run_id=None, minio_object_key="iris/v1.0.0.joblib",
                                model_bytes=fake_pkl)
 
     # Injecter des bytes corrompus dans le cache (HMAC invalide)
@@ -300,7 +300,7 @@ def test_load_model_tampered_redis_cache_invalidated():
 
     # L'entrée corrompue doit être ignorée ; MinIO doit avoir été appelé
     assert result["model"].marker == "fresh_from_minio"
-    minio_mock.async_download_file_bytes.assert_called_once_with("iris/v1.0.0.pkl")
+    minio_mock.async_download_file_bytes.assert_called_once_with("iris/v1.0.0.joblib")
     # Le cache doit maintenant contenir l'entrée valide
     new_cached = asyncio.run(service._redis.get(cache_key))
     assert new_cached is not None and len(new_cached) > 64

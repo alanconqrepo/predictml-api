@@ -8,23 +8,23 @@ Les préconisations sont classées par sévérité et regroupées en 4 phases d'
 
 ## Phase 1 — Correctifs critiques (code applicatif)
 
-### C1 — Signature HMAC des fichiers modèles avant `pickle.loads()`
+### C1 — Signature HMAC des fichiers modèles avant `joblib.load()`
 
 **Pourquoi**
-`pickle.loads()` peut exécuter du code Python arbitraire lors de la désérialisation. Si un attaquant parvient à écrire un fichier `.pkl` malveillant dans MinIO (accès direct au stockage, credential MinIO compromis) ou à empoisonner le cache Redis, il obtient une exécution de code distante (RCE) avec les droits du processus API. La présence du commentaire `# noqa: S301` dans `model_service.py:145` indique que le linter de sécurité Bandit signale déjà ce problème — il est délibérément ignoré.
+`joblib.load()` peut exécuter du code Python arbitraire lors de la désérialisation. Si un attaquant parvient à écrire un fichier `.joblib` malveillant dans MinIO (accès direct au stockage, credential MinIO compromis) ou à empoisonner le cache Redis, il obtient une exécution de code distante (RCE) avec les droits du processus API. La présence du commentaire `# noqa: S301` dans `model_service.py:145` indique que le linter de sécurité Bandit signale déjà ce problème — il est délibérément ignoré.
 
 **Fichiers concernés**
 - `src/services/model_service.py` (ligne ~145)
 - `src/services/minio_service.py` (ligne ~133)
 
 **Comment**
-1. À l'upload d'un modèle (`POST /models`), calculer un HMAC-SHA256 du contenu `.pkl` avec `SECRET_KEY` :
+1. À l'upload d'un modèle (`POST /models`), calculer un HMAC-SHA256 du contenu `.joblib` avec `SECRET_KEY` :
    ```python
    import hmac, hashlib
    signature = hmac.new(settings.SECRET_KEY.encode(), model_bytes, hashlib.sha256).hexdigest()
    ```
 2. Stocker la signature dans les métadonnées du modèle (colonne `ModelMetadata` ou champ JSON `tags`).
-3. Au chargement du modèle (depuis MinIO et depuis le cache Redis), vérifier la signature avant tout `pickle.loads()` :
+3. Au chargement du modèle (depuis MinIO et depuis le cache Redis), vérifier la signature avant tout `joblib.load()` :
    ```python
    expected = hmac.new(settings.SECRET_KEY.encode(), raw_bytes, hashlib.sha256).hexdigest()
    if not hmac.compare_digest(expected, stored_signature):
@@ -37,7 +37,7 @@ Les préconisations sont classées par sévérité et regroupées en 4 phases d'
 ### C2 — Restreindre `POST /models` aux administrateurs
 
 **Pourquoi**
-L'endpoint `POST /models` ne requiert qu'un token utilisateur valide (`Depends(verify_token)`), pas un rôle admin. N'importe quel utilisateur authentifié peut donc uploader un fichier `.pkl` arbitraire — y compris un modèle malveillant conçu pour exécuter du code lors de sa désérialisation (voir C1). Il peut aussi uploader un script `train.py` qui sera exécuté côté serveur lors d'un retrain.
+L'endpoint `POST /models` ne requiert qu'un token utilisateur valide (`Depends(verify_token)`), pas un rôle admin. N'importe quel utilisateur authentifié peut donc uploader un fichier `.joblib` arbitraire — y compris un modèle malveillant conçu pour exécuter du code lors de sa désérialisation (voir C1). Il peut aussi uploader un script `train.py` qui sera exécuté côté serveur lors d'un retrain.
 
 **Fichier concerné**
 - `src/api/models.py` (ligne ~3060)
@@ -89,7 +89,7 @@ Le script `train.py` uploadé par un admin est validé syntaxiquement via `ast.p
 1. **Validation statique renforcée des imports** (rapide, à implémenter en priorité) :
    Parcourir l'AST pour lister tous les `import` et `from ... import` et rejeter si un module hors allowlist est présent :
    ```python
-   ALLOWED_MODULES = {"os", "json", "pickle", "joblib", "pandas", "numpy",
+   ALLOWED_MODULES = {"os", "json", "joblib", "pandas", "numpy",
                       "sklearn", "datetime", "pathlib", "sys"}
    # Parcourir ast.walk(tree) pour les nœuds Import et ImportFrom
    ```
@@ -142,7 +142,7 @@ SECRET_KEY=<générer_avec_la_commande_ci-dessus>
 **Pourquoi**
 Les noms de modèles et versions sont interpolés directement dans les chemins MinIO :
 ```python
-object_name = f"{name}/v{version}.pkl"
+object_name = f"{name}/v{version}.joblib"
 ```
 Un nom comme `../admin_model` ou `../../../../etc/cron.d/malicious` peut provoquer une traversée de répertoire (path traversal) dans le bucket MinIO, permettant d'écraser des fichiers arbitraires ou de lire des objets en dehors de l'espace prévu.
 
@@ -176,7 +176,7 @@ Appeler ces fonctions au début de chaque endpoint recevant `name` et `version`.
 ### H4 — Activer l'authentification Redis
 
 **Pourquoi**
-Redis est exposé sur `0.0.0.0:6379` sans mot de passe. N'importe quelle machine du réseau interne peut lire, écrire ou supprimer des données en cache — y compris les modèles sérialisés en pickle (voir C1). Un attaquant interne ou une machine compromise peut empoisonner le cache pour déclencher un RCE.
+Redis est exposé sur `0.0.0.0:6379` sans mot de passe. N'importe quelle machine du réseau interne peut lire, écrire ou supprimer des données en cache — y compris les modèles sérialisés (voir C1). Un attaquant interne ou une machine compromise peut empoisonner le cache pour déclencher un RCE.
 
 **Fichier concerné**
 - `docker-compose.yml` (ligne ~60-70)
@@ -500,7 +500,7 @@ Appliquer une limite stricte sur les endpoints sensibles :
 | **P0 — Immédiat** | C3 | `require_admin` sur `DELETE /models` | 5 min |
 | **P0 — Immédiat** | H1 | `SECRET_KEY` obligatoire | 15 min |
 | **P0 — Immédiat** | H3 | Validation format nom/version modèle | 30 min |
-| **P1 — Court terme** | C1 | Signature HMAC des pickles | 2h |
+| **P1 — Court terme** | C1 | Signature HMAC des modèles | 2h |
 | **P1 — Court terme** | H4 | Redis avec mot de passe | 30 min |
 | **P1 — Court terme** | H5 | Credentials MinIO via variables d'env | 30 min |
 | **P1 — Court terme** | M5/M6/M7 | Restriction ports Docker | 1h |

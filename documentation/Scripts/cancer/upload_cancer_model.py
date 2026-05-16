@@ -3,8 +3,8 @@ upload_cancer_model.py — Entraîne et uploade cancer-classifier v1.0.0 via l'A
 ===========================================================================================
 
 Ce script tourne LOCALEMENT. Il :
-  1. Exécute train_cancer.py en subprocess pour produire le .pkl
-  2. Uploade le .pkl + train_cancer.py via POST /models
+  1. Exécute train_cancer.py en subprocess pour produire le .joblib
+  2. Uploade le .joblib + train_cancer.py via POST /models
 
 Déploiement : is_production = True, deployment_mode = "ab_test", traffic_weight = 0.5
 

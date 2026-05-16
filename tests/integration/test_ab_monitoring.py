@@ -80,7 +80,7 @@ asyncio.run(_setup())
 _r1 = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-    files={"file": ("m.pkl", io.BytesIO(_make_pkl()), "application/octet-stream")},
+    files={"file": ("m.joblib", io.BytesIO(_make_pkl()), "application/octet-stream")},
     data={
         "name": AB_MODEL,
         "version": V1,
@@ -94,7 +94,7 @@ assert _r1.status_code == 201, _r1.text
 _r2 = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-    files={"file": ("m.pkl", io.BytesIO(_make_pkl()), "application/octet-stream")},
+    files={"file": ("m.joblib", io.BytesIO(_make_pkl()), "application/octet-stream")},
     data={
         "name": AB_MODEL,
         "version": V2,

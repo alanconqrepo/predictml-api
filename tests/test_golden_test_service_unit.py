@@ -93,7 +93,7 @@ async def _setup_db():
                 name=_MODEL,
                 version=_VERSION,
                 minio_bucket="models",
-                minio_object_key=f"{_MODEL}/v{_VERSION}.pkl",
+                minio_object_key=f"{_MODEL}/v{_VERSION}.joblib",
                 is_active=True,
                 is_production=True,
             )

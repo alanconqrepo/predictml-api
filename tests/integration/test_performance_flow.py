@@ -88,7 +88,7 @@ asyncio.run(_setup())
 _r_create = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-    files={"file": ("m.pkl", io.BytesIO(_make_pkl()), "application/octet-stream")},
+    files={"file": ("m.joblib", io.BytesIO(_make_pkl()), "application/octet-stream")},
     data={"name": PF_MODEL, "version": MODEL_VERSION, "accuracy": "0.95"},
 )
 assert _r_create.status_code == 201, _r_create.text

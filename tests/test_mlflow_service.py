@@ -254,7 +254,7 @@ class TestLogRetrainRun:
     def test_skips_artifact_on_invalid_bytes(self):
         svc = _make_service()
         mock_mlflow, _ = _build_mock_mlflow()
-        _run_log(svc, mock_mlflow, model_bytes=b"not-a-valid-pickle")
+        _run_log(svc, mock_mlflow, model_bytes=b"not-a-valid-joblib")
         mock_mlflow.sklearn.log_model.assert_not_called()
 
     def test_skips_artifact_when_model_bytes_is_none(self):

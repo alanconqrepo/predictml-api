@@ -312,7 +312,7 @@ Réponse :
 #### Pourquoi
 
 Avant de mettre un modèle en production (via `PATCH /models/{name}/{version}` avec
-`is_production=true`), plusieurs conditions doivent être remplies : le fichier .pkl doit
+`is_production=true`), plusieurs conditions doivent être remplies : le fichier .joblib doit
 être accessible dans MinIO, le baseline doit être calculé (sinon le drift est aveugle),
 et aucun drift critique ne doit être actif. Aujourd'hui, ces vérifications sont soit
 manuelles, soit éparpillées dans plusieurs appels. Dans un pipeline CI/CD (GitHub Actions,
@@ -378,13 +378,13 @@ HTTP 200 dans les deux cas — `ready: false` n'est pas une erreur, c'est un ét
 
 ---
 
-### 3.1 `GET /models/{name}/{version}/download` — Téléchargement du .pkl
+### 3.1 `GET /models/{name}/{version}/download` — Téléchargement du .joblib
 
 #### Pourquoi
 
 Pour déboguer localement un modèle en production, rejouer des prédictions dans un
 notebook, ou l'analyser avec des outils externes (SkLearn-inspection, Evidently), le
-Data Scientist a besoin du fichier .pkl. Aujourd'hui, il doit passer par la console MinIO
+Data Scientist a besoin du fichier .joblib. Aujourd'hui, il doit passer par la console MinIO
 ou demander un accès direct au stockage objet — une friction qui sort du workflow API
 et crée une dépendance à l'infra. Un endpoint de téléchargement direct garde tout dans
 le contrat de l'API.
@@ -396,10 +396,10 @@ GET /models/{name}/{version}/download
 Authorization: Bearer <admin_token>
 
 Réponse : stream binaire, Content-Type: application/octet-stream
-Content-Disposition: attachment; filename="iris_2.0.0.pkl"
+Content-Disposition: attachment; filename="iris_2.0.0.joblib"
 ```
 
-Admin uniquement — le .pkl contient la logique interne du modèle.
+Admin uniquement — le .joblib contient la logique interne du modèle.
 
 #### Comment implémenter
 
@@ -408,7 +408,7 @@ Admin uniquement — le .pkl contient la logique interne du modèle.
      est admin (`require_admin` déjà implémenté).
   2. `model_bytes = minio_service.download_model(object_key)` (déjà implémenté, retourne bytes).
   3. `return Response(content=model_bytes, media_type="application/octet-stream",
-     headers={"Content-Disposition": f'attachment; filename="{name}_{version}.pkl"'})`.
+     headers={"Content-Disposition": f'attachment; filename="{name}_{version}.joblib"'})`.
 - Aucun nouveau service, aucune migration, aucun nouveau schéma.
 
 ---
@@ -480,7 +480,7 @@ Contrôle d'accès : un utilisateur voit ses propres stats ; un admin voit n'imp
 | 2.1 | Timeline de performance | `GET /models/{name}/performance-timeline` | **Haute** | Moyenne | ~1 jour |
 | 2.2 | Distribution de confiance | `GET /models/{name}/confidence-distribution` | Moyenne | Moyenne | ~1 jour |
 | 2.3 | Vérification de readiness | `GET /models/{name}/readiness` | Moyenne | Moyenne | ~1 jour |
-| 3.1 | Téléchargement du .pkl | `GET /models/{name}/{version}/download` | Moyenne | Facile | ~2 h |
+| 3.1 | Téléchargement du .joblib | `GET /models/{name}/{version}/download` | Moyenne | Facile | ~2 h |
 | 3.2 | Usage par utilisateur | `GET /users/{id}/usage` | Moyenne | Facile | ~3 h |
 
 ---

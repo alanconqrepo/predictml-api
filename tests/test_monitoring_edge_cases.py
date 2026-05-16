@@ -63,7 +63,7 @@ def _create_model(name: str, version: str = "1.0.0") -> dict:
     r = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        files={"file": ("m.pkl", io.BytesIO(_make_pkl()), "application/octet-stream")},
+        files={"file": ("m.joblib", io.BytesIO(_make_pkl()), "application/octet-stream")},
         data={"name": name, "version": version},
     )
     assert r.status_code == 201, r.text

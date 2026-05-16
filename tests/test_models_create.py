@@ -65,7 +65,7 @@ def test_create_model_without_auth():
     """POST /models sans header Authorization → 401/403"""
     response = client.post(
         "/models",
-        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         data={"name": "no_auth_model", "version": "1.0.0"},
     )
     assert response.status_code in [401, 403]
@@ -76,7 +76,7 @@ def test_create_model_with_invalid_token():
     response = client.post(
         "/models",
         headers={"Authorization": "Bearer invalid-token"},
-        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         data={"name": "invalid_token_model", "version": "1.0.0"},
     )
     assert response.status_code == 401
@@ -87,7 +87,7 @@ def test_create_model_non_admin_forbidden():
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {USER_TOKEN}"},
-        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         data={"name": f"{TEST_MODEL_NAME}_nonadmin", "version": "1.0.0"},
     )
     assert response.status_code == 403
@@ -103,7 +103,7 @@ def test_create_model_success():
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         data={
             "name": TEST_MODEL_NAME,
             "version": "1.0.0",
@@ -125,7 +125,7 @@ def test_create_model_success():
     assert data["is_production"] is False
     assert data["user_id_creator"] is not None
     assert data["creator_username"] == "test_post_models_admin"
-    assert data["minio_object_key"] == f"{TEST_MODEL_NAME}/v1.0.0.pkl"
+    assert data["minio_object_key"] == f"{TEST_MODEL_NAME}/v1.0.0.joblib"
     assert "id" in data
     assert "created_at" in data
 
@@ -136,7 +136,7 @@ def test_create_model_with_mlflow_run_id():
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         data={
             "name": f"{TEST_MODEL_NAME}_mlflow",
             "version": "1.0.0",
@@ -152,7 +152,7 @@ def test_create_model_with_classes_and_training_params():
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         data={
             "name": f"{TEST_MODEL_NAME}_params",
             "version": "1.0.0",
@@ -178,7 +178,7 @@ def test_create_model_duplicate_name():
     client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         data={"name": f"{TEST_MODEL_NAME}_dup", "version": "1.0.0"},
     )
 
@@ -186,7 +186,7 @@ def test_create_model_duplicate_name():
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         data={"name": f"{TEST_MODEL_NAME}_dup", "version": "1.0.0"},
     )
     assert response.status_code == 409
@@ -198,7 +198,7 @@ def test_create_model_empty_file():
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        files={"file": ("model.pkl", io.BytesIO(b""), "application/octet-stream")},
+        files={"file": ("model.joblib", io.BytesIO(b""), "application/octet-stream")},
         data={"name": f"{TEST_MODEL_NAME}_empty", "version": "1.0.0"},
     )
     assert response.status_code == 400
@@ -209,7 +209,7 @@ def test_create_model_missing_name():
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         data={"version": "1.0.0"},
     )
     assert response.status_code == 422
@@ -220,7 +220,7 @@ def test_create_model_missing_version():
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         data={"name": f"{TEST_MODEL_NAME}_noversion"},
     )
     assert response.status_code == 422
@@ -266,7 +266,7 @@ def test_create_model_auto_baseline_no_predictions():
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         data={
             "name": f"{TEST_MODEL_NAME}_auto_bl",
             "version": "1.0.0",
@@ -284,7 +284,7 @@ def test_create_model_auto_baseline_false():
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         data={"name": f"{TEST_MODEL_NAME}_no_auto_bl", "version": "1.0.0"},
     )
     assert response.status_code == 201
@@ -300,7 +300,7 @@ def test_create_model_invalid_json_field(field):
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         data={"name": f"{TEST_MODEL_NAME}_bad_json", "version": "1.0.0", field: "{invalid json"},
     )
     assert response.status_code == 400

@@ -38,7 +38,7 @@
 | 17 | **Comparaison côte-à-côte de versions** — Tableau multi-version avec highlighting | Moyenne | Facile | `2_Models.py` | [ ] | [x] |
 | 18 | **Stats agrégées `GET /predictions/stats`** — COUNT, error_rate, p50/p95 par modèle | Moyenne | Facile | `predict.py`, `db_service.py` | [x] | [ ] |
 | 19 | **Tags sur les modèles** — Champ JSONB `tags`, filtre `?tag=` sur `GET /models` | Moyenne | Facile | `db/models.py`, `schemas/`, `api/models.py` | [x] | [ ] |
-| 20 | **Validation taille à l'upload** — `413` si `.pkl` dépasse `MAX_MODEL_SIZE_MB` | Moyenne | Facile | `api/models.py`, `config.py` | [x] | [ ] |
+| 20 | **Validation taille à l'upload** — `413` si `.joblib` dépasse `MAX_MODEL_SIZE_MB` | Moyenne | Facile | `api/models.py`, `config.py` | [x] | [ ] |
 | 21 | **Marquage manuel prédiction** — Champ `is_correct`, `PATCH /predictions/{id}` | Moyenne | Facile | `db/models.py`, `predict.py`, `schemas/` | [ ] | [ ] |
 | 22 | **Profil features baseline** — Stocker `{feature: {mean, std, min, max}}`, warning en prod | Moyenne | Moyenne | `db/models.py`, `model_service.py` | [x] | [ ] |
 | 23 | **Webhook sortant post-prédiction** — `POST` async vers URL callback par modèle | Moyenne | Moyenne | `db/models.py`, `predict.py` | [x] | [ ] |
@@ -195,7 +195,7 @@
 ### Facile à implémenter
 
 #### 16. Upload de modèle dans Streamlit
-**Quoi** : Formulaire dans le dashboard pour uploader un `.pkl` directement depuis le navigateur.  
+**Quoi** : Formulaire dans le dashboard pour uploader un `.joblib` directement depuis le navigateur.  
 **Comment** : `st.file_uploader()` + champs pour les métadonnées + appel à `POST /models` via `api_client.py`.  
 **Fichiers** : `streamlit_app/pages/2_Models.py`, `streamlit_app/utils/api_client.py`  
 **Impact** : Autonomie des data scientists sans accès CLI ni `curl`.
@@ -227,7 +227,7 @@
 ---
 
 #### 20. Validation de taille à l'upload de modèle
-**Quoi** : Retourner `413 Request Entity Too Large` si le `.pkl` dépasse une taille configurable (ex : 500 MB).  
+**Quoi** : Retourner `413 Request Entity Too Large` si le `.joblib` dépasse une taille configurable (ex : 500 MB).  
 **Comment** : Lire `file.size` dans l'endpoint `POST /models`, comparer à `settings.MAX_MODEL_SIZE_MB`.  
 **Fichiers** : `src/api/models.py`, `src/core/config.py`  
 **Impact** : Évite les crashs mémoire lors du chargement de gros modèles.
@@ -262,7 +262,7 @@
 
 #### 24. Cache Redis (remplacement du cache in-memory)
 **Quoi** : Remplacer le dict Python `model_cache` par Redis pour partager le cache entre plusieurs instances de l'API.  
-**Comment** : `redis-py` + sérialisation pickle des modèles. Clé `model:{name}:{version}`, TTL configurable.  
+**Comment** : `redis-py` + sérialisation joblib des modèles. Clé `model:{name}:{version}`, TTL configurable.  
 **Dépendance** : `redis`, service Redis dans `docker-compose.yml`  
 **Fichiers** : `src/services/model_service.py`, `docker-compose.yml`  
 **Impact** : Prérequis pour le passage en mode multi-pod (Kubernetes, scaling horizontal).

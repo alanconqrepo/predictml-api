@@ -109,7 +109,7 @@ def _create_model(name: str, with_baseline: bool = False):
     r = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        files={"file": ("m.pkl", io.BytesIO(_make_pkl()), "application/octet-stream")},
+        files={"file": ("m.joblib", io.BytesIO(_make_pkl()), "application/octet-stream")},
         data=data,
     )
     assert r.status_code == 201, r.text

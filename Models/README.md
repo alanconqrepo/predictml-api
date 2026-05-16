@@ -4,15 +4,15 @@ Ce dossier contient tous les modèles scikit-learn disponibles pour l'API.
 
 ## Structure
 
-Chaque modèle doit être sauvegardé au format `.pkl` (pickle) dans ce dossier.
+Chaque modèle doit être sauvegardé au format `.joblib` dans ce dossier.
 
 Le nom du fichier (sans l'extension) sera utilisé comme identifiant du modèle dans l'API.
 
 ## Exemples
 
-- `iris_model.pkl` → accessible via le nom `iris_model`
-- `sentiment_model.pkl` → accessible via le nom `sentiment_model`
-- `regression_model.pkl` → accessible via le nom `regression_model`
+- `iris_model.joblib` → accessible via le nom `iris_model`
+- `sentiment_model.joblib` → accessible via le nom `sentiment_model`
+- `regression_model.joblib` → accessible via le nom `regression_model`
 
 ## Ajouter un nouveau modèle
 
@@ -20,7 +20,7 @@ Le nom du fichier (sans l'extension) sera utilisé comme identifiant du modèle 
 ```python
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.datasets import load_iris
-import pickle
+import joblib
 
 # Entraîner le modèle
 X, y = load_iris(return_X_y=True)
@@ -28,11 +28,10 @@ model = RandomForestClassifier()
 model.fit(X, y)
 
 # Sauvegarder le modèle
-with open("Models/mon_modele.pkl", "wb") as f:
-    pickle.dump(model, f)
+joblib.dump(model, "Models/mon_modele.joblib")
 ```
 
-2. Placez le fichier `.pkl` dans ce dossier `Models/`
+2. Placez le fichier `.joblib` dans ce dossier `Models/`
 
 3. Le modèle sera automatiquement disponible dans l'API
 
@@ -55,5 +54,5 @@ curl http://localhost:8000/models
 
 - Les modèles sont chargés dynamiquement lors de la première utilisation
 - Une fois chargés, ils restent en cache en mémoire
-- Seuls les fichiers `.pkl` sont reconnus
+- Seuls les fichiers `.joblib` sont reconnus
 - Le dossier est monté en lecture seule dans le conteneur Docker

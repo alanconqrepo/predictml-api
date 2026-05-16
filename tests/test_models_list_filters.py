@@ -59,7 +59,7 @@ def _create(name: str, version: str = "1.0.0", **extra_form) -> dict:
     r = client.post(
         "/models",
         data=data,
-        files={"file": (f"{name}.pkl", io.BytesIO(_make_pkl()), "application/octet-stream")},
+        files={"file": (f"{name}.joblib", io.BytesIO(_make_pkl()), "application/octet-stream")},
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     )
     assert r.status_code == 201, r.text

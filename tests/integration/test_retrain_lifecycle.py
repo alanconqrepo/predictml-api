@@ -105,7 +105,7 @@ _r = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     files={
-        "file": ("m.pkl", io.BytesIO(_make_pkl()), "application/octet-stream"),
+        "file": ("m.joblib", io.BytesIO(_make_pkl()), "application/octet-stream"),
         "train_file": ("train.py", io.BytesIO(VALID_TRAIN_SCRIPT.encode()), "text/x-python"),
     },
     data={"name": RT_MODEL, "version": "1.0.0", "accuracy": "0.90"},
@@ -190,7 +190,7 @@ class TestRetrainLifecycle:
         r_create = client.post(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-            files={"file": ("m.pkl", io.BytesIO(_make_pkl()), "application/octet-stream")},
+            files={"file": ("m.joblib", io.BytesIO(_make_pkl()), "application/octet-stream")},
             data={"name": f"{RT_MODEL}_noscript", "version": "1.0.0"},
         )
         assert r_create.status_code == 201

@@ -88,7 +88,7 @@ predictml-api/
 ├── smoke-tests/                    # Tests manuels (Docker live)
 ├── init_data/                      # Scripts one-shot (init_db, create_multiple_models)
 │   └── example_train.py            # Exemple de script train.py compatible retrain
-├── Models/                         # Fichiers .pkl locaux
+├── Models/                         # Fichiers .joblib locaux
 ├── notebooks/                      # Jupyter notebooks
 ├── alembic/                        # Migrations DB
 ├── docker-compose.yml

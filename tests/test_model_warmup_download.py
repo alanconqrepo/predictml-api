@@ -73,7 +73,7 @@ def _create_model(name=WM_MODEL, version="1.0.0") -> dict:
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
         files={
-            "file": ("model.pkl", io.BytesIO(_make_pkl_bytes()), "application/octet-stream")
+            "file": ("model.joblib", io.BytesIO(_make_pkl_bytes()), "application/octet-stream")
         },
         data={"name": name, "version": version, "description": "warmup test"},
     )

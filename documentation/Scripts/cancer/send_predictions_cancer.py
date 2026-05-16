@@ -1,149 +1,230 @@
 """
-send_predictions_cancer.py — Envoi de prédictions Breast Cancer via l'API PredictML
-=====================================================================================
+send_predictions_cancer.py — 900 prédictions Cancer étalées sur 45 jours
+=========================================================================
 
-Démontre deux modes d'appel :
-  1. Prédictions unitaires   — POST /predict         (une requête par observation)
-  2. Prédictions en lot      — POST /predict-batch   (une seule requête, plus efficace)
+Simule une dégradation progressive du modèle cancer-classifier (classification
+binaire : 0=malignant, 1=benign) sur 45 jours :
 
-Dataset : Breast Cancer Wisconsin (classification binaire : malignant vs benign)
-Features : 30 mesures nucléaires (mean radius, mean texture, mean perimeter, etc.)
+  Phase 1 (J-45 → J-31, 15 jours) : distribution stable, ~94% accuracy
+  Phase 2 (J-30 → J-16, 15 jours) : drift de calibration du scanner —
+    radius, area et perimeter augmentent systématiquement, les cas bénins
+    ressemblent de plus en plus à des cas malins → ~82% accuracy
+  Phase 3 (J-15 → J-1,  15 jours) : nouveau protocole clinique —
+    toute cellule avec worst_concavity > 0.30 ET worst_area > 1200 est
+    reclassifiée maligne, même si le modèle prédit benign → ~70% accuracy
+
+Produit cancer_predictions_log.json — utilisé par send_ground_truth_cancer.py.
 
 Usage :
   API_URL=http://localhost:8000 API_TOKEN=<token> python send_predictions_cancer.py
 
 Variables d'environnement :
-  API_URL        URL de l'API           (défaut : http://localhost:8000)
+  API_URL        URL de l'API              (défaut : http://localhost:80)
   API_TOKEN      Token Bearer — requis
-  MODEL_NAME     Nom du modèle cible    (défaut : cancer-classifier)
-  MODEL_VERSION  Version (optionnel)    (défaut : version en production)
-
-Prérequis Python :
-  pip install requests
+  MODEL_NAME     Nom du modèle             (défaut : cancer-classifier)
+  MODEL_VERSION  Version (optionnel)
+  TOTAL_DAYS     Nombre de jours           (défaut : 45)
+  N_PER_DAY      Prédictions par jour      (défaut : 20)
+  SLEEP_BETWEEN  Pause entre batches (s)   (défaut : 7)
 """
 
 import json
 import os
+import random
 import sys
+import time
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import requests
 from dotenv import find_dotenv, load_dotenv
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 load_dotenv(find_dotenv())
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# ── Configuration ──────────────────────────────────────────────────────────────
 
-API_URL   = os.environ.get("API_URL",   "http://localhost:80")
-API_TOKEN = os.environ.get("API_TOKEN", os.environ.get("ADMIN_TOKEN", ""))
-
+API_URL       = os.environ.get("API_URL",       "http://localhost:80")
+API_TOKEN     = os.environ.get("API_TOKEN",     os.environ.get("ADMIN_TOKEN", ""))
 MODEL_NAME    = os.environ.get("MODEL_NAME",    "cancer-classifier")
 MODEL_VERSION = os.environ.get("MODEL_VERSION", None)
+TOTAL_DAYS    = int(os.environ.get("TOTAL_DAYS",    "45"))
+N_PER_DAY     = int(os.environ.get("N_PER_DAY",     "20"))
+SLEEP_BETWEEN = float(os.environ.get("SLEEP_BETWEEN", "7"))
 
-HEADERS = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
+HEADERS  = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
+LOG_FILE = os.path.join(os.path.dirname(__file__), "cancer_predictions_log.json")
 
-# Observations représentatives du dataset Breast Cancer Wisconsin
-# Source : sklearn.datasets.load_breast_cancer() — quelques exemples typiques
-CANCER_SAMPLES = [
-    {
-        "id_obs": str(uuid.uuid4()),
-        "label":  "malignant (attendu)",
-        "features": {
-            "mean radius": 17.99, "mean texture": 10.38, "mean perimeter": 122.8,
-            "mean area": 1001.0, "mean smoothness": 0.1184, "mean compactness": 0.2776,
-            "mean concavity": 0.3001, "mean concave points": 0.1471,
-            "mean symmetry": 0.2419, "mean fractal dimension": 0.07871,
-            "radius error": 1.095, "texture error": 0.9053, "perimeter error": 8.589,
-            "area error": 153.4, "smoothness error": 0.006399, "compactness error": 0.04904,
-            "concavity error": 0.05373, "concave points error": 0.01587,
-            "symmetry error": 0.03003, "fractal dimension error": 0.006193,
-            "worst radius": 25.38, "worst texture": 17.33, "worst perimeter": 184.6,
-            "worst area": 2019.0, "worst smoothness": 0.1622, "worst compactness": 0.6656,
-            "worst concavity": 0.7119, "worst concave points": 0.2654,
-            "worst symmetry": 0.4601, "worst fractal dimension": 0.1189,
-        },
-    },
-    {
-        "id_obs": str(uuid.uuid4()),
-        "label":  "malignant (attendu)",
-        "features": {
-            "mean radius": 20.57, "mean texture": 17.77, "mean perimeter": 132.9,
-            "mean area": 1326.0, "mean smoothness": 0.08474, "mean compactness": 0.07864,
-            "mean concavity": 0.0869, "mean concave points": 0.07017,
-            "mean symmetry": 0.1812, "mean fractal dimension": 0.05667,
-            "radius error": 0.5435, "texture error": 0.7339, "perimeter error": 3.398,
-            "area error": 74.08, "smoothness error": 0.005225, "compactness error": 0.01308,
-            "concavity error": 0.01860, "concave points error": 0.01340,
-            "symmetry error": 0.01389, "fractal dimension error": 0.003532,
-            "worst radius": 24.99, "worst texture": 23.41, "worst perimeter": 158.8,
-            "worst area": 1956.0, "worst smoothness": 0.1238, "worst compactness": 0.1866,
-            "worst concavity": 0.2416, "worst concave points": 0.1860,
-            "worst symmetry": 0.2750, "worst fractal dimension": 0.08902,
-        },
-    },
-    {
-        "id_obs": str(uuid.uuid4()),
-        "label":  "benign (attendu)",
-        "features": {
-            "mean radius": 13.54, "mean texture": 14.36, "mean perimeter": 87.46,
-            "mean area": 566.3, "mean smoothness": 0.09779, "mean compactness": 0.08129,
-            "mean concavity": 0.06664, "mean concave points": 0.04781,
-            "mean symmetry": 0.1885, "mean fractal dimension": 0.05766,
-            "radius error": 0.2699, "texture error": 0.7886, "perimeter error": 2.058,
-            "area error": 23.56, "smoothness error": 0.008462, "compactness error": 0.01460,
-            "concavity error": 0.02387, "concave points error": 0.01315,
-            "symmetry error": 0.01980, "fractal dimension error": 0.002300,
-            "worst radius": 15.11, "worst texture": 19.26, "worst perimeter": 99.70,
-            "worst area": 711.2, "worst smoothness": 0.1440, "worst compactness": 0.1773,
-            "worst concavity": 0.2390, "worst concave points": 0.1288,
-            "worst symmetry": 0.2977, "worst fractal dimension": 0.07259,
-        },
-    },
-    {
-        "id_obs": str(uuid.uuid4()),
-        "label":  "benign (attendu)",
-        "features": {
-            "mean radius": 9.463, "mean texture": 19.07, "mean perimeter": 60.45,
-            "mean area": 271.7, "mean smoothness": 0.1065, "mean compactness": 0.1068,
-            "mean concavity": 0.06812, "mean concave points": 0.03404,
-            "mean symmetry": 0.1854, "mean fractal dimension": 0.07130,
-            "radius error": 0.3276, "texture error": 1.432, "perimeter error": 2.158,
-            "area error": 17.54, "smoothness error": 0.006735, "compactness error": 0.02505,
-            "concavity error": 0.02426, "concave points error": 0.009044,
-            "symmetry error": 0.01716, "fractal dimension error": 0.004124,
-            "worst radius": 10.56, "worst texture": 24.98, "worst perimeter": 68.17,
-            "worst area": 331.9, "worst smoothness": 0.1403, "worst compactness": 0.2536,
-            "worst concavity": 0.2262, "worst concave points": 0.09585,
-            "worst symmetry": 0.2948, "worst fractal dimension": 0.09519,
-        },
-    },
-    {
-        "id_obs": str(uuid.uuid4()),
-        "label":  "benign (attendu)",
-        "features": {
-            "mean radius": 12.45, "mean texture": 15.70, "mean perimeter": 82.57,
-            "mean area": 477.1, "mean smoothness": 0.1278, "mean compactness": 0.17000,
-            "mean concavity": 0.1578, "mean concave points": 0.08089,
-            "mean symmetry": 0.2087, "mean fractal dimension": 0.07613,
-            "radius error": 0.3345, "texture error": 0.8902, "perimeter error": 2.217,
-            "area error": 27.19, "smoothness error": 0.007491, "compactness error": 0.03323,
-            "concavity error": 0.03564, "concave points error": 0.01769,
-            "symmetry error": 0.01827, "fractal dimension error": 0.004972,
-            "worst radius": 14.50, "worst texture": 20.47, "worst perimeter": 94.28,
-            "worst area": 640.2, "worst smoothness": 0.1703, "worst compactness": 0.3179,
-            "worst concavity": 0.3530, "worst concave points": 0.1661,
-            "worst symmetry": 0.3414, "worst fractal dimension": 0.1005,
-        },
-    },
-]
+# ── Distributions par classe (μ, σ) — source : sklearn breast_cancer ──────────
+# 0 = malignant,  1 = benign
 
-# ── Validation ────────────────────────────────────────────────────────────────
+CLASS_PARAMS = {
+    0: {  # malignant
+        "mean radius":              (17.46, 3.20),
+        "mean texture":             (21.60, 4.20),
+        "mean perimeter":           (115.4, 22.0),
+        "mean area":                (978.0, 368.0),
+        "mean smoothness":          (0.103, 0.015),
+        "mean compactness":         (0.145, 0.052),
+        "mean concavity":           (0.161, 0.079),
+        "mean concave points":      (0.088, 0.034),
+        "mean symmetry":            (0.195, 0.027),
+        "mean fractal dimension":   (0.063, 0.010),
+        "radius error":             (1.215, 0.620),
+        "texture error":            (1.210, 0.570),
+        "perimeter error":          (8.834, 5.80),
+        "area error":               (102.9, 85.0),
+        "smoothness error":         (0.007, 0.003),
+        "compactness error":        (0.032, 0.019),
+        "concavity error":          (0.042, 0.030),
+        "concave points error":     (0.015, 0.006),
+        "symmetry error":           (0.021, 0.008),
+        "fractal dimension error":  (0.004, 0.002),
+        "worst radius":             (21.1,  4.50),
+        "worst texture":            (29.3,  6.00),
+        "worst perimeter":          (141.4, 31.0),
+        "worst area":               (1422., 590.0),
+        "worst smoothness":         (0.145, 0.023),
+        "worst compactness":        (0.374, 0.167),
+        "worst concavity":          (0.451, 0.198),
+        "worst concave points":     (0.183, 0.057),
+        "worst symmetry":           (0.324, 0.073),
+        "worst fractal dimension":  (0.092, 0.020),
+    },
+    1: {  # benign
+        "mean radius":              (12.15, 1.78),
+        "mean texture":             (17.91, 4.00),
+        "mean perimeter":           (78.07, 13.6),
+        "mean area":                (462.8, 136.0),
+        "mean smoothness":          (0.092, 0.013),
+        "mean compactness":         (0.080, 0.025),
+        "mean concavity":           (0.046, 0.042),
+        "mean concave points":      (0.026, 0.017),
+        "mean symmetry":            (0.175, 0.023),
+        "mean fractal dimension":   (0.063, 0.008),
+        "radius error":             (0.284, 0.102),
+        "texture error":            (1.180, 0.568),
+        "perimeter error":          (1.977, 0.764),
+        "area error":               (21.1,  8.70),
+        "smoothness error":         (0.007, 0.002),
+        "compactness error":        (0.011, 0.006),
+        "concavity error":          (0.013, 0.013),
+        "concave points error":     (0.006, 0.003),
+        "symmetry error":           (0.019, 0.006),
+        "fractal dimension error":  (0.002, 0.001),
+        "worst radius":             (13.38, 2.30),
+        "worst texture":            (23.52, 5.50),
+        "worst perimeter":          (86.54, 16.3),
+        "worst area":               (558.9, 163.0),
+        "worst smoothness":         (0.125, 0.020),
+        "worst compactness":        (0.177, 0.072),
+        "worst concavity":          (0.166, 0.124),
+        "worst concave points":     (0.074, 0.035),
+        "worst symmetry":           (0.270, 0.062),
+        "worst fractal dimension":  (0.079, 0.014),
+    },
+}
+
+# Proportions [malignant, benign] par phase
+PHASE_PROPORTIONS = {
+    1: [0.37, 0.63],   # distribution originale du dataset
+    2: [0.45, 0.55],   # plus de cas malins
+    3: [0.55, 0.45],   # majorité maligne (population plus agressive)
+}
+
+# Drift cumulatif par jour, actif à partir du jour 16 (début phase 2)
+# Simule une dérive de calibration du scanner : mesures systématiquement plus grandes
+DRIFT_PER_DAY = {
+    "mean radius":       0.05,
+    "mean perimeter":    0.30,
+    "mean area":         6.00,
+    "worst radius":      0.05,
+    "worst perimeter":   0.30,
+    "worst area":        6.00,
+    "worst concavity":   0.003,
+    "mean concavity":    0.002,
+}
+
+# Bornes physiquement plausibles
+FEATURE_BOUNDS = {
+    "mean radius":             (5.0,  30.0),
+    "mean texture":            (8.0,  40.0),
+    "mean perimeter":          (40.0, 200.0),
+    "mean area":               (140.0, 2600.0),
+    "mean smoothness":         (0.05,  0.20),
+    "mean compactness":        (0.01,  0.40),
+    "mean concavity":          (0.00,  0.50),
+    "mean concave points":     (0.00,  0.25),
+    "mean symmetry":           (0.10,  0.35),
+    "mean fractal dimension":  (0.04,  0.10),
+    "radius error":            (0.10,  4.00),
+    "texture error":           (0.30,  5.00),
+    "perimeter error":         (0.50, 30.00),
+    "area error":              (5.00, 500.0),
+    "smoothness error":        (0.001, 0.030),
+    "compactness error":       (0.002, 0.130),
+    "concavity error":         (0.000, 0.200),
+    "concave points error":    (0.000, 0.050),
+    "symmetry error":          (0.007, 0.070),
+    "fractal dimension error": (0.001, 0.020),
+    "worst radius":            (7.00,  40.00),
+    "worst texture":           (12.0,  50.00),
+    "worst perimeter":         (50.0, 260.00),
+    "worst area":              (190.0, 4300.0),
+    "worst smoothness":        (0.07,  0.30),
+    "worst compactness":       (0.02,  1.20),
+    "worst concavity":         (0.00,  1.30),
+    "worst concave points":    (0.00,  0.30),
+    "worst symmetry":          (0.15,  0.70),
+    "worst fractal dimension": (0.05,  0.25),
+}
+
+FEATURE_NAMES = list(CLASS_PARAMS[0].keys())
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+
+def get_phase(day_idx: int) -> int:
+    if day_idx < 15:
+        return 1
+    elif day_idx < 30:
+        return 2
+    return 3
+
+
+def drift_days(day_idx: int) -> int:
+    return max(0, day_idx - 14)
+
+
+def weighted_choice(classes: list, weights: list, rng: random.Random) -> int:
+    r = rng.random()
+    cum = 0.0
+    for cls, w in zip(classes, weights):
+        cum += w
+        if r < cum:
+            return cls
+    return classes[-1]
+
+
+def sample_features(cls: int, cum_drift: int, rng: random.Random) -> dict:
+    features = {}
+    for feat in FEATURE_NAMES:
+        mu, sigma = CLASS_PARAMS[cls][feat]
+        drift = DRIFT_PER_DAY.get(feat, 0.0) * cum_drift
+        val   = rng.gauss(mu + drift, sigma)
+        lo, hi = FEATURE_BOUNDS[feat]
+        features[feat] = round(max(lo, min(hi, val)), 4)
+    return features
+
+
+# ── Validation ─────────────────────────────────────────────────────────────────
 
 if not API_TOKEN:
     print("❌  API_TOKEN non défini.")
-    print("    Lancez : API_TOKEN=<votre_token> python send_predictions_cancer.py")
+    print("    Lancez : API_TOKEN=<token> python send_predictions_cancer.py")
     sys.exit(1)
-
-# ── 0. Vérification API ───────────────────────────────────────────────────────
 
 try:
     r = requests.get(f"{API_URL}/health", timeout=5)
@@ -153,71 +234,86 @@ except Exception as e:
     print(f"❌  API inaccessible ({API_URL}) : {e}")
     sys.exit(1)
 
-# ── 1. Prédictions unitaires — POST /predict ──────────────────────────────────
+# ── Génération et envoi ────────────────────────────────────────────────────────
 
-print("=" * 60)
-print("  MODE 1 — Prédictions unitaires (POST /predict)")
-print("=" * 60)
+rng  = random.Random(42)
+now  = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
+log  = []
+phase_counts = {1: 0, 2: 0, 3: 0}
 
-for sample in CANCER_SAMPLES[:3]:
-    payload = {
-        "model_name": MODEL_NAME,
-        "id_obs":     sample["id_obs"],
-        "features":   sample["features"],
-    }
+print("=" * 72)
+print(f"  Envoi de {TOTAL_DAYS * N_PER_DAY} prédictions cancer sur {TOTAL_DAYS} jours")
+print(f"  Phases : 1=stable (j1-15)  2=drift scanner (j16-30)  3=protocole (j31-45)")
+print("=" * 72)
+
+for day_idx in range(TOTAL_DAYS):
+    day_date    = now - timedelta(days=(TOTAL_DAYS - day_idx))
+    timestamp   = day_date.strftime("%Y-%m-%dT%H:%M:%S")
+    phase       = get_phase(day_idx)
+    cum_drift   = drift_days(day_idx)
+    proportions = PHASE_PROPORTIONS[phase]
+
+    batch_items = []
+    day_entries = []
+
+    for _ in range(N_PER_DAY):
+        cls      = weighted_choice([0, 1], proportions, rng)
+        features = sample_features(cls, cum_drift, rng)
+        obs_id   = str(uuid.uuid4())
+
+        batch_items.append({
+            "id_obs":    obs_id,
+            "timestamp": timestamp,
+            "features":  features,
+        })
+        day_entries.append({
+            "id_obs":     obs_id,
+            "day_offset": day_idx,
+            "phase":      phase,
+            "true_class": cls,
+            "features":   features,
+            "timestamp":  timestamp,
+        })
+
+    payload = {"model_name": MODEL_NAME, "inputs": batch_items}
     if MODEL_VERSION:
         payload["model_version"] = MODEL_VERSION
 
-    r = requests.post(f"{API_URL}/predict", headers=HEADERS, json=payload, timeout=10)
+    r = requests.post(
+        f"{API_URL}/predict-batch", headers=HEADERS, json=payload, timeout=30
+    )
 
     if r.status_code == 200:
-        data = r.json()
+        log.extend(day_entries)
+        phase_counts[phase] += N_PER_DAY
+        area_drift  = cum_drift * DRIFT_PER_DAY.get("worst area", 6.0)
+        drift_label = f"+{area_drift:.0f}mm²" if area_drift else "baseline"
         print(
-            f"  ✅  {sample['id_obs']:<25}"
-            f"  prédit : {str(data.get('prediction')):<12}"
-            f"  [{sample['label']}]"
+            f"  [{timestamp[:10]}]  phase={phase}  area_drift={drift_label:<10}"
+            f"  ✅  {N_PER_DAY} prédictions"
         )
     else:
-        print(f"  ❌  {sample['id_obs']} — Erreur {r.status_code} : {r.text[:120]}")
-
-# ── 2. Prédictions en lot — POST /predict-batch ───────────────────────────────
-
-print()
-print("=" * 60)
-print("  MODE 2 — Prédictions en lot (POST /predict-batch)")
-print("=" * 60)
-
-batch_inputs = [
-    {"id_obs": s["id_obs"], "features": s["features"]}
-    for s in CANCER_SAMPLES
-]
-batch_payload = {
-    "model_name": MODEL_NAME,
-    "inputs":     batch_inputs,
-}
-if MODEL_VERSION:
-    batch_payload["model_version"] = MODEL_VERSION
-
-r = requests.post(f"{API_URL}/predict-batch", headers=HEADERS, json=batch_payload, timeout=30)
-
-if r.status_code == 200:
-    results = r.json()
-    predictions = results if isinstance(results, list) else results.get("predictions", [])
-    print(f"  ✅  {len(predictions)} prédictions reçues :\n")
-    for pred, sample in zip(predictions, CANCER_SAMPLES):
         print(
-            f"     {pred.get('id_obs', ''):<30}"
-            f"  prédit : {str(pred.get('prediction')):<12}"
-            f"  [{sample['label']}]"
+            f"  [{timestamp[:10]}]  ❌  Erreur {r.status_code} : {r.text[:120]}"
         )
-else:
-    print(f"  ❌  Erreur {r.status_code} : {r.text[:200]}")
 
-# ── 3. Résumé ─────────────────────────────────────────────────────────────────
+    if day_idx < TOTAL_DAYS - 1:
+        time.sleep(SLEEP_BETWEEN)
+
+# ── Sauvegarde du log ──────────────────────────────────────────────────────────
+
+with open(LOG_FILE, "w", encoding="utf-8") as f:
+    json.dump(log, f, ensure_ascii=False, indent=2)
+
+# ── Résumé ─────────────────────────────────────────────────────────────────────
 
 print()
-print("=" * 60)
-version_label = f"v{MODEL_VERSION}" if MODEL_VERSION else "production"
-print(f"  Modèle utilisé : {MODEL_NAME} ({version_label})")
-print(f"  Historique     : {API_URL.replace(':8000', ':8501')}/Predictions")
-print("=" * 60)
+print("=" * 72)
+print(f"  Total envoyé     : {len(log)} prédictions")
+print(f"  Phase 1 (stable) : {phase_counts[1]:4d} obs  — accuracy attendue ~94%")
+print(f"  Phase 2 (drift)  : {phase_counts[2]:4d} obs  — accuracy attendue ~82%")
+print(f"  Phase 3 (règle)  : {phase_counts[3]:4d} obs  — accuracy attendue ~70%")
+print(f"  Log sauvegardé   : {LOG_FILE}")
+print()
+print("  → Lancez maintenant : python send_ground_truth_cancer.py")
+print("=" * 72)

@@ -59,7 +59,7 @@ QUICK_TOPICS = [
     ),
     (
         "🌐 Appels API Python complets",
-        "Montre-moi le workflow Python complet avec requests : uploader un modèle .pkl, "
+        "Montre-moi le workflow Python complet avec requests : uploader un modèle .joblib, "
         "le passer en production, faire une prédiction unitaire et batch, "
         "puis enregistrer les résultats observés.",
     ),

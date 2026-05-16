@@ -3,8 +3,8 @@ upload_iris_model_GradientBoosting.py — Entraîne et uploade un modèle Iris (
 =================================================================================================================
 
 Ce script tourne LOCALEMENT. Il :
-  1. Exécute train_iris_GradientBoosting.py en subprocess pour produire le .pkl
-  2. Uploade le .pkl + train_iris_GradientBoosting.py via POST /models (version 1.1.0)
+  1. Exécute train_iris_GradientBoosting.py en subprocess pour produire le .joblib
+  2. Uploade le .joblib + train_iris_GradientBoosting.py via POST /models (version 1.1.0)
   3. Ajoute le tag "Example" — le modèle n'est PAS mis en production
 
 Usage :

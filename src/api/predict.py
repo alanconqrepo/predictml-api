@@ -935,6 +935,7 @@ async def predict(
                 "user_agent": request.headers.get("user-agent"),
                 "status": "success",
                 "max_confidence": max(probability) if probability else None,
+                "timestamp": input_data.timestamp,
             }
             if settings.PREDICTION_STREAM_ENABLED:
                 _published = await _publish_prediction_to_stream(_prediction_payload)
@@ -1042,6 +1043,7 @@ async def predict(
                     status="error",
                     error_message=error_message,
                     id_obs=input_data.id_obs,
+                    timestamp=input_data.timestamp,
                 )
             except Exception as log_error:
                 logger.error("Erreur lors du logging de la prédiction", error=str(log_error))
@@ -1194,6 +1196,7 @@ async def predict_batch(
                     user_agent=user_agent,
                     status="success",
                     max_confidence=max(probability) if probability else None,
+                    **({"timestamp": item.timestamp} if item.timestamp is not None else {}),
                 )
             )
             results.append(

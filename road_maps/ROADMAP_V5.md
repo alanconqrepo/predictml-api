@@ -107,7 +107,7 @@ Colonnes CSV : id_obs, model_name, observed_result, date_time
 #### Pourquoi
 
 Les modèles se chargent paresseusement : la première prédiction après un déploiement ou un
-redémarrage subit une latence élevée (download MinIO + désérialisation pickle). Dans un
+redémarrage subit une latence élevée (download MinIO + désérialisation joblib). Dans un
 déploiement A/B, cela crée une fausse asymétrie de latence entre la version en place (chaude)
 et la nouvelle version (froide) qui biaise les métriques de comparaison.
 

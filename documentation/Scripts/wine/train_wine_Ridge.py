@@ -14,7 +14,7 @@ CONTRAT D'INTERFACE
 -------------------------------------------------------------------------------------
   TRAIN_START_DATE   : date de début  — format YYYY-MM-DD
   TRAIN_END_DATE     : date de fin    — format YYYY-MM-DD
-  OUTPUT_MODEL_PATH  : chemin absolu où sauvegarder le .pkl produit
+  OUTPUT_MODEL_PATH  : chemin absolu où sauvegarder le .joblib produit
 """
 
 import json

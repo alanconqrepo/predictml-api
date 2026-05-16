@@ -110,7 +110,7 @@ def _create_model(name: str, version: str = "1.0.0") -> dict:
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
         files={
-            "file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
+            "file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
             "train_file": ("train.py", io.BytesIO(VALID_TRAIN_SCRIPT.encode()), "text/x-python"),
         },
         data={"name": name, "version": version, "accuracy": "0.90", "f1_score": "0.88"},
@@ -132,7 +132,7 @@ async def _insert_retrained_version(
             name=name,
             version=version,
             minio_bucket="models",
-            minio_object_key=f"{name}/v{version}.pkl",
+            minio_object_key=f"{name}/v{version}.joblib",
             file_size_bytes=512,
             accuracy=training_stats.get("accuracy"),
             f1_score=training_stats.get("f1_score"),

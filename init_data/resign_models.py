@@ -4,9 +4,9 @@ Script one-shot : re-signe tous les modèles MinIO existants sans model_hmac_sig
 
 Contexte
 --------
-Depuis l'introduction de la vérification HMAC-SHA256 sur les fichiers .pkl,
+Depuis l'introduction de la vérification HMAC-SHA256 sur les fichiers .joblib,
 tout chargement d'un modèle sans signature est refusé avec une HTTPException 403.
-Ce script télécharge chaque fichier .pkl depuis MinIO, calcule son HMAC-SHA256
+Ce script télécharge chaque fichier .joblib depuis MinIO, calcule son HMAC-SHA256
 (avec la SECRET_KEY de l'application) et enregistre la signature dans la colonne
 `model_hmac_signature` de la table `model_metadata`.
 
@@ -106,7 +106,7 @@ async def resign_models(dry_run: bool = False, force_all: bool = False) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Re-signe les modèles pkl sans signature HMAC.")
+    parser = argparse.ArgumentParser(description="Re-signe les modèles joblib sans signature HMAC.")
     parser.add_argument(
         "--dry-run",
         action="store_true",

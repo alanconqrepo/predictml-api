@@ -75,7 +75,7 @@ def make_pkl_bytes() -> bytes:
 
 def _create_model(name: str, version: str = "1.0.0", with_train_script: bool = False) -> dict:
     files: dict = {
-        "file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
+        "file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
     }
     if with_train_script:
         files["train_file"] = (

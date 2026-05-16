@@ -29,14 +29,14 @@ Ce sont des **quick wins** : le travail backend est fait, seule l'UI manque.
 **Effort UI estimé :** Moyen (3–4h)
 
 **Pourquoi :**  
-C'est le point d'entrée principal du produit — sans ça, il est impossible d'ajouter un modèle sans quitter le dashboard et écrire du code curl/Python. Tout nouvel utilisateur est bloqué dès son arrivée. L'API accepte un `.pkl` multipart + métadonnées optionnelles + un `train.py` optionnel, mais aucun formulaire n'existe dans Streamlit.
+C'est le point d'entrée principal du produit — sans ça, il est impossible d'ajouter un modèle sans quitter le dashboard et écrire du code curl/Python. Tout nouvel utilisateur est bloqué dès son arrivée. L'API accepte un `.joblib` multipart + métadonnées optionnelles + un `train.py` optionnel, mais aucun formulaire n'existe dans Streamlit.
 
 **Comment :**  
 Dans `streamlit_app/pages/2_Models.py`, ajouter un expander "➕ Uploader un nouveau modèle" avec :
-- `st.file_uploader` pour le fichier `.pkl` (pas de limite de taille imposée, streamer via `requests`)
+- `st.file_uploader` pour le fichier `.joblib` (pas de limite de taille imposée, streamer via `requests`)
 - `st.file_uploader` optionnel pour le `train.py`
 - Champs : `name` (text), `version` (text), `description` (text area), `algorithm` (selectbox), `accuracy` / `f1_score` (number inputs), `tags` (text multi-input)
-- `st.progress` + spinner pendant l'upload (les .pkl peuvent dépasser 50 Mo)
+- `st.progress` + spinner pendant l'upload (les .joblib peuvent dépasser 50 Mo)
 - Réponse : `st.success()` avec le nom/version créés, ou `st.error()` avec le détail du 422
 
 ---
@@ -124,7 +124,7 @@ Dans l'onglet "🧪 Tester" (créé en 1.2), ajouter un sous-expander "Valider l
 
 ---
 
-### 1.7 `GET /models/{name}/{version}/download` — Téléchargement du fichier .pkl
+### 1.7 `GET /models/{name}/{version}/download` — Téléchargement du fichier .joblib
 
 **Priorité :** 🟡 MOYENNE  
 **Effort UI estimé :** Trivial (30 min)
@@ -133,7 +133,7 @@ Dans l'onglet "🧪 Tester" (créé en 1.2), ajouter un sous-expander "Valider l
 Un Data Scientist ou un DevOps peut avoir besoin de récupérer le fichier modèle pour une analyse offline, un audit, ou un redéploiement manuel. Aujourd'hui, il faut accéder directement à la console MinIO. Un simple bouton de téléchargement suffit.
 
 **Comment :**  
-Dans la vue détail d'un modèle (page 2_Models), ajouter un `st.download_button` "⬇️ Télécharger le .pkl" qui appelle GET `/models/{name}/{version}/download` et streame le contenu binaire. Afficher la taille du fichier (depuis `file_size_bytes` dans les métadonnées) à côté du bouton.
+Dans la vue détail d'un modèle (page 2_Models), ajouter un `st.download_button` "⬇️ Télécharger le .joblib" qui appelle GET `/models/{name}/{version}/download` et streame le contenu binaire. Afficher la taille du fichier (depuis `file_size_bytes` dans les métadonnées) à côté du bouton.
 
 ---
 
@@ -492,7 +492,7 @@ Les fonctionnalités suivantes sont complètes, testées, et ne nécessitent pas
 | 8 | API | Leaderboard (GET /models/leaderboard) | Nouveau + 4_Stats.py | 🟠 HAUTE | Facile | Vision globale des perfs en production |
 | 9 | UI | Export serveur-side (GET /predictions/export) | 3_Predictions.py | 🟡 MOYENNE | Facile | Cohérence export + volumes > 1 000 lignes |
 | 10 | UI | Validate input schema UI | 2_Models.py | 🟡 MOYENNE | Facile | Débogage pipeline sans curl |
-| 11 | UI | Download modèle .pkl | 2_Models.py | 🟡 MOYENNE | Trivial | Workflow DS offline |
+| 11 | UI | Download modèle .joblib | 2_Models.py | 🟡 MOYENNE | Trivial | Workflow DS offline |
 | 12 | UI | Model readiness checklist | 2_Models.py | 🟡 MOYENNE | Trivial | Évite les promotions prématurées |
 | 13 | UI | Analytics par utilisateur | 1_Users.py | 🟡 MOYENNE | Facile | Admin reporting |
 | 14 | API | Deprecate model status | src/api/models.py | 🟡 MOYENNE | Facile | Cycle de vie explicite sans suppression |

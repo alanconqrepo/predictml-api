@@ -85,7 +85,7 @@ compétences Docker que la stack existante, sur la même infrastructure.
 
 ### Pourquoi c'est critique
 
-MinIO stocke tous les fichiers `.pkl` des modèles ML et tous les scripts `train.py`.
+MinIO stocke tous les fichiers `.joblib` des modèles ML et tous les scripts `train.py`.
 Sans ces fichiers, l'API ne peut plus charger aucun modèle, même si Redis possède encore
 un cache chaud — le cache expire (TTL 1h par défaut) et ne peut plus être rechargé.
 
@@ -96,7 +96,7 @@ un cache chaud — le cache expire (TTL 1h par défaut) et ne peut plus être re
 | Corruption du volume `minio_data` | Perte permanente de tous les modèles |
 | Crash du container MinIO | Interruption des prédictions dès que le cache Redis expire |
 | Saturation du disque hôte | MinIO refuse les uploads → retrain impossible, nouveaux modèles bloqués |
-| Redémarrage du container pendant un upload `.pkl` | Fichier corrompu → `ModelService` retourne une erreur 500 au prochain chargement |
+| Redémarrage du container pendant un upload `.joblib` | Fichier corrompu → `ModelService` retourne une erreur 500 au prochain chargement |
 
 L'instance unique actuelle ne protège contre aucun de ces scénarios. Le `restart: unless-stopped`
 redémarre le container mais ne récupère pas un volume corrompu.

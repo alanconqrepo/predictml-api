@@ -328,7 +328,7 @@ class TestModelMetadataCRUD:
                     name=f"dbcrud_model_{suffix}",
                     version="1.0.0",
                     minio_bucket="models",
-                    minio_object_key=f"dbcrud_model_{suffix}/v1.0.0.pkl",
+                    minio_object_key=f"dbcrud_model_{suffix}/v1.0.0.joblib",
                     accuracy=0.92,
                 )
                 assert meta.id is not None
@@ -350,7 +350,7 @@ class TestModelMetadataCRUD:
                     name=model_name,
                     version="2.0.0",
                     minio_bucket="models",
-                    minio_object_key=f"{model_name}/v2.0.0.pkl",
+                    minio_object_key=f"{model_name}/v2.0.0.joblib",
                 )
                 meta = await DBService.get_model_metadata(db, model_name, "2.0.0")
                 assert meta is not None
@@ -382,7 +382,7 @@ class TestModelMetadataCRUD:
                     name=model_name,
                     version="1.0.0",
                     minio_bucket="models",
-                    minio_object_key=f"{model_name}/v1.0.0.pkl",
+                    minio_object_key=f"{model_name}/v1.0.0.joblib",
                 )
                 models = await DBService.get_all_active_models(db)
                 names = [m.name for m in models]
@@ -402,7 +402,7 @@ class TestModelMetadataCRUD:
                     name=model_name,
                     version="1.0.0",
                     minio_bucket="models",
-                    minio_object_key=f"{model_name}/v1.0.0.pkl",
+                    minio_object_key=f"{model_name}/v1.0.0.joblib",
                 )
                 result = await DBService.deactivate_model(db, model_name, "1.0.0")
                 assert result is True
