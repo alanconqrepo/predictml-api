@@ -217,10 +217,10 @@ class ModelService:
         Charge un modèle depuis le cache Redis ou depuis MinIO/MLflow en cas de cache miss.
 
         Sécurité :
-        - Cache Redis : vérifie l'enveloppe HMAC-SHA256 (64 octets ASCII) avant pickle.loads().
+        - Cache Redis : vérifie l'enveloppe HMAC-SHA256 (64 octets ASCII) avant joblib.load().
           Protège contre l'empoisonnement du cache Redis (l'attaquant ne connaît pas SECRET_KEY).
-        - MinIO : vérifie la signature HMAC stockée en DB avant pickle.loads().
-          Protège contre la falsification du fichier .pkl dans MinIO.
+        - MinIO : vérifie la signature HMAC stockée en DB avant joblib.load().
+          Protège contre la falsification du fichier .joblib dans MinIO.
 
         Format Redis : HMAC_HEX(64 octets ASCII) + payload_bytes
 
@@ -316,7 +316,7 @@ class ModelService:
                         model_name=model_name,
                         version=str(metadata.version),
                     )
-                    # Download raw pkl bytes — do NOT call pickle.loads() until HMAC is verified
+                    # Download raw bytes — do NOT call joblib.load() until HMAC is verified
                     raw_bytes = await minio_service.async_download_file_bytes(
                         metadata.minio_object_key
                     )

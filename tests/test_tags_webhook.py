@@ -100,7 +100,7 @@ async def _setup():
                 name=TW_MODEL_TAGGED,
                 version=MODEL_VERSION,
                 minio_bucket="models",
-                minio_object_key=f"{TW_MODEL_TAGGED}/v{MODEL_VERSION}.pkl",
+                minio_object_key=f"{TW_MODEL_TAGGED}/v{MODEL_VERSION}.joblib",
                 is_active=True,
                 is_production=True,
                 tags=["production", "finance"],
@@ -113,7 +113,7 @@ async def _setup():
                 name=TW_MODEL_WEBHOOK,
                 version=MODEL_VERSION,
                 minio_bucket="models",
-                minio_object_key=f"{TW_MODEL_WEBHOOK}/v{MODEL_VERSION}.pkl",
+                minio_object_key=f"{TW_MODEL_WEBHOOK}/v{MODEL_VERSION}.joblib",
                 is_active=True,
                 is_production=True,
                 webhook_url="https://example.com/webhook",
@@ -207,7 +207,7 @@ class TestUploadSize:
                     "name": TW_MODEL_UPLOAD,
                     "version": "9.9.9",
                 },
-                files={"file": ("model.pkl", io.BytesIO(big_bytes), "application/octet-stream")},
+                files={"file": ("model.joblib", io.BytesIO(big_bytes), "application/octet-stream")},
             )
         assert r.status_code == 413
         assert "taille maximale" in r.json()["detail"].lower()
@@ -225,7 +225,7 @@ class TestUploadSize:
                     "name": TW_MODEL_UPLOAD,
                     "version": "1.1.1",
                 },
-                files={"file": ("model.pkl", io.BytesIO(tiny_bytes), "application/octet-stream")},
+                files={"file": ("model.joblib", io.BytesIO(tiny_bytes), "application/octet-stream")},
             )
         # Pas un 413 (le fichier passera la vérification de taille)
         assert r.status_code != 413

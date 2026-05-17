@@ -101,7 +101,7 @@ _r = client.post(
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     files={
         "file": (
-            "model.pkl",
+            "model.joblib",
             io.BytesIO(_make_iris_model_pkl()),
             "application/octet-stream",
         )

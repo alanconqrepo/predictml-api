@@ -48,7 +48,7 @@ def _create_model(name: str, version: str = "1.0.0") -> dict:
     response = client.post(
         "/models",
         data={"name": name, "version": version},
-        files={"file": (f"{name}.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": (f"{name}.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
     )
     return response.json()

@@ -15,7 +15,7 @@ Entraîner un modèle ML est une chose. Le rendre utilisable en production, séc
 
 PredictML API résout ce problème :
 
-- **Déploiement en une commande** — uploader un `.pkl`, l'API est prête
+- **Déploiement en une commande** — uploader un `.joblib`, l'API est prête
 - **Multi-modèles et multi-versions** — chaque modèle a son cycle de vie (actif, production, déprécié)
 - **Traçabilité complète** — chaque prédiction est loguée avec ses features, son résultat, sa latence et l'utilisateur
 - **Évaluation continue** — les résultats observés peuvent être rapportés pour mesurer la précision réelle des modèles
@@ -33,7 +33,7 @@ PredictML API résout ce problème :
 
 | Profil | Usage |
 |---|---|
-| Data Scientist | Déployer un modèle `.pkl` sans écrire de code serveur |
+| Data Scientist | Déployer un modèle `.joblib` sans écrire de code serveur |
 | Développeur back-end | Consommer l'API dans une application |
 | MLOps | Versionner, monitorer, comparer, ré-entraîner des modèles en production |
 | Administrateur | Gérer les utilisateurs, quotas et accès via le dashboard |
@@ -88,7 +88,7 @@ curl http://localhost/health
 ```
 
 > L'utilisateur admin est créé automatiquement au démarrage grâce à `ADMIN_TOKEN` dans `.env`.
-> Si vous souhaitez uploader des modèles `.pkl` locaux depuis `Models/`, lancez :
+> Si vous souhaitez uploader des modèles `.joblib` locaux depuis `Models/`, lancez :
 > `docker-compose -p predictml-api exec api python init_data/init_db.py`
 
 **Credentials**
@@ -107,7 +107,7 @@ curl http://localhost/health
 ## Fonctionnalités principales
 
 ### Gestion des modèles
-- Upload d'un fichier `.pkl` via API ou référence à un run MLflow
+- Upload d'un fichier `.joblib` via API ou référence à un run MLflow
 - Versionnage (`name` + `version`)
 - Flag `is_production` pour router automatiquement les prédictions
 - Métadonnées riches : algorithme, accuracy, f1_score, features, classes, dataset
@@ -243,7 +243,7 @@ curl http://localhost/health
 - Rate limiting automatique (HTTP 429 si quota journalier dépassé)
 
 ### Sécurité
-- **HMAC-SHA256** — chaque `.pkl` est signé à l'upload et vérifié avant `pickle.loads()` (clé : `SECRET_KEY`)
+- **HMAC-SHA256** — chaque `.joblib` est signé à l'upload et vérifié avant `joblib.load()` (clé : `SECRET_KEY`)
 - **Audit logging** — opérations admin sensibles (création/suppression de modèle, retrain, gestion utilisateurs) loguées en JSON via `structlog` avec `user_id`, IP et action
 - **Token expiration** — les tokens Bearer expirent après `TOKEN_LIFETIME_DAYS` jours (HTTP 401 au-delà) ; renouvellement possible via `PATCH /users/{id}`
 - **Rate limiting per-IP** — limite par IP et par minute via `slowapi` avec backend Redis partagé entre réplicas (HTTP 429 si dépassé), en plus du quota journalier par utilisateur
@@ -263,7 +263,7 @@ curl http://localhost/health
 | GET | `/models` | Non | Liste des modèles actifs (filtre par tag) |
 | GET | `/models/cached` | Non | Modèles chargés en mémoire |
 | GET | `/models/{name}/{version}` | Non | Détail complet d'un modèle |
-| POST | `/models` | Oui | Uploader un modèle (.pkl ou MLflow) |
+| POST | `/models` | Oui | Uploader un modèle (.joblib ou MLflow) |
 | PATCH | `/models/{name}/{version}` | Oui | Mettre à jour (production, A/B, tags, webhook…) |
 | DELETE | `/models/{name}/{version}` | Oui | Supprimer une version |
 | DELETE | `/models/{name}` | Oui | Supprimer toutes les versions |
@@ -285,7 +285,7 @@ curl http://localhost/health
 | GET | `/models/{name}/retrain-history` | Oui | Historique des événements de ré-entraînement |
 | PATCH | `/models/{name}/{version}/deprecate` | Admin | Déprécier une version (bloque les prédictions avec HTTP 410) |
 | POST | `/models/{name}/{version}/validate-input` | Oui | Valider le schéma de features sans consommer de quota |
-| GET | `/models/{name}/{version}/download` | Oui | Télécharger le fichier .pkl depuis MinIO |
+| GET | `/models/{name}/{version}/download` | Oui | Télécharger le fichier .joblib depuis MinIO |
 | GET | `/models/{name}/ab-compare` | Oui | Rapport de comparaison A/B avec significativité statistique |
 | GET | `/models/{name}/shadow-compare` | Oui | Rapport enrichi shadow vs production (accuracy, latence, désaccord) |
 | GET | `/models/{name}/output-drift` | Oui | Drift de distribution des sorties (label shift via PSI) |

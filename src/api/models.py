@@ -250,7 +250,7 @@ def _validate_train_script(source: str) -> Optional[str]:
     3. Référencer TRAIN_START_DATE (variable d'env)
     4. Référencer TRAIN_END_DATE (variable d'env)
     5. Référencer OUTPUT_MODEL_PATH (variable d'env)
-    6. Contenir un appel de sauvegarde : pickle.dump, joblib.dump ou save_model
+    6. Contenir un appel de sauvegarde : joblib.dump ou save_model
 
     Returns:
         None si le script est valide, sinon un message d'erreur.
@@ -287,9 +287,9 @@ def _validate_train_script(source: str) -> Optional[str]:
         if token not in source:
             return f"Le script {msg}"
 
-    save_calls = ["pickle.dump", "joblib.dump", "save_model"]
+    save_calls = ["joblib.dump", "save_model"]
     if not any(call in source for call in save_calls):
-        return "Le script doit sauvegarder le modèle avec pickle.dump, joblib.dump ou save_model"
+        return "Le script doit sauvegarder le modèle avec joblib.dump ou save_model"
 
     return None
 
@@ -306,11 +306,11 @@ async def _run_train_subprocess(
     """
     Lance train.py en subprocess avec des dates par défaut (J-30 → aujourd'hui).
 
-    Retourne ``(req_txt, pkl_bytes)`` :
-    - ``req_txt``   : contenu du requirements.txt (depuis "dependencies" dans stdout JSON),
-                      ou None si le champ est absent (l'appelant fait le fallback AST).
-    - ``pkl_bytes`` : contenu du .pkl généré par le script, ou None si le subprocess a échoué
-                      ou n'a pas produit de fichier (l'appelant utilise le pkl uploadé).
+    Retourne ``(req_txt, model_bytes)`` :
+    - ``req_txt``     : contenu du requirements.txt (depuis "dependencies" dans stdout JSON),
+                        ou None si le champ est absent (l'appelant fait le fallback AST).
+    - ``model_bytes`` : contenu du .joblib généré par le script, ou None si le subprocess a échoué
+                        ou n'a pas produit de fichier (l'appelant utilise le fichier uploadé).
 
     Timeout : 120 s.
     """
@@ -361,11 +361,11 @@ async def _run_train_subprocess(
 
             stdout_text = raw_stdout.decode("utf-8", errors="replace")
 
-            # Lire le .pkl produit (si présent)
-            pkl_bytes: Optional[bytes] = None
+            # Lire le .joblib produit (si présent)
+            model_bytes: Optional[bytes] = None
             if proc.returncode == 0 and os.path.exists(output_path):
                 with open(output_path, "rb") as f:
-                    pkl_bytes = f.read()
+                    model_bytes = f.read()
             elif proc.returncode != 0:
                 logger.warning(
                     "_run_train_subprocess : subprocess échoué",
@@ -387,7 +387,7 @@ async def _run_train_subprocess(
                         pass
                     break
 
-            return req_txt, pkl_bytes
+            return req_txt, model_bytes
 
         except Exception as exc:
             logger.warning("_run_train_subprocess : exception", error=str(exc))
@@ -866,7 +866,7 @@ async def get_model_readiness(
 
     Exécute 4 checks :
     - **is_production** : la version est marquée comme production
-    - **file_accessible** : le fichier .pkl est accessible dans MinIO
+    - **file_accessible** : le fichier .joblib est accessible dans MinIO
     - **baseline_computed** : le profil baseline des features est calculé
     - **no_critical_drift** : aucun drift critique sur les dernières 24h
 
@@ -1352,7 +1352,7 @@ async def retrain_model(
 
     Le script reçoit via variables d'environnement :
     - **TRAIN_START_DATE** / **TRAIN_END_DATE** : plage de dates (YYYY-MM-DD)
-    - **OUTPUT_MODEL_PATH** : chemin où déposer le `.pkl` produit
+    - **OUTPUT_MODEL_PATH** : chemin où déposer le `.joblib` produit
     - **MLFLOW_TRACKING_URI**, **MODEL_NAME** : optionnels
 
     Timeout d'exécution : 600 secondes.
@@ -3511,7 +3511,7 @@ async def create_model(
         description=(
             "Script Python de ré-entraînement (train.py). "
             "Doit référencer TRAIN_START_DATE, TRAIN_END_DATE, OUTPUT_MODEL_PATH "
-            "et contenir un appel pickle.dump/joblib.dump/save_model."
+            "et contenir un appel joblib.dump/save_model."
         ),
     ),
     parent_version: Optional[str] = Form(
@@ -3524,6 +3524,14 @@ async def create_model(
             "Si True, calcule et sauvegarde automatiquement la baseline de features "
             "depuis les prédictions existantes pour ce nom de modèle (fenêtre 30 jours). "
             "Silencieusement ignoré si moins de 100 prédictions sont disponibles."
+        ),
+    ),
+    run_training: bool = Form(
+        False,
+        description=(
+            "Si True, exécute train.py dans un sous-processus lors de l'upload "
+            "pour générer un modèle cohérent avec les versions de librairies de l'API. "
+            "Par défaut False : le fichier uploadé est stocké tel quel sans ré-entraînement."
         ),
     ),
     user: User = Depends(require_admin),
@@ -3586,7 +3594,7 @@ async def create_model(
     # --- Traitement du script d'entraînement (optionnel) ---
     train_script_object_key = None
     requirements_object_key = None
-    subprocess_pkl_bytes: Optional[bytes] = None
+    subprocess_model_bytes: Optional[bytes] = None
     if train_file is not None:
         train_bytes = await train_file.read()
         if not train_bytes:
@@ -3616,15 +3624,22 @@ async def create_model(
             "Script train.py uploadé", object_name=train_object_name, model=name, version=version
         )
 
-        # Lancer le subprocess pour capturer les dépendances et générer le pkl Docker.
-        # Si le subprocess réussit, son pkl est utilisé à la place du pkl uploadé par l'utilisateur
-        # (le pkl Docker est entraîné dans l'environnement API — versions de librairies cohérentes).
         from src.services.env_snapshot_service import generate_requirements_txt
 
-        req_txt, subprocess_pkl_bytes = await _run_train_subprocess(train_source)
-        if req_txt is None:
+        if run_training:
+            # Lancer le subprocess pour capturer les dépendances et générer le pkl Docker.
+            # Si le subprocess réussit, son pkl est utilisé à la place du pkl uploadé par l'utilisateur
+            # (le pkl Docker est entraîné dans l'environnement API — versions de librairies cohérentes).
+            req_txt, subprocess_model_bytes = await _run_train_subprocess(train_source)
+            if req_txt is None:
+                logger.info(
+                    "Fallback AST pour requirements.txt — subprocess sans 'dependencies'",
+                    model=name, version=version,
+                )
+                req_txt = generate_requirements_txt(train_source)
+        else:
             logger.info(
-                "Fallback AST pour requirements.txt — subprocess sans 'dependencies'",
+                "run_training=False — subprocess ignoré, modèle uploadé utilisé tel quel",
                 model=name, version=version,
             )
             req_txt = generate_requirements_txt(train_source)
@@ -3639,8 +3654,8 @@ async def create_model(
         )
 
     # Choisir les bytes du modèle à stocker : subprocess prioritaire, sinon fichier utilisateur
-    model_bytes_to_store = subprocess_pkl_bytes if subprocess_pkl_bytes is not None else model_bytes
-    if subprocess_pkl_bytes is not None:
+    model_bytes_to_store = subprocess_model_bytes if subprocess_model_bytes is not None else model_bytes
+    if subprocess_model_bytes is not None:
         logger.info("Modèle subprocess utilisé (Docker env)", model=name, version=version)
     elif model_bytes is not None:
         logger.info("Modèle utilisateur uploadé (subprocess absent)", model=name, version=version)
@@ -3891,7 +3906,7 @@ async def delete_model_version(
 
     - Supprime l'entrée en base PostgreSQL.
     - Supprime le run MLflow associé (si `mlflow_run_id` renseigné).
-    - Supprime l'objet `.pkl` dans MinIO.
+    - Supprime l'objet `.joblib` dans MinIO.
 
     Retourne **204 No Content** en cas de succès. Nécessite un token Bearer admin.
     """
@@ -4124,9 +4139,9 @@ async def download_model(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Télécharge le fichier .pkl d'un modèle.
+    Télécharge le fichier .joblib d'un modèle.
 
-    Admin uniquement — le .pkl contient la logique interne du modèle.
+    Admin uniquement — le .joblib contient la logique interne du modèle.
     """
     result = await db.execute(
         select(ModelMetadata).where(
@@ -4274,7 +4289,7 @@ async def delete_model_all_versions(
 
     - Supprime toutes les entrées PostgreSQL pour ce nom.
     - Supprime chaque run MLflow associé.
-    - Supprime chaque objet `.pkl` dans MinIO.
+    - Supprime chaque objet `.joblib` dans MinIO.
 
     Retourne un résumé des suppressions effectuées. Nécessite un token Bearer admin.
     """

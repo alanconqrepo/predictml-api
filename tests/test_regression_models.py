@@ -128,7 +128,7 @@ async def _setup():
                     name=name,
                     version=ver,
                     minio_bucket="models",
-                    minio_object_key=f"{name}/v{ver}.pkl",
+                    minio_object_key=f"{name}/v{ver}.joblib",
                     is_active=True,
                     is_production=(ver == "1.0.0"),
                     deployment_mode="ab_test" if name == REG_AB_MODEL else "production",
@@ -165,7 +165,7 @@ async def _setup_extra():
                     name=name,
                     version=ver,
                     minio_bucket="models",
-                    minio_object_key=f"{name}/v{ver}.pkl",
+                    minio_object_key=f"{name}/v{ver}.joblib",
                     is_active=True,
                     is_production=True,
                 )
@@ -285,7 +285,7 @@ class TestRegressionModelUpload:
         r = client.post(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-            files={"file": ("model.pkl", io.BytesIO(_pkl(model)), "application/octet-stream")},
+            files={"file": ("model.joblib", io.BytesIO(_pkl(model)), "application/octet-stream")},
             data={"name": "reg_upload_test", "version": "1.0.0"},
         )
         assert r.status_code == 201
@@ -300,7 +300,7 @@ class TestRegressionModelUpload:
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
             files={
-                "file": ("model.pkl", io.BytesIO(_pkl(model)), "application/octet-stream"),
+                "file": ("model.joblib", io.BytesIO(_pkl(model)), "application/octet-stream"),
                 "train_file": ("train.py", io.BytesIO(VALID_TRAIN_SCRIPT.encode()), "text/x-python"),
             },
             data={"name": "reg_upload_train", "version": "1.0.0"},

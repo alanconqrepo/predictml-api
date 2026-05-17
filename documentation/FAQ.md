@@ -124,7 +124,7 @@ Solution : augmenter le quota via `PATCH /users/{id}` (admin) ou attendre le res
 ### Comment uploader mon premier modèle ?
 
 ```python
-import pickle, requests
+import joblib, requests
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
@@ -138,15 +138,14 @@ model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
 
 # Sauvegarder
-with open("mon_modele.pkl", "wb") as f:
-    pickle.dump(model, f)
+joblib.dump(model, "mon_modele.joblib")
 
 # Uploader
-with open("mon_modele.pkl", "rb") as f:
+with open("mon_modele.joblib", "rb") as f:
     r = requests.post(
         "http://localhost:8000/models",
         headers={"Authorization": "Bearer <ADMIN_TOKEN>"},
-        files={"file": ("mon_modele.pkl", f, "application/octet-stream")},
+        files={"file": ("mon_modele.joblib", f, "application/octet-stream")},
         data={
             "name": "mon_modele", "version": "1.0.0",
             "accuracy": str(accuracy_score(y_test, y_pred)),
@@ -324,7 +323,7 @@ L'API vérifie que votre script :
 2. Lit `os.environ["TRAIN_START_DATE"]`
 3. Lit `os.environ["TRAIN_END_DATE"]`
 4. Lit `os.environ["OUTPUT_MODEL_PATH"]`
-5. Appelle `pickle.dump()`, `joblib.dump()` ou `save_model()`
+5. Appelle `joblib.dump()` ou `save_model()`
 
 Vérifiez que ces 5 éléments sont bien présents.
 
@@ -334,7 +333,7 @@ Vérifiez que ces 5 éléments sont bien présents.
 
 Votre script ne trouve pas de données pour la plage de dates demandée. Solutions :
 1. Vérifiez votre source de données (CSV, BDD) et le filtrage sur la date
-2. Testez manuellement : `TRAIN_START_DATE=2025-01-01 TRAIN_END_DATE=2025-12-31 OUTPUT_MODEL_PATH=/tmp/test.pkl python train.py`
+2. Testez manuellement : `TRAIN_START_DATE=2025-01-01 TRAIN_END_DATE=2025-12-31 OUTPUT_MODEL_PATH=/tmp/test.joblib python train.py`
 3. Ajoutez un check dans votre script et terminez avec `sys.exit(1)` + message JSON d'erreur si aucune donnée
 
 ---

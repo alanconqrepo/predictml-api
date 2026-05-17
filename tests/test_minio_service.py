@@ -110,9 +110,9 @@ class TestUploadModel:
 
             svc = MinIOService()
             dummy_model = {"weights": [1, 2, 3]}  # picklable
-            result = svc.upload_model(dummy_model, "test/v1.0.0.pkl")
+            result = svc.upload_model(dummy_model, "test/v1.0.0.joblib")
             assert result["bucket"] == svc.bucket
-            assert result["object_name"] == "test/v1.0.0.pkl"
+            assert result["object_name"] == "test/v1.0.0.joblib"
             assert result["etag"] == "abc123"
             assert result["size"] > 0
             mock_client.put_object.assert_called_once()
@@ -127,7 +127,7 @@ class TestUploadModel:
 
             svc = MinIOService()
             with pytest.raises(S3Error):
-                svc.upload_model({"x": 1}, "fail/v1.pkl")
+                svc.upload_model({"x": 1}, "fail/v1.joblib")
 
 
 class TestUploadModelBytes:
@@ -147,7 +147,7 @@ class TestUploadModelBytes:
             _jbuf = io.BytesIO()
             joblib.dump({"model": "data"}, _jbuf)
             model_bytes = _jbuf.getvalue()
-            result = svc.upload_model_bytes(model_bytes, "test/v2.0.0.pkl")
+            result = svc.upload_model_bytes(model_bytes, "test/v2.0.0.joblib")
             call_kwargs = mock_client.put_object.call_args
             assert call_kwargs[1].get("length") == len(model_bytes) or (
                 len(call_kwargs[0]) > 3 and call_kwargs[0][3] == len(model_bytes)
@@ -165,7 +165,7 @@ class TestUploadModelBytes:
 
             svc = MinIOService()
             with pytest.raises(S3Error):
-                svc.upload_model_bytes(b"data", "fail.pkl")
+                svc.upload_model_bytes(b"data", "fail.joblib")
 
 
 class TestUploadFileBytes:
@@ -215,8 +215,8 @@ class TestUploadFileBytes:
 class TestDownloadModel:
     """Tests pour download_model()."""
 
-    def test_download_model_deserializes_pickle(self):
-        """download_model() lit et désérialise le pickle correctement."""
+    def test_download_model_deserializes_joblib(self):
+        """download_model() lit et désérialise le joblib correctement."""
         with patch("src.services.minio_service.Minio") as MockMinio:
             mock_client = MockMinio.return_value
             mock_client.bucket_exists.return_value = True
@@ -230,7 +230,7 @@ class TestDownloadModel:
             from src.services.minio_service import MinIOService
 
             svc = MinIOService()
-            result = svc.download_model("test/v1.0.0.pkl")
+            result = svc.download_model("test/v1.0.0.joblib")
             assert result == original_obj
 
     def test_download_model_calls_close_and_release(self):
@@ -244,7 +244,7 @@ class TestDownloadModel:
             from src.services.minio_service import MinIOService
 
             svc = MinIOService()
-            svc.download_model("test/v1.pkl")
+            svc.download_model("test/v1.joblib")
             mock_response.close.assert_called_once()
             mock_response.release_conn.assert_called_once()
 
@@ -258,7 +258,7 @@ class TestDownloadModel:
 
             svc = MinIOService()
             with pytest.raises(S3Error):
-                svc.download_model("fail/v1.pkl")
+                svc.download_model("fail/v1.joblib")
 
 
 class TestDownloadFileBytes:
@@ -301,16 +301,16 @@ class TestListModels:
             mock_client = MockMinio.return_value
             mock_client.bucket_exists.return_value = True
             obj1 = MagicMock()
-            obj1.object_name = "model_a/v1.pkl"
+            obj1.object_name = "model_a/v1.joblib"
             obj2 = MagicMock()
-            obj2.object_name = "model_b/v2.pkl"
+            obj2.object_name = "model_b/v2.joblib"
             mock_client.list_objects.return_value = [obj1, obj2]
             from src.services.minio_service import MinIOService
 
             svc = MinIOService()
             result = svc.list_models()
-            assert "model_a/v1.pkl" in result
-            assert "model_b/v2.pkl" in result
+            assert "model_a/v1.joblib" in result
+            assert "model_b/v2.joblib" in result
 
     def test_list_models_with_prefix(self):
         """list_models(prefix=...) passe le préfixe à list_objects."""
@@ -348,7 +348,7 @@ class TestDeleteModel:
             from src.services.minio_service import MinIOService
 
             svc = MinIOService()
-            result = svc.delete_model("test/v1.pkl")
+            result = svc.delete_model("test/v1.joblib")
             assert result is True
             mock_client.remove_object.assert_called_once()
 
@@ -360,7 +360,7 @@ class TestDeleteModel:
             from src.services.minio_service import MinIOService
 
             svc = MinIOService()
-            result = svc.delete_model("test/v1.pkl")
+            result = svc.delete_model("test/v1.joblib")
             assert result is False
 
 
@@ -381,7 +381,7 @@ class TestGetObjectInfo:
             from src.services.minio_service import MinIOService
 
             svc = MinIOService()
-            result = svc.get_object_info("test/v1.pkl")
+            result = svc.get_object_info("test/v1.joblib")
             assert result is not None
             assert result["size"] == 1024
             assert result["etag"] == "etag-stat"
@@ -396,5 +396,5 @@ class TestGetObjectInfo:
             from src.services.minio_service import MinIOService
 
             svc = MinIOService()
-            result = svc.get_object_info("nonexistent.pkl")
+            result = svc.get_object_info("nonexistent.joblib")
             assert result is None

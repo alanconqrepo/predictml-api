@@ -259,7 +259,7 @@ async def _create_sig_fixtures():
                     name=_SIG_MODEL,
                     version=ver,
                     minio_bucket="models",
-                    minio_object_key=f"{_SIG_MODEL}/v{ver}.pkl",
+                    minio_object_key=f"{_SIG_MODEL}/v{ver}.joblib",
                     is_active=True,
                     is_production=False,
                     deployment_mode=mode,

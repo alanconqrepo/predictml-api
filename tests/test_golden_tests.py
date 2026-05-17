@@ -118,7 +118,7 @@ async def _setup():
                 name=GT_MODEL,
                 version=GT_VERSION,
                 minio_bucket="models",
-                minio_object_key=f"{GT_MODEL}/v{GT_VERSION}.pkl",
+                minio_object_key=f"{GT_MODEL}/v{GT_VERSION}.joblib",
                 is_active=True,
                 is_production=True,
             )
@@ -335,7 +335,7 @@ class TestGoldenTestRun:
                         name=cls.GT_RUN_MODEL,
                         version=cls.GT_RUN_VERSION,
                         minio_bucket="models",
-                        minio_object_key=f"{cls.GT_RUN_MODEL}/v{cls.GT_RUN_VERSION}.pkl",
+                        minio_object_key=f"{cls.GT_RUN_MODEL}/v{cls.GT_RUN_VERSION}.joblib",
                         is_active=True,
                         is_production=True,
                     )

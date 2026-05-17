@@ -10,7 +10,7 @@ Scripts d'initialisation à exécuter **une seule fois** lors du premier déploi
 python init_data/create_multiple_models.py
 ```
 
-**Ce que ça fait :** entraîne 3 modèles scikit-learn (iris, wine, cancer) et les sauvegarde en `.pkl` dans `Models/`.
+**Ce que ça fait :** entraîne 3 modèles scikit-learn (iris, wine, cancer) et les sauvegarde en `.joblib` dans `Models/`.
 
 **Quand :** avant `init_db.py`, si le dossier `Models/` est vide ou inexistant.
 
@@ -29,7 +29,7 @@ python init_data/init_db.py
 **Ce que ça fait :**
 1. Crée les tables PostgreSQL (`users`, `predictions`, `model_metadata`)
 2. Crée l'utilisateur admin avec un token généré aléatoirement
-3. Upload tous les `.pkl` de `Models/` vers MinIO et les enregistre en base
+3. Upload tous les `.joblib` de `Models/` vers MinIO et les enregistre en base
 
 **Quand :** une seule fois après le premier `docker-compose up -d --build`.
 

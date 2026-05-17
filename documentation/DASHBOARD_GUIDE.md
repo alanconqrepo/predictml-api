@@ -53,12 +53,12 @@ Vue d'ensemble de l'état du système :
 #### Détails
 - Tableau de toutes les versions avec accuracy, F1, statut (production/actif/déprécié)
 - Bouton **Passer en production** : sélectionnez la version, confirmez
-- Télécharger le fichier `.pkl` directement depuis MinIO
+- Télécharger le fichier `.joblib` directement depuis MinIO
 - Lien vers le run MLflow associé
 
 #### Uploader un modèle
-Formulaire multipart pour uploader un `.pkl` :
-- Fichier `.pkl` (obligatoire)
+Formulaire multipart pour uploader un `.joblib` :
+- Fichier `.joblib` (obligatoire)
 - `train.py` (optionnel — permet le ré-entraînement)
 - Métadonnées : name, version, description, algorithm, accuracy, f1_score, features_count, classes
 

@@ -80,7 +80,7 @@ asyncio.run(_setup())
 _r_mon = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-    files={"file": ("m.pkl", io.BytesIO(_make_pkl()), "application/octet-stream")},
+    files={"file": ("m.joblib", io.BytesIO(_make_pkl()), "application/octet-stream")},
     data={"name": MON_MODEL, "version": "1.0.0", "accuracy": "0.95"},
 )
 assert _r_mon.status_code == 201, _r_mon.text
@@ -197,7 +197,7 @@ class TestMonitoringAlertingE2E:
         r_create = client.post(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-            files={"file": ("m.pkl", io.BytesIO(_make_pkl()), "application/octet-stream")},
+            files={"file": ("m.joblib", io.BytesIO(_make_pkl()), "application/octet-stream")},
             data={"name": second_model, "version": "1.0.0"},
         )
         assert r_create.status_code == 201

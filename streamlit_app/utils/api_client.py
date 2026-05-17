@@ -146,7 +146,7 @@ class APIClient:
         train_file_bytes: Optional[bytes] = None,
         train_filename: Optional[str] = None,
     ) -> dict:
-        """Upload un modèle .pkl avec ses métadonnées (multipart/form-data)."""
+        """Upload un modèle .joblib avec ses métadonnées (multipart/form-data)."""
         import json
 
         data: dict = {"name": name, "version": version}

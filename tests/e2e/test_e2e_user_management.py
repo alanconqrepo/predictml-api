@@ -61,7 +61,7 @@ asyncio.run(_setup())
 _r_model = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-    files={"file": ("m.pkl", io.BytesIO(_make_pkl()), "application/octet-stream")},
+    files={"file": ("m.joblib", io.BytesIO(_make_pkl()), "application/octet-stream")},
     data={"name": UM_MODEL, "version": "1.0.0"},
 )
 assert _r_model.status_code == 201, _r_model.text

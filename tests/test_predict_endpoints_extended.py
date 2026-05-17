@@ -98,7 +98,7 @@ async def _setup():
                 name=EXT_MODEL,
                 version=MODEL_VERSION,
                 minio_bucket="models",
-                minio_object_key=f"{EXT_MODEL}/v{MODEL_VERSION}.pkl",
+                minio_object_key=f"{EXT_MODEL}/v{MODEL_VERSION}.joblib",
                 is_active=True,
                 is_production=True,
             )

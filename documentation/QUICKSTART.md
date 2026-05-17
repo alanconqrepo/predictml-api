@@ -41,7 +41,7 @@ docker-compose -p predictml-api up -d --build
 > **Note :** L'utilisateur admin est créé automatiquement au démarrage si `ADMIN_TOKEN` est défini
 > dans `.env`. Aucune commande supplémentaire n'est requise pour l'initialisation de base.
 >
-> Si vous souhaitez uploader des modèles `.pkl` locaux depuis le dossier `Models/`, lancez
+> Si vous souhaitez uploader des modèles `.joblib` locaux depuis le dossier `Models/`, lancez
 > manuellement : `docker-compose -p predictml-api exec api python init_data/init_db.py`
 
 ---
@@ -78,7 +78,7 @@ curl http://localhost/models
 
 ```python
 # train_iris.py
-import pickle
+import joblib
 from sklearn.datasets import load_iris
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -100,16 +100,15 @@ f1 = f1_score(y_test, y_pred, average="weighted")
 print(f"Accuracy: {acc:.4f}, F1: {f1:.4f}")
 
 # Sauvegarder
-with open("iris_model.pkl", "wb") as f:
-    pickle.dump(model, f)
-print("Modèle sauvegardé : iris_model.pkl")
+joblib.dump(model, "iris_model.joblib")
+print("Modèle sauvegardé : iris_model.joblib")
 ```
 
 ```bash
 pip install scikit-learn
 python train_iris.py
 # Accuracy: 1.0000, F1: 1.0000
-# Modèle sauvegardé : iris_model.pkl
+# Modèle sauvegardé : iris_model.joblib
 ```
 
 ### Étape 2 : Uploader le modèle via l'API
@@ -122,11 +121,11 @@ BASE_URL = "http://localhost:8000"
 TOKEN = "<ADMIN_TOKEN>"
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 
-with open("iris_model.pkl", "rb") as f:
+with open("iris_model.joblib", "rb") as f:
     response = requests.post(
         f"{BASE_URL}/models",
         headers=HEADERS,
-        files={"file": ("iris_model.pkl", f, "application/octet-stream")},
+        files={"file": ("iris_model.joblib", f, "application/octet-stream")},
         data={
             "name": "iris_model",
             "version": "1.0.0",

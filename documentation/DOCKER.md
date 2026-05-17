@@ -80,7 +80,7 @@ Client ─── port 80 ──► │ nginx (reverse proxy, least_conn)        
 | `redis-master` | Redis master — cache modèles (DB 0) + rate limiting (DB 1) |
 | `redis-replica-1/2` | Redis réplicas — haute disponibilité |
 | `redis-sentinel-1/2/3` | Sentinel — basculement automatique < 10 s (quorum : 2) |
-| `minio` | Stockage objets S3-compatible (modèles .pkl, scripts train.py) |
+| `minio` | Stockage objets S3-compatible (modèles .joblib, scripts train.py) |
 | `mlflow` | Experiment tracking (métriques, artifacts) |
 | `grafana` | Stack LGTM — Prometheus + Loki + Tempo + Grafana |
 | `streamlit` | Dashboard admin multipage |
@@ -300,4 +300,4 @@ docker exec -it predictml-redis-master redis-cli -a "$REDIS_PASSWORD" XLEN predi
 | `WEEKLY_REPORT_ENABLED` | `false` | Non | Activer le rapport hebdomadaire |
 | `PERFORMANCE_DRIFT_ALERT_THRESHOLD` | `0.10` | Non | Seuil de chute d'accuracy déclenchant une alerte |
 | `ERROR_RATE_ALERT_THRESHOLD` | `0.10` | Non | Taux d'erreur déclenchant une alerte |
-| `MAX_MODEL_SIZE_MB` | `500` | Non | Taille max d'upload d'un fichier `.pkl` |
+| `MAX_MODEL_SIZE_MB` | `500` | Non | Taille max d'upload d'un fichier `.joblib` |

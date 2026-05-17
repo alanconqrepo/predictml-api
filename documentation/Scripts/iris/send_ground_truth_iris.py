@@ -1,63 +1,53 @@
 """
-send_ground_truth_iris.py — Envoi des résultats observés (ground truth) via l'API PredictML
-============================================================================================
+send_ground_truth_iris.py — Vérité terrain Iris avec dégradation temporelle
+============================================================================
 
-Ce script récupère les prédictions existantes en base (GET /predictions) et envoie
-les labels réels correspondants (POST /observed-results) en simulant un taux d'erreur
-réaliste :
-  - 80 % des cas : observed_result = valeur prédite  (prédiction correcte)
-  - 20 % des cas : observed_result = autre classe     (erreur de prédiction)
+Charge iris_predictions_log.json (produit par send_predictions_iris.py) et
+calcule la vraie classe selon les règles de chaque phase, puis envoie les
+observed_results via POST /observed-results.
+
+Règles de vérité terrain :
+  Phase 1-2 : true_class = classe d'échantillonnage originale
+  Phase 3   : si petal_length > 5.0 ET petal_width > 1.7
+              → true_class = 2 (virginica) — nouvelle règle déterministe
+              Simule un changement biologique : grandes fleurs = virginica,
+              même si le modèle (entraîné avant) prédit versicolor.
 
 Usage :
   API_URL=http://localhost:8000 API_TOKEN=<token> python send_ground_truth_iris.py
 
 Variables d'environnement :
-  API_URL        URL de l'API           (défaut : http://localhost:8000)
-  API_TOKEN      Token Bearer — requis
-  MODEL_NAME     Nom du modèle cible    (défaut : iris-classifier)
-  DAYS_BACK      Fenêtre de recherche   (défaut : 30 jours)
-  ERROR_RATE     Taux d'erreur simulé   (défaut : 0.20)
-
-Prérequis Python :
-  pip install requests
+  API_URL    URL de l'API  (défaut : http://localhost:80)
+  API_TOKEN  Token Bearer — requis
+  MODEL_NAME Nom du modèle (défaut : iris-classifier)
 """
 
+import json
 import os
-import random
 import sys
-from datetime import datetime, timedelta, timezone
 
 import requests
 from dotenv import find_dotenv, load_dotenv
 
-# Force UTF-8 sur Windows (terminal cp1252 ne supporte pas les emojis)
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 load_dotenv(find_dotenv())
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# ── Configuration ──────────────────────────────────────────────────────────────
 
-API_URL   = os.environ.get("API_URL",   "http://localhost:80")
-API_TOKEN = os.environ.get("API_TOKEN", os.environ.get("ADMIN_TOKEN", ""))
+API_URL    = os.environ.get("API_URL",    "http://localhost:80")
+API_TOKEN  = os.environ.get("API_TOKEN",  os.environ.get("ADMIN_TOKEN", ""))
+MODEL_NAME = os.environ.get("MODEL_NAME", "iris-classifier")
 
-MODEL_NAME  = os.environ.get("MODEL_NAME", "iris-classifier")
-DAYS_BACK   = int(os.environ.get("DAYS_BACK",   "30"))
-ERROR_RATE  = float(os.environ.get("ERROR_RATE", "0.20"))
+HEADERS    = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
+LOG_FILE   = os.path.join(os.path.dirname(__file__), "iris_predictions_log.json")
+BATCH_SIZE = 50
 
-HEADERS = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
-NOW     = datetime.now(timezone.utc)
-NOW_ISO = NOW.strftime("%Y-%m-%dT%H:%M:%S")
-
-# Classes connues pour iris (index entier ou label string)
-IRIS_INT_CLASSES    = [0, 1, 2]
-IRIS_STRING_CLASSES = ["setosa", "versicolor", "virginica"]
-
-# ── Validation ────────────────────────────────────────────────────────────────
+# ── Validation ─────────────────────────────────────────────────────────────────
 
 if not API_TOKEN:
     print("❌  API_TOKEN non défini.")
-    print("    Lancez : API_TOKEN=<votre_token> python send_ground_truth_iris.py")
     sys.exit(1)
 
 try:
@@ -68,154 +58,98 @@ except Exception as e:
     print(f"❌  API inaccessible ({API_URL}) : {e}")
     sys.exit(1)
 
-# ── 1. Récupération des prédictions existantes ────────────────────────────────
-
-print("=" * 62)
-print("  ÉTAPE 1 — Récupération des prédictions (GET /predictions)")
-print("=" * 62)
-
-start_dt = (NOW - timedelta(days=DAYS_BACK)).strftime("%Y-%m-%dT%H:%M:%S")
-end_dt   = NOW.strftime("%Y-%m-%dT%H:%M:%S")
-
-all_predictions = []
-cursor = None
-
-while True:
-    params = {
-        "name":  MODEL_NAME,
-        "start": start_dt,
-        "end":   end_dt,
-        "limit": 200,
-    }
-    if cursor:
-        params["cursor"] = cursor
-
-    r = requests.get(f"{API_URL}/predictions", headers=HEADERS, params=params, timeout=15)
-
-    if r.status_code != 200:
-        print(f"  ❌  Erreur {r.status_code} : {r.text[:200]}")
-        sys.exit(1)
-
-    data        = r.json()
-    page        = data.get("predictions", [])
-    next_cursor = data.get("next_cursor")
-
-    # Garder uniquement les prédictions avec id_obs et un prediction_result scalar
-    all_predictions.extend(
-        p for p in page
-        if p.get("id_obs") and isinstance(p.get("prediction_result"), (int, float, str))
-    )
-
-    if not next_cursor:
-        break
-    cursor = next_cursor
-
-print(f"\n  {len(all_predictions)} prédictions avec id_obs trouvées sur les {DAYS_BACK} derniers jours.\n")
-
-if not all_predictions:
-    print("  ⚠️   Aucune prédiction disponible. Lancez d'abord send_predictions_iris.py.")
-    sys.exit(0)
-
-# ── 2. Construction des observed results ──────────────────────────────────────
-
-print("=" * 62)
-print("  ÉTAPE 2 — Construction du ground truth (80 % correct / 20 % erreur)")
-print("=" * 62)
-
-
-def pick_wrong_value(predicted):
-    """Retourne une classe iris différente de la valeur prédite."""
-    if isinstance(predicted, bool):
-        # bool est sous-classe de int — traiter séparément
-        others = [c for c in IRIS_INT_CLASSES if c != int(predicted)]
-    elif isinstance(predicted, int):
-        others = [c for c in IRIS_INT_CLASSES if c != predicted]
-    elif isinstance(predicted, float):
-        others = [c for c in IRIS_INT_CLASSES if c != int(predicted)]
-    elif isinstance(predicted, str):
-        others = [c for c in IRIS_STRING_CLASSES if c != predicted]
-    else:
-        others = IRIS_INT_CLASSES[:]
-    return random.choice(others) if others else predicted
-
-
-random.seed(42)  # Reproductibilité
-
-# Dédupliquer par (id_obs, model_name) — garder la première occurrence
-seen: set[tuple] = set()
-unique_predictions = []
-for pred in all_predictions:
-    key = (pred["id_obs"], MODEL_NAME)
-    if key not in seen:
-        seen.add(key)
-        unique_predictions.append(pred)
-
-if len(unique_predictions) < len(all_predictions):
-    print(
-        f"  ℹ️   {len(all_predictions) - len(unique_predictions)} doublon(s) ignoré(s)"
-        f" (même id_obs présent plusieurs fois en DB).\n"
-    )
-
-ground_truth_data = []
-correct_count = 0
-error_count   = 0
-
-for pred in unique_predictions:
-    predicted    = pred["prediction_result"]
-    is_error     = random.random() < ERROR_RATE
-    observed     = pick_wrong_value(predicted) if is_error else predicted
-
-    if is_error:
-        error_count += 1
-        marker = "⚠️ "
-    else:
-        correct_count += 1
-        marker = "✅"
-
-    print(
-        f"  {marker}  {pred['id_obs']:<36}"
-        f"  prédit={str(predicted):<12}"
-        f"  observé={str(observed)}"
-    )
-
-    ground_truth_data.append({
-        "id_obs":          pred["id_obs"],
-        "model_name":      MODEL_NAME,
-        "date_time":       NOW_ISO,
-        "observed_result": observed,
-    })
-
-print(
-    f"\n  {correct_count} correctes · {error_count} erreurs"
-    f"  (taux d'erreur réel : {error_count / len(ground_truth_data):.1%})\n"
-)
-
-# ── 3. Envoi du ground truth — POST /observed-results ────────────────────────
-
-print("=" * 62)
-print("  ÉTAPE 3 — Envoi du ground truth (POST /observed-results)")
-print("=" * 62)
-
-r = requests.post(
-    f"{API_URL}/observed-results",
-    headers=HEADERS,
-    json={"data": ground_truth_data},
-    timeout=30,
-)
-
-if r.status_code == 200:
-    result   = r.json()
-    upserted = result.get("upserted", "?")
-    print(f"\n  ✅  {upserted} résultats observés enregistrés (idempotent — re-exécutable sans doublon).\n")
-else:
-    print(f"\n  ❌  Erreur {r.status_code} : {r.text[:200]}")
+if not os.path.exists(LOG_FILE):
+    print(f"❌  Log introuvable : {LOG_FILE}")
+    print("    Lancez d'abord : python send_predictions_iris.py")
     sys.exit(1)
 
-# ── 4. Vérification de la couverture ─────────────────────────────────────────
+# ── Chargement du log ──────────────────────────────────────────────────────────
 
-print("=" * 62)
-print("  ÉTAPE 4 — Couverture ground truth")
-print("=" * 62)
+with open(LOG_FILE, encoding="utf-8") as f:
+    log = json.load(f)
+
+print(f"  {len(log)} entrées chargées depuis {LOG_FILE}\n")
+
+# ── Règle de vérité terrain ────────────────────────────────────────────────────
+
+
+def compute_true_class(entry: dict) -> int:
+    """Retourne la vraie classe selon la phase et les features."""
+    if entry["phase"] < 3:
+        return entry["true_class"]
+
+    # Phase 3 : nouvelle règle déterministe
+    petal_len = entry["features"].get("petal length (cm)", 0.0)
+    petal_wid = entry["features"].get("petal width (cm)", 0.0)
+    if petal_len > 5.0 and petal_wid > 1.7:
+        return 2  # virginica — nouvelle règle
+    return entry["true_class"]
+
+
+# ── Construction des observed results ─────────────────────────────────────────
+
+print("=" * 68)
+print("  Calcul de la vérité terrain par phase")
+print("=" * 68)
+
+observed_data = []
+phase_stats   = {p: {"total": 0, "overridden": 0} for p in [1, 2, 3]}
+
+for entry in log:
+    true_cls = compute_true_class(entry)
+    phase    = entry["phase"]
+    phase_stats[phase]["total"] += 1
+    if true_cls != entry["true_class"]:
+        phase_stats[phase]["overridden"] += 1
+
+    observed_data.append({
+        "id_obs":          entry["id_obs"],
+        "model_name":      MODEL_NAME,
+        "date_time":       entry["timestamp"],
+        "observed_result": true_cls,
+    })
+
+for phase in [1, 2, 3]:
+    s = phase_stats[phase]
+    line = f"  Phase {phase} : {s['total']:4d} obs"
+    if s["overridden"]:
+        pct = s["overridden"] / s["total"] * 100
+        line += f"  ({s['overridden']} reclassifiées → virginica par nouvelle règle, {pct:.0f}%)"
+    else:
+        line += "  (distribution stable)"
+    print(line)
+
+print()
+
+# ── Envoi en batches ───────────────────────────────────────────────────────────
+
+print("=" * 68)
+print("  Envoi des observed results (POST /observed-results)")
+print("=" * 68)
+
+total_upserted = 0
+for i in range(0, len(observed_data), BATCH_SIZE):
+    chunk = observed_data[i : i + BATCH_SIZE]
+    r = requests.post(
+        f"{API_URL}/observed-results",
+        headers=HEADERS,
+        json={"data": chunk},
+        timeout=30,
+    )
+    if r.status_code == 200:
+        n = r.json().get("upserted", len(chunk))
+        total_upserted += n
+        end_idx = min(i + BATCH_SIZE, len(observed_data))
+        print(f"  [{i + 1:4d} – {end_idx:4d}]  ✅  {n} upserted")
+    else:
+        print(f"  [{i + 1:4d} – ...]  ❌  Erreur {r.status_code} : {r.text[:100]}")
+
+# ── Vérification de couverture ─────────────────────────────────────────────────
+
+print()
+print("=" * 68)
+print("  Couverture ground truth (GET /observed-results/stats)")
+print("=" * 68)
 
 r = requests.get(
     f"{API_URL}/observed-results/stats",
@@ -223,22 +157,29 @@ r = requests.get(
     params={"model_name": MODEL_NAME},
     timeout=10,
 )
-
 if r.status_code == 200:
-    stats   = r.json()
-    total   = stats.get("total_predictions", "?")
-    labeled = stats.get("labeled_count",     "?")
-    rate    = stats.get("coverage_rate",     0.0)
-    print(f"\n  Modèle                        : {MODEL_NAME}")
-    print(f"  Prédictions labellisées       : {labeled} / {total}")
-    print(f"  Taux de couverture            : {rate:.1%}")
+    stats = r.json()
+    print(f"\n  Modèle      : {MODEL_NAME}")
+    print(
+        f"  Labellisées : {stats.get('labeled_count', '?')}"
+        f" / {stats.get('total_predictions', '?')}"
+    )
+    print(f"  Couverture  : {stats.get('coverage_rate', 0.0):.1%}")
 else:
     print(f"  (stats indisponibles — {r.status_code})")
 
-# ── Résumé ────────────────────────────────────────────────────────────────────
+# ── Résumé ─────────────────────────────────────────────────────────────────────
 
 print()
-print("=" * 62)
-print(f"  → Historique : {API_URL.replace(':8000', ':8501')}/Predictions")
-print(f"  → Performance réelle disponible sur la page Models")
-print("=" * 62)
+print("=" * 68)
+print(f"  Total upserted   : {total_upserted}")
+print()
+print("  Scénario de dégradation simulé :")
+print("  Phase 1 (stable) → ~93% accuracy  (population iris originale)")
+print("  Phase 2 (drift)  → ~78% accuracy  (pétales grandissants, frontières floues)")
+print("  Phase 3 (règle)  → ~62% accuracy  (nouvelle règle : grands pétales = virginica)")
+print()
+print("  Le modèle nécessite un retraining sur les données de production récentes.")
+print()
+print(f"  → Dashboard : {API_URL.replace(':8000', ':8501')}/Models")
+print("=" * 68)

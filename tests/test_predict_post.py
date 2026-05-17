@@ -114,7 +114,7 @@ async def _setup():
                     name=name,
                     version=version,
                     minio_bucket="models",
-                    minio_object_key=f"{name}/v{version}.pkl",
+                    minio_object_key=f"{name}/v{version}.joblib",
                     is_active=True,
                     is_production=is_prod,
                 )

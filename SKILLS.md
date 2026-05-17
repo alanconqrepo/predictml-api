@@ -8,7 +8,7 @@ Ce document explique comment interagir avec **PredictML API** en tant qu'utilisa
 
 PredictML API est une plateforme ML-as-a-Service qui permet de :
 
-- **Déployer** des modèles scikit-learn (`.pkl`) via une API REST
+- **Déployer** des modèles scikit-learn (`.joblib`) via une API REST
 - **Servir des prédictions** en temps réel (unitaires ou batch)
 - **Versionner** les modèles avec gestion de trafic A/B et déploiement shadow
 - **Monitorer** les performances et détecter le drift des features
@@ -87,7 +87,7 @@ Authorization: Bearer <token>
 Champs obligatoires :
   name        (string)   : Nom unique du modèle
   version     (string)   : Version (ex: "1.0.0")
-  file        (fichier)  : Fichier .pkl (OU mlflow_run_id)
+  file        (fichier)  : Fichier .joblib (OU mlflow_run_id)
 
 Champs optionnels :
   description, algorithm, accuracy, f1_score
@@ -106,7 +106,7 @@ curl -X POST http://localhost:8000/models \
   -H "Authorization: Bearer <token>" \
   -F "name=churn_model" \
   -F "version=1.0.0" \
-  -F "file=@models/churn_v1.pkl" \
+  -F "file=@models/churn_v1.joblib" \
   -F "algorithm=RandomForest" \
   -F "accuracy=0.92" \
   -F "classes=[0,1]" \
@@ -136,7 +136,7 @@ curl -X POST http://localhost:8000/models \
   -H "Authorization: Bearer <token>" \
   -F "name=churn_model" \
   -F "version=1.1.0" \
-  -F "file=@models/churn_v2.pkl" \
+  -F "file=@models/churn_v2.joblib" \
   -F "accuracy=0.94"
 ```
 
@@ -400,8 +400,8 @@ Le script fourni à l'upload doit respecter les contraintes suivantes (vérifié
 | Syntaxe Python valide | Vérifié via `ast.parse()` |
 | Lire `TRAIN_START_DATE` | `os.environ["TRAIN_START_DATE"]` (format YYYY-MM-DD) |
 | Lire `TRAIN_END_DATE` | `os.environ["TRAIN_END_DATE"]` |
-| Lire `OUTPUT_MODEL_PATH` | Chemin où écrire le `.pkl` |
-| Sauvegarder le modèle | `pickle.dump`, `joblib.dump` ou `save_model` |
+| Lire `OUTPUT_MODEL_PATH` | Chemin où écrire le `.joblib` |
+| Sauvegarder le modèle | `joblib.dump` ou `save_model` |
 | Retourner les métriques | Dernière ligne JSON sur stdout : `{"accuracy": 0.94, "f1_score": 0.93}` |
 
 **Variables d'environnement injectées automatiquement :**
@@ -410,13 +410,13 @@ Le script fourni à l'upload doit respecter les contraintes suivantes (vérifié
 |---|---|
 | `TRAIN_START_DATE` | Date début (YYYY-MM-DD) |
 | `TRAIN_END_DATE` | Date fin (YYYY-MM-DD) |
-| `OUTPUT_MODEL_PATH` | Chemin absolu du `.pkl` à produire |
+| `OUTPUT_MODEL_PATH` | Chemin absolu du `.joblib` à produire |
 | `MLFLOW_TRACKING_URI` | URI MLflow (optionnel) |
 | `MODEL_NAME` | Nom du modèle source |
 
 **Squelette minimal de `train.py` :**
 ```python
-import os, pickle, json
+import os, joblib, json
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 
@@ -436,8 +436,7 @@ model.fit(X, y)
 
 accuracy = model.score(X, y)
 
-with open(OUTPUT_MODEL_PATH, "wb") as f:
-    pickle.dump(model, f)
+joblib.dump(model, OUTPUT_MODEL_PATH)
 
 # Retourner les métriques — doit être la dernière ligne JSON sur stdout
 print(json.dumps({"accuracy": accuracy, "f1_score": accuracy}))

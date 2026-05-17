@@ -56,7 +56,7 @@ def _create_model(name: str, version: str = "1.0.0") -> dict:
     resp = client.post(
         "/models",
         data={"name": name, "version": version},
-        files={"file": (f"{name}.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": (f"{name}.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         headers=_AUTH,
     )
     assert resp.status_code in (200, 201), resp.text

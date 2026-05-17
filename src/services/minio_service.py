@@ -50,7 +50,7 @@ class MinIOService:
 
         Args:
             model: Le modèle scikit-learn
-            object_name: Nom de l'objet dans MinIO (ex: "iris_model/v1.0.0.pkl")
+            object_name: Nom de l'objet dans MinIO (ex: "iris_model/v1.0.0.joblib")
             metadata: Métadonnées optionnelles
 
         Returns:

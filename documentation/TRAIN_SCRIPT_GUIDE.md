@@ -20,9 +20,9 @@ Votre script **doit** :
 1. **Lire trois variables d'environnement** (injectées automatiquement par l'API) :
    - `TRAIN_START_DATE` — date de début au format `YYYY-MM-DD`
    - `TRAIN_END_DATE` — date de fin au format `YYYY-MM-DD`
-   - `OUTPUT_MODEL_PATH` — chemin absolu où sauvegarder le `.pkl`
+   - `OUTPUT_MODEL_PATH` — chemin absolu où sauvegarder le `.joblib`
 
-2. **Sauvegarder le modèle** à `OUTPUT_MODEL_PATH` via `pickle.dump()`
+2. **Sauvegarder le modèle** à `OUTPUT_MODEL_PATH` via `joblib.dump()`
 
 3. **Afficher un JSON sur stdout** (dernière ligne JSON) avec au minimum :
    ```json
@@ -39,7 +39,7 @@ Votre script **doit** :
 |---|---|---|
 | `TRAIN_START_DATE` | Oui | Date de début de la fenêtre d'entraînement (YYYY-MM-DD) |
 | `TRAIN_END_DATE` | Oui | Date de fin de la fenêtre d'entraînement (YYYY-MM-DD) |
-| `OUTPUT_MODEL_PATH` | Oui | Chemin absolu du fichier `.pkl` à produire |
+| `OUTPUT_MODEL_PATH` | Oui | Chemin absolu du fichier `.joblib` à produire |
 | `MLFLOW_TRACKING_URI` | Non | URI du serveur MLflow (ex: `http://mlflow:5000`) |
 | `MODEL_NAME` | Non | Nom du modèle source |
 
@@ -87,7 +87,7 @@ La **dernière ligne JSON** de stdout est parsée par l'API pour mettre à jour 
 """train.py — Template minimal compatible PredictML"""
 import json
 import os
-import pickle
+import joblib
 import sys
 
 from sklearn.ensemble import RandomForestClassifier
@@ -130,8 +130,7 @@ f1  = float(f1_score(y_test, y_pred, average="weighted", zero_division=0))
 print(f"[train.py] Accuracy={acc:.4f}, F1={f1:.4f}", file=sys.stderr)
 
 # ── Sauvegarde (OBLIGATOIRE) ──────────────────────────────────────────────────
-with open(OUTPUT_MODEL_PATH, "wb") as f:
-    pickle.dump(model, f)
+joblib.dump(model, OUTPUT_MODEL_PATH)
 print(f"[train.py] Modèle sauvegardé : {OUTPUT_MODEL_PATH}", file=sys.stderr)
 
 # ── JSON stdout (DERNIÈRE LIGNE — lue par l'API) ──────────────────────────────
@@ -146,7 +145,7 @@ print(json.dumps({"accuracy": round(acc, 4), "f1_score": round(f1, 4)}))
 """train.py — Template avec MLflow + feature_stats pour drift detection"""
 import json
 import os
-import pickle
+import joblib
 import sys
 
 import numpy as np
@@ -202,8 +201,7 @@ f1  = float(f1_score(y_test, y_pred, average="weighted", zero_division=0))
 print(f"[{MODEL_NAME}] Accuracy={acc:.4f} | F1={f1:.4f}", file=sys.stderr)
 
 # ── Sauvegarde ────────────────────────────────────────────────────────────────
-with open(OUTPUT_MODEL_PATH, "wb") as f:
-    pickle.dump(model, f)
+joblib.dump(model, OUTPUT_MODEL_PATH)
 print(f"[{MODEL_NAME}] Modèle → {OUTPUT_MODEL_PATH}", file=sys.stderr)
 
 # ── Stats pour drift detection et MLflow ─────────────────────────────────────
@@ -243,7 +241,7 @@ print(json.dumps({
 """train.py — Régression avec scikit-learn"""
 import json
 import os
-import pickle
+import joblib
 import sys
 
 import numpy as np
@@ -287,8 +285,7 @@ f1  = max(0.0, 1.0 - mae / float(y_test.mean()))
 print(f"[train.py] MAE={mae:.2f}, RMSE={rmse:.2f}, R²={r2:.4f}", file=sys.stderr)
 
 # ── Sauvegarde ────────────────────────────────────────────────────────────────
-with open(OUTPUT_MODEL_PATH, "wb") as f:
-    pickle.dump(model, f)
+joblib.dump(model, OUTPUT_MODEL_PATH)
 
 # ── JSON stdout ───────────────────────────────────────────────────────────────
 print(json.dumps({
@@ -310,7 +307,7 @@ print(json.dumps({
 # curl
 curl -X POST http://localhost:8000/models \
   -H "Authorization: Bearer $TOKEN" \
-  -F "file=@mon_modele.pkl;type=application/octet-stream" \
+  -F "file=@mon_modele.joblib;type=application/octet-stream" \
   -F "train_file=@train.py" \
   -F "name=mon_modele" \
   -F "version=1.0.0" \
@@ -323,12 +320,12 @@ curl -X POST http://localhost:8000/models \
 # Python
 import requests
 
-with open("mon_modele.pkl", "rb") as pkl, open("train.py", "rb") as train:
+with open("mon_modele.joblib", "rb") as f_model, open("train.py", "rb") as train:
     r = requests.post(
         "http://localhost:8000/models",
         headers={"Authorization": f"Bearer {TOKEN}"},
         files={
-            "file":       ("mon_modele.pkl", pkl, "application/octet-stream"),
+            "file":       ("mon_modele.joblib", f_model, "application/octet-stream"),
             "train_file": ("train.py", train, "text/plain"),
         },
         data={
@@ -407,7 +404,7 @@ L'API vérifie automatiquement que votre `train.py` :
 - Référence `TRAIN_START_DATE`
 - Référence `TRAIN_END_DATE`
 - Référence `OUTPUT_MODEL_PATH`
-- Contient un appel `pickle.dump`, `joblib.dump` ou `save_model`
+- Contient un appel `joblib.dump` ou `save_model`
 
 Si la validation échoue, l'upload est rejeté avec un message d'erreur détaillé.
 
@@ -512,7 +509,7 @@ dont le module de premier niveau n'est pas dans la liste suivante :
 |---|---|
 | `os`, `sys`, `pathlib` | Variables d'env, chemins |
 | `json`, `csv`, `io` | Sérialisation, lecture de fichiers |
-| `pickle`, `joblib` | Sauvegarde du modèle |
+| `joblib` | Sauvegarde du modèle |
 | `pandas`, `numpy` | Manipulation des données |
 | `sklearn` | Entraînement et métriques |
 | `datetime`, `time` | Filtres temporels |

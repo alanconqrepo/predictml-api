@@ -86,7 +86,7 @@ class TestShadowCompareNoShadowVersion:
             headers={"Authorization": f"Bearer {USER_TOKEN}"},
             files={
                 "file": (
-                    "model.pkl",
+                    "model.joblib",
                     io.BytesIO(_make_pkl_bytes()),
                     "application/octet-stream",
                 )

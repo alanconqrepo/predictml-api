@@ -29,7 +29,7 @@ streamlit_app/      # Dashboard admin multipage
 tests/              # Pytest — tests automatisés
 smoke-tests/        # Tests manuels contre Docker live
 init_data/          # Scripts one-shot (create_multiple_models, init_db)
-Models/             # Fichiers .pkl locaux
+Models/             # Fichiers .joblib locaux
 notebooks/          # Jupyter
 alembic/            # Migrations DB
 ```
@@ -290,7 +290,7 @@ L'endpoint `GET /models/{name}/ab-compare` enrichit sa réponse avec un bloc `ab
    en précisant une plage de dates.
 4. Le script s'exécute dans un **sous-processus isolé** (timeout 600 s) avec les variables
    d'environnement injectées automatiquement.
-5. Le `.pkl` produit est uploadé dans MinIO et enregistré comme **nouvelle version** du modèle.
+5. Le `.joblib` produit est uploadé dans MinIO et enregistré comme **nouvelle version** du modèle.
 6. Si `set_production: true`, la nouvelle version est automatiquement mise en production.
 7. L'intégralité des logs `stdout`/`stderr` est retournée dans la réponse et affichée dans
    le dashboard Streamlit.
@@ -304,8 +304,8 @@ Le script doit impérativement :
 | Syntaxe Python valide | Vérifié via `ast.parse()` |
 | Référencer `TRAIN_START_DATE` | Lire `os.environ["TRAIN_START_DATE"]` |
 | Référencer `TRAIN_END_DATE` | Lire `os.environ["TRAIN_END_DATE"]` |
-| Référencer `OUTPUT_MODEL_PATH` | Chemin où sauvegarder le `.pkl` |
-| Sauvegarder le modèle | Appel à `pickle.dump`, `joblib.dump` ou `save_model` |
+| Référencer `OUTPUT_MODEL_PATH` | Chemin où sauvegarder le `.joblib` |
+| Sauvegarder le modèle | Appel à `joblib.dump` ou `save_model` |
 
 ### Variables d'environnement injectées par l'API
 
@@ -313,7 +313,7 @@ Le script doit impérativement :
 |---|---|
 | `TRAIN_START_DATE` | Date début (YYYY-MM-DD) |
 | `TRAIN_END_DATE` | Date fin (YYYY-MM-DD) |
-| `OUTPUT_MODEL_PATH` | Chemin absolu pour le `.pkl` produit |
+| `OUTPUT_MODEL_PATH` | Chemin absolu pour le `.joblib` produit |
 | `MLFLOW_TRACKING_URI` | URI MLflow (optionnel) |
 | `MODEL_NAME` | Nom du modèle source (optionnel) |
 
@@ -348,7 +348,7 @@ print(json.dumps({
 curl -X POST http://localhost:8000/models \
   -H "Authorization: Bearer <token>" \
   -F "name=mon_modele" -F "version=1.0.0" \
-  -F "file=@mon_modele.pkl" \
+  -F "file=@mon_modele.joblib" \
   -F "train_file=@init_data/example_train.py"
 ```
 

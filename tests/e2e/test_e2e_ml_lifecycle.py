@@ -141,7 +141,7 @@ _r_create = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     files={
-        "file": ("m.pkl", io.BytesIO(_make_pkl()), "application/octet-stream"),
+        "file": ("m.joblib", io.BytesIO(_make_pkl()), "application/octet-stream"),
         "train_file": (
             "train.py",
             io.BytesIO(VALID_TRAIN_SCRIPT.encode()),

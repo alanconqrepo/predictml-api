@@ -3,8 +3,8 @@ upload_wine_model.py — Entraîne et uploade un modèle Wine (Régression) via 
 ===========================================================================================
 
 Ce script tourne LOCALEMENT. Il :
-  1. Exécute train_wine.py en subprocess pour produire le .pkl
-  2. Uploade le .pkl + train_wine.py via POST /models
+  1. Exécute train_wine.py en subprocess pour produire le .joblib
+  2. Uploade le .joblib + train_wine.py via POST /models
   3. Met le modèle en production avec le tag "Example" et la baseline des features
 
 Modèle : GradientBoostingRegressor — prédit la teneur en alcool (variable continue)

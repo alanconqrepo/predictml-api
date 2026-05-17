@@ -140,7 +140,7 @@ print(model["traffic_weight"])    # 0.8
   "algorithm": "RandomForestClassifier",
   "mlflow_run_id": "abc123def456",
   "minio_bucket": "models",
-  "minio_object_key": "iris_model/v1.0.0_model.pkl",
+  "minio_object_key": "iris_model/v1.0.0_model.joblib",
   "file_size_bytes": 24576,
   "file_hash": "sha256:...",
   "accuracy": 0.97,
@@ -179,15 +179,15 @@ print(model["traffic_weight"])    # 0.8
 
 ### `POST /models` — Uploader un modèle
 
-Upload d'un fichier `.pkl` avec ses métadonnées. Utilise `multipart/form-data`.
+Upload d'un fichier `.joblib` avec ses métadonnées. Utilise `multipart/form-data`.
 
 **Auth requise** (rôle `user` ou supérieur)
 
 ```python
 import requests
 
-with open("iris_model.pkl", "rb") as f:
-    files = {"file": ("iris_model.pkl", f, "application/octet-stream")}
+with open("iris_model.joblib", "rb") as f:
+    files = {"file": ("iris_model.joblib", f, "application/octet-stream")}
     data = {
         "name": "iris_model",
         "version": "1.0.0",
@@ -213,7 +213,7 @@ with open("iris_model.pkl", "rb") as f:
 print(response.status_code)  # 201
 ```
 
-**Avec un run MLflow (sans fichier `.pkl`)**
+**Avec un run MLflow (sans fichier `.joblib`)**
 
 ```python
 data = {
@@ -227,12 +227,12 @@ response = requests.post(f"{BASE_URL}/models", headers=headers, data=data)
 **Avec un script de ré-entraînement**
 
 ```python
-with open("iris_model.pkl", "rb") as f_model, open("train.py", "rb") as f_train:
+with open("iris_model.joblib", "rb") as f_model, open("train.py", "rb") as f_train:
     response = requests.post(
         f"{BASE_URL}/models",
         headers=headers,
         files={
-            "file": ("iris_model.pkl", f_model, "application/octet-stream"),
+            "file": ("iris_model.joblib", f_model, "application/octet-stream"),
             "train_file": ("train.py", f_train, "text/x-python"),
         },
         data={"name": "iris_model", "version": "1.0.0"},
@@ -245,7 +245,7 @@ with open("iris_model.pkl", "rb") as f_model, open("train.py", "rb") as f_train:
 |---|---|---|---|
 | `name` | str | Oui | Nom unique du modèle |
 | `version` | str | Oui | Version (ex: "1.0.0") |
-| `file` | fichier `.pkl` | Si pas de MLflow | Fichier sérialisé |
+| `file` | fichier `.joblib` | Si pas de MLflow | Fichier sérialisé |
 | `train_file` | fichier `.py` | Non | Script de ré-entraînement |
 | `description` | str | Non | Description lisible |
 | `algorithm` | str | Non | Nom de l'algo |
@@ -2530,7 +2530,7 @@ else:
 | Check | Description |
 |---|---|
 | `is_production` | `is_production=True` sur au moins une version |
-| `file_accessible` | Fichier `.pkl` accessible dans MinIO |
+| `file_accessible` | Fichier `.joblib` accessible dans MinIO |
 | `baseline_computed` | `feature_baseline` calculée (nécessaire pour le drift) |
 | `no_critical_drift` | Aucun drift critique détecté dans la fenêtre récente |
 
@@ -2673,7 +2673,7 @@ print(f"Politique activée : {response.json()['auto_promote']}")
 
 ---
 
-### `GET /models/{name}/{version}/download` — Télécharger le fichier .pkl
+### `GET /models/{name}/{version}/download` — Télécharger le fichier .joblib
 
 Télécharge le fichier modèle sérialisé depuis MinIO.
 
@@ -2689,7 +2689,7 @@ response = requests.get(
 )
 response.raise_for_status()
 
-output_path = pathlib.Path("iris_model_v2.0.0.pkl")
+output_path = pathlib.Path("iris_model_v2.0.0.joblib")
 with open(output_path, "wb") as f:
     for chunk in response.iter_content(chunk_size=8192):
         f.write(chunk)
@@ -2697,7 +2697,7 @@ with open(output_path, "wb") as f:
 print(f"Modèle téléchargé : {output_path} ({output_path.stat().st_size / 1024:.1f} Ko)")
 ```
 
-La réponse est un flux binaire (`Content-Type: application/octet-stream`) avec en-tête `Content-Disposition: attachment; filename=iris_model_2.0.0.pkl`.
+La réponse est un flux binaire (`Content-Type: application/octet-stream`) avec en-tête `Content-Disposition: attachment; filename=iris_model_2.0.0.joblib`.
 
 ---
 
@@ -3136,7 +3136,7 @@ explanation = client.explain(
 print(f"Top feature: {max(explanation['shap_values'], key=lambda k: abs(explanation['shap_values'][k]))}")
 
 # Upload + mise en production
-client.upload_model("models/rf_v2.pkl", "iris_model", "2.0.0",
+client.upload_model("models/rf_v2.joblib", "iris_model", "2.0.0",
                     algorithm="RandomForestClassifier", accuracy=0.98)
 client.set_production("iris_model", "2.0.0")
 

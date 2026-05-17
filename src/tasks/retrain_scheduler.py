@@ -10,7 +10,7 @@ Chaque job :
    en environnement multi-réplicas.
 2. Télécharge le script ``train.py`` depuis MinIO.
 3. Exécute le script dans un sous-processus (timeout 600 s).
-4. Upload le ``.pkl`` produit et crée une nouvelle version en base.
+4. Upload le ``.joblib`` produit et crée une nouvelle version en base.
 5. Évalue l'auto-promotion si ``schedule.auto_promote=True``.
 6. Met à jour ``last_run_at`` et ``next_run_at`` sur la version source.
 """

@@ -5,7 +5,7 @@
 Les noms de modèles et les versions sont interpolés directement dans les chemins d'objets MinIO :
 
 ```python
-object_name = f"{name}/v{version}.pkl"
+object_name = f"{name}/v{version}.joblib"
 ```
 
 Sans validation, un attaquant peut envoyer une valeur comme `../admin_model` ou

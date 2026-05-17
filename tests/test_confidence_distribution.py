@@ -121,7 +121,7 @@ def test_confidence_distribution_no_predictions():
     client.post(
         "/models",
         data={"name": "conf_dist_empty", "version": "1.0.0"},
-        files={"file": ("m.pkl", io.BytesIO(pkl), "application/octet-stream")},
+        files={"file": ("m.joblib", io.BytesIO(pkl), "application/octet-stream")},
         headers=AUTH,
     )
     r = client.get("/models/conf_dist_empty/confidence-distribution", headers=AUTH)
@@ -136,7 +136,7 @@ def test_confidence_distribution_no_predictions():
 
 def test_confidence_distribution_basic():
     """Retourne sample_count correct et histogram non vide."""
-    import io, pickle
+    import io
     from sklearn.linear_model import LogisticRegression
     from sklearn.datasets import load_iris
 
@@ -147,7 +147,7 @@ def test_confidence_distribution_basic():
     client.post(
         "/models",
         data={"name": MODEL, "version": VERSION_A},
-        files={"file": ("m.pkl", io.BytesIO(pkl), "application/octet-stream")},
+        files={"file": ("m.joblib", io.BytesIO(pkl), "application/octet-stream")},
         headers=AUTH,
     )
 
@@ -169,7 +169,7 @@ def test_confidence_distribution_basic():
 
 def test_confidence_distribution_pct_high_confidence():
     """Toutes les prédictions > 0.9 → pct_high_confidence=1.0."""
-    import io, pickle
+    import io
     from sklearn.linear_model import LogisticRegression
     from sklearn.datasets import load_iris
 
@@ -190,7 +190,7 @@ def test_confidence_distribution_pct_high_confidence():
     client.post(
         "/models",
         data={"name": "conf_dist_high", "version": "1.0.0"},
-        files={"file": ("m.pkl", io.BytesIO(pkl), "application/octet-stream")},
+        files={"file": ("m.joblib", io.BytesIO(pkl), "application/octet-stream")},
         headers=AUTH,
     )
     r = client.get(
@@ -206,7 +206,7 @@ def test_confidence_distribution_pct_high_confidence():
 
 def test_confidence_distribution_pct_uncertain():
     """Toutes les prédictions à ~0.55 → pct_uncertain=1.0 avec seuil par défaut 0.60."""
-    import io, pickle
+    import io
     from sklearn.linear_model import LogisticRegression
     from sklearn.datasets import load_iris
 
@@ -227,7 +227,7 @@ def test_confidence_distribution_pct_uncertain():
     client.post(
         "/models",
         data={"name": "conf_dist_unc", "version": "1.0.0"},
-        files={"file": ("m.pkl", io.BytesIO(pkl), "application/octet-stream")},
+        files={"file": ("m.joblib", io.BytesIO(pkl), "application/octet-stream")},
         headers=AUTH,
     )
     r = client.get(
@@ -262,7 +262,7 @@ def test_confidence_distribution_custom_thresholds():
 
 def test_confidence_distribution_version_filter():
     """?version=X ne compte que les prédictions de cette version."""
-    import io, pickle
+    import io
     from sklearn.linear_model import LogisticRegression
     from sklearn.datasets import load_iris
 
@@ -274,7 +274,7 @@ def test_confidence_distribution_version_filter():
         client.post(
             "/models",
             data={"name": MODEL_V, "version": v},
-            files={"file": ("m.pkl", io.BytesIO(pkl), "application/octet-stream")},
+            files={"file": ("m.joblib", io.BytesIO(pkl), "application/octet-stream")},
             headers=AUTH,
         )
 
@@ -298,7 +298,7 @@ def test_confidence_distribution_version_filter():
 
 def test_confidence_distribution_days_filter():
     """Une prédiction vieille de 30 jours est exclue avec days=7."""
-    import io, pickle
+    import io
     from sklearn.linear_model import LogisticRegression
     from sklearn.datasets import load_iris
 
@@ -309,7 +309,7 @@ def test_confidence_distribution_days_filter():
     client.post(
         "/models",
         data={"name": MODEL_OLD, "version": VERSION_A},
-        files={"file": ("m.pkl", io.BytesIO(pkl), "application/octet-stream")},
+        files={"file": ("m.joblib", io.BytesIO(pkl), "application/octet-stream")},
         headers=AUTH,
     )
 
@@ -331,7 +331,7 @@ def test_confidence_distribution_days_filter():
 
 def test_confidence_distribution_dict_probabilities():
     """Probabilités stockées en dict → max extrait correctement."""
-    import io, pickle
+    import io
     from sklearn.linear_model import LogisticRegression
     from sklearn.datasets import load_iris
 
@@ -342,7 +342,7 @@ def test_confidence_distribution_dict_probabilities():
     client.post(
         "/models",
         data={"name": MODEL_DICT, "version": VERSION_A},
-        files={"file": ("m.pkl", io.BytesIO(pkl), "application/octet-stream")},
+        files={"file": ("m.joblib", io.BytesIO(pkl), "application/octet-stream")},
         headers=AUTH,
     )
 

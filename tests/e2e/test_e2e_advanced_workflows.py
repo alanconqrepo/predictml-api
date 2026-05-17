@@ -102,7 +102,7 @@ asyncio.run(_setup())
 _r_batch = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-    files={"file": ("m.pkl", io.BytesIO(_make_lr_pkl()), "application/octet-stream")},
+    files={"file": ("m.joblib", io.BytesIO(_make_lr_pkl()), "application/octet-stream")},
     data={"name": ADV_BATCH_MODEL, "version": "1.0.0", "accuracy": "0.95"},
 )
 assert _r_batch.status_code == 201, _r_batch.text
@@ -111,7 +111,7 @@ _inject_cache(ADV_BATCH_MODEL, "1.0.0", use_rf=False)
 _r_explain = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-    files={"file": ("m.pkl", io.BytesIO(_make_rf_pkl()), "application/octet-stream")},
+    files={"file": ("m.joblib", io.BytesIO(_make_rf_pkl()), "application/octet-stream")},
     data={"name": ADV_EXPLAIN_MODEL, "version": "1.0.0", "accuracy": "0.97"},
 )
 assert _r_explain.status_code == 201, _r_explain.text
@@ -121,7 +121,7 @@ _inject_cache(ADV_EXPLAIN_MODEL, "1.0.0", use_rf=True)
 _r_ab_v1 = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-    files={"file": ("m.pkl", io.BytesIO(_make_lr_pkl()), "application/octet-stream")},
+    files={"file": ("m.joblib", io.BytesIO(_make_lr_pkl()), "application/octet-stream")},
     data={"name": ADV_AB_MODEL, "version": "1.0.0"},
 )
 assert _r_ab_v1.status_code == 201, _r_ab_v1.text
@@ -137,7 +137,7 @@ _inject_cache(ADV_AB_MODEL, "1.0.0")
 _r_ab_v2 = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-    files={"file": ("m.pkl", io.BytesIO(_make_lr_pkl()), "application/octet-stream")},
+    files={"file": ("m.joblib", io.BytesIO(_make_lr_pkl()), "application/octet-stream")},
     data={"name": ADV_AB_MODEL, "version": "2.0.0"},
 )
 assert _r_ab_v2.status_code == 201, _r_ab_v2.text

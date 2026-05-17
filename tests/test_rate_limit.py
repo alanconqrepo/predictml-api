@@ -70,7 +70,7 @@ async def _setup():
                 name=RL_MODEL,
                 version=RL_MODEL_VERSION,
                 minio_bucket="models",
-                minio_object_key=f"{RL_MODEL}/v{RL_MODEL_VERSION}.pkl",
+                minio_object_key=f"{RL_MODEL}/v{RL_MODEL_VERSION}.joblib",
                 is_active=True,
                 is_production=True,
             )

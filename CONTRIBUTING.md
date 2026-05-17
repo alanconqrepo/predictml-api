@@ -118,7 +118,7 @@ Avant de toucher au code lié aux domaines suivants, lire les sections correspon
 
 | Fonctionnalité | Fichiers clés |
 |---|---|
-| **HMAC-SHA256 modèles** | Signature à l'upload + vérification avant `pickle.loads()` · `SECRET_KEY` dans `src/core/config.py` |
+| **HMAC-SHA256 modèles** | Signature à l'upload + vérification avant `joblib.load()` · `SECRET_KEY` dans `src/core/config.py` |
 | **Sandbox retrain scripts** | Whitelist d'imports + limites ressources · `src/tasks/retrain_scheduler.py` · voir `documentation/TRAIN_SCRIPT_GUIDE.md` |
 | **Rate limiting per-IP** | Middleware `slowapi` · `src/core/rate_limit.py` · HTTP 429 si dépassé |
 | **Token expiration** | `TOKEN_LIFETIME_DAYS` dans `src/core/config.py` · vérification dans `src/core/security.py` |

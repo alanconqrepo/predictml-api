@@ -217,6 +217,7 @@ class DBService:
         id_obs: Optional[str] = None,
         is_shadow: bool = False,
         max_confidence: Optional[float] = None,
+        timestamp: Optional[datetime] = None,
     ) -> Prediction:
         """Enregistre une prédiction"""
         prediction = Prediction(
@@ -234,6 +235,7 @@ class DBService:
             error_message=error_message,
             is_shadow=is_shadow,
             max_confidence=max_confidence,
+            **({"timestamp": timestamp} if timestamp is not None else {}),
         )
         db.add(prediction)
         await db.commit()

@@ -92,7 +92,7 @@ _minio_mock.upload_file_bytes.return_value = {
 
 
 async def _mock_exec_success(*args, **kwargs):
-    """Subprocess mock → crée un vrai pickle et retourne JSON metrics."""
+    """Subprocess mock → crée un vrai modèle joblib et retourne JSON metrics."""
     env = kwargs.get("env", {})
     output_path = env.get("OUTPUT_MODEL_PATH", "")
     if output_path:
@@ -118,7 +118,7 @@ _r = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     files={
-        "file": ("m.pkl", io.BytesIO(_make_pkl()), "application/octet-stream"),
+        "file": ("m.joblib", io.BytesIO(_make_pkl()), "application/octet-stream"),
         "train_file": ("train.py", io.BytesIO(VALID_TRAIN_SCRIPT.encode()), "text/x-python"),
     },
     data={

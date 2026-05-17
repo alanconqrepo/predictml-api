@@ -13,7 +13,7 @@
 |---|---|
 | Requêtes API concurrentes | ~10–20 (limité par pool_size=5 DB) |
 | Prédictions/jour | < 500 000 (au-delà les endpoints stats deviennent lents) |
-| Modèles en prod | < 50 (selon taille des .pkl en RAM Redis) |
+| Modèles en prod | < 50 (selon taille des .joblib en RAM Redis) |
 | Utilisateurs actifs | < 200 |
 | Taille d'équipe | Startup / PME < 50 personnes |
 
@@ -218,7 +218,7 @@ upstream api_backend {
 
 server {
     listen 80;
-    client_max_body_size 512M;     # pour l'upload de modèles .pkl
+    client_max_body_size 512M;     # pour l'upload de modèles .joblib
     proxy_read_timeout 120s;       # pour les endpoints retrain lents
 
     location / {

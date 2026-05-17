@@ -188,7 +188,7 @@ CREATE INDEX ix_model_metadata_user_id_creator ON model_metadata (user_id_creato
 | `version` | VARCHAR(50) | Version (ex: "1.0", "2024-01") |
 | `minio_bucket` | VARCHAR(100) | Bucket MinIO contenant le fichier |
 | `minio_object_key` | VARCHAR(255) | Chemin du fichier dans MinIO |
-| `file_size_bytes` | INTEGER | Taille du fichier `.pkl` en octets |
+| `file_size_bytes` | INTEGER | Taille du fichier `.joblib` en octets |
 | `file_hash` | VARCHAR(64) | Hash SHA256 du fichier |
 | `description` | TEXT | Description lisible |
 | `algorithm` | VARCHAR(100) | Classe de l'algorithme |

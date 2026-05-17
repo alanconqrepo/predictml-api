@@ -10,7 +10,7 @@ CONTRAT D'INTERFACE (variables d'environnement injectées automatiquement par l'
 -------------------------------------------------------------------------------------
   TRAIN_START_DATE   : date de début  — format YYYY-MM-DD
   TRAIN_END_DATE     : date de fin    — format YYYY-MM-DD
-  OUTPUT_MODEL_PATH  : chemin absolu où sauvegarder le .pkl produit
+  OUTPUT_MODEL_PATH  : chemin absolu où sauvegarder le .joblib produit
 
 Variables optionnelles :
   MLFLOW_TRACKING_URI      : URI du serveur MLflow (ex: http://localhost:5000)

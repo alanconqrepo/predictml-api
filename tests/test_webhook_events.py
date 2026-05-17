@@ -67,7 +67,7 @@ def _create_model(name: str, version: str = "1.0.0") -> dict:
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
         files={
-            "file": ("model.pkl", io.BytesIO(_make_pkl_bytes()), "application/octet-stream"),
+            "file": ("model.joblib", io.BytesIO(_make_pkl_bytes()), "application/octet-stream"),
             "train_file": ("train.py", io.BytesIO(VALID_TRAIN_SCRIPT.encode()), "text/x-python"),
         },
         data={"name": name, "version": version},

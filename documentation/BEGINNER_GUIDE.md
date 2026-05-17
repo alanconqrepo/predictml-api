@@ -12,7 +12,7 @@ Le problème qu'elle résout : vous avez entraîné un modèle scikit-learn sur 
 
 **Ce que vous faites :**
 1. Entraîner un modèle localement (`model.fit(...)`)
-2. Le sauvegarder en `.pkl` (`pickle.dump(...)`)
+2. Le sauvegarder en `.joblib` (`joblib.dump(...)`)
 3. L'uploader via l'API
 4. Faire des prédictions via HTTP depuis n'importe quelle application
 
@@ -30,7 +30,7 @@ Le problème qu'elle résout : vous avez entraîné un modèle scikit-learn sur 
 ## Architecture expliquée simplement
 
 ```
-Votre script Python  ──upload .pkl──▶  PredictML API  ──stocke──▶  MinIO
+Votre script Python  ──upload .joblib──▶  PredictML API  ──stocke──▶  MinIO
                                             │
                                             │  ──log──▶  PostgreSQL
                                             │
@@ -40,7 +40,7 @@ Votre application    ──POST /predict──▶  API  ──retourne──▶ 
 L'API tourne dans Docker avec 7 services :
 - **FastAPI** (port 8000) — l'API principale
 - **PostgreSQL** (port 5433) — stocke les prédictions et métadonnées
-- **MinIO** (port 9000) — stocke les fichiers `.pkl`
+- **MinIO** (port 9000) — stocke les fichiers `.joblib`
 - **Redis** (port 6379) — cache les modèles en mémoire pour des prédictions rapides
 - **MLflow** (port 5000) — experiment tracking optionnel
 - **Streamlit** (port 8501) — dashboard d'administration
@@ -87,7 +87,7 @@ pip install requests scikit-learn pandas numpy shap
 
 ```python
 # 1_train.py
-import pickle
+import joblib
 import pandas as pd
 from sklearn.datasets import load_iris
 from sklearn.ensemble import RandomForestClassifier
@@ -113,16 +113,15 @@ print(f"Accuracy : {accuracy_score(y_test, y_pred):.4f}")
 print(f"F1 Score : {f1_score(y_test, y_pred, average='weighted'):.4f}")
 
 # Sauvegarder
-with open("iris_model.pkl", "wb") as f:
-    pickle.dump(model, f)
-print("Modèle sauvegardé dans iris_model.pkl")
+joblib.dump(model, "iris_model.joblib")
+print("Modèle sauvegardé dans iris_model.joblib")
 ```
 
 ```bash
 python 1_train.py
 # Accuracy : 1.0000
 # F1 Score : 1.0000
-# Modèle sauvegardé dans iris_model.pkl
+# Modèle sauvegardé dans iris_model.joblib
 ```
 
 ### Étape 2 : Uploader le modèle
@@ -135,11 +134,11 @@ BASE_URL = "http://localhost:8000"
 TOKEN = "<ADMIN_TOKEN>"
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 
-with open("iris_model.pkl", "rb") as f:
+with open("iris_model.joblib", "rb") as f:
     response = requests.post(
         f"{BASE_URL}/models",
         headers=HEADERS,
-        files={"file": ("iris_model.pkl", f, "application/octet-stream")},
+        files={"file": ("iris_model.joblib", f, "application/octet-stream")},
         data={
             "name": "iris_model",
             "version": "1.0.0",
@@ -385,9 +384,9 @@ BASE_URL = "http://localhost:8000"
 HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
 # 1. Uploader la nouvelle version
-with open("iris_model_v2.pkl", "rb") as f:
+with open("iris_model_v2.joblib", "rb") as f:
     requests.post(f"{BASE_URL}/models", headers=HEADERS,
-                  files={"file": ("iris_model_v2.pkl", f, "application/octet-stream")},
+                  files={"file": ("iris_model_v2.joblib", f, "application/octet-stream")},
                   data={"name": "iris_model", "version": "2.0.0"})
 
 # 2. Configurer l'A/B test (20% du trafic vers v2)
@@ -596,7 +595,7 @@ Ouvrez **http://localhost:8501** et connectez-vous avec le token admin.
 |---|---|
 | Accueil | Vue d'ensemble, liens vers les services |
 | Utilisateurs | Créer/désactiver des comptes, renouveler les tokens, analytics d'utilisation par modèle |
-| Modèles | Détails, passer en production, What-if Explorer (sliders → prédiction live), confusion matrix, importance des features SHAP, validation de schéma, téléchargement .pkl, seuil de confiance, lien MLflow |
+| Modèles | Détails, passer en production, What-if Explorer (sliders → prédiction live), confusion matrix, importance des features SHAP, validation de schéma, téléchargement .joblib, seuil de confiance, lien MLflow |
 | Prédictions | Historique filtrable par modèle, date, version ; soumission inline de résultat observé ; export CSV/JSONL/Parquet ; purge RGPD |
 | Stats | Graphiques volume, temps de réponse, distribution ; leaderboard ; scatter plot accuracy vs latency P95 |
 | Code Example | Exemples Python, curl/bash et JavaScript générés dynamiquement |

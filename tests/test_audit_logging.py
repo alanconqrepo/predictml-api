@@ -67,7 +67,7 @@ def _create_model(name: str, version: str = "1.0.0") -> dict:
     r = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+        files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
         data={"name": name, "version": version},
     )
     assert r.status_code == 201, r.text
@@ -102,7 +102,7 @@ def test_audit_model_upload_not_called_on_failure():
         r = client.post(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-            files={"file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
+            files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
             data={"name": name, "version": "1.0.0"},
         )
     assert r.status_code == 409
@@ -278,7 +278,7 @@ def test_audit_retrain_trigger():
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
         files={
-            "file": ("model.pkl", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
+            "file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
             "train_file": ("train.py", io.BytesIO(VALID_TRAIN_SCRIPT.encode()), "text/x-python"),
         },
         data={"name": name, "version": "1.0.0"},

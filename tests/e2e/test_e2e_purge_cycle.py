@@ -87,7 +87,7 @@ for _name in [PURGE_E2E_MODEL_A, PURGE_E2E_MODEL_B]:
     _r = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-        files={"file": ("m.pkl", io.BytesIO(_make_pkl()), "application/octet-stream")},
+        files={"file": ("m.joblib", io.BytesIO(_make_pkl()), "application/octet-stream")},
         data={"name": _name, "version": MODEL_VERSION},
     )
     assert _r.status_code == 201, _r.text

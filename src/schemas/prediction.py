@@ -49,7 +49,7 @@ class PredictionInput(BaseModel):
 
     model_name: str = Field(
         ...,
-        description="Nom du modèle à utiliser (sans extension .pkl)",
+        description="Nom du modèle à utiliser (sans extension .joblib)",
         json_schema_extra={"example": "iris_model"},
     )
     model_version: Optional[str] = Field(
@@ -65,6 +65,15 @@ class PredictionInput(BaseModel):
         None,
         description="Identifiant de l'observation (stocké dans la table predictions)",
         json_schema_extra={"example": "obs-001"},
+    )
+    timestamp: Optional[datetime] = Field(
+        None,
+        description=(
+            "Horodatage forcé de la prédiction (UTC). "
+            "Si absent, le serveur utilise l'heure courante. "
+            "Permet d'injecter des prédictions historiques ou futures."
+        ),
+        json_schema_extra={"example": "2025-01-15T08:32:00"},
     )
     features: Dict[str, Union[float, int, str]] = Field(
         ...,
@@ -164,12 +173,19 @@ class BatchPredictionItem(BaseModel):
         ..., description="Features sous forme de dict nommé"
     )
     id_obs: Optional[str] = Field(None, description="Identifiant de l'observation (optionnel)")
+    timestamp: Optional[datetime] = Field(
+        None,
+        description=(
+            "Horodatage forcé pour cet item (UTC). "
+            "Si absent, le serveur utilise l'heure courante."
+        ),
+    )
 
 
 class BatchPredictionInput(BaseModel):
     """Données d'entrée pour une prédiction batch"""
 
-    model_name: str = Field(..., description="Nom du modèle à utiliser (sans extension .pkl)")
+    model_name: str = Field(..., description="Nom du modèle à utiliser (sans extension .joblib)")
     model_version: Optional[str] = Field(
         None, description="Version du modèle (ex: '1.0.0'). Si absent, utilise is_production=True."
     )
@@ -240,7 +256,7 @@ class ExplainInput(BaseModel):
 
     model_name: str = Field(
         ...,
-        description="Nom du modèle à utiliser (sans extension .pkl)",
+        description="Nom du modèle à utiliser (sans extension .joblib)",
         json_schema_extra={"example": "iris_model"},
     )
     model_version: Optional[str] = Field(
