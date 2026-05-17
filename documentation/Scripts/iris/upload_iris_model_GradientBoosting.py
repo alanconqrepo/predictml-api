@@ -26,6 +26,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import tempfile
 
 import requests
@@ -177,6 +178,7 @@ try:
         if hyperparameters:
             data["hyperparameters"] = json.dumps(hyperparameters)
 
+        _upload_t0 = time.perf_counter()
         response = requests.post(
             f"{API_URL}/models",
             headers=HEADERS,
@@ -185,8 +187,10 @@ try:
                 "train_file": ("train_iris_GradientBoosting.py", train_fh, "text/plain"),
             },
             data=data,
-            timeout=30,
+            timeout=180,
         )
+        _upload_elapsed = time.perf_counter() - _upload_t0
+        print(f"  [TIMING] POST /models répondu en {_upload_elapsed:.2f}s — status {response.status_code}")
 finally:
     os.unlink(tmp_pkl.name)
 
@@ -197,12 +201,16 @@ if response.status_code == 409:
     patch_payload = {"is_production": True, "deployment_mode": "ab_test", "traffic_weight": 0.5}
     if hyperparameters:
         patch_payload["hyperparameters"] = hyperparameters
-    patch_resp = requests.patch(
-        f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
-        headers={**HEADERS, "Content-Type": "application/json"},
-        json=patch_payload,
-        timeout=10,
-    )
+    try:
+        patch_resp = requests.patch(
+            f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
+            headers={**HEADERS, "Content-Type": "application/json"},
+            json=patch_payload,
+            timeout=30,
+        )
+    except Exception as _e:
+        print(f"    [WARN] PATCH existe-déjà échoué : {_e} — continuons")
+        sys.exit(0)
     if patch_resp.status_code == 200:
         print(f"✅  Mode ab_test et hyperparamètres mis à jour.")
     else:
@@ -240,7 +248,7 @@ patch = requests.patch(
     f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
     headers={**HEADERS, "Content-Type": "application/json"},
     json=patch_body,
-    timeout=10,
+    timeout=30,
 )
 
 if patch.status_code == 200:

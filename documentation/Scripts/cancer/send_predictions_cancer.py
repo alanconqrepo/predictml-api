@@ -6,12 +6,16 @@ Simule une dégradation progressive du modèle cancer-classifier (classification
 binaire : 0=malignant, 1=benign) sur 45 jours :
 
   Phase 1 (J-45 → J-31, 15 jours) : distribution stable, ~94% accuracy
-  Phase 2 (J-30 → J-16, 15 jours) : drift de calibration du scanner —
-    radius, area et perimeter augmentent systématiquement, les cas bénins
-    ressemblent de plus en plus à des cas malins → ~82% accuracy
-  Phase 3 (J-15 → J-1,  15 jours) : nouveau protocole clinique —
-    toute cellule avec worst_concavity > 0.30 ET worst_area > 1200 est
-    reclassifiée maligne, même si le modèle prédit benign → ~70% accuracy
+
+  Phase 2 (J-30 → J-16, 15 jours) : dérive de calibration du scanner —
+    le scanner sur-estime radius, area et perimeter des tissus BÉNINS uniquement.
+    Les cas bénins glissent dans la zone maligne du modèle → ~60% accuracy.
+    (Le drift s'accumule : +30 mm²/j sur worst_area, +0.25/j sur worst_radius)
+
+  Phase 3 (J-15 → J-1,  15 jours) : nouveau protocole de détection précoce —
+    certains cas MALINS "doux" (mean_radius < 18 ET mean_concavity < 0.15)
+    sont désormais reclassifiés BÉNINS par les nouvelles guidelines. Le modèle
+    (entraîné sur l'ancien protocole) les prédit toujours malins → ~38% accuracy.
 
 Produit cancer_predictions_log.json — utilisé par send_ground_truth_cancer.py.
 
@@ -135,16 +139,18 @@ PHASE_PROPORTIONS = {
 }
 
 # Drift cumulatif par jour, actif à partir du jour 16 (début phase 2)
-# Simule une dérive de calibration du scanner : mesures systématiquement plus grandes
+# Appliqué UNIQUEMENT aux cas BÉNINS (cls==1) — simule une dérive de calibration
+# du scanner qui sur-estime les mesures des tissus bénins, les faisant glisser
+# progressivement dans la zone de décision maligne du modèle.
 DRIFT_PER_DAY = {
-    "mean radius":       0.05,
-    "mean perimeter":    0.30,
-    "mean area":         6.00,
-    "worst radius":      0.05,
-    "worst perimeter":   0.30,
-    "worst area":        6.00,
-    "worst concavity":   0.003,
-    "mean concavity":    0.002,
+    "mean radius":       0.20,   # +3 mm sur 15j → bénins ressemblent à malins
+    "mean perimeter":    1.30,   # +19.5 mm sur 15j
+    "mean area":         25.0,   # +375 mm² sur 15j  (μ bénin 559 → 934)
+    "worst radius":      0.25,   # +3.75 mm sur 15j
+    "worst perimeter":   1.60,   # +24 mm sur 15j
+    "worst area":        30.0,   # +450 mm² sur 15j  (μ bénin 559 → 1009)
+    "worst concavity":   0.010,  # +0.15 sur 15j
+    "mean concavity":    0.007,  # +0.105 sur 15j
 }
 
 # Bornes physiquement plausibles
@@ -212,7 +218,10 @@ def sample_features(cls: int, cum_drift: int, rng: random.Random) -> dict:
     features = {}
     for feat in FEATURE_NAMES:
         mu, sigma = CLASS_PARAMS[cls][feat]
-        drift = DRIFT_PER_DAY.get(feat, 0.0) * cum_drift
+        # Drift appliqué UNIQUEMENT aux cas bénins (cls==1) :
+        # le scanner sur-estime les mesures des tissus bénins → ils glissent
+        # progressivement dans la zone de décision maligne du modèle.
+        drift = DRIFT_PER_DAY.get(feat, 0.0) * cum_drift if cls == 1 else 0.0
         val   = rng.gauss(mu + drift, sigma)
         lo, hi = FEATURE_BOUNDS[feat]
         features[feat] = round(max(lo, min(hi, val)), 4)
@@ -279,14 +288,25 @@ for day_idx in range(TOTAL_DAYS):
     if MODEL_VERSION:
         payload["model_version"] = MODEL_VERSION
 
-    r = requests.post(
-        f"{API_URL}/predict-batch", headers=HEADERS, json=payload, timeout=30
-    )
+    try:
+        r = requests.post(
+            f"{API_URL}/predict-batch", headers=HEADERS, json=payload, timeout=120
+        )
+    except requests.exceptions.Timeout:
+        print(f"  [{timestamp[:10]}]  ⏱  Timeout — batch ignoré (réessayez avec SLEEP_BETWEEN plus grand)")
+        if day_idx < TOTAL_DAYS - 1 and SLEEP_BETWEEN > 0:
+            time.sleep(SLEEP_BETWEEN)
+        continue
+    except requests.exceptions.RequestException as exc:
+        print(f"  [{timestamp[:10]}]  ❌  Erreur réseau : {exc}")
+        if day_idx < TOTAL_DAYS - 1 and SLEEP_BETWEEN > 0:
+            time.sleep(SLEEP_BETWEEN)
+        continue
 
     if r.status_code == 200:
         log.extend(day_entries)
         phase_counts[phase] += N_PER_DAY
-        area_drift  = cum_drift * DRIFT_PER_DAY.get("worst area", 6.0)
+        area_drift  = cum_drift * DRIFT_PER_DAY.get("worst area", 30.0)
         drift_label = f"+{area_drift:.0f}mm²" if area_drift else "baseline"
         print(
             f"  [{timestamp[:10]}]  phase={phase}  area_drift={drift_label:<10}"
@@ -315,8 +335,8 @@ print()
 print("=" * 72)
 print(f"  Total envoyé     : {len(log)} prédictions")
 print(f"  Phase 1 (stable) : {phase_counts[1]:4d} obs  — accuracy attendue ~94%")
-print(f"  Phase 2 (drift)  : {phase_counts[2]:4d} obs  — accuracy attendue ~82%")
-print(f"  Phase 3 (règle)  : {phase_counts[3]:4d} obs  — accuracy attendue ~70%")
+print(f"  Phase 2 (drift)  : {phase_counts[2]:4d} obs  — accuracy attendue ~60%")
+print(f"  Phase 3 (règle)  : {phase_counts[3]:4d} obs  — accuracy attendue ~38%")
 print(f"  Log sauvegardé   : {LOG_FILE}")
 print()
 print("  → Lancez maintenant : python send_ground_truth_cancer.py")

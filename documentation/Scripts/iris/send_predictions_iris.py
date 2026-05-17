@@ -6,9 +6,11 @@ Simule une dégradation progressive du modèle en production :
 
   Phase 1 (J-45 → J-31, 15 jours) : distribution stable, ~93% accuracy
   Phase 2 (J-30 → J-16, 15 jours) : drift des features (pétales grandissants)
+    — versicolor glisse vers la zone virginica, confusion massive → ~65% accuracy
   Phase 3 (J-15 → J-1,  15 jours) : nouvelle règle déterministe — toute fleur
-    avec petal_length > 5.0 ET petal_width > 1.7 est en réalité virginica,
+    avec petal_length > 4.5 ET petal_width > 1.5 est en réalité virginica,
     même si le modèle (entraîné sur l'ancienne distribution) prédit versicolor.
+    Couverture plus large qu'avant → ~40% accuracy
 
 Produit iris_predictions_log.json — utilisé par send_ground_truth_iris.py.
 
@@ -80,16 +82,17 @@ CLASS_PARAMS = {
 # Proportions [setosa, versicolor, virginica] par phase
 PHASE_PROPORTIONS = {
     1: [0.40, 0.40, 0.20],   # stable et équilibré
-    2: [0.25, 0.40, 0.35],   # hausse progressive des virginica
-    3: [0.15, 0.30, 0.55],   # dominance virginica (nouvelle population)
+    2: [0.15, 0.50, 0.35],   # plus de versicolor qui vont dériver vers la zone virginica
+    3: [0.05, 0.30, 0.65],   # dominance virginica → modèle massivement erroné
 }
 
 # Drift cumulatif par jour, actif à partir du jour 16 (début phase 2)
+# Valeurs doublées pour une dégradation visible sur le graphique
 DRIFT_PER_DAY = {
-    "petal length (cm)":  0.04,
-    "petal width (cm)":   0.02,
-    "sepal length (cm)":  0.01,
-    "sepal width (cm)":  -0.01,
+    "petal length (cm)":  0.08,   # +0.08 cm/j → +1.2 cm sur 15 jours
+    "petal width (cm)":   0.04,   # +0.04 cm/j → +0.6 cm sur 15 jours
+    "sepal length (cm)":  0.02,
+    "sepal width (cm)":  -0.02,
 }
 
 # Bornes botaniquement plausibles
@@ -195,9 +198,20 @@ for day_idx in range(TOTAL_DAYS):
     if MODEL_VERSION:
         payload["model_version"] = MODEL_VERSION
 
-    r = requests.post(
-        f"{API_URL}/predict-batch", headers=HEADERS, json=payload, timeout=30
-    )
+    try:
+        r = requests.post(
+            f"{API_URL}/predict-batch", headers=HEADERS, json=payload, timeout=120
+        )
+    except requests.exceptions.Timeout:
+        print(f"  [{timestamp[:10]}]  ⏱  Timeout — batch ignoré (réessayez avec SLEEP_BETWEEN plus grand)")
+        if day_idx < TOTAL_DAYS - 1 and SLEEP_BETWEEN > 0:
+            time.sleep(SLEEP_BETWEEN)
+        continue
+    except requests.exceptions.RequestException as exc:
+        print(f"  [{timestamp[:10]}]  ❌  Erreur réseau : {exc}")
+        if day_idx < TOTAL_DAYS - 1 and SLEEP_BETWEEN > 0:
+            time.sleep(SLEEP_BETWEEN)
+        continue
 
     if r.status_code == 200:
         log.extend(day_entries)
@@ -230,8 +244,8 @@ print()
 print("=" * 68)
 print(f"  Total envoyé     : {len(log)} prédictions")
 print(f"  Phase 1 (stable) : {phase_counts[1]:4d} obs  — accuracy attendue ~93%")
-print(f"  Phase 2 (drift)  : {phase_counts[2]:4d} obs  — accuracy attendue ~78%")
-print(f"  Phase 3 (règle)  : {phase_counts[3]:4d} obs  — accuracy attendue ~62%")
+print(f"  Phase 2 (drift)  : {phase_counts[2]:4d} obs  — accuracy attendue ~65%")
+print(f"  Phase 3 (règle)  : {phase_counts[3]:4d} obs  — accuracy attendue ~40%")
 print(f"  Log sauvegardé   : {LOG_FILE}")
 print()
 print("  → Lancez maintenant : python send_ground_truth_iris.py")

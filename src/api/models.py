@@ -3625,13 +3625,16 @@ async def create_model(
                 detail=f"Script train.py invalide : {validation_error}",
             )
         train_object_name = f"{name}/v{version}_train.py"
+        _t0 = time.perf_counter()
         minio_service.upload_file_bytes(
             train_bytes, train_object_name, content_type="text/x-python"
         )
-        train_script_object_key = train_object_name
         logger.info(
-            "Script train.py uploadé", object_name=train_object_name, model=name, version=version
+            "Script train.py uploadé",
+            object_name=train_object_name, model=name, version=version,
+            duration_ms=round((time.perf_counter() - _t0) * 1000),
         )
+        train_script_object_key = train_object_name
 
         from src.services.env_snapshot_service import generate_requirements_txt
 
@@ -3666,12 +3669,14 @@ async def create_model(
                 req_txt = generate_requirements_txt(train_source)
 
         req_object_name = f"{name}/v{version}_requirements.txt"
+        _t0 = time.perf_counter()
         minio_service.upload_file_bytes(
             req_txt.encode("utf-8"), req_object_name, content_type="text/plain"
         )
-        requirements_object_key = req_object_name
         logger.info(
-            "requirements.txt uploadé", object_name=req_object_name, model=name, version=version
+            "requirements.txt uploadé",
+            object_name=req_object_name, model=name, version=version,
+            duration_ms=round((time.perf_counter() - _t0) * 1000),
         )
 
     # Si local_dependencies fourni sans train_file, générer quand même requirements.txt
@@ -3700,8 +3705,19 @@ async def create_model(
     # Uploader le modèle final vers MinIO
     if model_bytes_to_store is not None:
         object_name = f"{name}/v{version}.joblib"
+        logger.info(
+            "Début upload modèle MinIO",
+            model=name, version=version, size_kb=round(len(model_bytes_to_store) / 1024),
+        )
+        _t0 = time.perf_counter()
         model_hmac_signature = compute_model_hmac(model_bytes_to_store)
+        logger.info("HMAC calculé", model=name, version=version, duration_ms=round((time.perf_counter() - _t0) * 1000))
+        _t1 = time.perf_counter()
         upload_info = minio_service.upload_model_bytes(model_bytes_to_store, object_name)
+        logger.info(
+            "Modèle uploadé MinIO",
+            model=name, version=version, duration_ms=round((time.perf_counter() - _t1) * 1000),
+        )
         minio_bucket = upload_info["bucket"]
         minio_object_key = object_name
         file_size_bytes = upload_info["size"]
