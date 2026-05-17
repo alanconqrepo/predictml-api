@@ -72,6 +72,10 @@ if not os.path.exists(LOG_FILE):
 with open(LOG_FILE, encoding="utf-8") as f:
     log = json.load(f)
 
+if not log:
+    print("❌  Log vide : aucune prédiction à labelliser. Relancez send_predictions_cancer.py.")
+    sys.exit(1)
+
 print(f"  {len(log)} entrées chargées depuis {LOG_FILE}\n")
 
 # ── Règle de vérité terrain ────────────────────────────────────────────────────

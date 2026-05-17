@@ -359,5 +359,14 @@ output = {
 if mlflow_run_id:
     output["mlflow_run_id"] = mlflow_run_id
 
+import importlib.metadata as _imeta
+_deps: dict = {}
+for _pkg in ("scikit-learn", "numpy", "pandas", "joblib"):
+    try:
+        _deps[_pkg] = _imeta.version(_pkg)
+    except _imeta.PackageNotFoundError:
+        pass
+output["dependencies"] = _deps
+
 _ts("fin script")
 print(json.dumps(output))

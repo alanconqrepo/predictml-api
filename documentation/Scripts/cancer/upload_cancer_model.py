@@ -43,6 +43,8 @@ ALGORITHM     = "RandomForest"
 TRAIN_START = os.environ.get("TRAIN_START", "2024-01-01")
 TRAIN_END   = os.environ.get("TRAIN_END",   "2024-12-31")
 
+RETRAIN_IN_API = False  # True = relance train.py côté API (librairies du serveur)
+
 MLFLOW_TRACKING_URI      = os.environ.get("MLFLOW_TRACKING_URI",      "http://localhost:5000")
 MLFLOW_TRACKING_USERNAME = os.environ.get("MLFLOW_TRACKING_USERNAME", "admin")
 MLFLOW_TRACKING_PASSWORD = os.environ.get("MLFLOW_TRACKING_PASSWORD", "")
@@ -131,6 +133,7 @@ classes          = metrics.get("classes")
 training_dataset = metrics.get("training_dataset")
 mlflow_run_id    = metrics.get("mlflow_run_id")
 hyperparameters  = metrics.get("hyperparameters")
+dependencies     = metrics.get("dependencies", {})
 print(
     f"✅  Entraînement terminé — Accuracy : {acc} | F1 : {f1}"
     f" | ROC-AUC : {roc_auc}"
@@ -172,6 +175,9 @@ try:
             data["mlflow_run_id"] = mlflow_run_id
         if hyperparameters:
             data["hyperparameters"] = json.dumps(hyperparameters)
+        data["run_training"] = str(RETRAIN_IN_API).lower()
+        if dependencies:
+            data["local_dependencies"] = json.dumps(dependencies)
 
         response = requests.post(
             f"{API_URL}/models",
