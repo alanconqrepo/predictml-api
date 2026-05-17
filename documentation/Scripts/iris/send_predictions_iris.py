@@ -212,13 +212,17 @@ for day_idx in range(TOTAL_DAYS):
             f"  [{timestamp[:10]}]  ❌  Erreur {r.status_code} : {r.text[:120]}"
         )
 
-    if day_idx < TOTAL_DAYS - 1:
+    if day_idx < TOTAL_DAYS - 1 and SLEEP_BETWEEN > 0:
         time.sleep(SLEEP_BETWEEN)
 
 # ── Sauvegarde du log ──────────────────────────────────────────────────────────
 
 with open(LOG_FILE, "w", encoding="utf-8") as f:
     json.dump(log, f, ensure_ascii=False, indent=2)
+
+if not log:
+    print("\n❌  Aucune prédiction n'a été enregistrée — vérifiez les erreurs ci-dessus.")
+    sys.exit(1)
 
 # ── Résumé ─────────────────────────────────────────────────────────────────────
 

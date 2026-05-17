@@ -1,6 +1,8 @@
 """
 seed_sample_data.py — Seed des données exemples au premier démarrage.
 
+$env:API_URL = "http://localhost:80"; $env:API_TOKEN = "18_YgH-4oOQjFe6Ph0FtgUzM_oMolrnz"; $env:PYTHONIOENCODING = "utf-8"; & ".venv\Scripts\python.exe" init_data\seed_sample_data.py
+
 Idempotent : vérifie si iris-classifier v1.0.0 existe déjà avant d'agir.
 
 Schéma de déploiement après le seed :
@@ -91,11 +93,11 @@ SCRIPTS = [
      {"MODEL_NAME": "cancer-classifier", "MODEL_VERSION": "1.3.0"}),
 
     # ── Prédictions et ground truth ──────────────────────────────────────────
-    ("iris/send_predictions_iris.py",    {"MODEL_NAME": "iris-classifier"}),
+    ("iris/send_predictions_iris.py",    {"MODEL_NAME": "iris-classifier",   "SLEEP_BETWEEN": "1"}),
     ("iris/send_ground_truth_iris.py",   {"MODEL_NAME": "iris-classifier"}),
-    ("wine/send_predictions_wine.py",    {"MODEL_NAME": "wine-regressor"}),
+    ("wine/send_predictions_wine.py",    {"MODEL_NAME": "wine-regressor",    "SLEEP_BETWEEN": "1"}),
     ("wine/send_ground_truth_wine.py",   {"MODEL_NAME": "wine-regressor"}),
-    ("cancer/send_predictions_cancer.py",  {"MODEL_NAME": "cancer-classifier"}),
+    ("cancer/send_predictions_cancer.py",  {"MODEL_NAME": "cancer-classifier", "SLEEP_BETWEEN": "1"}),
     ("cancer/send_ground_truth_cancer.py", {"MODEL_NAME": "cancer-classifier"}),
 ]
 
@@ -116,6 +118,21 @@ def model_exists(name: str, version: str) -> bool:
             timeout=5,
         )
         return r.status_code == 200
+    except Exception:
+        return False
+
+
+def predictions_exist(model_name: str) -> bool:
+    try:
+        r = requests.get(
+            f"{API_URL}/predictions",
+            headers={"Authorization": f"Bearer {API_TOKEN}"},
+            params={"model_name": model_name, "limit": 1},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            return len(r.json().get("predictions", [])) > 0
+        return False
     except Exception:
         return False
 
@@ -155,8 +172,8 @@ def main():
         print("❌  API inaccessible — seed annulé.")
         sys.exit(1)
 
-    if model_exists("iris-classifier", "1.0.0"):
-        print("\n✅  iris-classifier v1.0.0 déjà présent — seed ignoré.")
+    if model_exists("iris-classifier", "1.0.0") and predictions_exist("iris-classifier"):
+        print("\n✅  Données déjà présentes (modèles + prédictions) — seed ignoré.")
         sys.exit(0)
 
     print("\n  Données exemples absentes — lancement du seed…\n")

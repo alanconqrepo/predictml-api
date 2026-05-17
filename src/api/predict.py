@@ -1066,7 +1066,7 @@ MAX_BATCH_SIZE = int(os.getenv("MAX_BATCH_SIZE", "500"))
 
 
 @router.post("/predict-batch", response_model=BatchPredictionOutput)
-@limiter.limit("10/minute")
+@limiter.limit("200/minute")
 async def predict_batch(
     input_data: BatchPredictionInput,
     request: Request,

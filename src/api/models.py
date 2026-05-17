@@ -3534,6 +3534,15 @@ async def create_model(
             "Par défaut False : le fichier uploadé est stocké tel quel sans ré-entraînement."
         ),
     ),
+    local_dependencies: Optional[str] = Form(
+        None,
+        description=(
+            "JSON {package: version} capturé depuis l'environnement local d'entraînement "
+            "(ex: {\"scikit-learn\": \"1.6.1\", \"numpy\": \"2.2.5\"}). "
+            "Utilisé pour générer requirements.txt quand run_training=False, "
+            "reflétant les versions du poste ayant produit le modèle."
+        ),
+    ),
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3642,7 +3651,19 @@ async def create_model(
                 "run_training=False — subprocess ignoré, modèle uploadé utilisé tel quel",
                 model=name, version=version,
             )
-            req_txt = generate_requirements_txt(train_source)
+            if local_dependencies:
+                try:
+                    local_deps_dict = json.loads(local_dependencies)
+                    from src.services.env_snapshot_service import dependencies_to_requirements_txt
+                    req_txt = dependencies_to_requirements_txt(local_deps_dict)
+                    logger.info(
+                        "requirements.txt généré depuis local_dependencies",
+                        packages=list(local_deps_dict.keys()), model=name, version=version,
+                    )
+                except (json.JSONDecodeError, Exception):
+                    req_txt = generate_requirements_txt(train_source)
+            else:
+                req_txt = generate_requirements_txt(train_source)
 
         req_object_name = f"{name}/v{version}_requirements.txt"
         minio_service.upload_file_bytes(
@@ -3652,6 +3673,22 @@ async def create_model(
         logger.info(
             "requirements.txt uploadé", object_name=req_object_name, model=name, version=version
         )
+
+    # Si local_dependencies fourni sans train_file, générer quand même requirements.txt
+    if local_dependencies and train_file is None and requirements_object_key is None:
+        try:
+            local_deps_dict = json.loads(local_dependencies)
+            from src.services.env_snapshot_service import dependencies_to_requirements_txt
+            req_txt = dependencies_to_requirements_txt(local_deps_dict)
+            req_object_name = f"{name}/v{version}_requirements.txt"
+            minio_service.upload_file_bytes(req_txt.encode("utf-8"), req_object_name, content_type="text/plain")
+            requirements_object_key = req_object_name
+            logger.info(
+                "requirements.txt généré depuis local_dependencies (sans train_file)",
+                packages=list(local_deps_dict.keys()), model=name, version=version,
+            )
+        except Exception:
+            pass
 
     # Choisir les bytes du modèle à stocker : subprocess prioritaire, sinon fichier utilisateur
     model_bytes_to_store = subprocess_model_bytes if subprocess_model_bytes is not None else model_bytes
