@@ -7,11 +7,17 @@ calcule la vraie classe selon les règles de chaque phase, puis envoie les
 observed_results via POST /observed-results.
 
 Règles de vérité terrain :
-  Phase 1-2 : true_class = classe d'échantillonnage originale (0=malignant, 1=benign)
-  Phase 3   : si worst_concavity > 0.30 ET worst_area > 1200
-              → true_class = 0 (malignant) — nouveau protocole clinique
-              Simule l'adoption d'un critère conservateur : forte concavité +
-              grande surface = maligne, même si le modèle prédit bénigne.
+  Phase 1   : true_class = classe d'échantillonnage originale (0=malignant, 1=benign)
+              → ~94% accuracy (modèle stable)
+
+  Phase 2   : true_class = classe d'échantillonnage originale
+              Les cas BÉNINS ont des features driftées → le modèle les prédit MALINS.
+              → ~60% accuracy (confusion bénin/malin due au drift du scanner)
+
+  Phase 3   : nouveau protocole de détection précoce — certains cas MALINS "doux"
+              (mean_radius < 18 ET mean_concavity < 0.15) sont reclassifiés BÉNINS.
+              Le modèle (entraîné sur l'ancien protocole) les prédit toujours MALINS.
+              → ~38% accuracy (erreur systématique sur les malins légers)
 
 Usage :
   API_URL=http://localhost:8000 API_TOKEN=<token> python send_ground_truth_cancer.py
@@ -40,9 +46,11 @@ API_URL    = os.environ.get("API_URL",    "http://localhost:80")
 API_TOKEN  = os.environ.get("API_TOKEN",  os.environ.get("ADMIN_TOKEN", ""))
 MODEL_NAME = os.environ.get("MODEL_NAME", "cancer-classifier")
 
-# Seuils du nouveau protocole clinique (phase 3)
-CONCAVITY_THR = 0.30
-AREA_THR      = 1200.0
+# Seuils du nouveau protocole de détection précoce (phase 3)
+# Un cas malin "doux" sous ces seuils est reclassifié bénin par les nouvelles guidelines.
+# Le modèle (entraîné avant) continue de le prédire malin → erreur systématique.
+RADIUS_THR    = 18.0   # mean_radius  < 18 mm  → "doux"
+CONCAVITY_THR = 0.15   # mean_concavity < 0.15 → faible irrégularité
 
 HEADERS    = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
 LOG_FILE   = os.path.join(os.path.dirname(__file__), "cancer_predictions_log.json")
@@ -86,11 +94,14 @@ def compute_true_class(entry: dict) -> int:
     if entry["phase"] < 3:
         return entry["true_class"]
 
-    # Phase 3 — nouveau protocole clinique conservateur
-    worst_concavity = entry["features"].get("worst concavity", 0.0)
-    worst_area      = entry["features"].get("worst area",      0.0)
-    if worst_concavity > CONCAVITY_THR and worst_area > AREA_THR:
-        return 0  # malignant — nouveau critère
+    # Phase 3 — nouveau protocole de détection précoce :
+    # les cas MALINS avec faible radius ET faible concavité sont reclassifiés BÉNINS.
+    # Le modèle (entraîné avant ce protocole) continue de les prédire MALINS → erreur.
+    if entry["true_class"] == 0:  # malin à l'origine
+        mean_radius    = entry["features"].get("mean radius",    0.0)
+        mean_concavity = entry["features"].get("mean concavity", 0.0)
+        if mean_radius < RADIUS_THR and mean_concavity < CONCAVITY_THR:
+            return 1  # reclassifié bénin — nouvelles guidelines
     return entry["true_class"]
 
 
@@ -123,7 +134,7 @@ for phase in [1, 2, 3]:
     if s["overridden"]:
         pct = s["overridden"] / s["total"] * 100
         line += (
-            f"  ({s['overridden']} reclassifiées → malignant"
+            f"  ({s['overridden']} reclassifiées → benign"
             f" par nouveau protocole, {pct:.0f}%)"
         )
     else:
@@ -186,11 +197,11 @@ print("=" * 72)
 print(f"  Total upserted   : {total_upserted}")
 print()
 print("  Scénario de dégradation simulé :")
-print("  Phase 1 (stable)   → ~94% accuracy  (distribution originale)")
-print("  Phase 2 (drift)    → ~82% accuracy  (dérive calibration scanner)")
+print("  Phase 1 (stable)    → ~94% accuracy  (distribution originale)")
+print("  Phase 2 (drift)     → ~60% accuracy  (bénins driftés → zone maligne)")
 print(
-    f"  Phase 3 (protocole)→ ~70% accuracy"
-    f"  (nouveau critère : concavity>{CONCAVITY_THR} & area>{AREA_THR:.0f} = malignant)"
+    f"  Phase 3 (protocole) → ~38% accuracy"
+    f"  (malins doux reclassifiés bénins : radius<{RADIUS_THR} & concavity<{CONCAVITY_THR})"
 )
 print()
 print("  Le modèle nécessite un retraining sur les données de production récentes.")

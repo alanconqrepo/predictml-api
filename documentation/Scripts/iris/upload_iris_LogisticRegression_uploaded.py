@@ -18,6 +18,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import tempfile
 
 import requests
@@ -141,12 +142,15 @@ try:
         if hyperparams:
             data["hyperparameters"] = json.dumps(hyperparams)
 
+        _upload_t0 = time.perf_counter()
         response = requests.post(
             f"{API_URL}/models", headers=HEADERS,
             files={"file": (f"{MODEL_NAME}.joblib", pkl_fh, "application/octet-stream"),
                    "train_file": ("train_iris_LogisticRegression.py", train_fh, "text/plain")},
-            data=data, timeout=30,
+            data=data, timeout=180,
         )
+        _upload_elapsed = time.perf_counter() - _upload_t0
+        print(f"  [TIMING] POST /models répondu en {_upload_elapsed:.2f}s — status {response.status_code}")
 finally:
     os.unlink(tmp_pkl.name)
 
@@ -155,11 +159,15 @@ if response.status_code == 409:
     patch_payload = {"tags": ["Example"]}
     if hyperparams:
         patch_payload["hyperparameters"] = hyperparams
-    patch_resp = requests.patch(
-        f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
-        headers={**HEADERS, "Content-Type": "application/json"},
-        json=patch_payload, timeout=10,
-    )
+    try:
+        patch_resp = requests.patch(
+            f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
+            headers={**HEADERS, "Content-Type": "application/json"},
+            json=patch_payload, timeout=30,
+        )
+    except Exception as _e:
+        print(f"    [WARN] PATCH existe-déjà échoué : {_e} — continuons")
+        sys.exit(0)
     print(f"✅  PATCH OK" if patch_resp.status_code == 200 else f"❌  PATCH {patch_resp.status_code}")
     sys.exit(0)
 
@@ -183,7 +191,7 @@ if metrics.get("confidence_threshold") is not None:
 patch = requests.patch(
     f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
     headers={**HEADERS, "Content-Type": "application/json"},
-    json=patch_body, timeout=10,
+    json=patch_body, timeout=30,
 )
 
 if patch.status_code == 200:

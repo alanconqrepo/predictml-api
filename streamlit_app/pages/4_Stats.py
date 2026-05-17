@@ -2,7 +2,7 @@
 Statistiques et graphiques d'utilisation
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 import pandas as pd
 import plotly.express as px
@@ -467,25 +467,36 @@ if "response_time_ms" in df.columns and df["response_time_ms"].notna().any():
 
 # --- Drift de performance (accuracy rolling) ---
 st.divider()
-st.subheader("Drift de performance — accuracy rolling (30j)")
+st.subheader("Drift de performance — accuracy rolling")
 
-drift_col_model, drift_col_threshold = st.columns([2, 2])
+drift_col_model, drift_col_threshold, drift_col_dates = st.columns([2, 2, 2])
 with drift_col_model:
     drift_search = st.text_input("Filtrer par nom", key="drift_model_search", placeholder="Rechercher…")
     drift_filtered = [n for n in model_names if drift_search.lower() in n.lower()] if drift_search else model_names
     drift_model = st.selectbox("Modèle (drift)", drift_filtered or model_names, key="drift_model")
-alert_enabled = drift_col_threshold.checkbox("Activer alerte seuil", value=True)
-threshold = drift_col_threshold.slider(
-    "Seuil d'alerte accuracy",
-    min_value=0.0,
-    max_value=1.0,
-    value=0.7,
-    step=0.05,
-    disabled=not alert_enabled,
-)
+with drift_col_threshold:
+    alert_enabled = st.checkbox("Activer alerte seuil", value=True)
+    threshold = st.slider(
+        "Seuil d'alerte accuracy",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.7,
+        step=0.05,
+        disabled=not alert_enabled,
+    )
+with drift_col_dates:
+    _default_end = datetime.utcnow().date()
+    _default_start = _default_end - timedelta(days=45)
+    drift_date_start = st.date_input("Date début", value=_default_start, key="drift_date_start")
+    drift_date_end = st.date_input("Date fin", value=_default_end, key="drift_date_end")
 
-drift_end = datetime.utcnow()
-drift_start = drift_end - timedelta(days=30)
+drift_end = datetime.combine(drift_date_end, datetime.max.time())
+drift_start = datetime.combine(drift_date_start, datetime.min.time())
+_n_drift_days = (drift_date_end - drift_date_start).days
+
+if drift_start >= drift_end:
+    st.warning("⚠️ La date de début doit être antérieure à la date de fin.")
+    st.stop()
 
 try:
     perf_data = client.get_model_performance(
@@ -503,7 +514,8 @@ except Exception as e:
 
 if not by_period:
     st.info(
-        "Pas assez de données observées pour ce modèle sur les 30 derniers jours. "
+        f"Pas assez de données observées pour ce modèle sur la période sélectionnée "
+        f"({drift_date_start} → {drift_date_end}). "
         "Soumettez des résultats via POST /observed-results pour activer le suivi."
     )
 else:
@@ -515,8 +527,13 @@ else:
     drift_df = drift_df.sort_values("date").reset_index(drop=True)
 
     if metric_col in drift_df.columns and drift_df[metric_col].notna().any():
-        drift_df["rolling_7d"] = drift_df[metric_col].rolling(7, min_periods=1).mean().round(4)
-        drift_df["rolling_30d"] = drift_df[metric_col].rolling(30, min_periods=1).mean().round(4)
+        # Fenêtres mobiles adaptées à la plage sélectionnée
+        win_short = min(7, max(1, _n_drift_days // 6))
+        win_long  = min(30, max(3, _n_drift_days // 2))
+        drift_df["rolling_7d"]  = drift_df[metric_col].rolling(win_short, min_periods=1).mean().round(4)
+        drift_df["rolling_30d"] = drift_df[metric_col].rolling(win_long,  min_periods=1).mean().round(4)
+        roll_short_label = f"Moy. mobile {win_short}j"
+        roll_long_label  = f"Moy. mobile {win_long}j"
 
         # Métriques résumé
         last_val = drift_df[metric_col].iloc[-1]
@@ -535,7 +552,7 @@ else:
             help=_perf_help,
         )
         m2.metric(
-            "Moyenne mobile 7j",
+            roll_short_label,
             (
                 f"{drift_df['rolling_7d'].iloc[-1]:.1%}"
                 if model_type == "classification"
@@ -543,7 +560,7 @@ else:
             ),
             help=_perf_help,
         )
-        m3.metric("Prédictions avec résultat observé (30j)", f"{matched_total:,}")
+        m3.metric(f"Prédictions avec résultat observé ({_n_drift_days}j)", f"{matched_total:,}")
 
         # Alerte drift
         if alert_enabled and model_type == "classification":
@@ -572,7 +589,7 @@ else:
                 x=drift_df["date"],
                 y=drift_df["rolling_7d"],
                 mode="lines",
-                name="Moyenne mobile 7j",
+                name=roll_short_label,
                 line=dict(color="#636EFA", width=2),
             )
         )
@@ -581,7 +598,7 @@ else:
                 x=drift_df["date"],
                 y=drift_df["rolling_30d"],
                 mode="lines",
-                name="Moyenne mobile 30j",
+                name=roll_long_label,
                 line=dict(color="#FF7F0E", width=2, dash="dash"),
             )
         )

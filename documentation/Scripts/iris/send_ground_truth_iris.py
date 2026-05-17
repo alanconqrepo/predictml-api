@@ -8,9 +8,10 @@ observed_results via POST /observed-results.
 
 Règles de vérité terrain :
   Phase 1-2 : true_class = classe d'échantillonnage originale
-  Phase 3   : si petal_length > 5.0 ET petal_width > 1.7
+  Phase 3   : si petal_length > 4.5 ET petal_width > 1.5
               → true_class = 2 (virginica) — nouvelle règle déterministe
-              Simule un changement biologique : grandes fleurs = virginica,
+              Seuil abaissé (était 5.0/1.7) pour couvrir plus de versicolor driftés.
+              Simule un changement biologique : pétales moyennement grands = virginica,
               même si le modèle (entraîné avant) prédit versicolor.
 
 Usage :
@@ -82,11 +83,11 @@ def compute_true_class(entry: dict) -> int:
     if entry["phase"] < 3:
         return entry["true_class"]
 
-    # Phase 3 : nouvelle règle déterministe
+    # Phase 3 : nouvelle règle déterministe (seuil abaissé → plus de reclassifications)
     petal_len = entry["features"].get("petal length (cm)", 0.0)
     petal_wid = entry["features"].get("petal width (cm)", 0.0)
-    if petal_len > 5.0 and petal_wid > 1.7:
-        return 2  # virginica — nouvelle règle
+    if petal_len > 4.5 and petal_wid > 1.5:
+        return 2  # virginica — nouvelle règle élargie
     return entry["true_class"]
 
 
@@ -180,8 +181,8 @@ print(f"  Total upserted   : {total_upserted}")
 print()
 print("  Scénario de dégradation simulé :")
 print("  Phase 1 (stable) → ~93% accuracy  (population iris originale)")
-print("  Phase 2 (drift)  → ~78% accuracy  (pétales grandissants, frontières floues)")
-print("  Phase 3 (règle)  → ~62% accuracy  (nouvelle règle : grands pétales = virginica)")
+print("  Phase 2 (drift)  → ~65% accuracy  (pétales grandissants, frontières floues)")
+print("  Phase 3 (règle)  → ~40% accuracy  (seuil abaissé : pétales moyens déjà virginica)")
 print()
 print("  Le modèle nécessite un retraining sur les données de production récentes.")
 print()

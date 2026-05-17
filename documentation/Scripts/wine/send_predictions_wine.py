@@ -245,9 +245,20 @@ for day_idx in range(TOTAL_DAYS):
     if MODEL_VERSION:
         payload["model_version"] = MODEL_VERSION
 
-    r = requests.post(
-        f"{API_URL}/predict-batch", headers=HEADERS, json=payload, timeout=30
-    )
+    try:
+        r = requests.post(
+            f"{API_URL}/predict-batch", headers=HEADERS, json=payload, timeout=120
+        )
+    except requests.exceptions.Timeout:
+        print(f"  [{timestamp[:10]}]  ⏱  Timeout — batch ignoré (réessayez avec SLEEP_BETWEEN plus grand)")
+        if day_idx < TOTAL_DAYS - 1 and SLEEP_BETWEEN > 0:
+            time.sleep(SLEEP_BETWEEN)
+        continue
+    except requests.exceptions.RequestException as exc:
+        print(f"  [{timestamp[:10]}]  ❌  Erreur réseau : {exc}")
+        if day_idx < TOTAL_DAYS - 1 and SLEEP_BETWEEN > 0:
+            time.sleep(SLEEP_BETWEEN)
+        continue
 
     if r.status_code == 200:
         log.extend(day_entries)

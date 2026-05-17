@@ -21,6 +21,7 @@ import sys
 from datetime import datetime
 from typing import Optional
 
+import redis.asyncio as aioredis
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -30,7 +31,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from src.core.config import settings
 from src.db.models.prediction import Prediction
-from src.services.model_service import model_service
 
 logger = structlog.get_logger(__name__)
 
@@ -200,6 +200,24 @@ async def _ensure_consumer_group(redis) -> None:
             raise
 
 
+async def _build_redis() -> aioredis.Redis:
+    """
+    Connexion Redis directe dédiée au prediction-writer.
+
+    Utilise REDIS_URL (hostname DNS Docker → redis-master) plutôt que le Sentinel.
+    Cela évite les IP périmées stockées par le Sentinel après des redémarrages.
+    socket_timeout doit être > FLUSH_MS (en secondes).
+    """
+    # Marge ×5 par rapport au block XREADGROUP pour éviter les race conditions
+    data_socket_timeout = max(2.0, (FLUSH_MS / 1000) * 5)
+    return aioredis.Redis.from_url(
+        settings.REDIS_URL,
+        decode_responses=False,
+        socket_timeout=data_socket_timeout,
+        socket_connect_timeout=2.0,
+    )
+
+
 async def run() -> None:
     """Boucle principale du worker."""
     engine = create_async_engine(
@@ -209,7 +227,7 @@ async def run() -> None:
     )
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    redis = await model_service._get_redis()
+    redis = await _build_redis()
     await _ensure_consumer_group(redis)
 
     running = True
