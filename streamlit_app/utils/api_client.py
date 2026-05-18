@@ -125,8 +125,19 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
-    def get_user_usage(self, user_id: int, days: int = 30) -> dict:
-        r = self._get(f"/users/{user_id}/usage", params={"days": days})
+    def get_user_usage(
+        self,
+        user_id: int,
+        days: int = 30,
+        start_date: str = None,
+        end_date: str = None,
+    ) -> dict:
+        params = {"days": days}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+        r = self._get(f"/users/{user_id}/usage", params=params)
         r.raise_for_status()
         return r.json()
 
@@ -487,12 +498,18 @@ class APIClient:
         model_name: str,
         versions: Optional[str] = None,
         days: int = 7,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> dict:
         """Comparaison multi-versions d'un modèle en un seul appel."""
-        r = self._get(
-            f"/models/{model_name}/compare",
-            params={"versions": versions, "days": days},
-        )
+        params: dict = {"days": days}
+        if versions:
+            params["versions"] = versions
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+        r = self._get(f"/models/{model_name}/compare", params=params)
         r.raise_for_status()
         return r.json()
 

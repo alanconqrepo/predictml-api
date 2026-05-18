@@ -392,21 +392,24 @@ _DEPLOY_BADGE = {
 }
 
 
-# Tableau de synthèse
-rows = []
-for m in models:
+def _statut(m: dict) -> str:
     mode = m.get("deployment_mode")
     weight = m.get("traffic_weight")
     if mode == "ab_test":
-        statut = f"🟠 A/B ({weight:.0%})" if weight is not None else "🟠 A/B"
-    elif mode == "shadow":
-        statut = "🟣 Shadow"
-    elif m.get("is_production"):
-        statut = "🟢 Production"
-    elif m.get("is_active"):
-        statut = "✅ Actif"
-    else:
-        statut = "⚫ Inactif"
+        return f"🟠 A/B ({weight:.0%})" if weight is not None else "🟠 A/B"
+    if mode == "shadow":
+        return "🟣 Shadow"
+    if m.get("is_production"):
+        return "🟢 Production"
+    if m.get("is_active"):
+        return "✅ Actif"
+    return "⚫ Inactif"
+
+
+# Tableau de synthèse
+rows = []
+for m in models:
+    statut = _statut(m)
 
     in_cache = f"{m.get('name')}:{m.get('version')}" in cached_model_keys
     rows.append(
@@ -415,6 +418,11 @@ for m in models:
             "Version": m.get("version", ""),
             "Tags": ", ".join(m.get("tags") or []) or "—",
             "Algorithme": m.get("algorithm") or "—",
+            "Tâche": {
+                "regression": "📈 Régression",
+                "classification_binary": "🔵 Binaire",
+                "classification_multiclass": "🟡 Multiclass",
+            }.get(m.get("model_task") or "", "—"),
             "Baseline": "✅ Baseline" if m.get("feature_baseline") else "⚠️ No baseline",
             "Cache": "🔥 En cache" if in_cache else "❄️ Non chargé",
             "Statut": statut,
@@ -429,8 +437,8 @@ for m in models:
                 if m.get("last_seen")
                 else "—"
             ),
-            "Accuracy (train)": f"{m['accuracy']:.3f}" if m.get("accuracy") is not None else "—",
-            "F1 (train)": f"{m['f1_score']:.3f}" if m.get("f1_score") is not None else "—",
+            "Accuracy (eval)": f"{m['accuracy']:.3f}" if m.get("accuracy") is not None else "—",
+            "F1 (eval)": f"{m['f1_score']:.3f}" if m.get("f1_score") is not None else "—",
             "R² (train)": (
                 f"{(m.get('training_metrics') or {}).get('r2'):.3f}"
                 if (m.get("training_metrics") or {}).get("r2") is not None
@@ -445,7 +453,7 @@ for m in models:
     )
 
 st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-st.caption("Accuracy (train), F1 (train), R² (train), RMSE (train) : métriques issues de l'évaluation sur le jeu de test lors de l'entraînement.")
+st.caption("Accuracy (eval), F1 (eval), R² (eval), RMSE (eval) : métriques issues de l'évaluation sur le jeu de test lors de l'entraînement.")
 
 # ---------------------------------------------------------------------------
 # Comparaison multi-versions
@@ -474,71 +482,145 @@ with st.expander("📊 Comparaison multi-versions", expanded=False):
         default=[],
         key="compare_versions_select",
     )
-    compare_days = st.slider("Fenêtre latence (jours)", 1, 30, 7, key="compare_days")
+    _cmp_col_start, _cmp_col_end = st.columns(2)
+    _cmp_default_end = pd.Timestamp.now().date()
+    _cmp_default_start = _cmp_default_end - pd.Timedelta(days=6)
+    compare_date_start = _cmp_col_start.date_input("Date début", value=_cmp_default_start, key="compare_date_start")
+    compare_date_end = _cmp_col_end.date_input("Date fin", value=_cmp_default_end, key="compare_date_end")
+    compare_days = max(1, (compare_date_end - compare_date_start).days + 1)
 
     if st.button("🔍 Comparer", key="compare_btn", type="primary"):
-        versions_param = ",".join(selected_versions) if selected_versions else None
-        with st.spinner("Comparaison en cours…"):
-            try:
-                cmp = client.compare_model_versions(
-                    compare_name, versions=versions_param, days=compare_days
-                )
-                cmp_versions = cmp.get("versions", [])
-                if not cmp_versions:
-                    st.info("Aucune version active trouvée.")
-                else:
-                    _DRIFT_BADGE = {
-                        "ok": "🟢 ok",
-                        "warning": "🟡 warning",
-                        "critical": "🔴 critical",
-                        "no_baseline": "⚫ no baseline",
-                        "insufficient_data": "⬜ insuff. data",
-                    }
-                    cmp_rows = []
-                    for v in cmp_versions:
-                        cmp_rows.append(
-                            {
+        if compare_date_start > compare_date_end:
+            st.warning("La date de début doit être antérieure à la date de fin.")
+        else:
+            versions_param = ",".join(selected_versions) if selected_versions else None
+            with st.spinner("Comparaison en cours…"):
+                try:
+                    cmp = client.compare_model_versions(
+                        compare_name,
+                        versions=versions_param,
+                        days=compare_days,
+                        start_date=compare_date_start.isoformat(),
+                        end_date=compare_date_end.isoformat(),
+                    )
+                    cmp_versions = cmp.get("versions", [])
+                    if not cmp_versions:
+                        st.info("Aucune version active trouvée.")
+                    else:
+                        _DRIFT_BADGE = {
+                            "ok": "🟢 ok",
+                            "warning": "🟡 warning",
+                            "critical": "🔴 critical",
+                            "no_baseline": "⚫ no baseline",
+                            "insufficient_data": "⬜ insuff. data",
+                        }
+                        _full_meta = {
+                            m["version"]: m
+                            for m in models
+                            if m.get("name") == compare_name
+                        }
+                        cmp_rows = []
+                        # Régression si training_metrics contient mae/rmse/r2
+                        is_regression = any(v.get("mae_eval") is not None for v in cmp_versions)
+
+                        def _r(val, n=3):
+                            return round(val, n) if val is not None else None
+
+                        # Règle : afficher une paire (eval, live) seulement si l'eval est présent
+                        show = {}
+                        if is_regression:
+                            show["mae"]  = any(v.get("mae_eval")  is not None for v in cmp_versions)
+                            show["rmse"] = any(v.get("rmse_eval") is not None for v in cmp_versions)
+                            show["r2"]   = any(v.get("r2_eval")   is not None for v in cmp_versions)
+                        else:
+                            show["accuracy"] = any(v.get("accuracy")  is not None for v in cmp_versions)
+                            show["f1"]       = any(v.get("f1_score")  is not None for v in cmp_versions)
+                            show["brier"]    = any(v.get("brier_score") is not None for v in cmp_versions)
+
+                        for v in cmp_versions:
+                            full = _full_meta.get(v["version"], v)
+                            row = {
                                 "Version": v["version"],
-                                "Production": "🟢 Oui" if v["is_production"] else "—",
-                                "Accuracy": (
-                                    f"{v['accuracy']:.3f}" if v.get("accuracy") is not None else "—"
-                                ),
-                                "F1": f"{v['f1_score']:.3f}" if v.get("f1_score") is not None else "—",
-                                "Latence p50 (ms)": (
-                                    f"{v['latency_p50_ms']:.1f}"
-                                    if v.get("latency_p50_ms") is not None
-                                    else "—"
-                                ),
-                                "Latence p95 (ms)": (
-                                    f"{v['latency_p95_ms']:.1f}"
-                                    if v.get("latency_p95_ms") is not None
-                                    else "—"
-                                ),
-                                "Drift": _DRIFT_BADGE.get(v.get("drift_status") or "", "—"),
-                                "Brier score": (
-                                    f"{v['brier_score']:.4f}"
-                                    if v.get("brier_score") is not None
-                                    else "—"
-                                ),
+                                "Statut": _statut(full),
+                                "Tâche": {
+                                    "regression": "📈 Régression",
+                                    "classification_binary": "🔵 Binaire",
+                                    "classification_multiclass": "🟡 Multiclass",
+                                }.get(v.get("model_task") or "", "—"),
+                                "Nb préd.": v.get("prediction_count") or 0,
+                                "Nb préd. shadow": v.get("shadow_prediction_count") or 0,
+                                "Latence p50 (ms)": _r(v.get("latency_p50_ms"), 1),
+                                "Latence p95 (ms)": _r(v.get("latency_p95_ms"), 1),
                                 "Entraîné le": (
                                     pd.to_datetime(v["trained_at"]).strftime("%Y-%m-%d")
-                                    if v.get("trained_at")
-                                    else "—"
+                                    if v.get("trained_at") else "—"
                                 ),
-                                "Lignes entraîn.": (
-                                    f"{v['n_rows_trained']:,}"
-                                    if v.get("n_rows_trained") is not None
-                                    else "—"
-                                ),
+                                "Drift": _DRIFT_BADGE.get(v.get("drift_status") or "", "—"),
                             }
+                            if is_regression:
+                                if show["mae"]:
+                                    row["MAE (eval)"]  = _r(v.get("mae_eval"), 4)
+                                    row["MAE (live)"]  = _r(v.get("live_mae"), 4)
+                                if show["rmse"]:
+                                    row["RMSE (eval)"] = _r(v.get("rmse_eval"), 4)
+                                    row["RMSE (live)"] = _r(v.get("live_rmse"), 4)
+                                if show["r2"]:
+                                    row["R² (eval)"]   = _r(v.get("r2_eval"), 3)
+                                    row["R² (live)"]   = _r(v.get("live_r2"), 3)
+                            else:
+                                if show["accuracy"]:
+                                    row["Accuracy (eval)"] = _r(v.get("accuracy"))
+                                    row["Accuracy (live)"] = _r(v.get("live_accuracy"))
+                                if show["f1"]:
+                                    row["F1 (eval)"]       = _r(v.get("f1_score"))
+                                    row["F1 (live)"]       = _r(v.get("live_f1"))
+                                if show["brier"]:
+                                    row["Brier score"]     = _r(v.get("brier_score"), 4)
+                            cmp_rows.append(row)
+
+                        col_config = {
+                            "Nb préd.": st.column_config.NumberColumn(
+                                "Nb préd.",
+                                help=f"Prédictions production (is_shadow=False) sur la période {compare_date_start} → {compare_date_end}.",
+                            ),
+                            "Nb préd. shadow": st.column_config.NumberColumn(
+                                "Nb préd. shadow",
+                                help=f"Prédictions shadow (is_shadow=True) sur la période {compare_date_start} → {compare_date_end}.",
+                            ),
+                            "Latence p50 (ms)": st.column_config.NumberColumn(format="%.1f"),
+                            "Latence p95 (ms)": st.column_config.NumberColumn(format="%.1f"),
+                        }
+                        if is_regression:
+                            for col, fmt in [("MAE", "%.4f"), ("RMSE", "%.4f"), ("R²", "%.3f")]:
+                                col_config[f"{col} (eval)"] = st.column_config.NumberColumn(f"{col} (eval)", help=f"{col} sur le jeu de test d'entraînement.", format=fmt)
+                                col_config[f"{col} (live)"] = st.column_config.NumberColumn(f"{col} (live)", help=f"{col} calculé sur les prédictions réelles avec ground truth.", format=fmt)
+                        else:
+                            for col, fmt in [("Accuracy", "%.3f"), ("F1", "%.3f")]:
+                                col_config[f"{col} (eval)"] = st.column_config.NumberColumn(f"{col} (eval)", help=f"{col} sur le jeu de test d'entraînement.", format=fmt)
+                                col_config[f"{col} (live)"] = st.column_config.NumberColumn(f"{col} (live)", help=f"{col} sur les prédictions réelles avec ground truth.", format=fmt)
+                            if show.get("brier"):
+                                col_config["Brier score"] = st.column_config.NumberColumn(
+                                    "Brier score (?)",
+                                    help=(
+                                        "Erreur quadratique entre probabilité prédite et résultat réel (0 = parfait, 1 = pire).\n\n"
+                                        "• < 0.10 → très bon\n• 0.10–0.25 → correct\n• > 0.25 → à améliorer\n\n"
+                                        "Classifieurs avec probabilités, ≥ 30 paires ground truth."
+                                    ),
+                                    format="%.4f",
+                                )
+
+                        st.dataframe(
+                            pd.DataFrame(cmp_rows),
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config=col_config,
                         )
-                    st.dataframe(pd.DataFrame(cmp_rows), use_container_width=True, hide_index=True)
-                    st.caption(
-                        f"Comparé le {pd.to_datetime(cmp['compared_at']).strftime('%Y-%m-%d %H:%M')} UTC"
-                        f" — fenêtre latence : {compare_days} j"
-                    )
-            except Exception as e:
-                st.error(f"Erreur lors de la comparaison : {e}")
+                        st.caption(
+                            f"Comparé le {pd.to_datetime(cmp['compared_at']).strftime('%Y-%m-%d %H:%M')} UTC"
+                            f" — période : {compare_date_start} → {compare_date_end}"
+                        )
+                except Exception as e:
+                    st.error(f"Erreur lors de la comparaison : {e}")
 
 st.divider()
 st.subheader("Détail et actions")
@@ -638,6 +720,35 @@ with st.expander("📋 Détails complets", expanded=True):
                 st.markdown(f"**Taille fichier :** {size / 1024:.1f} KB")
 
     with col_r:
+        # ── Statut de déploiement ─────────────────────────────────────────────
+        _d_mode   = selected.get("deployment_mode")
+        _d_prod   = selected.get("is_production")
+        _d_active = selected.get("is_active")
+        _d_weight = selected.get("traffic_weight")
+
+        if _d_mode == "ab_test":
+            _badge_color = "#e67e00"
+            _badge_label = f"🟠 A/B test actif — trafic {_d_weight:.0%}" if _d_weight is not None else "🟠 A/B test actif"
+        elif _d_mode == "shadow":
+            _badge_color = "#7c3aed"
+            _badge_label = "🟣 Shadow actif"
+        elif _d_prod:
+            _badge_color = "#1a7f37"
+            _badge_label = "🟢 En production"
+        elif _d_active:
+            _badge_color = "#0ea5e9"
+            _badge_label = "✅ Actif (non production)"
+        else:
+            _badge_color = "#6b7280"
+            _badge_label = "⚫ Inactif"
+
+        st.markdown(
+            f'<div style="display:inline-block;background:{_badge_color};color:white;'
+            f'padding:4px 14px;border-radius:16px;font-size:0.9em;font-weight:600;'
+            f'margin-bottom:8px">{_badge_label}</div>',
+            unsafe_allow_html=True,
+        )
+
         st.markdown(f"**Nb features :** {selected.get('features_count') or '—'}")
         last_seen = selected.get("last_seen")
         st.markdown(

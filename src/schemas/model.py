@@ -94,6 +94,7 @@ class ModelCreateResponse(BaseModel):
     retrain_schedule: Optional[Dict[str, Any]] = None
     parent_version: Optional[str] = None
     alert_thresholds: Optional[Dict[str, Any]] = None
+    model_task: Optional[str] = None
     created_at: datetime
     user_id_creator: Optional[int]
     creator_username: Optional[str] = None
@@ -161,6 +162,8 @@ class ModelGetResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
     deprecated_at: Optional[datetime]
+
+    model_task: Optional[str] = None  # "regression" | "classification_binary" | "classification_multiclass"
 
     # Infos de chargement
     model_loaded: bool
@@ -771,6 +774,7 @@ class ModelVersionSummary(BaseModel):
 
     version: str
     is_production: bool
+    model_task: Optional[str] = None  # "regression" | "classification_binary" | "classification_multiclass"
     accuracy: Optional[float] = None
     f1_score: Optional[float] = None
     latency_p50_ms: Optional[float] = None
@@ -779,6 +783,18 @@ class ModelVersionSummary(BaseModel):
     brier_score: Optional[float] = None
     trained_at: Optional[datetime] = None
     n_rows_trained: Optional[int] = None
+    prediction_count: Optional[int] = None
+    shadow_prediction_count: Optional[int] = None
+    # Métriques eval régression (depuis training_metrics JSON)
+    mae_eval: Optional[float] = None
+    rmse_eval: Optional[float] = None
+    r2_eval: Optional[float] = None
+    # Métriques live
+    live_accuracy: Optional[float] = None
+    live_f1: Optional[float] = None
+    live_mae: Optional[float] = None
+    live_rmse: Optional[float] = None
+    live_r2: Optional[float] = None
 
 
 class ModelCompareResponse(BaseModel):

@@ -178,6 +178,16 @@ with tab_users:
     df["last_login"] = pd.to_datetime(df["last_login"]).dt.strftime("%Y-%m-%d %H:%M").fillna("—")
     df["created_at"] = pd.to_datetime(df["created_at"]).dt.strftime("%Y-%m-%d")
     df["is_active"] = df["is_active"].map({True: "✅ Actif", False: "❌ Inactif"})
+    df = df.rename(columns={
+        "id": "ID",
+        "username": "Utilisateur",
+        "email": "Email",
+        "role": "Rôle",
+        "is_active": "Statut",
+        "rate_limit_per_day": "Quota / jour",
+        "last_login": "Dernière connexion",
+        "created_at": "Créé le",
+    })
 
     st.dataframe(df, use_container_width=True, hide_index=True)
 
@@ -258,86 +268,143 @@ with tab_users:
 
     # --- Analytics d'usage ---
     st.divider()
+    _default_end = pd.Timestamp.now().date()
+    _default_start = _default_end - pd.Timedelta(days=29)
     with st.expander(
-        f"📊 Analytics d'usage — {selected['username']} (30 derniers jours)", expanded=True
+        f"📊 Analytics d'usage — {selected['username']}", expanded=True
     ):
+        daily_limit = selected["rate_limit_per_day"]
+
+        # Quota du jour (indépendant des filtres de date)
         try:
-            usage = client.get_user_usage(selected["id"], days=30)
-            daily_limit = selected["rate_limit_per_day"]
-
-            today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
-            today_calls = next(
-                (d["calls"] for d in usage["by_day"] if str(d["date"]) == today_str), 0
+            _quota_usage = client.get_user_usage(
+                selected["id"],
+                start_date=str(_default_end),
+                end_date=str(_default_end),
             )
-            pct = today_calls / daily_limit * 100 if daily_limit > 0 else 0
+            today_calls = sum(d["calls"] for d in _quota_usage.get("by_day", []))
+        except Exception:
+            today_calls = 0
+        pct = today_calls / daily_limit * 100 if daily_limit > 0 else 0
+        st.metric(
+            label="Consommation quota (aujourd'hui)",
+            value=f"{pct:.1f}%",
+            delta=f"{today_calls} / {daily_limit} appels",
+            delta_color="off",
+        )
 
-            st.metric(
-                label="Consommation quota (aujourd'hui)",
-                value=f"{pct:.1f}%",
-                delta=f"{today_calls} / {daily_limit} appels",
-                delta_color="off",
-            )
-            show_quota_progress(today_calls, daily_limit)
+        st.divider()
 
-            col_left, col_right = st.columns(2)
+        # Filtres de date — affectent tableau + graphique
+        col_date_start, col_date_end = st.columns(2)
+        usage_date_start = col_date_start.date_input(
+            "Date début", value=_default_start, key=f"usage_start_{selected['id']}"
+        )
+        usage_date_end = col_date_end.date_input(
+            "Date fin", value=_default_end, key=f"usage_end_{selected['id']}"
+        )
 
-            with col_left:
-                if usage["by_model"]:
-                    df_model = pd.DataFrame(usage["by_model"])
-                    fig_model = px.bar(
-                        df_model,
-                        x="model_name",
-                        y="calls",
-                        title="Prédictions par modèle",
-                        labels={"model_name": "Modèle", "calls": "Appels"},
-                        color_discrete_sequence=["#4C78A8"],
-                    )
-                    fig_model.update_layout(
-                        xaxis_title="Modèle",
-                        yaxis_title="Appels",
-                        showlegend=False,
-                        margin={"t": 40},
-                    )
-                    st.plotly_chart(fig_model, use_container_width=True)
+        if usage_date_start > usage_date_end:
+            st.warning("La date de début doit être antérieure à la date de fin.")
+        else:
+            try:
+                usage = client.get_user_usage(
+                    selected["id"],
+                    start_date=str(usage_date_start),
+                    end_date=str(usage_date_end),
+                )
+
+                # --- Tableau récapitulatif ---
+                by_model_day = usage.get("by_model_day", [])
+                if by_model_day:
+                    df_md = pd.DataFrame(by_model_day)
+                    df_md["date"] = pd.to_datetime(df_md["date"]).dt.date
+
+                    rows_table = []
+                    for model_name, grp in df_md.groupby("model_name"):
+                        s = grp["calls"]
+                        rows_table.append({
+                            "Modèle": model_name,
+                            "Volume total": int(s.sum()),
+                            "Max / jour": int(s.max()),
+                            "Moy. / jour": round(float(s.mean()), 1),
+                            "Médiane / jour": round(float(s.median()), 1),
+                        })
+                    by_day_data = usage.get("by_day", [])
+                    if by_day_data:
+                        s_all = pd.DataFrame(by_day_data)["calls"]
+                        rows_table.append({
+                            "Modèle": "Total",
+                            "Volume total": int(s_all.sum()),
+                            "Max / jour": int(s_all.max()),
+                            "Moy. / jour": round(float(s_all.mean()), 1),
+                            "Médiane / jour": round(float(s_all.median()), 1),
+                        })
+
+                    st.subheader("Prédictions par modèle")
+                    st.dataframe(pd.DataFrame(rows_table), use_container_width=True, hide_index=True)
+                elif usage.get("by_model"):
+                    df_model = pd.DataFrame(usage["by_model"]).rename(
+                        columns={"model_name": "Modèle", "calls": "Volume total", "errors": "Erreurs"}
+                    )[["Modèle", "Volume total", "Erreurs"]]
+                    st.subheader("Prédictions par modèle")
+                    st.dataframe(df_model, use_container_width=True, hide_index=True)
                 else:
-                    st.info("Aucune prédiction par modèle sur la période.")
+                    st.info("Aucune prédiction sur la période sélectionnée.")
 
-            with col_right:
-                if usage["by_day"]:
-                    df_day = pd.DataFrame(usage["by_day"])
-                    df_day["date"] = pd.to_datetime(df_day["date"])
-                    df_day = df_day.sort_values("date")
+                # --- Graphique volume par jour — une courbe par modèle ---
+                if by_model_day:
+                    df_md_plot = pd.DataFrame(by_model_day)
+                    df_md_plot["date"] = pd.to_datetime(df_md_plot["date"])
+                    df_md_plot = df_md_plot.sort_values("date")
 
                     fig_day = go.Figure()
-                    fig_day.add_trace(
-                        go.Scatter(
-                            x=df_day["date"],
-                            y=df_day["calls"],
-                            mode="lines+markers",
-                            name="Appels/jour",
-                            line={"color": "#4C78A8"},
+                    colors = px.colors.qualitative.Set2
+                    for i, (model_name, grp) in enumerate(df_md_plot.groupby("model_name")):
+                        color = colors[i % len(colors)]
+                        fig_day.add_trace(go.Scatter(
+                            x=grp["date"],
+                            y=grp["calls"],
+                            mode="lines",
+                            name=model_name,
+                            stackgroup="one",
+                            line={"color": color, "width": 1},
+                            fillcolor=color,
+                        ))
+
+                    y_max = df_md_plot["calls"].max()
+                    total_max = y_max * df_md_plot["model_name"].nunique()
+                    if daily_limit > 0 and daily_limit <= total_max * 3:
+                        fig_day.add_hline(
+                            y=daily_limit,
+                            line_dash="dash",
+                            line_color="red",
+                            annotation_text=f"Quota ({daily_limit:,}/jour)",
+                            annotation_position="top right",
                         )
-                    )
-                    fig_day.add_hline(
-                        y=daily_limit,
-                        line_dash="dash",
-                        line_color="red",
-                        annotation_text=f"Quota ({daily_limit}/jour)",
-                        annotation_position="top right",
-                    )
+                    else:
+                        fig_day.add_annotation(
+                            text=f"Quota : {daily_limit:,}/jour",
+                            xref="paper", yref="paper",
+                            x=1, y=1.08,
+                            showarrow=False,
+                            font=dict(color="red", size=11),
+                        )
                     fig_day.update_layout(
                         title="Volume par jour",
                         xaxis_title="Date",
                         yaxis_title="Appels",
-                        showlegend=False,
-                        margin={"t": 40},
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                        margin={"t": 60, "r": 20},
+                        yaxis=dict(rangemode="tozero"),
+                        hovermode="x unified",
                     )
                     st.plotly_chart(fig_day, use_container_width=True)
                 else:
                     st.info("Aucune donnée journalière sur la période.")
 
-        except Exception as e:
-            st.error(f"Impossible de charger les analytics : {e}")
+            except Exception as e:
+                st.error(f"Impossible de charger les analytics : {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

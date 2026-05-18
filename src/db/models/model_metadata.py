@@ -50,6 +50,7 @@ class ModelMetadata(Base):
     algorithm = Column(String(100), nullable=True)  # RandomForest, LogisticRegression, etc.
     features_count = Column(Integer, nullable=True)
     classes = Column(JSON, nullable=True)  # Liste des classes
+    model_task = Column(String(50), nullable=True)  # "regression" | "classification_binary" | "classification_multiclass"
 
     # Performance
     accuracy = Column(Float, nullable=True)
