@@ -397,21 +397,22 @@ class ModelService:
         self,
         db: AsyncSession,
         model_name: str,
-    ) -> Tuple[Optional[ModelMetadata], Optional[ModelMetadata]]:
+    ) -> Tuple[Optional[ModelMetadata], List[ModelMetadata]]:
         """
         Détermine quelle(s) version(s) utiliser pour un appel sans version explicite.
 
         Règles de sélection :
-        1. Les versions avec deployment_mode="shadow" deviennent le candidat shadow.
-        2. Les versions avec deployment_mode="ab_test" et traffic_weight > 0 participent
+        1. Les versions avec deployment_mode="ab_test" et traffic_weight > 0 participent
            au routage pondéré (random.choices) → version primaire.
-        3. Si aucune version A/B : fallback sur get_model_metadata() (comportement legacy :
-           is_production=True ou la plus récente).
-        4. Le shadow n'est activé que s'il existe exactement une version shadow.
+           Les candidats A/B non sélectionnés tournent automatiquement en shadow,
+           permettant de comparer toutes les versions sur les mêmes inputs.
+        2. Les versions avec deployment_mode="shadow" s'ajoutent à la liste des shadows.
+        3. Si aucune version A/B : fallback sur get_model_metadata() (is_production=True
+           ou la plus récente).
 
         Retourne:
-            (primary_metadata, shadow_metadata)
-            shadow_metadata est None si aucune version shadow unique n'existe.
+            (primary_metadata, shadow_list)
+            shadow_list peut contenir : candidats A/B non sélectionnés + version shadow dédiée.
         """
         result = await db.execute(
             select(ModelMetadata).where(
@@ -433,23 +434,27 @@ class ModelService:
             and m.traffic_weight > 0.0
         ]
 
-        # Un seul shadow autorisé (ambiguïté sinon → désactivé)
-        shadow_metadata = shadow_candidates[0] if len(shadow_candidates) == 1 else None
-
         if ab_candidates:
             weights = [m.traffic_weight for m in ab_candidates]
             primary_metadata = random.choices(ab_candidates, weights=weights, k=1)[0]
+            # Les autres candidats A/B non sélectionnés tournent en shadow
+            ab_shadows = [m for m in ab_candidates if m.version != primary_metadata.version]
             logger.info(
                 "Routage A/B",
                 model_name=model_name,
                 selected_version=primary_metadata.version,
                 candidates=[m.version for m in ab_candidates],
+                ab_shadows=[m.version for m in ab_shadows],
             )
         else:
             # Fallback legacy : is_production=True ou plus récent
             primary_metadata = await DBService.get_model_metadata(db, model_name, version=None)
+            ab_shadows = []
 
-        return primary_metadata, shadow_metadata
+        # Shadow dédié (deployment_mode="shadow") + candidats A/B non sélectionnés
+        shadow_list = ab_shadows + shadow_candidates
+
+        return primary_metadata, shadow_list
 
     async def close(self):
         """Ferme proprement la connexion Redis (à appeler au shutdown de l'app)."""

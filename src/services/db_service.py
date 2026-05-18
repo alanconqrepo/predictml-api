@@ -4,7 +4,7 @@ Service pour les opérations de base de données
 
 import secrets
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, List, Optional
 
 from sklearn.metrics import accuracy_score, mean_absolute_error
@@ -143,14 +143,35 @@ class DBService:
         return result.scalar() or 0
 
     @staticmethod
-    async def get_user_usage(db: AsyncSession, user_id: int, days: int = 30) -> dict:
-        """Retourne les statistiques d'usage d'un utilisateur sur les N derniers jours.
+    async def get_user_usage(
+        db: AsyncSession,
+        user_id: int,
+        days: int = 30,
+        start_date=None,
+        end_date=None,
+    ) -> dict:
+        """Retourne les statistiques d'usage d'un utilisateur sur une période.
 
-        Agrège les prédictions par modèle (calls, errors, avg_latency_ms)
-        et par jour (calls), calculées côté Python pour compatibilité SQLite/PostgreSQL.
+        Agrège les prédictions par modèle (calls, errors, avg_latency_ms),
+        par jour (calls) et par modèle+jour, pour compatibilité SQLite/PostgreSQL.
         """
-        days = min(days, settings.ANALYTICS_MAX_DAYS)
-        cutoff = _utcnow() - timedelta(days=days)
+        if start_date and end_date:
+            if isinstance(start_date, str):
+                start_date = date.fromisoformat(start_date)
+            if isinstance(end_date, str):
+                end_date = date.fromisoformat(end_date)
+            cutoff = datetime.combine(start_date, datetime.min.time())
+            end_dt = datetime.combine(end_date, datetime.max.time())
+            actual_days = (end_date - start_date).days + 1
+        else:
+            actual_days = min(days, settings.ANALYTICS_MAX_DAYS)
+            cutoff = _utcnow() - timedelta(days=actual_days)
+            end_dt = None
+
+        conditions = [Prediction.user_id == user_id, Prediction.timestamp >= cutoff]
+        if end_dt is not None:
+            conditions.append(Prediction.timestamp <= end_dt)
+
         stmt = (
             select(
                 Prediction.model_name,
@@ -158,7 +179,7 @@ class DBService:
                 Prediction.response_time_ms,
                 Prediction.timestamp,
             )
-            .where(and_(Prediction.user_id == user_id, Prediction.timestamp >= cutoff))
+            .where(and_(*conditions))
             .limit(settings.MAX_ROWS_ANALYTICS)
         )
 
@@ -167,6 +188,7 @@ class DBService:
 
         by_model: dict = defaultdict(lambda: {"calls": 0, "errors": 0, "latencies": []})
         by_day: dict = defaultdict(int)
+        by_model_day: dict = defaultdict(int)
 
         for row in rows:
             by_model[row.model_name]["calls"] += 1
@@ -177,6 +199,7 @@ class DBService:
             if row.timestamp is not None:
                 day_key = row.timestamp.date()
                 by_day[day_key] += 1
+                by_model_day[(row.model_name, day_key)] += 1
 
         model_stats = []
         for model_name, g in sorted(by_model.items()):
@@ -191,11 +214,17 @@ class DBService:
             )
 
         day_stats = [{"date": d, "calls": c} for d, c in sorted(by_day.items())]
+        model_day_stats = [
+            {"model_name": mn, "date": d, "calls": c}
+            for (mn, d), c in sorted(by_model_day.items())
+        ]
 
         return {
             "total_calls": len(rows),
             "by_model": model_stats,
             "by_day": day_stats,
+            "by_model_day": model_day_stats,
+            "actual_days": actual_days,
         }
 
     # === Predictions ===
@@ -953,6 +982,8 @@ class DBService:
         model_name: str,
         model_version: Optional[str],
         days: int = 7,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
     ) -> dict:
         """
         Calcule les statistiques des features de production sur une fenêtre glissante.
@@ -962,15 +993,22 @@ class DBService:
         SQLite (tests) : agrégation numpy Python-side avec LIMIT de sécurité.
         Retourne {feature: {mean, std, min, max, count, values, null_rate}}.
         """
-        days = min(days, settings.ANALYTICS_MAX_DAYS)
-        cutoff = _utcnow() - timedelta(days=days)
+        if start is not None:
+            cutoff = start
+        else:
+            days = min(days, settings.ANALYTICS_MAX_DAYS)
+            cutoff = _utcnow() - timedelta(days=days)
 
         if _pg(db):
             version_clause = "AND model_version = :version" if model_version else ""
             version_clause_p = "AND p.model_version = :version" if model_version else ""
+            end_filter = "AND timestamp <= :end_ts" if end is not None else ""
+            end_filter_p = "AND p.timestamp <= :end_ts" if end is not None else ""
             pg_params: dict = {"name": model_name, "cutoff": cutoff}
             if model_version:
                 pg_params["version"] = model_version
+            if end is not None:
+                pg_params["end_ts"] = end
             sql = text(f"""
                 WITH base AS (
                     SELECT COUNT(*) AS total_rows
@@ -978,6 +1016,7 @@ class DBService:
                     WHERE model_name = :name
                       AND status     = 'success'
                       AND timestamp  >= :cutoff
+                      {end_filter}
                       {version_clause}
                 )
                 SELECT
@@ -993,6 +1032,7 @@ class DBService:
                 WHERE p.model_name = :name
                   AND p.status     = 'success'
                   AND p.timestamp  >= :cutoff
+                  {end_filter_p}
                   {version_clause_p}
                   AND kv.value     ~ '^-?[0-9]+\\.?[0-9]*$'
                 GROUP BY kv.key
@@ -1023,6 +1063,8 @@ class DBService:
             Prediction.status == "success",
             Prediction.timestamp >= cutoff,
         ]
+        if end is not None:
+            filters.append(Prediction.timestamp <= end)
         if model_version:
             filters.append(Prediction.model_version == model_version)
 
@@ -1306,6 +1348,58 @@ class DBService:
             "oldest_remaining": oldest_remaining,
             "models_affected": models_affected,
             "linked_observed_results_count": linked_count,
+        }
+
+    @staticmethod
+    async def delete_predictions_for_version(
+        db: AsyncSession,
+        model_name: str,
+        model_version: str,
+    ) -> dict:
+        """
+        Supprime toutes les prédictions (et observed_results liés) d'une version précise.
+
+        Appelé en cascade depuis DELETE /models/{name}/{version} et
+        DELETE /models/{name} (par version) pour éviter les enregistrements orphelins.
+
+        Returns:
+            dict avec deleted_predictions et deleted_observed_results.
+        """
+        # Collecter les (id_obs, model_name) pour nettoyer les observed_results associés
+        pairs_result = await db.execute(
+            select(Prediction.id_obs, Prediction.model_name)
+            .where(
+                and_(
+                    Prediction.model_name    == model_name,
+                    Prediction.model_version == model_version,
+                )
+            )
+            .distinct()
+        )
+        pairs = pairs_result.all()
+
+        deleted_obs = 0
+        if pairs:
+            or_clauses = [
+                and_(ObservedResult.id_obs == id_obs, ObservedResult.model_name == mname)
+                for id_obs, mname in pairs
+            ]
+            obs_result = await db.execute(delete(ObservedResult).where(or_(*or_clauses)))
+            deleted_obs = obs_result.rowcount or 0
+
+        pred_result = await db.execute(
+            delete(Prediction).where(
+                and_(
+                    Prediction.model_name    == model_name,
+                    Prediction.model_version == model_version,
+                )
+            )
+        )
+        deleted_preds = pred_result.rowcount or 0
+
+        return {
+            "deleted_predictions":      deleted_preds,
+            "deleted_observed_results": deleted_obs,
         }
 
     # === Model Metadata ===
@@ -1805,6 +1899,8 @@ class DBService:
         db: AsyncSession,
         model_name: str,
         days: int = 30,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
     ) -> list[dict]:
         """
         Retourne les statistiques par version pour une comparaison A/B.
@@ -1813,14 +1909,20 @@ class DBService:
         GROUP BY et PERCENTILE_CONT côté serveur — pas de LIMIT bloquant.
         SQLite (tests) : agrégation Python-side avec LIMIT de sécurité.
         """
-        days = min(days, settings.ANALYTICS_MAX_DAYS)
-        cutoff = _utcnow() - timedelta(days=days)
+        if start is not None:
+            cutoff = start
+        else:
+            days = min(days, settings.ANALYTICS_MAX_DAYS)
+            cutoff = _utcnow() - timedelta(days=days)
 
         if _pg(db):
             params: dict = {"name": model_name, "cutoff": cutoff}
+            end_filter = "AND timestamp <= :end_ts" if end is not None else ""
+            if end is not None:
+                params["end_ts"] = end
 
             # 1. Agrégats principaux par (version, is_shadow)
-            agg_sql = text("""
+            agg_sql = text(f"""
                 SELECT
                     COALESCE(model_version, 'unknown')            AS version,
                     is_shadow,
@@ -1833,28 +1935,28 @@ class DBService:
                         FILTER (WHERE status = 'success'
                                   AND response_time_ms IS NOT NULL) AS p95_response_time_ms
                 FROM predictions
-                WHERE model_name = :name AND timestamp >= :cutoff
+                WHERE model_name = :name AND timestamp >= :cutoff {end_filter}
                 GROUP BY model_version, is_shadow
                 ORDER BY model_version, is_shadow
             """)
 
             # 2. Distribution des labels (production uniquement)
-            dist_sql = text("""
+            dist_sql = text(f"""
                 SELECT
                     COALESCE(model_version, 'unknown') AS version,
                     prediction_result::text            AS label,
                     COUNT(*)                           AS cnt
                 FROM predictions
                 WHERE model_name     = :name
-                  AND timestamp      >= :cutoff
+                  AND timestamp      >= :cutoff {end_filter}
                   AND is_shadow      = false
                   AND status         = 'success'
                   AND prediction_result IS NOT NULL
                 GROUP BY model_version, prediction_result::text
             """)
 
-            # 3. Temps de réponse pour le test Mann-Whitney (limité par version)
-            times_sql = text("""
+            # 3. Temps de réponse — toutes prédictions (prod + shadow) pour p50
+            times_sql = text(f"""
                 SELECT version, response_time_ms
                 FROM (
                     SELECT
@@ -1866,8 +1968,7 @@ class DBService:
                         ) AS rn
                     FROM predictions
                     WHERE model_name     = :name
-                      AND timestamp      >= :cutoff
-                      AND is_shadow      = false
+                      AND timestamp      >= :cutoff {end_filter}
                       AND status         = 'success'
                       AND response_time_ms IS NOT NULL
                 ) sub
@@ -1906,25 +2007,28 @@ class DBService:
             for ver in sorted(agg):
                 prod = agg[ver]["prod"]
                 shadow = agg[ver]["shadow"]
-                if prod is None:
+                if prod is None and shadow is None:
                     continue
-                total_prod = int(prod.total)
-                errors = int(prod.error_count)
+                # Pour les versions shadow-only, utiliser leurs stats propres
+                row = prod if prod is not None else shadow
+                is_shadow_only = prod is None
+                total = int(row.total)
+                errors = int(row.error_count)
                 stats.append(
                     {
                         "version": ver,
-                        "total_predictions": total_prod,
-                        "shadow_predictions": int(shadow.total) if shadow else 0,
-                        "error_rate": round(errors / total_prod, 4) if total_prod > 0 else 0.0,
+                        "total_predictions": 0 if is_shadow_only else total,
+                        "shadow_predictions": total if is_shadow_only else (int(shadow.total) if shadow else 0),
+                        "error_rate": round(errors / total, 4) if total > 0 else 0.0,
                         "error_count": errors,
                         "avg_response_time_ms": (
-                            round(float(prod.avg_response_time_ms), 2)
-                            if prod.avg_response_time_ms is not None
+                            round(float(row.avg_response_time_ms), 2)
+                            if row.avg_response_time_ms is not None
                             else None
                         ),
                         "p95_response_time_ms": (
-                            round(float(prod.p95_response_time_ms), 2)
-                            if prod.p95_response_time_ms is not None
+                            round(float(row.p95_response_time_ms), 2)
+                            if row.p95_response_time_ms is not None
                             else None
                         ),
                         "prediction_distribution": dist.get(ver, {}),

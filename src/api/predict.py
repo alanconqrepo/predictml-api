@@ -2,10 +2,12 @@
 Endpoints pour les prédictions
 """
 
+import asyncio
 import csv
 import io
 import json
 import os
+import random
 import time
 from datetime import datetime
 from typing import List, Optional
@@ -51,6 +53,11 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["predictions"])
 
+# Limite le nombre de prédictions shadow simultanées pour éviter de saturer le pool de connexions
+_SHADOW_SEMAPHORE = asyncio.Semaphore(int(os.getenv("SHADOW_CONCURRENCY", "20")))
+# En mode batch, on échantillonne au plus N items par version shadow
+_MAX_SHADOW_ITEMS_PER_BATCH = int(os.getenv("MAX_SHADOW_ITEMS_PER_BATCH", "50"))
+
 
 async def _run_shadow_prediction(
     model_name: str,
@@ -60,6 +67,7 @@ async def _run_shadow_prediction(
     user_id: int,
     client_ip: Optional[str],
     user_agent: Optional[str],
+    timestamp: Optional[datetime] = None,
 ) -> None:
     """
     Exécute la prédiction du modèle shadow en background et la persiste avec is_shadow=True.
@@ -67,59 +75,61 @@ async def _run_shadow_prediction(
     """
     import time as _time
 
-    start = _time.time()
-    try:
-        async with AsyncSessionLocal() as db:
-            shadow_data = await model_service.load_model(db, model_name, shadow_version)
-            shadow_model = shadow_data["model"]
-            shadow_meta = shadow_data["metadata"]
+    async with _SHADOW_SEMAPHORE:
+        start = _time.time()
+        try:
+            async with AsyncSessionLocal() as db:
+                shadow_data = await model_service.load_model(db, model_name, shadow_version)
+                shadow_model = shadow_data["model"]
+                shadow_meta = shadow_data["metadata"]
 
-            if not hasattr(shadow_model, "feature_names_in_"):
-                raise ValueError(
-                    f"Shadow model '{model_name}:{shadow_version}' n'a pas feature_names_in_"
+                if not hasattr(shadow_model, "feature_names_in_"):
+                    raise ValueError(
+                        f"Shadow model '{model_name}:{shadow_version}' n'a pas feature_names_in_"
+                    )
+
+                x = np.array([[features[n] for n in shadow_model.feature_names_in_]], dtype=object)
+                raw = shadow_model.predict(x)[0]
+                result = raw.item() if hasattr(raw, "item") else raw
+                proba = (
+                    shadow_model.predict_proba(x)[0].tolist()
+                    if hasattr(shadow_model, "predict_proba")
+                    else None
+                )
+                rt_ms = (_time.time() - start) * 1000
+
+                await DBService.create_prediction(
+                    db=db,
+                    user_id=user_id,
+                    model_name=shadow_meta.name,
+                    model_version=shadow_meta.version,
+                    input_features=features,
+                    prediction_result=result,
+                    probabilities=proba,
+                    response_time_ms=rt_ms,
+                    client_ip=client_ip,
+                    user_agent=user_agent,
+                    status="success",
+                    id_obs=id_obs,
+                    is_shadow=True,
+                    max_confidence=max(proba) if proba else None,
+                    timestamp=timestamp,
                 )
 
-            x = np.array([[features[n] for n in shadow_model.feature_names_in_]], dtype=object)
-            raw = shadow_model.predict(x)[0]
-            result = raw.item() if hasattr(raw, "item") else raw
-            proba = (
-                shadow_model.predict_proba(x)[0].tolist()
-                if hasattr(shadow_model, "predict_proba")
-                else None
-            )
-            rt_ms = (_time.time() - start) * 1000
+                logger.info(
+                    "Shadow prediction enregistrée",
+                    model_name=model_name,
+                    version=shadow_version,
+                    result=result,
+                )
 
-            await DBService.create_prediction(
-                db=db,
-                user_id=user_id,
-                model_name=shadow_meta.name,
-                model_version=shadow_meta.version,
-                input_features=features,
-                prediction_result=result,
-                probabilities=proba,
-                response_time_ms=rt_ms,
-                client_ip=client_ip,
-                user_agent=user_agent,
-                status="success",
-                id_obs=id_obs,
-                is_shadow=True,
-                max_confidence=max(proba) if proba else None,
-            )
-
-            logger.info(
-                "Shadow prediction enregistrée",
+        except Exception as e:
+            logger.warning(
+                "Échec de la prédiction shadow (non-bloquant)",
                 model_name=model_name,
                 version=shadow_version,
-                result=result,
+                error=str(e),
             )
-
-    except Exception as e:
-        logger.warning(
-            "Échec de la prédiction shadow (non-bloquant)",
-            model_name=model_name,
-            version=shadow_version,
-            error=str(e),
-        )
 
 
 async def _publish_prediction_to_stream(payload: dict) -> bool:
@@ -810,7 +820,7 @@ async def predict(
     prediction_result = None
     probability = None
     error_message = None
-    shadow_meta = None
+    shadow_meta: list = []
     _metric_version = "unknown"
     _metric_mode = "production"
     structlog.contextvars.bind_contextvars(event_type="predict", model_name=input_data.model_name)
@@ -835,7 +845,7 @@ async def predict(
             model_data = await model_service.load_model(
                 db, input_data.model_name, input_data.model_version
             )
-            shadow_meta = None
+            shadow_meta = []
         else:
             # Routage intelligent : A/B test ou shadow si configuré
             primary_meta, shadow_meta = await model_service.select_routing_versions(
@@ -944,17 +954,18 @@ async def predict(
             else:
                 await DBService.create_prediction(db=db, **_prediction_payload)
 
-            # --- Dispatch shadow en background (si une version shadow est active) ---
-            if shadow_meta is not None:
+            # --- Dispatch shadow en background (versions shadow + A/B non sélectionnés) ---
+            for _sm in shadow_meta:
                 background_tasks.add_task(
                     _run_shadow_prediction,
                     model_name=metadata.name,
-                    shadow_version=shadow_meta.version,
+                    shadow_version=_sm.version,
                     features=input_data.features,
                     id_obs=input_data.id_obs,
                     user_id=user.id,
                     client_ip=request.client.host if request.client else None,
                     user_agent=request.headers.get("user-agent"),
+                    timestamp=input_data.timestamp,
                 )
 
             # Déclencher le webhook si configuré sur le modèle
@@ -1070,6 +1081,7 @@ MAX_BATCH_SIZE = int(os.getenv("MAX_BATCH_SIZE", "500"))
 async def predict_batch(
     input_data: BatchPredictionInput,
     request: Request,
+    background_tasks: BackgroundTasks,
     strict_validation: bool = Query(
         False,
         description=(
@@ -1114,9 +1126,24 @@ async def predict_batch(
         )
 
     try:
+        # Routing A/B / shadow si aucune version explicite
+        batch_shadow_list: List = []
+        if input_data.model_version is None:
+            primary_meta, batch_shadow_list = await model_service.select_routing_versions(
+                db, input_data.model_name
+            )
+            if primary_meta is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Aucune version active trouvée pour le modèle '{input_data.model_name}'.",
+                )
+            resolved_version = primary_meta.version
+        else:
+            resolved_version = input_data.model_version
+
         # Charger le modèle une seule fois (cache partagé)
         model_data = await model_service.load_model(
-            db, input_data.model_name, input_data.model_version
+            db, input_data.model_name, resolved_version
         )
         model = model_data["model"]
         metadata = model_data["metadata"]
@@ -1211,6 +1238,28 @@ async def predict_batch(
         # Persister toutes les prédictions en une seule transaction
         db.add_all(orm_objects)
         await db.commit()
+
+        # Dispatcher les prédictions shadow en background (versions shadow + A/B non sélectionnés)
+        # On échantillonne pour éviter de saturer l'event loop sur les gros batchs
+        if batch_shadow_list:
+            shadow_items = (
+                input_data.inputs
+                if len(input_data.inputs) <= _MAX_SHADOW_ITEMS_PER_BATCH
+                else random.sample(input_data.inputs, _MAX_SHADOW_ITEMS_PER_BATCH)
+            )
+            for _sm in batch_shadow_list:
+                for item in shadow_items:
+                    background_tasks.add_task(
+                        _run_shadow_prediction,
+                        input_data.model_name,
+                        shadow_version=_sm.version,
+                        features=item.features,
+                        id_obs=item.id_obs,
+                        user_id=user.id,
+                        client_ip=client_ip,
+                        user_agent=user_agent,
+                        timestamp=item.timestamp,
+                    )
 
         return BatchPredictionOutput(
             model_name=metadata.name,

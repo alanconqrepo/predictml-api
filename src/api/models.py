@@ -5,6 +5,7 @@ Endpoints pour la gestion des modèles
 import ast
 import asyncio
 import csv
+import io
 import json
 import math
 import os
@@ -291,6 +292,28 @@ def _validate_train_script(source: str) -> Optional[str]:
     if not any(call in source for call in save_calls):
         return "Le script doit sauvegarder le modèle avec joblib.dump ou save_model"
 
+    return None
+
+
+def _detect_task_type(model_bytes: bytes) -> Optional[str]:
+    """
+    Détecte le type de tâche depuis les bytes du modèle sklearn (.joblib).
+    Retourne "regression", "classification_binary", "classification_multiclass", ou None.
+    """
+    try:
+        import joblib
+        obj = joblib.load(io.BytesIO(model_bytes))
+        # Unwrap Pipeline : prendre le dernier estimateur
+        if hasattr(obj, "steps"):
+            obj = obj.steps[-1][1]
+        if hasattr(obj, "classes_"):
+            n = len(obj.classes_)
+            return "classification_binary" if n == 2 else "classification_multiclass"
+        # Régression : pas de classes_, mais prédit des valeurs continues
+        if hasattr(obj, "predict"):
+            return "regression"
+    except Exception:
+        pass
     return None
 
 
@@ -1407,6 +1430,7 @@ async def retrain_model(
         "algorithm": source_model.algorithm,
         "features_count": source_model.features_count,
         "classes": source_model.classes,
+        "model_task": source_model.model_task,
         "training_params": source_model.training_params,
         "hyperparameters": source_model.hyperparameters,
         "training_dataset": source_model.training_dataset,
@@ -1770,6 +1794,7 @@ async def retrain_model(
                 f1_score=new_f1,
                 features_count=source_fields["features_count"],
                 classes=source_fields["classes"],
+                model_task=source_fields["model_task"],
                 training_params=source_fields["training_params"],
                 hyperparameters=parsed_metrics.get("hyperparameters") or source_fields["hyperparameters"],
                 training_dataset=(
@@ -2952,8 +2977,10 @@ async def compare_model_versions(
         description="Versions séparées par des virgules (ex: 1.0.0,2.0.0). Toutes les versions actives si absent.",
     ),
     days: int = Query(
-        7, ge=1, le=90, description="Fenêtre temporelle pour les stats de latence (jours)"
+        7, ge=1, le=90, description="Fenêtre temporelle pour les stats de latence et les métriques live (jours)"
     ),
+    start_date: Optional[str] = Query(None, description="Date début ISO (YYYY-MM-DD) — prioritaire sur days"),
+    end_date: Optional[str] = Query(None, description="Date fin ISO (YYYY-MM-DD) — prioritaire sur days"),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
@@ -2991,8 +3018,25 @@ async def compare_model_versions(
 
     meta_by_version = {m.version: m for m in filtered_metas}
 
-    # Latency stats — single DB query covering all versions
-    ab_stats = await DBService.get_ab_comparison_stats(db, name, days=days)
+    # Résoudre la fenêtre temporelle : start_date/end_date prioritaires sur days
+    _period_start: Optional[datetime] = None
+    _period_end: Optional[datetime] = None
+    if start_date:
+        try:
+            _period_start = datetime.fromisoformat(start_date)
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            _period_end = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59)
+        except ValueError:
+            pass
+    if _period_start is None and _period_end is None:
+        _period_start = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        _period_end = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # Latency stats — single DB query covering all versions, filtré sur la même période
+    ab_stats = await DBService.get_ab_comparison_stats(db, name, days=days, start=_period_start, end=_period_end)
     latency_by_version: dict = {}
     for s in ab_stats:
         times = sorted(s.get("response_times", []))
@@ -3001,13 +3045,15 @@ async def compare_model_versions(
         latency_by_version[s["version"]] = {
             "p50": p50,
             "p95": s.get("p95_response_time_ms"),
+            "total": s.get("total_predictions", 0),
+            "shadow": s.get("shadow_predictions", 0),
         }
 
-    # Per-version extras (drift + Brier score) — parallel gather
+    # Per-version extras (drift + live metrics) — parallel gather
     async def _version_extras(version: str, meta: ModelMetadata):
         prod_stats, pairs = await asyncio.gather(
-            DBService.get_feature_production_stats(db, name, version, days),
-            DBService.get_performance_pairs(db, name, model_version=version),
+            DBService.get_feature_production_stats(db, name, version, days, start=_period_start, end=_period_end),
+            DBService.get_performance_pairs(db, name, model_version=version, start=_period_start, end=_period_end),
         )
 
         baseline = meta.feature_baseline or {}
@@ -3020,7 +3066,45 @@ async def compare_model_versions(
             drift_status = "no_baseline"
 
         brier_score = None
+        live_accuracy = None
+        live_f1 = None
+        live_mae = None
+        live_rmse = None
+        live_r2 = None
         valid_pairs = [(row[0], row[1], row[2]) for row in pairs if row[2]]
+        all_pairs = [(row[0], row[1]) for row in pairs]
+
+        # Déterminer le type de modèle : model_task en priorité, fallback sur training_metrics
+        if meta.model_task == "regression":
+            _is_reg = True
+        elif meta.model_task in ("classification_binary", "classification_multiclass"):
+            _is_reg = False
+        else:
+            _tm = meta.training_metrics or {}
+            _is_reg = any(k in _tm for k in ("mae", "rmse", "r2"))
+
+        if all_pairs:
+            if _is_reg:
+                try:
+                    preds_f = np.array([float(pred) for pred, _ in all_pairs])
+                    obs_f = np.array([float(obs) for _, obs in all_pairs])
+                    live_mae = round(float(mean_absolute_error(obs_f, preds_f)), 4)
+                    live_rmse = round(float(np.sqrt(np.mean((preds_f - obs_f) ** 2))), 4)
+                    ss_res = np.sum((obs_f - preds_f) ** 2)
+                    ss_tot = np.sum((obs_f - obs_f.mean()) ** 2)
+                    live_r2 = round(float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0, 4)
+                except (ValueError, TypeError):
+                    pass
+            else:
+                y_pred_s = [str(pred) for pred, _ in all_pairs]
+                y_obs_s = [str(obs) for _, obs in all_pairs]
+                correct = sum(p == o for p, o in zip(y_pred_s, y_obs_s))
+                live_accuracy = round(correct / len(all_pairs), 4)
+                try:
+                    live_f1 = round(float(f1_score(y_obs_s, y_pred_s, average="weighted", zero_division=0)), 4)
+                except Exception:
+                    pass
+
         if len(valid_pairs) >= 30:
 
             def _max_prob(p):
@@ -3032,7 +3116,7 @@ async def compare_model_versions(
             )
             brier_score = round(float(np.mean((confidences - corrects) ** 2)), 4)
 
-        return drift_status, brier_score
+        return drift_status, brier_score, live_accuracy, live_f1, live_mae, live_rmse, live_r2
 
     ordered_versions = sorted(meta_by_version.keys())
     extras_list = await asyncio.gather(
@@ -3043,14 +3127,16 @@ async def compare_model_versions(
     version_summaries = []
     for version in ordered_versions:
         meta = meta_by_version[version]
-        drift_status, brier_score = extras_by_version[version]
+        drift_status, brier_score, live_accuracy, live_f1, live_mae, live_rmse, live_r2 = extras_by_version[version]
         lat = latency_by_version.get(version, {})
         training_stats = meta.training_stats or {}
         n_rows = training_stats.get("n_rows")
+        training_metrics = meta.training_metrics or {}
         version_summaries.append(
             ModelVersionSummary(
                 version=version,
                 is_production=meta.is_production,
+                model_task=meta.model_task,
                 accuracy=meta.accuracy,
                 f1_score=meta.f1_score,
                 latency_p50_ms=lat.get("p50"),
@@ -3059,6 +3145,16 @@ async def compare_model_versions(
                 brier_score=brier_score,
                 trained_at=meta.created_at,
                 n_rows_trained=n_rows,
+                prediction_count=lat.get("total") or 0,
+                shadow_prediction_count=lat.get("shadow") or 0,
+                mae_eval=training_metrics.get("mae") if training_metrics else None,
+                rmse_eval=training_metrics.get("rmse") if training_metrics else None,
+                r2_eval=training_metrics.get("r2") if training_metrics else None,
+                live_accuracy=live_accuracy,
+                live_f1=live_f1,
+                live_mae=live_mae,
+                live_rmse=live_rmse,
+                live_r2=live_r2,
             )
         )
 
@@ -3722,6 +3818,11 @@ async def create_model(
         minio_object_key = object_name
         file_size_bytes = upload_info["size"]
 
+    # Détecter le type de tâche depuis les bytes du modèle
+    detected_task: Optional[str] = None
+    if model_bytes_to_store is not None:
+        detected_task = _detect_task_type(model_bytes_to_store)
+
     # Désérialiser les champs JSON optionnels
     classes_parsed = _parse_json_field(classes, "classes")
     training_params_parsed = _parse_json_field(training_params, "training_params")
@@ -3759,6 +3860,7 @@ async def create_model(
         is_active=True,
         is_production=False,
         parent_version=parent_version,
+        model_task=detected_task,
     )
     db.add(metadata)
     await db.flush()  # obtenir l'id avant le snapshot
@@ -3960,6 +4062,8 @@ async def delete_model_version(
     - Supprime l'entrée en base PostgreSQL.
     - Supprime le run MLflow associé (si `mlflow_run_id` renseigné).
     - Supprime l'objet `.joblib` dans MinIO.
+    - **Cascade** : supprime toutes les prédictions de cette version ainsi que
+      les observed_results qui y sont liés.
 
     Retourne **204 No Content** en cas de succès. Nécessite un token Bearer admin.
     """
@@ -3982,6 +4086,9 @@ async def delete_model_version(
     if model.minio_object_key:
         _delete_minio_object(model.minio_object_key)
 
+    # Cascade : supprimer prédictions + observed_results de cette version
+    cascade = await DBService.delete_predictions_for_version(db, name, version)
+
     # Logger la suppression avant de supprimer l'objet ORM
     was_production = model.is_production
     await DBService.log_model_history(db, model, HistoryActionType.DELETED, user.id, user.username)
@@ -3989,7 +4096,15 @@ async def delete_model_version(
     await db.commit()
     if was_production:
         _leaderboard_cache.clear()
-    audit_log("model.delete", actor_id=user.id, resource=f"{name}:{version}")
+    audit_log(
+        "model.delete",
+        actor_id=user.id,
+        resource=f"{name}:{version}",
+        details={
+            "cascade_predictions":      cascade["deleted_predictions"],
+            "cascade_observed_results": cascade["deleted_observed_results"],
+        },
+    )
 
 
 @router.post("/models/{name}/{version}/validate-input", response_model=ValidateInputResponse)
@@ -4343,6 +4458,7 @@ async def delete_model_all_versions(
     - Supprime toutes les entrées PostgreSQL pour ce nom.
     - Supprime chaque run MLflow associé.
     - Supprime chaque objet `.joblib` dans MinIO.
+    - **Cascade** : supprime les prédictions et observed_results de chaque version.
 
     Retourne un résumé des suppressions effectuées. Nécessite un token Bearer admin.
     """
@@ -4358,6 +4474,8 @@ async def delete_model_all_versions(
     deleted_versions = []
     mlflow_runs_deleted = []
     minio_objects_deleted = []
+    total_cascade_predictions = 0
+    total_cascade_observed    = 0
 
     for model in models:
         deleted_versions.append(model.version)
@@ -4368,6 +4486,11 @@ async def delete_model_all_versions(
         if model.minio_object_key and _delete_minio_object(model.minio_object_key):
             minio_objects_deleted.append(model.minio_object_key)
 
+        # Cascade par version
+        cascade = await DBService.delete_predictions_for_version(db, name, model.version)
+        total_cascade_predictions += cascade["deleted_predictions"]
+        total_cascade_observed    += cascade["deleted_observed_results"]
+
         await DBService.log_model_history(
             db, model, HistoryActionType.DELETED, user.id, user.username
         )
@@ -4375,7 +4498,14 @@ async def delete_model_all_versions(
 
     await db.commit()
     audit_log(
-        "model.delete_all", actor_id=user.id, resource=name, details={"versions": deleted_versions}
+        "model.delete_all",
+        actor_id=user.id,
+        resource=name,
+        details={
+            "versions":                 deleted_versions,
+            "cascade_predictions":      total_cascade_predictions,
+            "cascade_observed_results": total_cascade_observed,
+        },
     )
 
     return ModelDeleteResponse(

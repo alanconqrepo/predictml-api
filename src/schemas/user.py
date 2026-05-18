@@ -68,6 +68,14 @@ class UserUsageByDay(BaseModel):
     calls: int
 
 
+class UserUsageByModelDay(BaseModel):
+    """Statistiques d'usage par modèle et par jour"""
+
+    model_name: str
+    date: date
+    calls: int
+
+
 class UserUsageResponse(BaseModel):
     """Statistiques d'usage d'un utilisateur sur une période"""
 
@@ -77,3 +85,4 @@ class UserUsageResponse(BaseModel):
     total_calls: int
     by_model: List[UserUsageByModel]
     by_day: List[UserUsageByDay]
+    by_model_day: List[UserUsageByModelDay]

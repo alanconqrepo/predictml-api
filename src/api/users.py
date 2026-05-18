@@ -171,14 +171,20 @@ async def get_user(
 async def get_user_usage(
     user_id: int,
     days: Optional[int] = 30,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     current_user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Retourne les statistiques d'usage d'un utilisateur sur les N derniers jours.
+    Retourne les statistiques d'usage d'un utilisateur sur une période.
 
     - **by_model** : appels, erreurs et latence moyenne par modèle.
     - **by_day** : nombre d'appels par jour sur la période.
+    - **by_model_day** : appels par modèle et par jour.
+
+    Passer `start_date` et `end_date` (YYYY-MM-DD) pour une plage personnalisée,
+    ou `days` pour les N derniers jours (défaut : 30).
 
     Accessible par l'administrateur ou par l'utilisateur lui-même.
     """
@@ -198,14 +204,17 @@ async def get_user_usage(
     if days is None or days < 1:
         days = 30
 
-    usage = await DBService.get_user_usage(db, user_id, days)
+    usage = await DBService.get_user_usage(
+        db, user_id, days, start_date=start_date, end_date=end_date
+    )
     return UserUsageResponse(
         user_id=user.id,
         username=user.username,
-        period_days=days,
+        period_days=usage.get("actual_days", days),
         total_calls=usage["total_calls"],
         by_model=usage["by_model"],
         by_day=usage["by_day"],
+        by_model_day=usage["by_model_day"],
     )
 
 
