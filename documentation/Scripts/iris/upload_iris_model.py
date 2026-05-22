@@ -255,6 +255,17 @@ if metrics.get("feature_stats"):
     patch_body["feature_baseline"] = metrics["feature_stats"]
 if metrics.get("confidence_threshold") is not None:
     patch_body["confidence_threshold"] = metrics["confidence_threshold"]
+training_stats: dict = {}
+if metrics.get("label_distribution"):
+    training_stats["label_distribution"] = metrics["label_distribution"]
+if metrics.get("n_rows") is not None:
+    training_stats["n_rows"] = metrics["n_rows"]
+if TRAIN_START:
+    training_stats["train_start_date"] = TRAIN_START
+if TRAIN_END:
+    training_stats["train_end_date"] = TRAIN_END
+if training_stats:
+    patch_body["training_stats"] = training_stats
 
 # webhook_url : URL appelée en POST après chaque prédiction (background task, non bloquant).
 # Le payload reçu contient : model_name, model_version, id_obs, prediction, probability,

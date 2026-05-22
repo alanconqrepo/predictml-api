@@ -1050,9 +1050,33 @@ class DBService:
                     "min": float(row.min),
                     "max": float(row.max),
                     "count": count,
-                    "values": [],  # non renvoyé en SQL — PSI non calculable sur ce chemin
+                    "values": [],
                     "null_rate": null_rate,
                 }
+
+            # Deuxième requête légère : valeurs brutes (max 500 prédictions récentes) pour le calcul PSI
+            if stats:
+                sql_raw = text(f"""
+                    SELECT kv.key AS feature, kv.value::float AS val
+                    FROM (
+                        SELECT input_features
+                        FROM predictions
+                        WHERE model_name = :name
+                          AND status     = 'success'
+                          AND timestamp  >= :cutoff
+                          {end_filter}
+                          {version_clause}
+                        ORDER BY timestamp DESC
+                        LIMIT 5000
+                    ) recent,
+                    LATERAL jsonb_each_text(recent.input_features::jsonb) AS kv(key, value)
+                    WHERE kv.value ~ '^-?[0-9]+\\.?[0-9]*$'
+                """)
+                raw_result = await db.execute(sql_raw, pg_params)
+                for raw_row in raw_result.all():
+                    if raw_row.feature in stats:
+                        stats[raw_row.feature]["values"].append(float(raw_row.val))
+
             return stats
 
         # --- SQLite fallback (tests) ---
@@ -1132,6 +1156,33 @@ class DBService:
         rows = result.all()
         counts = {row.label: int(row.cnt) for row in rows}
         return counts, sum(counts.values())
+
+    @staticmethod
+    async def get_prediction_numeric_values(
+        db: AsyncSession,
+        model_name: str,
+        model_version: Optional[str] = None,
+        days: int = 7,
+    ) -> list[float]:
+        """Returns raw numeric prediction_result values for regression output drift."""
+        days = min(days, settings.ANALYTICS_MAX_DAYS)
+        cutoff = _utcnow() - timedelta(days=days)
+        version_clause = "AND model_version = :version" if model_version else ""
+        params: dict = {"name": model_name, "cutoff": cutoff}
+        if model_version:
+            params["version"] = model_version
+        sql = text(f"""
+            SELECT (prediction_result::text)::float AS val
+            FROM predictions
+            WHERE model_name = :name
+              AND status = 'success'
+              AND timestamp >= :cutoff
+              AND prediction_result IS NOT NULL
+              AND prediction_result::text ~ '^-?[0-9]+(\\.[0-9]+)?$'
+              {version_clause}
+        """)
+        result = await db.execute(sql, params)
+        return [float(row.val) for row in result.all()]
 
     @staticmethod
     async def get_prediction_stats(

@@ -1671,6 +1671,7 @@ async def retrain_model(
         "n_rows": parsed_metrics.get("n_rows"),
         "feature_stats": parsed_metrics.get("feature_stats"),
         "label_distribution": parsed_metrics.get("label_distribution"),
+        "regression_bins": parsed_metrics.get("regression_bins"),
     }
 
     # 6b. Snapshot des versions de librairies (généré ici, uploadé MinIO en step 8b)
@@ -3976,7 +3977,12 @@ async def update_model(
     # Appliquer uniquement les champs fournis (non-None)
     update_data = payload.model_dump(exclude_unset=True)
     for field, value in update_data.items():
-        setattr(model, field, value)
+        if field == "training_stats" and isinstance(value, dict):
+            # Merge avec l'existant pour ne pas écraser les données du dernier retrain
+            merged = {**(model.training_stats or {}), **value}
+            setattr(model, field, merged)
+        else:
+            setattr(model, field, value)
 
     await db.flush()
 

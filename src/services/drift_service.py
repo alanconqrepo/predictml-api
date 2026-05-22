@@ -252,6 +252,19 @@ def is_nan_safe(value: float) -> bool:
 _OUTPUT_DRIFT_EPS = 1e-6
 
 
+def _bucket_label(bins: list[float], i: int) -> str:
+    """Human-readable label for quartile bucket i (0-based)."""
+    return f"{bins[i]:.3g}–{bins[i + 1]:.3g}"
+
+
+def _assign_bucket(value: float, bins: list[float]) -> int:
+    """Return 0-based bucket index for a numeric value given sorted bin edges."""
+    for i in range(len(bins) - 2):
+        if value < bins[i + 1]:
+            return i
+    return len(bins) - 2
+
+
 async def compute_output_drift(
     model_name: str,
     period_days: int,
@@ -262,8 +275,9 @@ async def compute_output_drift(
     """
     Calcule le drift de distribution des sorties (label shift).
 
-    Compare la distribution récente de prediction_result à la distribution
-    d'entraînement stockée dans training_stats.label_distribution.
+    - Classification : compare prediction_result discrets au baseline (PSI).
+    - Régression     : si regression_bins présent dans training_stats, bucket les
+                       prédictions live sur les quartiles d'entraînement puis PSI.
 
     PSI < 0.1 → ok | 0.1–0.2 → warning | ≥ 0.2 → critical
     Retourne status="no_baseline" si label_distribution absent.
@@ -293,22 +307,52 @@ async def compute_output_drift(
             status="no_baseline",
         )
 
-    label_counts, total = await DBService.get_prediction_label_distribution(
-        db, model_name, metadata.version, days=period_days
-    )
+    regression_bins: list[float] | None = training_stats.get("regression_bins")
 
-    if total < min_predictions:
-        return OutputDriftResponse(
-            model_name=model_name,
-            model_version=metadata.version,
-            period_days=period_days,
-            predictions_analyzed=total,
-            status="insufficient_data",
+    if regression_bins and len(regression_bins) >= 3:
+        # ── Régression : bucketing des prédictions live sur les quartiles ─────
+        raw_values = await DBService.get_prediction_numeric_values(
+            db, model_name, metadata.version, days=period_days
+        )
+        total = len(raw_values)
+
+        if total < min_predictions:
+            return OutputDriftResponse(
+                model_name=model_name,
+                model_version=metadata.version,
+                period_days=period_days,
+                predictions_analyzed=total,
+                status="insufficient_data",
+            )
+
+        n_buckets = len(regression_bins) - 1
+        bucket_counts: list[int] = [0] * n_buckets
+        for v in raw_values:
+            bucket_counts[_assign_bucket(v, regression_bins)] += 1
+
+        labels = [_bucket_label(regression_bins, i) for i in range(n_buckets)]
+        current_distribution = {labels[i]: bucket_counts[i] / total for i in range(n_buckets)}
+
+    else:
+        # ── Classification : GROUP BY sur prediction_result ───────────────────
+        label_counts, total = await DBService.get_prediction_label_distribution(
+            db, model_name, metadata.version, days=period_days
         )
 
-    current_distribution = {label: count / total for label, count in label_counts.items()}
+        if total < min_predictions:
+            return OutputDriftResponse(
+                model_name=model_name,
+                model_version=metadata.version,
+                period_days=period_days,
+                predictions_analyzed=total,
+                status="insufficient_data",
+            )
 
-    all_labels = sorted(set(baseline_distribution.keys()) | set(current_distribution.keys()))
+        current_distribution = {label: count / total for label, count in label_counts.items()}
+
+    all_labels = list(baseline_distribution.keys()) if regression_bins else sorted(
+        set(baseline_distribution.keys()) | set(current_distribution.keys())
+    )
 
     psi = 0.0
     for label in all_labels:

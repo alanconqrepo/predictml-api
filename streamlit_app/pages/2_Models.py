@@ -134,6 +134,39 @@ def fetch_output_drift(api_url, token, name, version, period_days):
     return r.json()
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_prediction_count(api_url, token, name, version, start: str, end: str) -> int:
+    """Retourne le nombre total de prédictions sur la période (appel léger limit=1)."""
+    import requests
+
+    try:
+        r = requests.get(
+            f"{api_url}/predictions",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"model_name": name, "model_version": version, "start": start, "end": end, "limit": 1},
+            timeout=5,
+        )
+        r.raise_for_status()
+        return r.json().get("total", 500)
+    except Exception:
+        return 500
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_feature_drift(api_url, token, name, start: str, end: str) -> dict:
+    """Récupère le drift des features via /monitoring/model/{name}."""
+    import requests
+
+    r = requests.get(
+        f"{api_url}/monitoring/model/{name}",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"start": start, "end": end},
+        timeout=15,
+    )
+    r.raise_for_status()
+    return r.json().get("feature_drift", {})
+
+
 @st.cache_data(ttl=10, show_spinner=False)
 def fetch_cached_models(api_url, token):
     """Retourne la liste des clés 'name:version' actuellement en cache Redis."""
@@ -150,6 +183,39 @@ def fetch_cached_models(api_url, token):
     except Exception:
         pass
     return []
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_model_pkl(api_url: str, token: str, name: str, version: str) -> bytes | None:
+    """Télécharge le .joblib depuis MinIO, mis en cache 5 min par version."""
+    from utils.api_client import APIClient
+
+    try:
+        return APIClient(base_url=api_url, token=token).download_model(name, version)
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_train_script(api_url: str, token: str, name: str, version: str) -> bytes | None:
+    """Télécharge le script train.py depuis MinIO, mis en cache 5 min par version."""
+    from utils.api_client import APIClient
+
+    try:
+        return APIClient(base_url=api_url, token=token).download_train_script(name, version)
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_training_dataset(api_url: str, token: str, name: str, version: str) -> bytes | None:
+    """Télécharge le dataset CSV depuis MinIO, mis en cache 5 min par version."""
+    from utils.api_client import APIClient
+
+    try:
+        return APIClient(base_url=api_url, token=token).download_training_dataset(name, version)
+    except Exception:
+        return None
 
 
 def reload():
@@ -651,23 +717,19 @@ _detail_is_regression = any(k in _detail_tm for k in ("mae", "rmse", "r2"))
 
 with st.expander("📋 Détails complets", expanded=True):
     col_l, col_r = st.columns(2)
-    # Pré-chargement des ressources téléchargeables
+    # Pré-chargement des ressources téléchargeables (mis en cache 5 min par version)
+    _api_url = client.base_url
+    _token = client.token
     _ds = selected.get("training_dataset") or ""
     _csv_bytes = None
     if _ds.endswith(".csv") and "/" in _ds:
-        try:
-            _csv_bytes = client.download_training_dataset(selected["name"], selected["version"])
-        except Exception:
-            pass
+        _csv_bytes = fetch_training_dataset(_api_url, _token, selected["name"], selected["version"])
 
     _script_bytes = None
     _script_filename = None
     if selected.get("train_script_object_key"):
-        try:
-            _script_bytes = client.download_train_script(selected["name"], selected["version"])
-            _script_filename = selected["train_script_object_key"].split("/")[-1]
-        except Exception:
-            pass
+        _script_bytes = fetch_train_script(_api_url, _token, selected["name"], selected["version"])
+        _script_filename = selected["train_script_object_key"].split("/")[-1]
 
     _pkl_bytes = None
     _pkl_size_label = ""
@@ -675,10 +737,7 @@ with st.expander("📋 Détails complets", expanded=True):
     size = selected.get("file_size_bytes")
     if minio_key and is_admin:
         _pkl_size_label = f" ({size / 1024:.1f} KB)" if size else ""
-        try:
-            _pkl_bytes = client.download_model(selected["name"], selected["version"])
-        except Exception:
-            pass
+        _pkl_bytes = fetch_model_pkl(_api_url, _token, selected["name"], selected["version"])
 
     with col_l:
         st.markdown(f"**Nom :** `{selected.get('name')}`")
@@ -840,326 +899,708 @@ with st.expander("📋 Détails complets", expanded=True):
 _tm = selected.get("training_metrics") or {}
 _is_regression = any(k in _tm for k in ("mae", "rmse", "r2"))
 
-_GT_PERIOD_DAYS = 30
+# ── Analyse & Monitoring (métriques, SHAP, performance, drift) ───────────────
+with st.expander("📊 Analyse & Monitoring", expanded=False):
+    from datetime import date as _date, timedelta as _td
 
-with st.expander("📈 Métriques", expanded=True):
-    _mcol_train, _mcol_gt = st.columns(2)
+    _today = _date.today()
+    _dcol1, _dcol2 = st.columns(2)
+    _date_debut = _dcol1.date_input(
+        "Date début",
+        value=_today - _td(days=30),
+        max_value=_today,
+        key=f"ana_date_debut_{selected['name']}_{selected['version']}",
+    )
+    _date_fin = _dcol2.date_input(
+        "Date fin",
+        value=_today,
+        max_value=_today,
+        key=f"ana_date_fin_{selected['name']}_{selected['version']}",
+    )
+    _ana_days = max(1, (_date_fin - _date_debut).days)
 
-    with _mcol_train:
-        st.markdown("##### Métriques d'entraînement")
-        st.caption("Évaluées sur le jeu de test lors de l'entraînement.")
-        if _is_regression:
-            st.markdown(f"**MAE :** {_tm.get('mae') or '—'}")
-            st.markdown(f"**RMSE :** {_tm.get('rmse') or '—'}")
-            st.markdown(f"**R² :** {_tm.get('r2') or '—'}")
-        else:
-            st.markdown(f"**Accuracy :** {_tm.get('accuracy') or selected.get('accuracy') or '—'}")
-            st.markdown(f"**F1 Score :** {_tm.get('f1_score') or selected.get('f1_score') or '—'}")
-            st.markdown(f"**Precision :** {_tm.get('precision') or '—'}")
-            st.markdown(f"**Recall :** {_tm.get('recall') or '—'}")
+    # ── Gate lazy-load ────────────────────────────────────────────────────────
+    _ana_key = f"ana_loaded_{selected['name']}_{selected['version']}"
+    _ana_loaded = st.session_state.get(_ana_key, False)
+    if not _ana_loaded:
+        _gcol1, _gcol2 = st.columns([1, 3])
+        if _gcol1.button(
+            "📊 Charger l'analyse",
+            key=f"btn_ana_{selected['name']}_{selected['version']}",
+            type="primary",
+            use_container_width=True,
+        ):
+            st.session_state[_ana_key] = True
+            st.rerun()
+        _gcol2.caption(
+            "Charge les métriques SHAP, la performance, le drift de sortie et le drift des features."
+        )
 
-    with _mcol_gt:
-        st.markdown("##### Performance observée (ground truth)")
-        st.caption(f"Fenêtre : {_GT_PERIOD_DAYS} derniers jours")
+    # ── Métriques ─────────────────────────────────────────────────────────────
+    if _ana_loaded:
+        st.divider()
+        st.markdown("#### 📈 Métriques")
+
+        # Récupération ground truth
+        _perf_gt = None
+        _gt_n = 0
         try:
-            _perf = fetch_model_performance(
+            _perf_gt = fetch_model_performance(
                 st.session_state.get("api_url"),
                 st.session_state.get("api_token"),
                 selected["name"],
                 selected["version"],
-                period_days=_GT_PERIOD_DAYS,
+                period_days=_ana_days,
             )
-            if _perf and _perf.get("matched_predictions", 0) > 0:
-                _gt_type = _perf.get("model_type", "classification")
-                if _gt_type == "regression":
-                    st.markdown(f"**MAE :** {round(_perf['mae'], 4) if _perf.get('mae') is not None else '—'}")
-                    st.markdown(f"**RMSE :** {round(_perf['rmse'], 4) if _perf.get('rmse') is not None else '—'}")
-                    st.markdown(f"**R² :** {round(_perf['r2'], 4) if _perf.get('r2') is not None else '—'}")
-                else:
-                    st.markdown(f"**Accuracy :** {round(_perf['accuracy'], 4) if _perf.get('accuracy') is not None else '—'}")
-                    st.markdown(f"**F1 Score :** {round(_perf['f1_weighted'], 4) if _perf.get('f1_weighted') is not None else '—'}")
-                    st.markdown(f"**Precision :** {round(_perf['precision_weighted'], 4) if _perf.get('precision_weighted') is not None else '—'}")
-                    st.markdown(f"**Recall :** {round(_perf['recall_weighted'], 4) if _perf.get('recall_weighted') is not None else '—'}")
-                _n = _perf.get("matched_predictions", 0)
-                st.caption(f"{_n} observation(s) labelisée(s) sur cette période")
-            else:
-                st.markdown("*Aucune donnée de ground truth.*")
-                st.caption("Envoyez des résultats via `POST /observed-results`")
+            _gt_n = _perf_gt.get("matched_predictions", 0) if _perf_gt else 0
         except Exception:
-            st.markdown("*Indisponible*")
+            pass
 
-    # Model card export — accessible to all authenticated users
-    try:
-        md_content = client.get_model_card(selected["name"], selected["version"], format="markdown")
-        st.download_button(
-            label="📄 Exporter la model card",
-            data=md_content,
-            file_name=f"{selected['name']}_{selected['version']}_model_card.md",
-            mime="text/markdown",
-            key="dl_model_card",
-        )
-    except Exception as e:
-        st.warning(f"Model card indisponible : {e}")
-
-# Importance des features (SHAP agrégé)
-with st.expander("📊 Importance des features (SHAP)", expanded=False):
-    fi_col1, fi_col2 = st.columns(2)
-    fi_days = fi_col1.slider("Fenêtre (jours)", 1, 30, 7, key="fi_days_slider")
-    fi_last_n = fi_col2.slider("Prédictions max", 10, 500, 100, step=10, key="fi_last_n_slider")
-    try:
-        fi_data = fetch_feature_importance(
-            st.session_state.get("api_url"),
-            st.session_state.get("api_token"),
-            selected["name"],
-            selected["version"],
-            last_n=fi_last_n,
-            days=fi_days,
-        )
-        fi = fi_data.get("feature_importance", {})
-        sample_size = fi_data.get("sample_size", 0)
-        if not fi or sample_size == 0:
-            st.info("Pas encore assez de prédictions pour calculer l'importance des features.")
-        else:
-            fi_rows = [
-                {"Feature": feat, "Importance SHAP": vals["mean_abs_shap"]}
-                for feat, vals in sorted(fi.items(), key=lambda x: x[1]["rank"])
+        # Construction du tableau comparatif entraînement vs production
+        if _is_regression:
+            _metrics_keys = [
+                ("MAE",  "mae",  "mae",             None),
+                ("RMSE", "rmse", "rmse",             None),
+                ("R²",   "r2",   "r2",               None),
             ]
-            fi_df = pd.DataFrame(fi_rows).head(15).sort_values("Importance SHAP")
-            try:
-                import plotly.express as px
+        else:
+            _metrics_keys = [
+                ("Accuracy",  "accuracy",  "accuracy",           selected.get("accuracy")),
+                ("F1 Score",  "f1_score",  "f1_weighted",        selected.get("f1_score")),
+                ("Precision", "precision", "precision_weighted",  None),
+                ("Recall",    "recall",    "recall_weighted",     None),
+            ]
 
-                fig = px.bar(
-                    fi_df,
-                    x="Importance SHAP",
-                    y="Feature",
-                    orientation="h",
-                    title=(
-                        f"Top {len(fi_df)} features — "
-                        f"{fi_data['model_name']} v{fi_data['version']}"
+        _table_rows = []
+        for _label, _train_key, _gt_key, _train_fallback in _metrics_keys:
+            _train_val = _tm.get(_train_key) or _train_fallback
+            _gt_val = None
+            if _perf_gt and _gt_n > 0:
+                _gt_val = _perf_gt.get(_gt_key)
+            _train_str = f"{round(float(_train_val), 4)}" if _train_val is not None else "—"
+            _gt_str    = f"{round(float(_gt_val), 4)}"    if _gt_val    is not None else "—"
+            _delta_str = "—"
+            if _train_val is not None and _gt_val is not None:
+                _d = round(float(_gt_val) - float(_train_val), 4)
+                _delta_str = f"{_d:+.4f}"
+            _table_rows.append({"Métrique": _label, "Entraînement": _train_str, "Production": _gt_str, "Δ": _delta_str})
+
+        st.dataframe(
+            pd.DataFrame(_table_rows),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Métrique": st.column_config.TextColumn("Métrique"),
+                "Entraînement": st.column_config.TextColumn(
+                    "Entraînement",
+                    help="Métriques évaluées sur le jeu de test lors de l'entraînement initial.",
+                ),
+                "Production": st.column_config.TextColumn(
+                    "Production",
+                    help=(
+                        f"Métriques calculées sur les prédictions appariées à des résultats observés "
+                        f"du {_date_debut} au {_date_fin}.\n\n"
+                        f"{_gt_n} prédiction(s) appariée(s). "
+                        "Alimenté via `POST /observed-results`."
                     ),
-                )
-                fig.update_layout(
-                    yaxis_title="",
-                    xaxis_title="Importance SHAP (valeur absolue moyenne)",
-                    margin={"l": 10, "r": 10, "t": 40, "b": 10},
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            except ImportError:
-                st.bar_chart(fi_df.set_index("Feature")["Importance SHAP"])
-            st.caption(
-                f"{sample_size} prédictions analysées"
-                f" — fenêtre : {fi_days} j — version : {fi_data.get('version')}"
-            )
-    except Exception as e:
-        status = getattr(getattr(e, "response", None), "status_code", None)
-        if status == 422:
-            st.info(
-                "Ce modèle ne supporte pas l'importance des features SHAP "
-                "(entraîner avec un DataFrame pandas pour activer cette fonctionnalité)."
-            )
-        elif status == 404:
-            st.error("Modèle introuvable.")
-        else:
-            st.warning(f"Impossible de calculer l'importance des features : {e}")
+                ),
+                "Δ": st.column_config.TextColumn(
+                    "Δ",
+                    help=(
+                        "Écart Production − Entraînement.\n\n"
+                        "- **Négatif** : dégradation en production\n"
+                        "- **Positif** : amélioration (ou distribution différente)\n"
+                        "- **—** : données insuffisantes"
+                    ),
+                ),
+            },
+        )
+        if _gt_n == 0:
+            st.caption("Aucune donnée de ground truth — envoyez des résultats via `POST /observed-results` pour voir la colonne Production.")
 
-# Métriques de performance (matrice de confusion + métriques par classe)
-with st.expander("📈 Métriques de performance", expanded=False):
-    try:
-        import numpy as np
-        import plotly.express as px
+        try:
+            md_content = client.get_model_card(selected["name"], selected["version"], format="markdown")
+            st.download_button(
+                label="📄 Exporter la model card",
+                data=md_content,
+                file_name=f"{selected['name']}_{selected['version']}_model_card.md",
+                mime="text/markdown",
+                key="dl_model_card",
+            )
+        except Exception as e:
+            st.warning(f"Model card indisponible : {e}")
 
-        perf = fetch_model_performance(
+    # ── Importance des features (SHAP agrégé) ─────────────────────────────────
+    if _ana_loaded:
+        st.divider()
+        st.markdown("#### 📊 Importance des features (SHAP)")
+        _shap_start = _date_debut.strftime("%Y-%m-%dT00:00:00")
+        _shap_end = _date_fin.strftime("%Y-%m-%dT23:59:59")
+        _shap_total = fetch_prediction_count(
             st.session_state.get("api_url"),
             st.session_state.get("api_token"),
             selected["name"],
             selected["version"],
+            _shap_start,
+            _shap_end,
         )
-
-        model_type = perf.get("model_type", "classification")
-        matched = perf.get("matched_predictions", 0)
-
-        if matched == 0:
-            st.info(
-                "Aucune paire (prédiction, résultat observé) disponible. "
-                "Ajoutez des résultats via POST /observed-results pour activer cette vue."
-            )
-        elif model_type != "classification":
-            col_mae, col_rmse, col_r2 = st.columns(3)
-            col_mae.metric(
-                "MAE",
-                f"{perf['mae']:.4f}" if perf.get("mae") is not None else "—",
-                help=METRIC_HELP["mae"],
-            )
-            col_rmse.metric(
-                "RMSE",
-                f"{perf['rmse']:.4f}" if perf.get("rmse") is not None else "—",
-                help=METRIC_HELP["rmse"],
-            )
-            col_r2.metric(
-                "R²",
-                f"{perf['r2']:.4f}" if perf.get("r2") is not None else "—",
-                help=METRIC_HELP["r2"],
-            )
-            st.caption(f"{matched} prédictions appariées")
-        else:
-            col_acc, col_prec, col_rec, col_f1 = st.columns(4)
-            col_acc.metric(
-                "Accuracy",
-                f"{perf['accuracy']:.3f}" if perf.get("accuracy") is not None else "—",
-                help=METRIC_HELP["accuracy"],
-            )
-            col_prec.metric(
-                "Precision (w.)",
-                (
-                    f"{perf['precision_weighted']:.3f}"
-                    if perf.get("precision_weighted") is not None
-                    else "—"
-                ),
-                help=METRIC_HELP["precision"],
-            )
-            col_rec.metric(
-                "Recall (w.)",
-                (
-                    f"{perf['recall_weighted']:.3f}"
-                    if perf.get("recall_weighted") is not None
-                    else "—"
-                ),
-                help=METRIC_HELP["recall"],
-            )
-            col_f1.metric(
-                "F1 (w.)",
-                f"{perf['f1_weighted']:.3f}" if perf.get("f1_weighted") is not None else "—",
-                help=METRIC_HELP["f1"],
-            )
-            st.caption(f"{matched} prédictions appariées")
-
-            cm = perf.get("confusion_matrix")
-            classes = perf.get("classes") or []
-            if cm and classes:
-                cm_arr = np.array(cm)
-                class_labels = [str(c) for c in classes]
-                fig = px.imshow(
-                    cm_arr,
-                    x=class_labels,
-                    y=class_labels,
-                    text_auto=True,
-                    color_continuous_scale="Blues",
-                    title="Matrice de confusion",
-                    labels={"x": "Prédit", "y": "Réel", "color": "Compte"},
-                )
-                fig.update_layout(
-                    xaxis_title="Prédit",
-                    yaxis_title="Réel",
-                    margin={"l": 10, "r": 10, "t": 40, "b": 10},
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-            per_class = perf.get("per_class_metrics")
-            if per_class:
-                st.markdown("**Métriques par classe**")
-                pc_rows = [
-                    {
-                        "Classe": str(label),
-                        "Precision": f"{m['precision']:.3f}",
-                        "Recall": f"{m['recall']:.3f}",
-                        "F1": f"{m['f1_score']:.3f}",
-                        "Support": m["support"],
-                    }
-                    for label, m in per_class.items()
-                ]
-                st.dataframe(pd.DataFrame(pc_rows), use_container_width=True, hide_index=True)
-
-    except Exception as e:
-        st.warning(f"Impossible de charger les métriques de performance : {e}")
-
-# Drift de sortie (label shift)
-with st.expander("📊 Drift de sortie (label shift)", expanded=False):
-    try:
-        import plotly.express as px
-
-        _od_days = st.slider(
-            "Fenêtre d'analyse (jours)",
-            min_value=1,
-            max_value=30,
-            value=7,
-            key=f"od_days_{selected['name']}_{selected['version']}",
+        _shap_max = max(10, _shap_total)
+        _shap_default = min(100, _shap_max)
+        fi_last_n = st.slider(
+            f"Échantillon SHAP ({_shap_total} prédictions disponibles sur la période)",
+            min_value=10,
+            max_value=_shap_max,
+            value=_shap_default,
+            step=max(1, _shap_max // 50),
+            key=f"fi_last_n_slider_{selected['name']}_{selected['version']}",
+            help=(
+                "Nombre de prédictions récentes utilisées pour calculer l'importance SHAP.\n\n"
+                "**SHAP** estime la contribution de chaque feature à chaque prédiction — "
+                "c'est coûteux en calcul, d'où cette limite.\n\n"
+                "- **Petit** : rapide, moins représentatif\n"
+                "- **Moyen** : bon compromis vitesse / précision ✅\n"
+                "- **Grand** : plus précis, plus lent\n\n"
+                "Les prédictions sont sélectionnées par **ordre chronologique inverse** "
+                "(les N plus récentes dans la période sélectionnée, `ORDER BY id DESC`)."
+            ),
         )
-        od = fetch_output_drift(
-            st.session_state.get("api_url"),
-            st.session_state.get("api_token"),
-            selected["name"],
-            selected["version"],
-            _od_days,
-        )
-        od_status = od.get("status", "no_baseline")
-        _OD_BADGE = {
-            "ok": "🟢 ok",
-            "warning": "🟡 warning",
-            "critical": "🔴 critical",
-            "no_baseline": "⬜ pas de baseline",
-            "insufficient_data": "⬜ données insuffisantes",
-        }
-        st.markdown(f"**Statut :** {_OD_BADGE.get(od_status, od_status)}")
-
-        if od_status in ("no_baseline", "insufficient_data"):
-            if od_status == "no_baseline":
-                st.info(
-                    "Aucune distribution de labels d'entraînement disponible. "
-                    "Assurez-vous que le script `train.py` imprime un JSON avec `label_distribution`."
-                )
+        try:
+            fi_data = fetch_feature_importance(
+                st.session_state.get("api_url"),
+                st.session_state.get("api_token"),
+                selected["name"],
+                selected["version"],
+                last_n=fi_last_n,
+                days=_ana_days,
+            )
+            fi = fi_data.get("feature_importance", {})
+            sample_size = fi_data.get("sample_size", 0)
+            if not fi or sample_size == 0:
+                st.info("Pas encore assez de prédictions pour calculer l'importance des features.")
             else:
-                st.info(
-                    f"Données insuffisantes ({od.get('predictions_analyzed', 0)} prédictions "
-                    f"sur la fenêtre de {_od_days} j — minimum : 30)."
-                )
-        else:
-            col_psi, col_n = st.columns(2)
-            psi_val = od.get("psi")
-            col_psi.metric(
-                "PSI",
-                f"{psi_val:.4f}" if psi_val is not None else "—",
-                help="Population Stability Index : ok < 0.1 | warning 0.1–0.2 | critical ≥ 0.2",
-            )
-            col_n.metric("Prédictions analysées", od.get("predictions_analyzed", 0))
-
-            by_class = od.get("by_class") or []
-            if by_class:
-                st.markdown("**Distribution par classe**")
-                bc_rows = [
-                    {
-                        "Classe": row["label"],
-                        "Baseline": f"{row['baseline_ratio']:.3f}",
-                        "Actuel": f"{row['current_ratio']:.3f}",
-                        "Δ": f"{row['delta']:+.3f}",
-                    }
-                    for row in by_class
+                fi_rows = [
+                    {"Feature": feat, "Importance SHAP": vals["mean_abs_shap"]}
+                    for feat, vals in sorted(fi.items(), key=lambda x: x[1]["rank"])
                 ]
-                st.dataframe(pd.DataFrame(bc_rows), use_container_width=True, hide_index=True)
+                fi_df = pd.DataFrame(fi_rows).head(15).sort_values("Importance SHAP")
+                try:
+                    import plotly.express as px
 
-                baseline_dist = od.get("baseline_distribution") or {}
-                current_dist = od.get("current_distribution") or {}
-                labels = [row["label"] for row in by_class]
-                df_bar = pd.DataFrame(
-                    {
-                        "Classe": labels + labels,
-                        "Ratio": [baseline_dist.get(l, 0.0) for l in labels]
-                        + [current_dist.get(l, 0.0) for l in labels],
-                        "Source": ["Baseline"] * len(labels) + ["Actuel"] * len(labels),
-                    }
+                    fig = px.bar(
+                        fi_df,
+                        x="Importance SHAP",
+                        y="Feature",
+                        orientation="h",
+                        title=(
+                            f"Top {len(fi_df)} features — "
+                            f"{fi_data['model_name']} v{fi_data['version']}"
+                        ),
+                    )
+                    fig.update_layout(
+                        yaxis_title="",
+                        xaxis_title="Importance SHAP (valeur absolue moyenne)",
+                        margin={"l": 10, "r": 10, "t": 40, "b": 10},
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                except ImportError:
+                    st.bar_chart(fi_df.set_index("Feature")["Importance SHAP"])
+                st.caption(
+                    f"{sample_size} prédictions analysées"
+                    f" — du {_date_debut} au {_date_fin} — version : {fi_data.get('version')}"
                 )
-                fig_od = px.bar(
-                    df_bar,
-                    x="Classe",
-                    y="Ratio",
-                    color="Source",
-                    barmode="group",
-                    title="Distribution baseline vs actuelle",
-                    color_discrete_map={"Baseline": "#636EFA", "Actuel": "#EF553B"},
+        except Exception as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status == 422:
+                st.info(
+                    "Ce modèle ne supporte pas l'importance des features SHAP "
+                    "(entraîner avec un DataFrame pandas pour activer cette fonctionnalité)."
                 )
-                fig_od.update_layout(yaxis_tickformat=".0%", yaxis_title="Proportion")
-                st.plotly_chart(fig_od, use_container_width=True)
-    except Exception as e:
-        st.warning(f"Impossible de calculer le drift de sortie : {e}")
+            elif status == 404:
+                st.error("Modèle introuvable.")
+            else:
+                st.warning(f"Impossible de calculer l'importance des features : {e}")
+
+    # ── Métriques de performance (matrice de confusion + métriques par classe) ─
+    if _ana_loaded:
+        st.divider()
+        st.markdown("#### 📈 Métriques de performance")
+        try:
+            import numpy as np
+            import plotly.express as px
+
+            perf = fetch_model_performance(
+                st.session_state.get("api_url"),
+                st.session_state.get("api_token"),
+                selected["name"],
+                selected["version"],
+                period_days=_ana_days,
+            )
+
+            model_type = perf.get("model_type", "classification")
+            matched = perf.get("matched_predictions", 0)
+
+            if matched == 0:
+                st.info(
+                    "Aucune paire (prédiction, résultat observé) disponible. "
+                    "Ajoutez des résultats via POST /observed-results pour activer cette vue."
+                )
+            elif model_type != "classification":
+                col_mae, col_rmse, col_r2 = st.columns(3)
+                col_mae.metric(
+                    "MAE",
+                    f"{perf['mae']:.4f}" if perf.get("mae") is not None else "—",
+                    help=METRIC_HELP["mae"],
+                )
+                col_rmse.metric(
+                    "RMSE",
+                    f"{perf['rmse']:.4f}" if perf.get("rmse") is not None else "—",
+                    help=METRIC_HELP["rmse"],
+                )
+                col_r2.metric(
+                    "R²",
+                    f"{perf['r2']:.4f}" if perf.get("r2") is not None else "—",
+                    help=METRIC_HELP["r2"],
+                )
+                st.caption(f"{matched} prédictions appariées")
+            else:
+                col_acc, col_prec, col_rec, col_f1 = st.columns(4)
+                col_acc.metric(
+                    "Accuracy",
+                    f"{perf['accuracy']:.3f}" if perf.get("accuracy") is not None else "—",
+                    help=METRIC_HELP["accuracy"],
+                )
+                col_prec.metric(
+                    "Precision (w.)",
+                    (
+                        f"{perf['precision_weighted']:.3f}"
+                        if perf.get("precision_weighted") is not None
+                        else "—"
+                    ),
+                    help=METRIC_HELP["precision"],
+                )
+                col_rec.metric(
+                    "Recall (w.)",
+                    (
+                        f"{perf['recall_weighted']:.3f}"
+                        if perf.get("recall_weighted") is not None
+                        else "—"
+                    ),
+                    help=METRIC_HELP["recall"],
+                )
+                col_f1.metric(
+                    "F1 (w.)",
+                    f"{perf['f1_weighted']:.3f}" if perf.get("f1_weighted") is not None else "—",
+                    help=METRIC_HELP["f1"],
+                )
+                st.caption(f"{matched} prédictions appariées")
+
+                # Mapping index → label depuis selected.classes
+                _named_classes = selected.get("classes") or []
+                def _cls_label(idx) -> str:
+                    try:
+                        i = int(str(idx))
+                        if _named_classes and 0 <= i < len(_named_classes):
+                            return f"{_named_classes[i]} ({i})"
+                    except (ValueError, TypeError):
+                        pass
+                    return str(idx)
+
+                cm = perf.get("confusion_matrix")
+                classes = perf.get("classes") or []
+                if cm and classes:
+                    cm_arr = np.array(cm)
+                    class_labels = [_cls_label(c) for c in classes]
+                    fig = px.imshow(
+                        cm_arr,
+                        x=class_labels,
+                        y=class_labels,
+                        text_auto=True,
+                        color_continuous_scale="Blues",
+                        title="Matrice de confusion",
+                        labels={"x": "Prédit", "y": "Réel", "color": "Compte"},
+                    )
+                    fig.update_layout(
+                        xaxis_title="Prédit",
+                        yaxis_title="Réel",
+                        margin={"l": 10, "r": 10, "t": 40, "b": 10},
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+                per_class = perf.get("per_class_metrics")
+                if per_class:
+                    st.markdown("**Métriques par classe**")
+                    pc_rows = [
+                        {
+                            "Classe": _cls_label(label),
+                            "Precision": f"{m['precision']:.3f}",
+                            "Recall": f"{m['recall']:.3f}",
+                            "F1": f"{m['f1_score']:.3f}",
+                            "Support": m["support"],
+                        }
+                        for label, m in per_class.items()
+                    ]
+                    st.dataframe(
+                        pd.DataFrame(pc_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Classe": st.column_config.TextColumn(
+                                "Classe",
+                                help="Classe prédite. Le chiffre entre parenthèses est l'indice numérique stocké en base.",
+                            ),
+                            "Precision": st.column_config.TextColumn(
+                                "Precision",
+                                help=(
+                                    "**Precision** : parmi toutes les prédictions de cette classe, "
+                                    "quelle fraction était correcte.\n\n"
+                                    "`TP / (TP + FP)`\n\n"
+                                    "Élevée = peu de faux positifs pour cette classe."
+                                ),
+                            ),
+                            "Recall": st.column_config.TextColumn(
+                                "Recall",
+                                help=(
+                                    "**Recall (sensibilité)** : parmi tous les vrais exemples de cette classe, "
+                                    "quelle fraction a été correctement détectée.\n\n"
+                                    "`TP / (TP + FN)`\n\n"
+                                    "Élevé = peu de faux négatifs pour cette classe."
+                                ),
+                            ),
+                            "F1": st.column_config.TextColumn(
+                                "F1",
+                                help=(
+                                    "**F1-score** : moyenne harmonique de la Precision et du Recall.\n\n"
+                                    "`2 × (Precision × Recall) / (Precision + Recall)`\n\n"
+                                    "Bon compromis quand les classes sont déséquilibrées."
+                                ),
+                            ),
+                            "Support": st.column_config.NumberColumn(
+                                "Support",
+                                help=(
+                                    "Nombre de prédictions appariées à un résultat observé pour cette classe "
+                                    "sur la période sélectionnée.\n\n"
+                                    "Un support faible rend les métriques moins fiables statistiquement."
+                                ),
+                            ),
+                        },
+                    )
+
+        except Exception as e:
+            st.warning(f"Impossible de charger les métriques de performance : {e}")
+
+    # ── Drift de sortie (label shift) ─────────────────────────────────────────
+    if _ana_loaded:
+        st.divider()
+        st.markdown("#### 📊 Drift de sortie (label shift)")
+        try:
+            import plotly.express as px
+
+            od = fetch_output_drift(
+                st.session_state.get("api_url"),
+                st.session_state.get("api_token"),
+                selected["name"],
+                selected["version"],
+                _ana_days,
+            )
+            od_status = od.get("status", "no_baseline")
+            _OD_BADGE = {
+                "ok": "🟢 ok",
+                "warning": "🟡 warning",
+                "critical": "🔴 critical",
+                "no_baseline": "⬜ pas de baseline",
+                "insufficient_data": "⬜ données insuffisantes",
+            }
+            st.markdown(f"**Statut :** {_OD_BADGE.get(od_status, od_status)}")
+
+            if od_status in ("no_baseline", "insufficient_data"):
+                if od_status == "no_baseline":
+                    st.info(
+                        "Aucune distribution de labels d'entraînement disponible. "
+                        "Assurez-vous que le script `train.py` imprime un JSON avec `label_distribution`."
+                    )
+                else:
+                    st.info(
+                        f"Données insuffisantes ({od.get('predictions_analyzed', 0)} prédictions "
+                        f"du {_date_debut} au {_date_fin} — minimum : 30)."
+                    )
+            else:
+                col_psi, col_n = st.columns(2)
+                psi_val = od.get("psi")
+                col_psi.metric(
+                    "PSI",
+                    f"{psi_val:.4f}" if psi_val is not None else "—",
+                    help="Population Stability Index : ok < 0.1 | warning 0.1–0.2 | critical ≥ 0.2",
+                )
+                col_n.metric("Prédictions analysées", od.get("predictions_analyzed", 0))
+
+                _od_named = selected.get("classes") or []
+                def _od_label(idx) -> str:
+                    try:
+                        i = int(str(idx))
+                        if _od_named and 0 <= i < len(_od_named):
+                            return f"{_od_named[i]} ({i})"
+                    except (ValueError, TypeError):
+                        pass
+                    return str(idx)
+
+                by_class = od.get("by_class") or []
+                if by_class:
+                    st.markdown("**Distribution par classe**")
+                    bc_rows = [
+                        {
+                            "Classe": _od_label(row["label"]),
+                            "Baseline": f"{row['baseline_ratio']:.3f}",
+                            "Actuel": f"{row['current_ratio']:.3f}",
+                            "Δ": f"{row['delta']:+.3f}",
+                        }
+                        for row in by_class
+                    ]
+                    st.dataframe(
+                        pd.DataFrame(bc_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Classe": st.column_config.TextColumn(
+                                "Classe",
+                                help="Classe prédite par le modèle. Le chiffre entre parenthèses est l'indice numérique stocké en base.",
+                            ),
+                            "Baseline": st.column_config.TextColumn(
+                                "Baseline",
+                                help=(
+                                    "Proportion de cette classe dans le **dataset d'entraînement** "
+                                    "(stockée dans `training_stats.label_distribution`).\n\n"
+                                    "Source : script `train.py` → JSON stdout → clé `label_distribution`."
+                                ),
+                            ),
+                            "Actuel": st.column_config.TextColumn(
+                                "Actuel",
+                                help=(
+                                    "Proportion de cette classe dans les **prédictions de production** "
+                                    "sur la période sélectionnée.\n\n"
+                                    "Calculé via `GROUP BY prediction_result` sur la table `predictions`."
+                                ),
+                            ),
+                            "Δ": st.column_config.TextColumn(
+                                "Δ",
+                                help=(
+                                    "Écart entre la proportion actuelle et la baseline (Actuel − Baseline).\n\n"
+                                    "- **Positif** : surreprésentation de cette classe en production\n"
+                                    "- **Négatif** : sous-représentation\n\n"
+                                    "Un Δ élevé contribue à un PSI critique."
+                                ),
+                            ),
+                        },
+                    )
+
+                    baseline_dist = od.get("baseline_distribution") or {}
+                    current_dist = od.get("current_distribution") or {}
+                    raw_labels = [row["label"] for row in by_class]
+                    named_labels = [_od_label(l) for l in raw_labels]
+                    df_bar = pd.DataFrame(
+                        {
+                            "Classe": named_labels + named_labels,
+                            "Ratio": [baseline_dist.get(str(l), 0.0) for l in raw_labels]
+                            + [current_dist.get(str(l), 0.0) for l in raw_labels],
+                            "Source": ["Baseline"] * len(raw_labels) + ["Actuel"] * len(raw_labels),
+                        }
+                    )
+                    fig_od = px.bar(
+                        df_bar,
+                        x="Classe",
+                        y="Ratio",
+                        color="Source",
+                        barmode="group",
+                        title="Distribution baseline vs actuelle",
+                        color_discrete_map={"Baseline": "#636EFA", "Actuel": "#EF553B"},
+                    )
+                    fig_od.update_layout(yaxis_tickformat=".0%", yaxis_title="Proportion")
+                    st.plotly_chart(fig_od, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Impossible de calculer le drift de sortie : {e}")
+
+    # ── Drift des features (inputs) ───────────────────────────────────────────
+    if _ana_loaded:
+        st.divider()
+        st.markdown("#### 🌡️ Drift des features (inputs)")
+        try:
+            import plotly.express as px
+
+            _fd_start = _date_debut.strftime("%Y-%m-%d")
+            _fd_end = _date_fin.strftime("%Y-%m-%d")
+            fd = fetch_feature_drift(
+                st.session_state.get("api_url"),
+                st.session_state.get("api_token"),
+                selected["name"],
+                _fd_start,
+                _fd_end,
+            )
+
+            _FD_BADGE = {
+                "ok": "🟢 ok",
+                "warning": "🟡 warning",
+                "critical": "🔴 critical",
+                "no_data": "⬜ pas de données",
+                "no_baseline": "⬜ pas de baseline",
+                "insufficient_data": "⬜ données insuffisantes",
+            }
+            fd_summary = fd.get("drift_summary", "no_data")
+            fd_baseline = fd.get("baseline_available", False)
+            fd_analyzed = fd.get("predictions_analyzed", 0)
+
+            _fd_features_raw = fd.get("features", {})
+            _fd_n_preds = (
+                next(iter(_fd_features_raw.values()), {}).get("production_count")
+                or fd_analyzed
+            )
+            st.markdown(f"**Statut global :** {_FD_BADGE.get(fd_summary, fd_summary)}")
+            st.caption(f"{_fd_n_preds} prédictions analysées du {_fd_start} au {_fd_end}")
+
+            features_dict = fd.get("features", {})
+            if not fd_baseline:
+                st.info(
+                    "Aucune baseline de features enregistrée pour ce modèle. "
+                    "Assurez-vous que le script `train.py` imprime un JSON avec `feature_stats`."
+                )
+            elif not features_dict:
+                st.info("Aucune donnée de drift de features disponible sur cette période.")
+            else:
+                _STATUS_COLOR = {"ok": "🟢", "warning": "🟡", "critical": "🔴", "no_data": "⬜"}
+                rows_fd = []
+                for feat_name, feat_data in features_dict.items():
+                    ds = feat_data.get("drift_status", "no_data")
+                    rows_fd.append(
+                        {
+                            "Feature": feat_name,
+                            "Statut": _STATUS_COLOR.get(ds, "⬜") + f" {ds}",
+                            "Moy. prod.": (
+                                round(feat_data["production_mean"], 4)
+                                if feat_data.get("production_mean") is not None
+                                else "—"
+                            ),
+                            "Moy. baseline": (
+                                round(feat_data["baseline_mean"], 4)
+                                if feat_data.get("baseline_mean") is not None
+                                else "—"
+                            ),
+                            "Z-score": (
+                                round(feat_data["z_score"], 3)
+                                if feat_data.get("z_score") is not None
+                                else "—"
+                            ),
+                            "PSI": (
+                                round(feat_data["psi"], 4)
+                                if feat_data.get("psi") is not None
+                                else "—"
+                            ),
+                            "N prod.": feat_data.get("production_count", 0),
+                        }
+                    )
+                df_fd = pd.DataFrame(rows_fd)
+                st.dataframe(
+                    df_fd,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Z-score": st.column_config.TextColumn(
+                            "Z-score",
+                            help=(
+                                "**Z-score** : écart entre la moyenne de production et la moyenne baseline, "
+                                "normalisé par l'écart-type baseline.\n\n"
+                                "- 🟢 **ok** : Z < 2σ\n"
+                                "- 🟡 **warning** : 2σ ≤ Z < 3σ\n"
+                                "- 🔴 **critical** : Z ≥ 3σ\n\n"
+                                "Un Z-score élevé indique que la distribution de la feature en production "
+                                "s'est significativement éloignée des données d'entraînement."
+                            ),
+                        ),
+                        "PSI": st.column_config.TextColumn(
+                            "PSI",
+                            help=(
+                                "**PSI (Population Stability Index)** : mesure le changement global de "
+                                "distribution d'une feature entre baseline et production.\n\n"
+                                "- 🟢 **ok** : PSI < 0.1 — distribution stable\n"
+                                "- 🟡 **warning** : 0.1 ≤ PSI < 0.2 — changement modéré\n"
+                                "- 🔴 **critical** : PSI ≥ 0.2 — changement majeur, ré-entraînement recommandé\n\n"
+                                "Calculé sur les **5 000 dernières prédictions** de la période sélectionnée "
+                                "via une approximation gaussienne des bins baseline.\n\n"
+                                "— = non disponible (nécessite une `feature_baseline` enregistrée sur le modèle)."
+                            ),
+                        ),
+                        "Moy. prod.": st.column_config.TextColumn(
+                            "Moy. prod.",
+                            help="Moyenne de la feature sur les prédictions de production de la période sélectionnée.",
+                        ),
+                        "Moy. baseline": st.column_config.TextColumn(
+                            "Moy. baseline",
+                            help="Moyenne de la feature sur le dataset d'entraînement (stockée dans `feature_baseline`).",
+                        ),
+                        "Statut": st.column_config.TextColumn(
+                            "Statut",
+                            help=(
+                                "**Statut de drift** de la feature, calculé à partir du Z-score et du PSI.\n\n"
+                                "- 🟢 **ok** : aucun drift significatif détecté\n"
+                                "- 🟡 **warning** : drift modéré — à surveiller\n"
+                                "- 🔴 **critical** : drift important — ré-entraînement recommandé\n"
+                                "- ⬜ **no_data** : pas assez de prédictions pour calculer le drift"
+                            ),
+                        ),
+                        "N prod.": st.column_config.NumberColumn(
+                            "N prod.",
+                            help=(
+                                "Nombre de prédictions de production utilisées pour calculer le drift "
+                                "sur la période sélectionnée. "
+                                "Un faible N rend le drift moins fiable statistiquement."
+                            ),
+                        ),
+                    },
+                )
+
+                _color_map = {"ok": "#2ECC71", "warning": "#F39C12", "critical": "#E74C3C", "no_data": "#95A5A6"}
+
+                _rows_z = [r for r in rows_fd if r["Z-score"] != "—"]
+                if _rows_z:
+                    _df_z = pd.DataFrame(
+                        {
+                            "Feature": [r["Feature"] for r in _rows_z],
+                            "Z-score": [abs(float(r["Z-score"])) for r in _rows_z],
+                            "Drift": [r["Statut"].split(" ", 1)[-1].strip() for r in _rows_z],
+                        }
+                    ).sort_values("Z-score", ascending=True)
+                    fig_z = px.bar(
+                        _df_z, x="Z-score", y="Feature", color="Drift", orientation="h",
+                        title="Z-score par feature (|Δμ / σ baseline|)",
+                        color_discrete_map=_color_map,
+                    )
+                    fig_z.add_vline(x=2.0, line_dash="dash", line_color="#F39C12",
+                                    annotation_text="seuil warning (2σ)", annotation_position="top right")
+                    fig_z.add_vline(x=3.0, line_dash="dash", line_color="#E74C3C",
+                                    annotation_text="seuil critical (3σ)", annotation_position="top right")
+                    fig_z.update_layout(height=max(250, len(_rows_z) * 32), yaxis_title="")
+                    st.plotly_chart(fig_z, use_container_width=True)
+
+                _rows_psi = [r for r in rows_fd if r["PSI"] != "—"]
+                if _rows_psi:
+                    _df_psi = pd.DataFrame(
+                        {
+                            "Feature": [r["Feature"] for r in _rows_psi],
+                            "PSI": [float(r["PSI"]) for r in _rows_psi],
+                            "Drift": [r["Statut"].split(" ", 1)[-1].strip() for r in _rows_psi],
+                        }
+                    ).sort_values("PSI", ascending=True)
+                    fig_psi = px.bar(
+                        _df_psi, x="PSI", y="Feature", color="Drift", orientation="h",
+                        title="PSI par feature (Population Stability Index)",
+                        color_discrete_map=_color_map,
+                    )
+                    fig_psi.add_vline(x=0.1, line_dash="dash", line_color="#F39C12",
+                                      annotation_text="seuil warning (0.1)", annotation_position="top right")
+                    fig_psi.add_vline(x=0.2, line_dash="dash", line_color="#E74C3C",
+                                      annotation_text="seuil critical (0.2)", annotation_position="top right")
+                    fig_psi.update_layout(height=max(250, len(_rows_psi) * 32), yaxis_title="")
+                    st.plotly_chart(fig_psi, use_container_width=True)
+
+        except Exception as e:
+            st.warning(f"Impossible de charger le drift des features : {e}")
 
 # Résolution des features pour les blocs Valider / Golden Tests
 feature_baseline = selected.get("feature_baseline") or {}
