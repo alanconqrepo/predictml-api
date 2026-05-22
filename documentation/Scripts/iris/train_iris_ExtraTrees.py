@@ -191,7 +191,7 @@ feature_stats = {
 }
 total_train = len(y_train)
 label_distribution = {
-    iris.target_names[int(c)]: round(float(np.sum(y_train == c)) / total_train, 4)
+    str(int(c)): round(float(np.sum(y_train == c)) / total_train, 4)
     for c in np.unique(y_train)
 }
 

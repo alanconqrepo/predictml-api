@@ -246,6 +246,19 @@ print(f"⏳  Mise en production, tag 'Example' et baseline des features…")
 patch_body: dict = {"is_production": True, "deployment_mode": "ab_test", "traffic_weight": 0.5, "tags": ["Example"]}
 if metrics.get("feature_stats"):
     patch_body["feature_baseline"] = metrics["feature_stats"]
+training_stats: dict = {}
+if metrics.get("label_distribution"):
+    training_stats["label_distribution"] = metrics["label_distribution"]
+if metrics.get("regression_bins"):
+    training_stats["regression_bins"] = metrics["regression_bins"]
+if metrics.get("n_rows") is not None:
+    training_stats["n_rows"] = metrics["n_rows"]
+if TRAIN_START:
+    training_stats["train_start_date"] = TRAIN_START
+if TRAIN_END:
+    training_stats["train_end_date"] = TRAIN_END
+if training_stats:
+    patch_body["training_stats"] = training_stats
 
 patch = requests.patch(
     f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",

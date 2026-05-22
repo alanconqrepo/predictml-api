@@ -194,6 +194,16 @@ target_stats = {
     "mean": round(float(y_train.mean()), 4), "std":  round(float(y_train.std()),  4),
     "min":  round(float(y_train.min()),  4), "max":  round(float(y_train.max()),  4),
 }
+_q0, _q25, _q50, _q75, _q100 = (
+    round(float(np.percentile(y_train, p)), 3) for p in (0, 25, 50, 75, 100)
+)
+regression_bins = [_q0, _q25, _q50, _q75, _q100]
+_qlabels = [f"{regression_bins[i]:.3g}–{regression_bins[i+1]:.3g}" for i in range(4)]
+_qcounts = [0, 0, 0, 0]
+for _v in y_train:
+    _idx = next((i for i in range(3) if float(_v) < regression_bins[i + 1]), 3)
+    _qcounts[_idx] += 1
+label_distribution = {_qlabels[i]: round(_qcounts[i] / len(y_train), 4) for i in range(4)}
 
 # ── 7. MLflow (dégradation gracieuse) ────────────────────────────────────────
 
@@ -230,9 +240,11 @@ output = {
     "n_rows":           len(X_train),
     "features_count":   len(FEATURE_NAMES),
     "training_dataset": _dataset_minio_path or "scikit-learn Wine dataset — RandomForest v1.1.0",
-    "feature_stats":    feature_stats,
-    "target_stats":     target_stats,
-    "hyperparameters":  HYPERPARAMS,
+    "feature_stats":      feature_stats,
+    "target_stats":       target_stats,
+    "label_distribution": label_distribution,
+    "regression_bins":    regression_bins,
+    "hyperparameters":    HYPERPARAMS,
 }
 if mlflow_run_id:
     output["mlflow_run_id"] = mlflow_run_id

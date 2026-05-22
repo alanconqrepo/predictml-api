@@ -168,7 +168,7 @@ feature_stats = {
 }
 total_train = len(y_train)
 label_distribution = {
-    cancer.target_names[int(cls)]: round(float(np.sum(y_train == cls)) / total_train, 4)
+    str(int(cls)): round(float(np.sum(y_train == cls)) / total_train, 4)
     for cls in np.unique(y_train)
 }
 

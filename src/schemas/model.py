@@ -57,6 +57,7 @@ class ModelUpdateInput(BaseModel):
     deployment_mode: Optional[str] = None
 
     alert_thresholds: Optional[AlertThresholds] = None
+    training_stats: Optional[Dict[str, Any]] = None
 
     model_config = {"from_attributes": True}
 

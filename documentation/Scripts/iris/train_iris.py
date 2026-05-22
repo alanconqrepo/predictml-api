@@ -323,8 +323,9 @@ feature_stats = {
 }
 
 total_train = len(y_train)
+# Clés = index entier (str) — correspond à prediction_result::text dans la DB
 label_distribution = {
-    iris.target_names[int(cls)]: round(float(np.sum(y_train == cls)) / total_train, 4)
+    str(int(cls)): round(float(np.sum(y_train == cls)) / total_train, 4)
     for cls in np.unique(y_train)
 }
 
