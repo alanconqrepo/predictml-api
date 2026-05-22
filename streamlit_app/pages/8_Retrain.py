@@ -91,7 +91,41 @@ with tab_overview:
             }
         )
 
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(
+        pd.DataFrame(rows),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Modèle": st.column_config.TextColumn(
+                "Modèle",
+                help="Nom du modèle ML concerné par ce planning de ré-entraînement.",
+            ),
+            "Version": st.column_config.TextColumn(
+                "Version",
+                help="Version du modèle sur laquelle le planning est configuré.",
+            ),
+            "Script train.py": st.column_config.TextColumn(
+                "Script train.py",
+                help="✅ Un script d'entraînement est disponible — le ré-entraînement automatique est possible. ❌ Aucun script — uploadez-en un via POST /models avec train_file.",
+            ),
+            "Cron": st.column_config.TextColumn(
+                "Cron",
+                help="Expression cron (5 champs, UTC) définissant le déclenchement automatique. Ex : '0 3 * * 1' = chaque lundi à 3h UTC.",
+            ),
+            "Dernier retrain": st.column_config.TextColumn(
+                "Dernier retrain",
+                help="Date et heure du dernier ré-entraînement déclenché par ce planning.",
+            ),
+            "Prochain retrain": st.column_config.TextColumn(
+                "Prochain retrain",
+                help="Date et heure prévue pour le prochain déclenchement automatique.",
+            ),
+            "Statut": st.column_config.TextColumn(
+                "Statut",
+                help="🟢 Actif : le planning est activé et s'exécutera automatiquement. 🔴 Désactivé : suspendu. ⚫ Aucun schedule : pas de planning configuré.",
+            ),
+        },
+    )
 
     active = sum(
         1
@@ -469,7 +503,59 @@ with tab_history:
             )
 
         df_hist = pd.DataFrame(rows)
-        st.dataframe(df_hist, use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_hist,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Date": st.column_config.TextColumn(
+                    "Date",
+                    help="Date et heure à laquelle le ré-entraînement a été déclenché.",
+                ),
+                "Version créée": st.column_config.TextColumn(
+                    "Version créée",
+                    help="Numéro de la nouvelle version du modèle créée par ce ré-entraînement.",
+                ),
+                "Trained by": st.column_config.TextColumn(
+                    "Trained by",
+                    help="Qui a déclenché le ré-entraînement : nom d'un utilisateur ou 'scheduler' si automatique.",
+                ),
+                "Version source": st.column_config.TextColumn(
+                    "Version source",
+                    help="Version du modèle utilisée comme base avant ce ré-entraînement.",
+                ),
+                "Accuracy": st.column_config.NumberColumn(
+                    "Accuracy",
+                    help="Précision du modèle ré-entraîné sur le jeu de test. Entre 0 et 1 — plus c'est proche de 1, meilleur est le modèle.",
+                    format="%.4f",
+                ),
+                "F1 Score": st.column_config.NumberColumn(
+                    "F1 Score",
+                    help="F1-score du modèle ré-entraîné. Moyenne harmonique précision/rappel, robuste aux classes déséquilibrées.",
+                    format="%.4f",
+                ),
+                "Auto-promotion": st.column_config.TextColumn(
+                    "Auto-promotion",
+                    help="✅ Auto : la nouvelle version a été automatiquement mise en production selon la politique configurée. ❌ : critères non satisfaits. — : pas de politique ou promotion manuelle.",
+                ),
+                "Raison": st.column_config.TextColumn(
+                    "Raison",
+                    help="Explication fournie par le système si l'auto-promotion n'a pas eu lieu.",
+                ),
+                "n_rows": st.column_config.NumberColumn(
+                    "n_rows",
+                    help="Nombre de lignes d'entraînement utilisées lors de ce ré-entraînement (si renseigné dans le script train.py).",
+                ),
+                "Train start": st.column_config.TextColumn(
+                    "Train start",
+                    help="Date de début de la fenêtre de données utilisée pour ce ré-entraînement.",
+                ),
+                "Train end": st.column_config.TextColumn(
+                    "Train end",
+                    help="Date de fin de la fenêtre de données utilisée pour ce ré-entraînement.",
+                ),
+            },
+        )
         st.caption(f"{total_retrains} ré-entraînement(s) au total.")
 
         # Graphique de progression de l'accuracy
@@ -641,4 +727,33 @@ with tab_history:
                         ),
                         use_container_width=True,
                         hide_index=True,
+                        column_config={
+                            "Feature": st.column_config.TextColumn(
+                                "Feature",
+                                help="Nom de la variable d'entrée du modèle.",
+                            ),
+                            f"v{source_version}": st.column_config.NumberColumn(
+                                f"v{source_version}",
+                                help=f"Importance SHAP moyenne (|valeur|) de cette feature dans la version {source_version} avant le retrain.",
+                                format="%.5f",
+                            ),
+                            f"v{new_version}": st.column_config.NumberColumn(
+                                f"v{new_version}",
+                                help=f"Importance SHAP moyenne (|valeur|) de cette feature dans la nouvelle version {new_version} après le retrain.",
+                                format="%.5f",
+                            ),
+                            "Δ": st.column_config.NumberColumn(
+                                "Δ",
+                                help="Différence d'importance SHAP entre la nouvelle version et l'ancienne (positif = la feature est devenue plus importante).",
+                                format="%.5f",
+                            ),
+                            "Δ%": st.column_config.TextColumn(
+                                "Δ%",
+                                help="Variation en pourcentage de l'importance SHAP. > 30 % = changement majeur (🔴), > 15 % = modéré (🟠), < 15 % = stable (✅).",
+                            ),
+                            "Alerte": st.column_config.TextColumn(
+                                "Alerte",
+                                help="Niveau d'alerte basé sur la variation d'importance. 🔴 >30% = majeur, 🟠 >15% = modéré, ✅ <15% = stable.",
+                            ),
+                        },
                     )

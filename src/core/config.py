@@ -74,8 +74,12 @@ class Settings:
     )
     # Empty string = no replica configured; falls back to DATABASE_URL
     DATABASE_READ_REPLICA_URL: str = os.getenv("DATABASE_READ_REPLICA_URL", "")
-    DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "20"))
-    DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "40"))
+    # Avec asyncpg + PgBouncer transaction mode, les connexions sont libérées
+    # immédiatement après chaque appel SQL — un petit pool suffit pour une très
+    # haute concurrence. pool_size + max_overflow doit rester ≤ DEFAULT_POOL_SIZE
+    # de PgBouncer pour éviter les query_wait_timeout.
+    DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "5"))
+    DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "10"))
 
     # MinIO Object Storage
     MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "localhost:9000")

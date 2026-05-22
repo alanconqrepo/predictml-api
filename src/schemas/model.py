@@ -847,6 +847,8 @@ class LeaderboardEntry(BaseModel):
     version: str
     accuracy: Optional[float] = None
     f1_score: Optional[float] = None
+    r2: Optional[float] = None
+    rmse: Optional[float] = None
     latency_p95_ms: Optional[float] = None
     drift_status: str = "unknown"
     predictions_count: int = 0

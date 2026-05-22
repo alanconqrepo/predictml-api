@@ -13,9 +13,16 @@ _ENGINE_KWARGS = dict(
     future=True,
     pool_size=settings.DB_POOL_SIZE,
     max_overflow=settings.DB_MAX_OVERFLOW,
-    pool_recycle=300,
+    # Recycle les connexions toutes les 10 min (évite les connexions mortes)
+    pool_recycle=600,
+    # Vérifie la connexion avant usage (détecte les déconnexions silencieuses)
     pool_pre_ping=True,
-    pool_timeout=30,
+    # Délai max pour obtenir une connexion du pool SQLAlchemy.
+    # Doit être > QUERY_WAIT_TIMEOUT PgBouncer (10 s) pour que l'erreur PgBouncer
+    # remonte proprement avant que SQLAlchemy abandonne de son côté.
+    pool_timeout=15,
+    # LIFO : réutilise en priorité les connexions récentes → meilleur cache côté Postgres
+    pool_use_lifo=True,
     # PgBouncer transaction mode does not support server-side prepared statements
     connect_args={"prepared_statement_cache_size": 0},
 )

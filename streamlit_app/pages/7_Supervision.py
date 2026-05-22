@@ -246,7 +246,61 @@ for m in models_data:
     )
 
 df_health = pd.DataFrame(rows_table)
-st.dataframe(df_health, use_container_width=True, hide_index=True)
+st.dataframe(
+    df_health,
+    use_container_width=True,
+    hide_index=True,
+    column_config={
+        "Modèle": st.column_config.TextColumn(
+            "Modèle",
+            help="Nom du modèle ML déployé.",
+        ),
+        "Versions": st.column_config.TextColumn(
+            "Versions",
+            help="Liste des versions actives de ce modèle (production, A/B, shadow).",
+        ),
+        "Mode": st.column_config.TextColumn(
+            "Mode",
+            help="Mode de déploiement actif : production, A/B test ou shadow.",
+        ),
+        "Prédictions": st.column_config.NumberColumn(
+            "Prédictions",
+            help="Nombre total de prédictions production (non shadow) sur la période sélectionnée.",
+        ),
+        "Shadow": st.column_config.NumberColumn(
+            "Shadow",
+            help="Nombre de prédictions shadow (parallèles, non visibles du client) sur la période.",
+        ),
+        "Erreurs": st.column_config.TextColumn(
+            "Erreurs",
+            help="Taux de prédictions en erreur. Seuil warning 5 %, critique 10 %.",
+        ),
+        "Latence moy.": st.column_config.TextColumn(
+            "Latence moy.",
+            help="Temps de réponse moyen en millisecondes sur la période.",
+        ),
+        "p95": st.column_config.TextColumn(
+            "p95",
+            help="95e percentile du temps de réponse : 95 % des requêtes répondent en moins de cette durée.",
+        ),
+        "Drift features": st.column_config.TextColumn(
+            "Drift features",
+            help="Écart entre les valeurs des features en production et la baseline d'entraînement. 🔴 critique = ré-entraînement recommandé.",
+        ),
+        "Drift perf.": st.column_config.TextColumn(
+            "Drift perf.",
+            help="Dégradation de l'accuracy en production par rapport aux métriques d'entraînement.",
+        ),
+        "Drift sortie": st.column_config.TextColumn(
+            "Drift sortie",
+            help="Changement de la distribution des labels prédits par rapport à la baseline (label shift).",
+        ),
+        "Statut": st.column_config.TextColumn(
+            "Statut",
+            help="🟢 ok : tout va bien. 🟡 warning : à surveiller. 🔴 critical : action requise. ⚪ no_data : pas assez de données.",
+        ),
+    },
+)
 
 # Graphiques côte à côte : volume et erreurs
 col_vol, col_err = st.columns(2)
@@ -362,7 +416,49 @@ if per_version:
             for v in per_version
         ]
     )
-    st.dataframe(df_ver, use_container_width=True, hide_index=True)
+    st.dataframe(
+        df_ver,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Version": st.column_config.TextColumn(
+                "Version",
+                help="Numéro de version du modèle (ex : 1.0.0).",
+            ),
+            "Mode": st.column_config.TextColumn(
+                "Mode",
+                help="Mode de déploiement : production, ab_test, shadow ou inactif.",
+            ),
+            "Poids trafic": st.column_config.TextColumn(
+                "Poids trafic",
+                help="Part du trafic reçue par cette version en mode A/B. Ex : 30 % = cette version répond à 3 requêtes sur 10.",
+            ),
+            "Prédictions": st.column_config.NumberColumn(
+                "Prédictions",
+                help="Nombre de prédictions production (non shadow) servies par cette version sur la période.",
+            ),
+            "Shadow": st.column_config.NumberColumn(
+                "Shadow",
+                help="Nombre de prédictions shadow (parallèles, invisibles du client) pour cette version.",
+            ),
+            "Erreurs": st.column_config.TextColumn(
+                "Erreurs",
+                help="Taux de prédictions en erreur pour cette version.",
+            ),
+            "Latence moy.": st.column_config.TextColumn(
+                "Latence moy.",
+                help="Temps de réponse moyen en millisecondes pour cette version.",
+            ),
+            "p50": st.column_config.TextColumn(
+                "p50",
+                help="Médiane du temps de réponse : la moitié des requêtes est traitée en moins de cette durée.",
+            ),
+            "p95": st.column_config.TextColumn(
+                "p95",
+                help="95e percentile : 95 % des requêtes répondent en moins de cette durée. Indicateur SLA.",
+            ),
+        },
+    )
 
 # --- Seuils d'alerte ---
 st.divider()
@@ -712,7 +808,41 @@ with col_feat:
                 }
             )
         df_drift = pd.DataFrame(rows_drift)
-        st.dataframe(df_drift, use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_drift,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Feature": st.column_config.TextColumn(
+                    "Feature",
+                    help="Nom de la variable d'entrée (feature) du modèle.",
+                ),
+                "Statut": st.column_config.TextColumn(
+                    "Statut",
+                    help="🟢 ok : distribution stable. 🟡 warning : drift modéré. 🔴 critical : drift important, ré-entraînement recommandé.",
+                ),
+                "Moy. prod.": st.column_config.TextColumn(
+                    "Moy. prod.",
+                    help="Valeur moyenne de cette feature dans les prédictions de production sur la période.",
+                ),
+                "Moy. baseline": st.column_config.TextColumn(
+                    "Moy. baseline",
+                    help="Valeur moyenne de cette feature dans le dataset d'entraînement (référence).",
+                ),
+                "Z-score": st.column_config.TextColumn(
+                    "Z-score",
+                    help="Écart entre moyenne production et baseline, divisé par l'écart-type baseline. |Z| > 2 = warning, > 3 = critique.",
+                ),
+                "PSI": st.column_config.TextColumn(
+                    "PSI",
+                    help="Population Stability Index : mesure le changement global de distribution. < 0.1 = stable, 0.1–0.2 = modéré, ≥ 0.2 = critique.",
+                ),
+                "N prod.": st.column_config.NumberColumn(
+                    "N prod.",
+                    help="Nombre de prédictions de production analysées pour cette feature sur la période.",
+                ),
+            },
+        )
     elif not feat_baseline:
         st.info("Pas de baseline de features enregistrée pour ce modèle.")
     else:
@@ -951,7 +1081,41 @@ if ab_comparison:
                 for v in ab_versions
             ]
         )
-        st.dataframe(df_ab, use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_ab,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Version": st.column_config.TextColumn(
+                    "Version",
+                    help="Numéro de version participant à la comparaison A/B ou shadow.",
+                ),
+                "Prédictions": st.column_config.NumberColumn(
+                    "Prédictions",
+                    help="Nombre de prédictions production pour cette version sur la période.",
+                ),
+                "Shadow": st.column_config.NumberColumn(
+                    "Shadow",
+                    help="Nombre de prédictions shadow (parallèles, non visibles du client) pour cette version.",
+                ),
+                "Taux d'erreur": st.column_config.TextColumn(
+                    "Taux d'erreur",
+                    help="Pourcentage de prédictions en erreur pour cette version.",
+                ),
+                "Latence moy.": st.column_config.TextColumn(
+                    "Latence moy.",
+                    help="Temps de réponse moyen en millisecondes pour cette version.",
+                ),
+                "p95": st.column_config.TextColumn(
+                    "p95",
+                    help="95e percentile du temps de réponse pour cette version.",
+                ),
+                "Accord shadow": st.column_config.TextColumn(
+                    "Accord shadow",
+                    help="Fraction des prédictions shadow qui correspondent à la prédiction production pour le même id_obs.",
+                ),
+            },
+        )
 
         # Distribution des prédictions par version
         dist_data = []
@@ -1072,7 +1236,38 @@ if _anom_data is not None:
                 )
 
             _df_anom = pd.DataFrame(_rows_anom).sort_values("Z-score max", ascending=False)
-            st.dataframe(_df_anom, use_container_width=True, hide_index=True)
+            st.dataframe(
+                _df_anom,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "ID": st.column_config.NumberColumn(
+                        "ID",
+                        help="Identifiant unique de la prédiction en base de données.",
+                    ),
+                    "Timestamp": st.column_config.TextColumn(
+                        "Timestamp",
+                        help="Date et heure à laquelle la prédiction a été effectuée.",
+                    ),
+                    "Résultat": st.column_config.TextColumn(
+                        "Résultat",
+                        help="Valeur prédite par le modèle pour cette observation.",
+                    ),
+                    "Confiance": st.column_config.TextColumn(
+                        "Confiance",
+                        help="Score de confiance maximal retourné par le modèle (probabilité de la classe prédite).",
+                    ),
+                    "Z-score max": st.column_config.NumberColumn(
+                        "Z-score max",
+                        help="Z-score le plus élevé parmi toutes les features de cette prédiction. Indique à quel point la valeur s'écarte de la baseline. |Z| > 3 = anomalie.",
+                        format="%.2f",
+                    ),
+                    "Features aberrantes": st.column_config.TextColumn(
+                        "Features aberrantes",
+                        help="Liste des features avec leurs z-scores qui dépassent le seuil configuré.",
+                    ),
+                },
+            )
 
             with st.expander("Détail des features par prédiction", expanded=False):
                 for _p in sorted(
@@ -1094,5 +1289,35 @@ if _anom_data is not None:
                         }
                         for _fn, _fd in sorted(_feats.items(), key=lambda x: -x[1]["z_score"])
                     ]
-                    st.dataframe(pd.DataFrame(_feat_rows), use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        pd.DataFrame(_feat_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Feature": st.column_config.TextColumn(
+                                "Feature",
+                                help="Nom de la variable d'entrée aberrante.",
+                            ),
+                            "Valeur": st.column_config.NumberColumn(
+                                "Valeur",
+                                help="Valeur réelle envoyée par le client pour cette feature lors de la prédiction.",
+                                format="%.4f",
+                            ),
+                            "Z-score": st.column_config.NumberColumn(
+                                "Z-score",
+                                help="Écart normalisé : (valeur − moyenne baseline) / écart-type baseline. |Z| > 3 = aberrant.",
+                                format="%.4f",
+                            ),
+                            "Baseline μ": st.column_config.NumberColumn(
+                                "Baseline μ",
+                                help="Moyenne de référence de cette feature dans les données d'entraînement.",
+                                format="%.4f",
+                            ),
+                            "Baseline σ": st.column_config.NumberColumn(
+                                "Baseline σ",
+                                help="Écart-type de référence de cette feature dans les données d'entraînement.",
+                                format="%.4f",
+                            ),
+                        },
+                    )
                     st.divider()

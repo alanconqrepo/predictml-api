@@ -189,7 +189,45 @@ with tab_users:
         "created_at": "Créé le",
     })
 
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "ID": st.column_config.NumberColumn(
+                "ID",
+                help="Identifiant unique de l'utilisateur en base de données.",
+            ),
+            "Utilisateur": st.column_config.TextColumn(
+                "Utilisateur",
+                help="Nom d'utilisateur (login) de la personne. Utilisé pour s'identifier dans l'API.",
+            ),
+            "Email": st.column_config.TextColumn(
+                "Email",
+                help="Adresse email de l'utilisateur. Utilisée pour les notifications et la création de compte.",
+            ),
+            "Rôle": st.column_config.TextColumn(
+                "Rôle",
+                help="Niveau d'accès : 'admin' peut tout faire, 'user' peut prédire, 'readonly' peut seulement consulter.",
+            ),
+            "Statut": st.column_config.TextColumn(
+                "Statut",
+                help="✅ Actif : l'utilisateur peut se connecter et utiliser l'API. ❌ Inactif : accès révoqué.",
+            ),
+            "Quota / jour": st.column_config.NumberColumn(
+                "Quota / jour",
+                help="Nombre maximum de prédictions autorisées par jour. Le compteur se remet à zéro à minuit UTC.",
+            ),
+            "Dernière connexion": st.column_config.TextColumn(
+                "Dernière connexion",
+                help="Date et heure de la dernière utilisation de l'API par cet utilisateur.",
+            ),
+            "Créé le": st.column_config.TextColumn(
+                "Créé le",
+                help="Date à laquelle le compte a été créé.",
+            ),
+        },
+    )
 
     st.divider()
     st.subheader("Actions")
@@ -342,13 +380,59 @@ with tab_users:
                         })
 
                     st.subheader("Prédictions par modèle")
-                    st.dataframe(pd.DataFrame(rows_table), use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        pd.DataFrame(rows_table),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Modèle": st.column_config.TextColumn(
+                                "Modèle",
+                                help="Nom du modèle ML appelé par cet utilisateur.",
+                            ),
+                            "Volume total": st.column_config.NumberColumn(
+                                "Volume total",
+                                help="Nombre total d'appels à ce modèle sur la période sélectionnée.",
+                            ),
+                            "Max / jour": st.column_config.NumberColumn(
+                                "Max / jour",
+                                help="Pic journalier d'appels à ce modèle sur la période.",
+                            ),
+                            "Moy. / jour": st.column_config.NumberColumn(
+                                "Moy. / jour",
+                                help="Nombre moyen d'appels par jour à ce modèle sur la période.",
+                                format="%.1f",
+                            ),
+                            "Médiane / jour": st.column_config.NumberColumn(
+                                "Médiane / jour",
+                                help="Médiane du nombre d'appels par jour. Moins sensible aux pics que la moyenne.",
+                                format="%.1f",
+                            ),
+                        },
+                    )
                 elif usage.get("by_model"):
                     df_model = pd.DataFrame(usage["by_model"]).rename(
                         columns={"model_name": "Modèle", "calls": "Volume total", "errors": "Erreurs"}
                     )[["Modèle", "Volume total", "Erreurs"]]
                     st.subheader("Prédictions par modèle")
-                    st.dataframe(df_model, use_container_width=True, hide_index=True)
+                    st.dataframe(
+                        df_model,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Modèle": st.column_config.TextColumn(
+                                "Modèle",
+                                help="Nom du modèle ML appelé par cet utilisateur.",
+                            ),
+                            "Volume total": st.column_config.NumberColumn(
+                                "Volume total",
+                                help="Nombre total d'appels à ce modèle sur la période sélectionnée.",
+                            ),
+                            "Erreurs": st.column_config.NumberColumn(
+                                "Erreurs",
+                                help="Nombre d'appels qui ont renvoyé une erreur (statut 'error').",
+                            ),
+                        },
+                    )
                 else:
                     st.info("Aucune prédiction sur la période sélectionnée.")
 
@@ -436,7 +520,37 @@ with tab_requests:
             "%Y-%m-%d %H:%M"
         )
         df_req["message"] = df_req["message"].fillna("—")
-        st.dataframe(df_req, use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_req,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "id": st.column_config.NumberColumn(
+                    "ID",
+                    help="Identifiant unique de la demande d'accès.",
+                ),
+                "username": st.column_config.TextColumn(
+                    "Utilisateur",
+                    help="Nom d'utilisateur souhaité par la personne qui demande l'accès.",
+                ),
+                "email": st.column_config.TextColumn(
+                    "Email",
+                    help="Adresse email du demandeur. Utilisée pour lui envoyer ses identifiants.",
+                ),
+                "role_requested": st.column_config.TextColumn(
+                    "Rôle demandé",
+                    help="Niveau d'accès souhaité : 'user' (prédictions), 'admin' (gestion complète), 'readonly' (consultation).",
+                ),
+                "message": st.column_config.TextColumn(
+                    "Message",
+                    help="Message optionnel laissé par le demandeur pour expliquer son besoin.",
+                ),
+                "requested_at": st.column_config.TextColumn(
+                    "Demandé le",
+                    help="Date et heure à laquelle la demande a été soumise.",
+                ),
+            },
+        )
 
         st.divider()
         req_options = {
@@ -500,7 +614,41 @@ with tab_requests:
                 df_past["status"] = df_past["status"].map(
                     {"approved": "✅ Approuvée", "rejected": "❌ Rejetée"}
                 )
-                st.dataframe(df_past, use_container_width=True, hide_index=True)
+                st.dataframe(
+                    df_past,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "id": st.column_config.NumberColumn(
+                            "ID",
+                            help="Identifiant unique de la demande d'accès.",
+                        ),
+                        "username": st.column_config.TextColumn(
+                            "Utilisateur",
+                            help="Nom d'utilisateur demandé.",
+                        ),
+                        "email": st.column_config.TextColumn(
+                            "Email",
+                            help="Adresse email du demandeur.",
+                        ),
+                        "role_requested": st.column_config.TextColumn(
+                            "Rôle demandé",
+                            help="Niveau d'accès sollicité lors de la demande.",
+                        ),
+                        "status": st.column_config.TextColumn(
+                            "Statut",
+                            help="✅ Approuvée : compte créé. ❌ Rejetée : demande refusée.",
+                        ),
+                        "reviewed_at": st.column_config.TextColumn(
+                            "Traitée le",
+                            help="Date et heure à laquelle un administrateur a statué sur la demande.",
+                        ),
+                        "rejection_reason": st.column_config.TextColumn(
+                            "Raison du refus",
+                            help="Motif indiqué par l'administrateur en cas de refus. '—' si non renseigné.",
+                        ),
+                    },
+                )
             else:
                 st.info("Aucun historique.")
         except Exception as e:

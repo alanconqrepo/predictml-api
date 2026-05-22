@@ -518,7 +518,127 @@ for m in models:
         }
     )
 
-st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+st.dataframe(
+    pd.DataFrame(rows),
+    use_container_width=True,
+    hide_index=True,
+    column_config={
+        "Nom": st.column_config.TextColumn(
+            "Nom",
+            help="Identifiant unique du modèle.",
+        ),
+        "Version": st.column_config.TextColumn(
+            "Version",
+            help="Version du modèle au format X.Y.Z.",
+        ),
+        "Tags": st.column_config.TextColumn(
+            "Tags",
+            help="Étiquettes libres associées au modèle (ex : Example, production, v2…).",
+        ),
+        "Algorithme": st.column_config.TextColumn(
+            "Algorithme",
+            help="Classe scikit-learn utilisée lors de l'entraînement (ex : RandomForest, GradientBoosting…).",
+        ),
+        "Tâche": st.column_config.TextColumn(
+            "Tâche",
+            help="Type de tâche ML : 📈 Régression, 🔵 Classification binaire ou 🟡 Classification multiclasse.",
+        ),
+        "Baseline": st.column_config.TextColumn(
+            "Baseline",
+            help=(
+                "✅ Baseline : statistiques de référence (moyenne, std, min/max) calculées à l'entraînement. "
+                "Utilisées pour la détection de drift et la validation du schéma d'entrée. "
+                "⚠️ Absent : upload sans feature_baseline."
+            ),
+        ),
+        "Cache": st.column_config.TextColumn(
+            "Cache",
+            help=(
+                "🔥 En cache : modèle chargé en mémoire — prêt à servir sans latence de cold start. "
+                "❄️ Non chargé : sera chargé depuis MinIO à la première prédiction."
+            ),
+        ),
+        "Statut": st.column_config.TextColumn(
+            "Statut",
+            help=(
+                "🟢 Production : version principale. "
+                "🟠 A/B (x%) : reçoit x% du trafic en test A/B. "
+                "🟣 Shadow : reçoit les requêtes sans retourner sa prédiction au client. "
+                "✅ Actif : disponible mais non en production. "
+                "⚫ Inactif : désactivé."
+            ),
+        ),
+        "Créateur": st.column_config.TextColumn(
+            "Créateur",
+            help="Utilisateur ayant uploadé ce modèle.",
+        ),
+        "Créé le": st.column_config.TextColumn(
+            "Créé le",
+            help="Date d'upload du modèle (heure locale).",
+        ),
+        "Dernière préd.": st.column_config.TextColumn(
+            "Dernière préd.",
+            help="Date et heure de la dernière prédiction servie par ce modèle.",
+        ),
+        "Accuracy (eval)": st.column_config.TextColumn(
+            "Accuracy (eval)",
+            help=(
+                "Accuracy = (vrais positifs + vrais négatifs) / total des observations.\n\n"
+                "Mesure la proportion de prédictions correctes sur le jeu de test (hold-out) "
+                "séparé avant l'entraînement.\n\n"
+                "• 1.0 → 100 % de prédictions correctes\n"
+                "• 0.5 → équivalent à un tirage aléatoire sur 2 classes\n\n"
+                "⚠️ Trompeuse sur des classes très déséquilibrées : un modèle qui "
+                "prédit toujours la classe majoritaire peut afficher 0.95 sans rien apprendre. "
+                "Dans ce cas, préférer le F1. Métrique classification uniquement."
+            ),
+        ),
+        "F1 (eval)": st.column_config.TextColumn(
+            "F1 (eval)",
+            help=(
+                "F1 = 2 × (Précision × Rappel) / (Précision + Rappel)\n\n"
+                "• Précision = parmi les exemples prédits positifs, combien le sont vraiment.\n"
+                "• Rappel = parmi les exemples réellement positifs, combien sont détectés.\n\n"
+                "Le F1 est la moyenne harmonique des deux : il pénalise fortement "
+                "un score très faible sur l'un ou l'autre.\n\n"
+                "• 1.0 → précision et rappel parfaits\n"
+                "• 0.0 → modèle inutilisable\n\n"
+                "Recommandé quand les classes sont déséquilibrées ou quand les faux négatifs "
+                "et faux positifs ont un coût différent (ex : détection de fraude, diagnostic médical). "
+                "Métrique classification uniquement."
+            ),
+        ),
+        "R² (train)": st.column_config.TextColumn(
+            "R² (train)",
+            help=(
+                "R² = 1 − (Σ(y − ŷ)²) / (Σ(y − ȳ)²)\n\n"
+                "Mesure la part de variance de la variable cible expliquée par le modèle, "
+                "calculée sur le jeu d'entraînement.\n\n"
+                "• 1.0 → le modèle prédit parfaitement toutes les valeurs\n"
+                "• 0.0 → le modèle n'explique rien (équivalent à prédire la moyenne)\n"
+                "• < 0 → le modèle est moins bon que de prédire la moyenne — signe "
+                "d'un problème (sur-régularisation, mauvais features, bug)\n\n"
+                "⚠️ Un R² élevé sur le train peut masquer du surapprentissage. "
+                "Comparer avec les métriques live en production. Métrique régression uniquement."
+            ),
+        ),
+        "RMSE (train)": st.column_config.TextColumn(
+            "RMSE (train)",
+            help=(
+                "RMSE = √( Σ(y − ŷ)² / n )\n\n"
+                "Erreur quadratique moyenne, exprimée dans la même unité que la variable cible. "
+                "Calculée sur le jeu d'entraînement.\n\n"
+                "• Un RMSE de 2.5 sur un prix en € signifie que le modèle se trompe "
+                "en moyenne de ±2.5 €.\n"
+                "• Plus la valeur est faible, meilleur est le modèle.\n"
+                "• Pas de borne supérieure : dépend de l'échelle de la cible.\n\n"
+                "Le RMSE pénalise davantage les grandes erreurs que la MAE "
+                "(Mean Absolute Error), car les écarts sont mis au carré avant la racine. "
+                "Métrique régression uniquement."
+            ),
+        ),
+    },
+)
 st.caption("Accuracy (eval), F1 (eval), R² (eval), RMSE (eval) : métriques issues de l'évaluation sur le jeu de test lors de l'entraînement.")
 
 # ---------------------------------------------------------------------------
@@ -1697,6 +1817,43 @@ with st.expander("🔍 Valider le schéma JSON", expanded=False):
 
                 except Exception as e:
                     st.error(f"Erreur lors de la validation : {e}")
+
+    st.divider()
+    st.markdown("**💻 Exemple Python — appel `/predict`**")
+    _predict_payload = {
+        "model_name": selected["name"],
+        "features": example_payload,
+    }
+    _python_code = (
+        "import requests\n\n"
+        'url = "http://localhost:8000/predict"\n'
+        "headers = {\n"
+        '    "Authorization": "Bearer <VOTRE_TOKEN>",\n'
+        '    "Content-Type": "application/json",\n'
+        "}\n"
+        f"payload = {_json.dumps(_predict_payload, indent=4)}\n\n"
+        "response = requests.post(url, headers=headers, json=payload)\n"
+        "print(response.json())"
+    )
+    st.code(_python_code, language="python")
+
+    st.markdown("**Exemple de réponse :**")
+    _example_response = _json.dumps(
+        {
+            "model_name": selected["name"],
+            "model_version": selected["version"],
+            "prediction": "<résultat>",
+            "probability": [0.98, 0.01, 0.01],
+            "low_confidence": False,
+            "id_obs": None,
+            "selected_version": None,
+            "shap_values": None,
+            "shap_base_value": None,
+        },
+        indent=4,
+        ensure_ascii=False,
+    )
+    st.code(_example_response, language="json")
 
 # Tests de régression (Golden Test Set)
 with st.expander("🧪 Tests de régression", expanded=False):
