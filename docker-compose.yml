@@ -220,11 +220,17 @@ services:
       DATABASES_USER: ${POSTGRES_USER:-postgres}
       DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       DATABASES_DBNAME: ${POSTGRES_DB:-sklearn_api}
-      PGBOUNCER_PORT: "${PGBOUNCER_PORT:-6432}"
-      POOL_MODE: transaction
-      MAX_CLIENT_CONN: "200"
-      DEFAULT_POOL_SIZE: "20"
-      SERVER_RESET_QUERY: DISCARD ALL
+      PGBOUNCER_LISTEN_PORT: "${PGBOUNCER_PORT:-6432}"
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_MAX_CLIENT_CONN: "200"
+      PGBOUNCER_DEFAULT_POOL_SIZE: "20"
+      PGBOUNCER_RESERVE_POOL_SIZE: "5"
+      PGBOUNCER_RESERVE_POOL_TIMEOUT: "1"
+      # Fail fast : renvoie une erreur au bout de 10 s au lieu d'attendre 120 s
+      PGBOUNCER_QUERY_WAIT_TIMEOUT: "10"
+      # Recycle les connexions serveur inactives après 10 min
+      PGBOUNCER_SERVER_IDLE_TIMEOUT: "600"
+      PGBOUNCER_SERVER_RESET_QUERY: DISCARD ALL
     depends_on:
       postgres:
         condition: service_healthy
@@ -246,11 +252,15 @@ services:
       DATABASES_USER: ${POSTGRES_USER:-postgres}
       DATABASES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       DATABASES_DBNAME: ${POSTGRES_DB:-sklearn_api}
-      PGBOUNCER_PORT: "${PGBOUNCER_PORT:-6432}"
-      POOL_MODE: transaction
-      MAX_CLIENT_CONN: "100"
-      DEFAULT_POOL_SIZE: "10"
-      SERVER_RESET_QUERY: DISCARD ALL
+      PGBOUNCER_LISTEN_PORT: "${PGBOUNCER_PORT:-6432}"
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_MAX_CLIENT_CONN: "100"
+      PGBOUNCER_DEFAULT_POOL_SIZE: "10"
+      PGBOUNCER_RESERVE_POOL_SIZE: "3"
+      PGBOUNCER_RESERVE_POOL_TIMEOUT: "1"
+      PGBOUNCER_QUERY_WAIT_TIMEOUT: "10"
+      PGBOUNCER_SERVER_IDLE_TIMEOUT: "600"
+      PGBOUNCER_SERVER_RESET_QUERY: DISCARD ALL
     depends_on:
       postgres-replica:
         condition: service_healthy

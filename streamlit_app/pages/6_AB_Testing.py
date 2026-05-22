@@ -384,6 +384,24 @@ else:
                 pd.DataFrame(sample_rows),
                 use_container_width=True,
                 hide_index=True,
+                column_config={
+                    "Version": st.column_config.TextColumn(
+                        "Version",
+                        help="Numéro de version du modèle participant au test A/B.",
+                    ),
+                    "Observations actuelles": st.column_config.NumberColumn(
+                        "Observations actuelles",
+                        help="Nombre de prédictions enregistrées pour cette version sur la période sélectionnée.",
+                    ),
+                    "Minimum recommandé": st.column_config.TextColumn(
+                        "Minimum recommandé",
+                        help="Nombre minimal d'observations nécessaires pour que le test soit statistiquement fiable (puissance 80 %).",
+                    ),
+                    "Suffisant ?": st.column_config.TextColumn(
+                        "Suffisant ?",
+                        help="✅ Oui : assez de données pour conclure. ❌ Non : continuez à accumuler des prédictions.",
+                    ),
+                },
             )
 
         # --- Recommandation finale ---
@@ -670,4 +688,38 @@ else:
         )
 
     st.caption(f"{len(shadow_preds)} prédiction(s) shadow")
-    st.dataframe(pd.DataFrame(shadow_rows), use_container_width=True, hide_index=True)
+    st.dataframe(
+        pd.DataFrame(shadow_rows),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "ID": st.column_config.NumberColumn(
+                "ID",
+                help="Identifiant unique de la prédiction en base de données.",
+            ),
+            "Timestamp": st.column_config.TextColumn(
+                "Timestamp",
+                help="Date et heure à laquelle la prédiction shadow a été effectuée.",
+            ),
+            "Version": st.column_config.TextColumn(
+                "Version",
+                help="Version du modèle qui a produit cette prédiction shadow.",
+            ),
+            "id_obs": st.column_config.TextColumn(
+                "id_obs",
+                help="Identifiant de l'observation, fourni par le client appelant. Permet d'apparier une prédiction shadow à sa contrepartie production.",
+            ),
+            "Résultat": st.column_config.TextColumn(
+                "Résultat",
+                help="Valeur prédite par la version shadow. Non retournée au client — sert uniquement à la comparaison interne.",
+            ),
+            "Latence (ms)": st.column_config.TextColumn(
+                "Latence (ms)",
+                help="Temps de calcul de la prédiction shadow en millisecondes.",
+            ),
+            "Statut": st.column_config.TextColumn(
+                "Statut",
+                help="✅ Succès ou ❌ Erreur lors du calcul de la prédiction.",
+            ),
+        },
+    )

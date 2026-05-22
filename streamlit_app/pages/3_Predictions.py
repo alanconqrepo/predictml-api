@@ -284,6 +284,112 @@ with tab_history:
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="single-row",
+                column_config={
+                    "ID": st.column_config.NumberColumn(
+                        "ID",
+                        help=(
+                            "Numéro d'identifiant interne attribué automatiquement à chaque "
+                            "prédiction enregistrée en base de données. Sert à retrouver une "
+                            "prédiction précise dans les logs ou via l'API."
+                        ),
+                    ),
+                    "id_obs": st.column_config.TextColumn(
+                        "id_obs",
+                        help=(
+                            "Identifiant de l'observation fourni par l'appelant au moment de "
+                            "la requête (champ optionnel). Permet de faire le lien entre une "
+                            "prédiction et une ligne de votre système métier (ex : ID client, "
+                            "ID commande). Vaut '—' si l'appelant n'en a pas fourni."
+                        ),
+                    ),
+                    "Timestamp": st.column_config.TextColumn(
+                        "Timestamp",
+                        help=(
+                            "Date et heure exactes auxquelles la prédiction a été effectuée "
+                            "(heure UTC). Utile pour corréler une prédiction avec un événement "
+                            "métier ou un incident."
+                        ),
+                    ),
+                    "Modèle": st.column_config.TextColumn(
+                        "Modèle",
+                        help="Nom du modèle ML qui a répondu à cette requête de prédiction.",
+                    ),
+                    "Version": st.column_config.TextColumn(
+                        "Version",
+                        help=(
+                            "Version du modèle utilisée au format X.Y.Z. Un même modèle peut "
+                            "exister en plusieurs versions — la version en production est "
+                            "utilisée par défaut sauf si l'appelant en précise une autre."
+                        ),
+                    ),
+                    "Résultat": st.column_config.TextColumn(
+                        "Résultat",
+                        help=(
+                            "La prédiction retournée par le modèle. Pour un modèle de "
+                            "classification (ex : iris), c'est le nom de la classe prédite. "
+                            "Pour un modèle de régression, c'est une valeur numérique. "
+                            "Les lignes surlignées en rouge indiquent que le résultat ne "
+                            "correspond pas au Ground Truth connu."
+                        ),
+                    ),
+                    "Ground Truth": st.column_config.TextColumn(
+                        "Ground Truth",
+                        help=(
+                            "Résultat réellement observé dans la réalité, renseigné "
+                            "après coup via l'endpoint /observed-results. Permet de mesurer "
+                            "si le modèle s'est trompé. Vaut '—' si personne n'a encore "
+                            "enregistré la vraie valeur pour cette observation."
+                        ),
+                    ),
+                    "Confiance": st.column_config.TextColumn(
+                        "Confiance",
+                        help=(
+                            "Niveau de certitude du modèle dans sa prédiction, exprimé en "
+                            "pourcentage. Calculé à partir de la probabilité maximale parmi "
+                            "toutes les classes (predict_proba). Ex : 97 % signifie que le "
+                            "modèle est très sûr de lui. En dessous du seuil configuré sur "
+                            "le modèle, la prédiction est marquée 'low confidence'. Vaut '—' "
+                            "si le modèle ne supporte pas les probabilités (ex : régression)."
+                        ),
+                    ),
+                    "Temps (ms)": st.column_config.TextColumn(
+                        "Temps (ms)",
+                        help=(
+                            "Temps de traitement de la requête côté API, en millisecondes. "
+                            "Inclut le chargement du modèle en mémoire (si pas en cache), "
+                            "le calcul de la prédiction et l'écriture en base. "
+                            "Une valeur élevée peut signaler un cold start (modèle non "
+                            "chargé) ou une surcharge du serveur."
+                        ),
+                    ),
+                    "Statut": st.column_config.TextColumn(
+                        "Statut",
+                        help=(
+                            "✅ Succès : la prédiction s'est déroulée sans erreur.\n"
+                            "❌ Échec : une erreur s'est produite pendant le traitement "
+                            "(ex : feature manquante, modèle indisponible). "
+                            "La prédiction a quand même été enregistrée pour traçabilité."
+                        ),
+                    ),
+                    "Shadow": st.column_config.TextColumn(
+                        "Shadow",
+                        help=(
+                            "🔮 Mode shadow : cette prédiction a été calculée en arrière-plan "
+                            "par une version candidate du modèle, mais le résultat n'a PAS "
+                            "été renvoyé au client — l'utilisateur final a reçu la réponse "
+                            "de la version en production. Permet de tester une nouvelle "
+                            "version sans risque. '—' = prédiction normale, visible par le client."
+                        ),
+                    ),
+                    "Utilisateur": st.column_config.TextColumn(
+                        "Utilisateur",
+                        help=(
+                            "Identifiant de l'utilisateur ou de l'application qui a effectué "
+                            "cette prédiction (authentifié via son token Bearer). Utile pour "
+                            "auditer qui consomme le modèle et en quelle quantité."
+                        ),
+                    ),
+                },
             )
 
             # ── Panneau détail (ligne sélectionnée) ───────────────────────────
@@ -469,19 +575,57 @@ with tab_history:
                             st.error(f"Erreur lors de l'export : {exc}")
 
         # --- Import / Export résultats observés ---
-        CSV_TEMPLATE = "id_obs,model_name,observed_result,date_time\n"
+        CSV_TEMPLATE = (
+            "id_obs,model_name,observed_result,date_time\n"
+            "obs-001,iris-classifier,2,2026-05-20 14:32:00\n"
+            "obs-002,iris-classifier,1,2026-05-20 14:33:10\n"
+            "obs-003,wine-regressor,13.5,2026-05-20\n"
+        )
 
         with st.expander("📤 Importer des résultats observés (CSV)"):
+            st.markdown(
+                "Enregistrez la **vraie valeur** observée pour chaque prédiction afin de "
+                "mesurer la précision du modèle en production (Ground Truth)."
+            )
+
+            # Format du CSV
+            st.markdown("**Format attendu**")
+            st.code(
+                "id_obs,model_name,observed_result,date_time\n"
+                "obs-001,iris-classifier,2,2026-05-20 14:32:00\n"
+                "obs-002,iris-classifier,1,2026-05-20\n"
+                "obs-003,wine-regressor,13.5,2026-05-20T09:15:00",
+                language="text",
+            )
+            st.markdown(
+                "| Colonne | Obligatoire | Description |\n"
+                "|---|---|---|\n"
+                "| `id_obs` | ✅ | Identifiant de l'observation — doit correspondre à l'`id_obs` envoyé lors de la prédiction |\n"
+                "| `model_name` | ✅ *(ou override)* | Nom du modèle concerné |\n"
+                "| `observed_result` | ✅ | La vraie valeur (entier, décimal ou texte) |\n"
+                "| `date_time` | ✅ | Date de l'observation — formats acceptés : `YYYY-MM-DD`, `YYYY-MM-DD HH:MM:SS`, `YYYY-MM-DDTHH:MM:SS` |"
+            )
+            st.caption("Séparateur : virgule  •  Encodage : UTF-8  •  Taille max : 10 MB")
+
             st.download_button(
-                "⬇️ Télécharger un template CSV",
+                "⬇️ Télécharger un template CSV avec exemples",
                 data=CSV_TEMPLATE,
                 file_name="template_observed_results.csv",
                 mime="text/csv",
             )
-            uploaded_file = st.file_uploader("Fichier CSV", type=["csv"], key="csv_obs_upload")
+
+            uploaded_file = st.file_uploader("Fichier CSV à importer", type=["csv"], key="csv_obs_upload")
+
             model_name_override = st.text_input(
-                "Modèle (override colonne CSV — optionnel)",
+                "Forcer le modèle pour toutes les lignes (optionnel)",
                 key="csv_obs_model_override",
+                help=(
+                    "Laissez vide si votre CSV contient déjà une colonne 'model_name'.\n\n"
+                    "Remplissez ce champ si :\n"
+                    "• votre CSV n'a pas de colonne 'model_name' (toutes les lignes concernent le même modèle)\n"
+                    "• vous voulez forcer un modèle spécifique et ignorer la colonne CSV\n\n"
+                    "Exemple : iris-classifier"
+                ),
             )
             if uploaded_file is not None and st.button("Importer", key="csv_obs_submit"):
                 try:

@@ -94,7 +94,33 @@ else:
             }
         )
 
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(
+        pd.DataFrame(rows),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "ID": st.column_config.NumberColumn(
+                "ID",
+                help="Identifiant unique du cas de test en base de données.",
+            ),
+            "Description": st.column_config.TextColumn(
+                "Description",
+                help="Libellé libre décrivant ce cas de test. Ex : 'iris setosa typique — valeurs nominales'.",
+            ),
+            "Input features": st.column_config.TextColumn(
+                "Input features",
+                help="Objet JSON contenant les valeurs des features envoyées au modèle lors du test.",
+            ),
+            "Expected output": st.column_config.TextColumn(
+                "Expected output",
+                help="Valeur de sortie attendue du modèle pour ces features. Le test échoue si le modèle retourne autre chose.",
+            ),
+            "Date": st.column_config.TextColumn(
+                "Date",
+                help="Date et heure à laquelle ce cas de test a été enregistré.",
+            ),
+        },
+    )
     st.caption(f"{len(golden_tests)} cas de test(s) enregistré(s).")
 
     col_run, col_spacer = st.columns([1, 3])

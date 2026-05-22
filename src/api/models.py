@@ -474,7 +474,7 @@ async def list_cached_models():
 
 @router.get("/models/leaderboard", response_model=List[LeaderboardEntry])
 async def get_models_leaderboard(
-    metric: Literal["accuracy", "f1_score", "latency_p95_ms", "predictions_count"] = Query(
+    metric: Literal["accuracy", "f1_score", "r2", "rmse", "latency_p95_ms", "predictions_count"] = Query(
         "accuracy", description="Metric to rank by"
     ),
     days: int = Query(30, ge=1, le=365, description="Sliding window in days"),
@@ -502,6 +502,7 @@ async def get_models_leaderboard(
         drift_status = await _get_leaderboard_drift_status(
             db, m.name, m.version, days, m.feature_baseline
         )
+        tm = m.training_metrics or {}
         entries.append(
             LeaderboardEntry(
                 rank=0,
@@ -509,6 +510,8 @@ async def get_models_leaderboard(
                 version=m.version,
                 accuracy=m.accuracy,
                 f1_score=m.f1_score,
+                r2=tm.get("r2"),
+                rmse=tm.get("rmse"),
                 latency_p95_ms=ps.get("p95_response_time_ms"),
                 drift_status=drift_status,
                 predictions_count=ps.get("total_predictions", 0),
@@ -523,6 +526,11 @@ async def get_models_leaderboard(
         entries.sort(key=lambda e: e.predictions_count, reverse=True)
     elif metric == "f1_score":
         entries.sort(key=lambda e: e.f1_score if e.f1_score is not None else -1, reverse=True)
+    elif metric == "r2":
+        entries.sort(key=lambda e: e.r2 if e.r2 is not None else -float("inf"), reverse=True)
+    elif metric == "rmse":
+        # RMSE : plus petit = meilleur → ordre croissant, None en dernier
+        entries.sort(key=lambda e: e.rmse if e.rmse is not None else float("inf"))
     else:  # accuracy
         entries.sort(key=lambda e: e.accuracy if e.accuracy is not None else -1, reverse=True)
 
