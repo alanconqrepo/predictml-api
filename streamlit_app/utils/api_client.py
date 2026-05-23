@@ -342,21 +342,33 @@ class APIClient:
     def set_policy(
         self,
         name: str,
+        # Auto-promotion
+        auto_promote: bool = False,
         min_accuracy: Optional[float] = None,
         max_mae: Optional[float] = None,
         max_latency_p95_ms: Optional[float] = None,
         min_sample_validation: int = 10,
-        auto_promote: bool = False,
+        min_golden_test_pass_rate: Optional[float] = None,
+        # Circuit breaker (auto-demotion)
+        auto_demote: bool = False,
+        demote_on_drift: str = "critical",
+        demote_on_accuracy_below: Optional[float] = None,
+        demote_cooldown_hours: int = 24,
     ) -> dict:
-        """Définit la politique d'auto-promotion post-retrain d'un modèle (admin requis)."""
+        """Définit la politique d'auto-promotion / circuit breaker d'un modèle (admin requis)."""
         r = self._patch(
             f"/models/{name}/policy",
             json={
+                "auto_promote": auto_promote,
                 "min_accuracy": min_accuracy,
                 "max_mae": max_mae,
                 "max_latency_p95_ms": max_latency_p95_ms,
                 "min_sample_validation": min_sample_validation,
-                "auto_promote": auto_promote,
+                "min_golden_test_pass_rate": min_golden_test_pass_rate,
+                "auto_demote": auto_demote,
+                "demote_on_drift": demote_on_drift,
+                "demote_on_accuracy_below": demote_on_accuracy_below,
+                "demote_cooldown_hours": demote_cooldown_hours,
             },
         )
         r.raise_for_status()
