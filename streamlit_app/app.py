@@ -306,16 +306,21 @@ if _logged_in:
 
         st.divider()
         if st.session_state.get("role") != "readonly":
+            _grafana_url = os.environ.get("GRAFANA_PUBLIC_URL", "http://localhost:3000")
+            _minio_url = os.environ.get("MINIO_CONSOLE_PUBLIC_URL", "http://localhost:9011")
+            _mlflow_url = os.environ.get("MLFLOW_PUBLIC_URL", "http://localhost:5000")
             st.subheader("Services")
             st.markdown(
-                "🔗 [Swagger](http://localhost/docs)  \n"
-                "📊 [Grafana](http://127.0.0.1:3000/dashboards)  \n"
-                "🪣 [MinIO](http://127.0.0.1:9011/login)  \n"
-                "🧪 [MLflow](http://127.0.0.1:5000/)"
+                f"🔗 [Swagger](http://localhost/docs)  \n"
+                f"📊 [Grafana]({_grafana_url}/dashboards)  \n"
+                f"🪣 [MinIO]({_minio_url}/login)  \n"
+                f"🧪 [MLflow]({_mlflow_url}/)"
             )
+            if st.session_state.get("is_admin"):
+                st.page_link("pages/11_Services.py", label="🔑 Accès & credentials →")
             st.divider()
 
-    _pg = st.navigation([
+    _base_pages = [
         st.Page(show_home, title="Accueil", default=True),
         st.Page("pages/1_Users.py", title="Users"),
         st.Page("pages/2_Models.py", title="Models"),
@@ -327,7 +332,10 @@ if _logged_in:
         st.Page("pages/9_Golden_Tests.py", title="Golden Tests"),
         st.Page("pages/10_Aide.py", title="Aide"),
         st.Page("pages/5_Code_Example.py", title="Code Example"),
-    ])
+    ]
+    if st.session_state.get("is_admin"):
+        _base_pages.append(st.Page("pages/11_Services.py", title="Services"))
+    _pg = st.navigation(_base_pages)
 else:
     _pg = st.navigation([
         st.Page(show_login, title="Connexion", default=True),
