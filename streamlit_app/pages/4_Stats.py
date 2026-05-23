@@ -24,8 +24,8 @@ if col_refresh.button("🔄 Rafraîchir", key="stats_refresh", width='stretch'):
 
 client = get_client()
 
-# --- Filtres ---
-col_d1, col_d2, col_search, col_model = st.columns([1, 1, 2, 2])
+# --- Filtres date (globaux) ---
+col_d1, col_d2 = st.columns([1, 1])
 
 date_start = col_d1.date_input(
     "Date début",
@@ -56,14 +56,6 @@ try:
     model_names = sorted({m["name"] for m in models})
 except Exception:
     model_names = []
-
-with col_search:
-    stats_search = st.text_input("Filtrer par nom", key="stats_model_search", placeholder="Rechercher…")
-    stats_filtered = [n for n in model_names if stats_search.lower() in n.lower()] if stats_search else model_names
-
-with col_model:
-    model_filter = st.selectbox("Modèle", ["(tous)"] + (stats_filtered or model_names))
-selected_model = None if model_filter == "(tous)" else model_filter
 
 if not model_names:
     st.warning("Aucun modèle disponible.")
@@ -464,6 +456,15 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
 
 # ── Expander 2 : Statistiques agrégées par modèle ────────────────────────────
 with st.expander("📊 Statistiques agrégées par modèle", expanded=True):
+    # Filtre modèle local à cet expander
+    _s2_col_search, _s2_col_model = st.columns([2, 2])
+    with _s2_col_search:
+        stats_search = st.text_input("Filtrer par nom", key="stats_model_search", placeholder="Rechercher…")
+        stats_filtered = [n for n in model_names if stats_search.lower() in n.lower()] if stats_search else model_names
+    with _s2_col_model:
+        model_filter = st.selectbox("Modèle", ["(tous)"] + (stats_filtered or model_names), key="stats_model_filter")
+    selected_model = None if model_filter == "(tous)" else model_filter
+
     # Charger les prédictions pour chaque modèle (ou le modèle sélectionné)
     all_preds = []
     fetch_models_list = [selected_model] if selected_model else model_names
