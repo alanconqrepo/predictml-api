@@ -1,4 +1,4 @@
-"""
+﻿"""
 Outils natifs (function calling) pour le chatbot d'aide PredictML.
 
 Deux tools disponibles pour Claude :
@@ -278,7 +278,7 @@ def render_tool_result(tool_name: str, result: dict) -> None:
         if row_count > 0:
             try:
                 df = pd.DataFrame(result["rows"])
-                st.dataframe(df, use_container_width=True, hide_index=True)
+                st.dataframe(df, width='stretch', hide_index=True)
             except Exception:
                 st.json(result["rows"])
         else:

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Historique des prédictions avec filtres
 """
 
@@ -41,7 +41,7 @@ def _view_script_dialog(filename: str) -> None:
         file_name=filename,
         mime="text/x-python",
         key=f"dl_dialog_{filename}",
-        use_container_width=True,
+        width='stretch',
     )
 
 
@@ -50,7 +50,7 @@ require_auth()
 
 col_title, col_refresh = st.columns([8, 1])
 col_title.title("📊 Prédictions")
-if col_refresh.button("🔄 Rafraîchir", key="pred_refresh", use_container_width=True):
+if col_refresh.button("🔄 Rafraîchir", key="pred_refresh", width='stretch'):
     st.cache_data.clear()
     st.rerun()
 
@@ -64,7 +64,7 @@ with st.expander("📋 Scripts d'exemple — Iris", expanded=False):
     for _script_name, _script_desc in _EXAMPLE_SCRIPTS:
         _col_desc, _col_view, _col_dl = st.columns([5, 1.5, 1.5])
         _col_desc.markdown(f"**`{_script_name}`**  \n{_script_desc}")
-        if _col_view.button("👁 Visualiser", key=f"view_{_script_name}", use_container_width=True):
+        if _col_view.button("👁 Visualiser", key=f"view_{_script_name}", width='stretch'):
             _view_script_dialog(_script_name)
         _col_dl.download_button(
             "⬇️ Télécharger",
@@ -72,7 +72,7 @@ with st.expander("📋 Scripts d'exemple — Iris", expanded=False):
             file_name=_script_name,
             mime="text/x-python",
             key=f"dl_{_script_name}",
-            use_container_width=True,
+            width='stretch',
         )
 
 tab_history, tab_batch = st.tabs(["📋 Historique", "📦 Prédictions batch"])
@@ -280,7 +280,7 @@ with tab_history:
             styled = df_display.style.apply(_highlight_mismatch, axis=1)
             sel = st.dataframe(
                 styled,
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="single-row",
@@ -509,7 +509,7 @@ with tab_history:
                                 margin={"l": 20, "r": 60, "t": 50, "b": 40},
                                 showlegend=False,
                             )
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, width='stretch')
                             if len(shap_values) > 10:
                                 with st.expander("Voir toutes les features"):
                                     st.dataframe(
@@ -517,7 +517,7 @@ with tab_history:
                                             sorted(shap_values.items(), key=lambda x: abs(x[1]), reverse=True),
                                             columns=["Feature", "SHAP"],
                                         ),
-                                        use_container_width=True, hide_index=True,
+                                        width='stretch', hide_index=True,
                                     )
                         else:
                             st.info("Aucune valeur SHAP retournée.")
@@ -644,7 +644,7 @@ with tab_history:
                         if errors:
                             st.dataframe(
                                 pd.DataFrame(errors),
-                                use_container_width=True,
+                                width='stretch',
                                 hide_index=True,
                             )
                 except Exception as exc:
@@ -708,7 +708,7 @@ with tab_history:
                 col_sim, col_purge = st.columns(2)
 
                 if col_sim.button(
-                    "🔍 Simuler (dry_run)", key="purge_simulate", use_container_width=True
+                    "🔍 Simuler (dry_run)", key="purge_simulate", width='stretch'
                 ):
                     try:
                         result = client.purge_predictions(
@@ -769,7 +769,7 @@ with tab_history:
                     "⚠️ Confirmer la purge",
                     key="purge_open_dialog",
                     type="primary",
-                    use_container_width=True,
+                    width='stretch',
                 ):
                     _confirm_purge_dialog()
 
@@ -803,7 +803,7 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
                 "petal_width": [0.2, 1.8, 0.2],
             }
         )
-        st.dataframe(example_df, use_container_width=True, hide_index=True)
+        st.dataframe(example_df, width='stretch', hide_index=True)
         st.download_button(
             "⬇️ Télécharger cet exemple (CSV)",
             data=example_df.to_csv(index=False),
@@ -871,7 +871,7 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
         st.caption(
             f"Fichier chargé : **{batch_file.name}** — {len(df_input):,} lignes, {len(df_input.columns)} colonnes"
         )
-        st.dataframe(df_input.head(10), use_container_width=True, hide_index=True)
+        st.dataframe(df_input.head(10), width='stretch', hide_index=True)
 
         if st.button("🚀 Lancer le scoring", type="primary", key="batch_run"):
             # Extraire id_obs si présente, puis construire les features
@@ -950,7 +950,7 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
 
             # Prévisualisation (50 premières lignes)
             st.markdown("**Prévisualisation des résultats (50 premières lignes) :**")
-            st.dataframe(df_result.head(50), use_container_width=True, hide_index=True)
+            st.dataframe(df_result.head(50), width='stretch', hide_index=True)
 
             # Téléchargement CSV complet
             csv_out = df_result.to_csv(index=False)
@@ -978,6 +978,6 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
                     dist = pred_series.value_counts()
                     st.dataframe(
                         dist.rename_axis("Classe").reset_index(name="Count"),
-                        use_container_width=True,
+                        width='stretch',
                         hide_index=True,
                     )

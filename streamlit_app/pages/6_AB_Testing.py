@@ -1,4 +1,4 @@
-"""
+﻿"""
 Dashboard A/B Testing & Shadow Deployment
 """
 
@@ -18,7 +18,7 @@ require_auth()
 
 col_title, col_refresh = st.columns([8, 1])
 col_title.title("🧪 A/B Testing & Shadow Deployment")
-if col_refresh.button("🔄 Rafraîchir", key="ab_refresh", use_container_width=True):
+if col_refresh.button("🔄 Rafraîchir", key="ab_refresh", width='stretch'):
     st.cache_data.clear()
     st.rerun()
 st.caption(
@@ -258,7 +258,7 @@ else:
                     "🏆 Promouvoir en production",
                     type="primary",
                     key="ab_promote_winner",
-                    use_container_width=True,
+                    width='stretch',
                 ):
                     errors_promo = []
                     try:
@@ -360,9 +360,9 @@ else:
 
         gauge_col1, gauge_col2 = st.columns(2)
         with gauge_col1:
-            st.plotly_chart(fig_gauge, use_container_width=True)
+            st.plotly_chart(fig_gauge, width='stretch')
         with gauge_col2:
-            st.plotly_chart(fig_power, use_container_width=True)
+            st.plotly_chart(fig_power, width='stretch')
 
         # --- Tableau des échantillons ---
         if current_samples:
@@ -382,7 +382,7 @@ else:
                 )
             st.dataframe(
                 pd.DataFrame(sample_rows),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 column_config={
                     "Version": st.column_config.TextColumn(
@@ -443,7 +443,7 @@ else:
                 text_auto=True,
             )
             fig_traffic.update_layout(showlegend=False, height=300)
-            st.plotly_chart(fig_traffic, use_container_width=True)
+            st.plotly_chart(fig_traffic, width='stretch')
         else:
             st.info("Pas de prédictions production enregistrées.")
 
@@ -464,7 +464,7 @@ else:
                 barmode="group",
             )
             fig_dist.update_layout(height=300)
-            st.plotly_chart(fig_dist, use_container_width=True)
+            st.plotly_chart(fig_dist, width='stretch')
         else:
             st.info("Pas de distribution disponible.")
 
@@ -495,7 +495,7 @@ else:
             range_y=[0, 1],
         )
         fig_agree.update_layout(height=250, yaxis_tickformat=".0%")
-        st.plotly_chart(fig_agree, use_container_width=True)
+        st.plotly_chart(fig_agree, width='stretch')
     else:
         st.info(
             "💡 Le taux de concordance shadow/production sera calculé automatiquement "
@@ -613,7 +613,7 @@ else:
             )
         )
         fig_agree_gauge.update_layout(height=240, margin=dict(t=40, b=10, l=20, r=20))
-        st.plotly_chart(fig_agree_gauge, use_container_width=True)
+        st.plotly_chart(fig_agree_gauge, width='stretch')
 
     if recommendation == "shadow_better" and is_admin:
         with st.container(border=True):
@@ -626,7 +626,7 @@ else:
                 "🚀 Promouvoir le shadow",
                 type="primary",
                 key="shadow_promote_btn",
-                use_container_width=True,
+                width='stretch',
             ):
                 errors_shadow_promo = []
                 try:
@@ -690,7 +690,7 @@ else:
     st.caption(f"{len(shadow_preds)} prédiction(s) shadow")
     st.dataframe(
         pd.DataFrame(shadow_rows),
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         column_config={
             "ID": st.column_config.NumberColumn(

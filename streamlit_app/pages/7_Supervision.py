@@ -1,4 +1,4 @@
-"""
+﻿"""
 Tableau de bord de supervision des modèles ML.
 
 Vue globale : état de santé de tous les modèles sur une plage calendaire.
@@ -248,7 +248,7 @@ for m in models_data:
 df_health = pd.DataFrame(rows_table)
 st.dataframe(
     df_health,
-    use_container_width=True,
+    width='stretch',
     hide_index=True,
     column_config={
         "Modèle": st.column_config.TextColumn(
@@ -325,7 +325,7 @@ fig_vol = px.bar(
     color_discrete_sequence=px.colors.qualitative.Set2,
 )
 fig_vol.update_layout(showlegend=False)
-col_vol.plotly_chart(fig_vol, use_container_width=True)
+col_vol.plotly_chart(fig_vol, width='stretch')
 
 fig_err = px.bar(
     df_models.sort_values("error_rate_pct", ascending=False),
@@ -341,7 +341,7 @@ fig_err.add_hline(
     y=10, line_dash="dash", line_color="#c0392b", annotation_text="Seuil critique 10%"
 )
 fig_err.update_layout(showlegend=False, coloraxis_showscale=False)
-col_err.plotly_chart(fig_err, use_container_width=True)
+col_err.plotly_chart(fig_err, width='stretch')
 
 # ---------------------------------------------------------------------------
 # Section 3 — Détail par modèle
@@ -363,9 +363,9 @@ st.session_state["_nav_model"] = selected_model
 # Quick links to act on the selected model
 _lc1, _lc2, _ = st.columns([1.5, 1.5, 3])
 with _lc1:
-    st.page_link("pages/2_Models.py", label="🤖 Gérer dans Models", use_container_width=True)
+    st.page_link("pages/2_Models.py", label="🤖 Gérer dans Models", width='stretch')
 with _lc2:
-    st.page_link("pages/8_Retrain.py", label="🔄 Ré-entraîner", use_container_width=True)
+    st.page_link("pages/8_Retrain.py", label="🔄 Ré-entraîner", width='stretch')
 
 with st.spinner(f"Chargement du détail pour {selected_model}…"):
     try:
@@ -418,7 +418,7 @@ if per_version:
     )
     st.dataframe(
         df_ver,
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         column_config={
             "Version": st.column_config.TextColumn(
@@ -641,7 +641,7 @@ if timeseries:
         hovermode="x unified",
         legend=dict(orientation="h", y=1.02),
     )
-    col_ts1.plotly_chart(fig_vol_ts, use_container_width=True)
+    col_ts1.plotly_chart(fig_vol_ts, width='stretch')
 
     # Latence
     if df_ts["avg_latency_ms"].notna().any():
@@ -667,7 +667,7 @@ if timeseries:
             hovermode="x unified",
             legend=dict(orientation="h", y=1.02),
         )
-        col_ts2.plotly_chart(fig_lat, use_container_width=True)
+        col_ts2.plotly_chart(fig_lat, width='stretch')
 
     # Taux d'erreur par jour (area)
     fig_err_ts = px.area(
@@ -689,7 +689,7 @@ if timeseries:
         fig_err_ts.add_hline(y=0.05, line_dash="dash", line_color="#e67e22", annotation_text="5%")
         fig_err_ts.add_hline(y=0.10, line_dash="dash", line_color="#c0392b", annotation_text="10%")
     fig_err_ts.update_yaxes(tickformat=".1%")
-    st.plotly_chart(fig_err_ts, use_container_width=True)
+    st.plotly_chart(fig_err_ts, width='stretch')
 
 # --- Drift de performance ---
 st.divider()
@@ -741,7 +741,7 @@ with col_perf:
                     annotation_text=f"Min {_acc_min:.0%}",
                     annotation_position="bottom right",
                 )
-            st.plotly_chart(fig_perf, use_container_width=True)
+            st.plotly_chart(fig_perf, width='stretch')
 
             # Indicateur de drift
             mid = len(df_perf) // 2
@@ -810,7 +810,7 @@ with col_feat:
         df_drift = pd.DataFrame(rows_drift)
         st.dataframe(
             df_drift,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             column_config={
                 "Feature": st.column_config.TextColumn(
@@ -938,7 +938,7 @@ if conf_trend is not None:
             hovermode="x unified",
             legend=dict(orientation="h", y=1.02),
         )
-        st.plotly_chart(fig_conf, use_container_width=True)
+        st.plotly_chart(fig_conf, width='stretch')
 
         if low_rate > 0.15:
             st.warning(
@@ -1038,7 +1038,7 @@ if calib:
                 hovermode="x unified",
                 legend=dict(orientation="h", y=1.05),
             )
-            st.plotly_chart(fig_cal, use_container_width=True)
+            st.plotly_chart(fig_cal, width='stretch')
 
         if calib_status == "overconfident":
             st.warning(
@@ -1083,7 +1083,7 @@ if ab_comparison:
         )
         st.dataframe(
             df_ab,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             column_config={
                 "Version": st.column_config.TextColumn(
@@ -1142,7 +1142,7 @@ if ab_comparison:
                 labels={"label": "Classe prédite", "count": "Nombre", "version": "Version"},
                 color_discrete_sequence=px.colors.qualitative.Set2,
             )
-            st.plotly_chart(fig_dist, use_container_width=True)
+            st.plotly_chart(fig_dist, width='stretch')
 
 # --- Erreurs récentes ---
 if recent_errors:
@@ -1238,7 +1238,7 @@ if _anom_data is not None:
             _df_anom = pd.DataFrame(_rows_anom).sort_values("Z-score max", ascending=False)
             st.dataframe(
                 _df_anom,
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 column_config={
                     "ID": st.column_config.NumberColumn(
@@ -1291,7 +1291,7 @@ if _anom_data is not None:
                     ]
                     st.dataframe(
                         pd.DataFrame(_feat_rows),
-                        use_container_width=True,
+                        width='stretch',
                         hide_index=True,
                         column_config={
                             "Feature": st.column_config.TextColumn(

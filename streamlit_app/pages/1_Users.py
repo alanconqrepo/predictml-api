@@ -117,42 +117,8 @@ tab_users, tab_requests = st.tabs(["👥 Utilisateurs", "📋 Demandes d'accès"
 # Onglet 1 — Gestion des utilisateurs
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_users:
-    # --- Créer un utilisateur ---
-    with st.expander("➕ Créer un nouvel utilisateur", expanded=False):
-        with st.form("create_user_form"):
-            col1, col2 = st.columns(2)
-            username = col1.text_input("Nom d'utilisateur", placeholder="john_doe")
-            email = col2.text_input("Email", placeholder="john@example.com")
-            col3, col4 = st.columns(2)
-            role = col3.selectbox("Rôle", ["user", "admin", "readonly"])
-            rate_limit = col4.number_input(
-                "Quota journalier", min_value=1, max_value=100000, value=1000
-            )
-            submitted = st.form_submit_button("Créer", use_container_width=True, type="primary")
 
-        if submitted:
-            if not username or not email:
-                st.error("Nom d'utilisateur et email sont requis.")
-            else:
-                try:
-                    result = client.create_user(
-                        {
-                            "username": username,
-                            "email": email,
-                            "role": role,
-                            "rate_limit": rate_limit,
-                        }
-                    )
-                    st.toast(f"Utilisateur {result['username']} créé.", icon="✅")
-                    st.info("Conservez ce token — il ne sera plus affiché !")
-                    show_token_with_copy(result["api_token"])
-                    reload()
-                except Exception as e:
-                    st.toast(f"Erreur : {e}", icon="❌")
-
-    st.divider()
-
-    # --- Liste des utilisateurs ---
+    # Chargement des utilisateurs (exécuté avant les expanders)
     try:
         users = fetch_users(st.session_state.get("api_url"), st.session_state.get("api_token"))
     except Exception as e:
@@ -163,162 +129,151 @@ with tab_users:
         st.info("Aucun utilisateur trouvé.")
         st.stop()
 
-    df = pd.DataFrame(users)[
-        [
-            "id",
-            "username",
-            "email",
-            "role",
-            "is_active",
-            "rate_limit_per_day",
-            "last_login",
-            "created_at",
-        ]
-    ]
+    df = pd.DataFrame(users)[[
+        "id", "username", "email", "role", "is_active",
+        "rate_limit_per_day", "last_login", "created_at",
+    ]]
     df["last_login"] = pd.to_datetime(df["last_login"]).dt.strftime("%Y-%m-%d %H:%M").fillna("—")
     df["created_at"] = pd.to_datetime(df["created_at"]).dt.strftime("%Y-%m-%d")
-    df["is_active"] = df["is_active"].map({True: "✅ Actif", False: "❌ Inactif"})
+    df["is_active"]  = df["is_active"].map({True: "✅ Actif", False: "❌ Inactif"})
     df = df.rename(columns={
-        "id": "ID",
-        "username": "Utilisateur",
-        "email": "Email",
-        "role": "Rôle",
-        "is_active": "Statut",
+        "id": "ID", "username": "Utilisateur", "email": "Email",
+        "role": "Rôle", "is_active": "Statut",
         "rate_limit_per_day": "Quota / jour",
-        "last_login": "Dernière connexion",
-        "created_at": "Créé le",
+        "last_login": "Dernière connexion", "created_at": "Créé le",
     })
 
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "ID": st.column_config.NumberColumn(
-                "ID",
-                help="Identifiant unique de l'utilisateur en base de données.",
-            ),
-            "Utilisateur": st.column_config.TextColumn(
-                "Utilisateur",
-                help="Nom d'utilisateur (login) de la personne. Utilisé pour s'identifier dans l'API.",
-            ),
-            "Email": st.column_config.TextColumn(
-                "Email",
-                help="Adresse email de l'utilisateur. Utilisée pour les notifications et la création de compte.",
-            ),
-            "Rôle": st.column_config.TextColumn(
-                "Rôle",
-                help="Niveau d'accès : 'admin' peut tout faire, 'user' peut prédire, 'readonly' peut seulement consulter.",
-            ),
-            "Statut": st.column_config.TextColumn(
-                "Statut",
-                help="✅ Actif : l'utilisateur peut se connecter et utiliser l'API. ❌ Inactif : accès révoqué.",
-            ),
-            "Quota / jour": st.column_config.NumberColumn(
-                "Quota / jour",
-                help="Nombre maximum de prédictions autorisées par jour. Le compteur se remet à zéro à minuit UTC.",
-            ),
-            "Dernière connexion": st.column_config.TextColumn(
-                "Dernière connexion",
-                help="Date et heure de la dernière utilisation de l'API par cet utilisateur.",
-            ),
-            "Créé le": st.column_config.TextColumn(
-                "Créé le",
-                help="Date à laquelle le compte a été créé.",
-            ),
-        },
-    )
-
-    st.divider()
-    st.subheader("Actions")
-
-    user_options = {f"{u['username']} (id:{u['id']})": u for u in users}
-    selected_label = st.selectbox("Sélectionner un utilisateur", list(user_options.keys()))
-    selected = user_options[selected_label]
-
-    col_a, col_b, col_c, col_d = st.columns(4)
-
-    # Toggle actif/inactif
-    current_active = selected["is_active"]
-    toggle_label = "Désactiver" if current_active else "Activer"
-    if col_a.button(f"{'🔴' if current_active else '🟢'} {toggle_label}", use_container_width=True):
-        try:
-            client.update_user(selected["id"], {"is_active": not current_active})
-            st.toast(f"Utilisateur {'désactivé' if current_active else 'activé'}.", icon="✅")
-            reload()
-        except Exception as e:
-            st.toast(f"Erreur : {e}", icon="❌")
-
-    # Renouveler token
-    if col_b.button("🔄 Renouveler token", use_container_width=True):
-        try:
-            result = client.update_user(selected["id"], {"regenerate_token": True})
-            new_token = result["api_token"]
-            st.session_state[f"regen_token_{selected['id']}"] = new_token
-            st.toast("Nouveau token généré.", icon="✅")
-        except Exception as e:
-            st.toast(f"Erreur : {e}", icon="❌")
-
-    # Afficher le token regénéré s'il est en session
-    regen_key = f"regen_token_{selected['id']}"
-    if st.session_state.get(regen_key):
-        st.info("Nouveau token — transmettez-le manuellement à l'utilisateur :")
-        show_token_with_copy(st.session_state[regen_key])
-        if st.button("Effacer l'affichage du token", key="clear_regen_token"):
-            del st.session_state[regen_key]
-            st.rerun()
-
-    # Modifier rôle
-    new_roles = [r for r in ["user", "admin", "readonly"] if r != selected["role"]]
-    _role_val = st.session_state.get("role_select", new_roles[0] if new_roles else None)
-    if _role_val not in new_roles and new_roles:
-        _role_val = new_roles[0]
-    if col_c.button("✏️ Appliquer rôle", use_container_width=True):
-        try:
-            client.update_user(selected["id"], {"role": _role_val})
-            st.toast(f"Rôle mis à jour → {_role_val}", icon="✅")
-            reload()
-        except Exception as e:
-            st.toast(f"Erreur : {e}", icon="❌")
-    col_c.selectbox("Changer rôle", new_roles, key="role_select")
-
-    # Supprimer
-    with col_d:
-        if st.button("🗑️ Supprimer", use_container_width=True, type="secondary"):
-            st.session_state["confirm_delete_user"] = selected["id"]
-
-    if st.session_state.get("confirm_delete_user") == selected["id"]:
-        st.warning(
-            f"Confirmer la suppression de **{selected['username']}** et toutes ses prédictions ?"
+    # 1. Liste des utilisateurs (ouvert) -------------------------------------------
+    with st.expander("👥 Liste des utilisateurs", expanded=True):
+        st.dataframe(
+            df,
+            width='stretch',
+            hide_index=True,
+            column_config={
+                "ID": st.column_config.NumberColumn("ID", help="Identifiant unique de l'utilisateur en base de données."),
+                "Utilisateur": st.column_config.TextColumn("Utilisateur", help="Nom d'utilisateur (login). Utilisé pour s'identifier dans l'API."),
+                "Email": st.column_config.TextColumn("Email", help="Adresse email de l'utilisateur."),
+                "Rôle": st.column_config.TextColumn("Rôle", help="Niveau d'accès : 'admin' peut tout faire, 'user' peut prédire, 'readonly' peut seulement consulter."),
+                "Statut": st.column_config.TextColumn("Statut", help="✅ Actif : accès autorisé. ❌ Inactif : accès révoqué."),
+                "Quota / jour": st.column_config.NumberColumn("Quota / jour", help="Nombre maximum de prédictions autorisées par jour. Reset à minuit UTC."),
+                "Dernière connexion": st.column_config.TextColumn("Dernière connexion", help="Date et heure de la dernière utilisation de l'API."),
+                "Créé le": st.column_config.TextColumn("Créé le", help="Date à laquelle le compte a été créé."),
+            },
         )
-        c1, c2 = st.columns(2)
-        if c1.button("Oui, supprimer", type="primary"):
+
+    # Le selectbox user est nécessaire ici pour définir `selected` avant Analytics
+    user_options = {f"{u['username']} (id:{u['id']})": u for u in users}
+
+    # 2. Actions (fermé) -----------------------------------------------------------
+    with st.expander("⚙️ Actions", expanded=False):
+        selected_label = st.selectbox("Sélectionner un utilisateur", list(user_options.keys()))
+        selected = user_options[selected_label]
+
+        col_a, col_b, col_c, col_d = st.columns(4)
+
+        current_active = selected["is_active"]
+        toggle_label = "Désactiver" if current_active else "Activer"
+        if col_a.button(f"{'🔴' if current_active else '🟢'} {toggle_label}", width='stretch'):
             try:
-                client.delete_user(selected["id"])
-                st.toast("Utilisateur supprimé.", icon="✅")
-                st.session_state.pop("confirm_delete_user", None)
+                client.update_user(selected["id"], {"is_active": not current_active})
+                st.toast(f"Utilisateur {'désactivé' if current_active else 'activé'}.", icon="✅")
                 reload()
             except Exception as e:
                 st.toast(f"Erreur : {e}", icon="❌")
-        if c2.button("Annuler"):
-            st.session_state.pop("confirm_delete_user", None)
-            st.rerun()
 
-    # --- Analytics d'usage ---
-    st.divider()
-    _default_end = pd.Timestamp.now().date()
+        if col_b.button("🔄 Renouveler token", width='stretch'):
+            try:
+                result = client.update_user(selected["id"], {"regenerate_token": True})
+                new_token = result["api_token"]
+                st.session_state[f"regen_token_{selected['id']}"] = new_token
+                st.toast("Nouveau token généré.", icon="✅")
+            except Exception as e:
+                st.toast(f"Erreur : {e}", icon="❌")
+
+        regen_key = f"regen_token_{selected['id']}"
+        if st.session_state.get(regen_key):
+            st.info("Nouveau token — transmettez-le manuellement à l'utilisateur :")
+            show_token_with_copy(st.session_state[regen_key])
+            if st.button("Effacer l'affichage du token", key="clear_regen_token"):
+                del st.session_state[regen_key]
+                st.rerun()
+
+        new_roles = [r for r in ["user", "admin", "readonly"] if r != selected["role"]]
+        _role_val = st.session_state.get("role_select", new_roles[0] if new_roles else None)
+        if _role_val not in new_roles and new_roles:
+            _role_val = new_roles[0]
+        if col_c.button("✏️ Appliquer rôle", width='stretch'):
+            try:
+                client.update_user(selected["id"], {"role": _role_val})
+                st.toast(f"Rôle mis à jour → {_role_val}", icon="✅")
+                reload()
+            except Exception as e:
+                st.toast(f"Erreur : {e}", icon="❌")
+        col_c.selectbox("Changer rôle", new_roles, key="role_select")
+
+        with col_d:
+            if st.button("🗑️ Supprimer", width='stretch', type="secondary"):
+                st.session_state["confirm_delete_user"] = selected["id"]
+
+        if st.session_state.get("confirm_delete_user") == selected["id"]:
+            st.warning(f"Confirmer la suppression de **{selected['username']}** et toutes ses prédictions ?")
+            c1, c2 = st.columns(2)
+            if c1.button("Oui, supprimer", type="primary"):
+                try:
+                    client.delete_user(selected["id"])
+                    st.toast("Utilisateur supprimé.", icon="✅")
+                    st.session_state.pop("confirm_delete_user", None)
+                    reload()
+                except Exception as e:
+                    st.toast(f"Erreur : {e}", icon="❌")
+            if c2.button("Annuler"):
+                st.session_state.pop("confirm_delete_user", None)
+                st.rerun()
+
+    # `selected` est défini par le selectbox dans le bloc with ci-dessus
+    # (les blocs with expander s'exécutent toujours, même si l'expander est fermé)
+    _selected = user_options[st.session_state.get(
+        "pm_model_select",
+        list(user_options.keys())[0]
+    )] if "selected" not in vars() else selected
+    selected = _selected if "selected" not in vars() else selected
+
+    # 3. Créer un nouvel utilisateur (fermé) ---------------------------------------
+    with st.expander("➕ Créer un nouvel utilisateur", expanded=False):
+        with st.form("create_user_form"):
+            col1, col2 = st.columns(2)
+            username = col1.text_input("Nom d'utilisateur", placeholder="john_doe")
+            email    = col2.text_input("Email", placeholder="john@example.com")
+            col3, col4 = st.columns(2)
+            role       = col3.selectbox("Rôle", ["user", "admin", "readonly"])
+            rate_limit = col4.number_input("Quota journalier", min_value=1, max_value=100000, value=1000)
+            submitted  = st.form_submit_button("Créer", width='stretch', type="primary")
+
+        if submitted:
+            if not username or not email:
+                st.error("Nom d'utilisateur et email sont requis.")
+            else:
+                try:
+                    result = client.create_user({
+                        "username": username, "email": email,
+                        "role": role, "rate_limit": rate_limit,
+                    })
+                    st.toast(f"Utilisateur {result['username']} créé.", icon="✅")
+                    st.info("Conservez ce token — il ne sera plus affiché !")
+                    show_token_with_copy(result["api_token"])
+                    reload()
+                except Exception as e:
+                    st.toast(f"Erreur : {e}", icon="❌")
+
+    # 4. Analytics d'usage (fermé) -------------------------------------------------
+    _default_end   = pd.Timestamp.now().date()
     _default_start = _default_end - pd.Timedelta(days=29)
-    with st.expander(
-        f"📊 Analytics d'usage — {selected['username']}", expanded=True
-    ):
+    with st.expander(f"📊 Analytics d'usage — {selected['username']}", expanded=False):
         daily_limit = selected["rate_limit_per_day"]
 
-        # Quota du jour (indépendant des filtres de date)
         try:
             _quota_usage = client.get_user_usage(
-                selected["id"],
-                start_date=str(_default_end),
-                end_date=str(_default_end),
+                selected["id"], start_date=str(_default_end), end_date=str(_default_end),
             )
             today_calls = sum(d["calls"] for d in _quota_usage.get("by_day", []))
         except Exception:
@@ -331,9 +286,6 @@ with tab_users:
             delta_color="off",
         )
 
-        st.divider()
-
-        # Filtres de date — affectent tableau + graphique
         col_date_start, col_date_end = st.columns(2)
         usage_date_start = col_date_start.date_input(
             "Date début", value=_default_start, key=f"usage_start_{selected['id']}"
@@ -352,12 +304,10 @@ with tab_users:
                     end_date=str(usage_date_end),
                 )
 
-                # --- Tableau récapitulatif ---
                 by_model_day = usage.get("by_model_day", [])
                 if by_model_day:
                     df_md = pd.DataFrame(by_model_day)
                     df_md["date"] = pd.to_datetime(df_md["date"]).dt.date
-
                     rows_table = []
                     for model_name, grp in df_md.groupby("model_name"):
                         s = grp["calls"]
@@ -378,35 +328,15 @@ with tab_users:
                             "Moy. / jour": round(float(s_all.mean()), 1),
                             "Médiane / jour": round(float(s_all.median()), 1),
                         })
-
                     st.subheader("Prédictions par modèle")
                     st.dataframe(
-                        pd.DataFrame(rows_table),
-                        use_container_width=True,
-                        hide_index=True,
+                        pd.DataFrame(rows_table), width='stretch', hide_index=True,
                         column_config={
-                            "Modèle": st.column_config.TextColumn(
-                                "Modèle",
-                                help="Nom du modèle ML appelé par cet utilisateur.",
-                            ),
-                            "Volume total": st.column_config.NumberColumn(
-                                "Volume total",
-                                help="Nombre total d'appels à ce modèle sur la période sélectionnée.",
-                            ),
-                            "Max / jour": st.column_config.NumberColumn(
-                                "Max / jour",
-                                help="Pic journalier d'appels à ce modèle sur la période.",
-                            ),
-                            "Moy. / jour": st.column_config.NumberColumn(
-                                "Moy. / jour",
-                                help="Nombre moyen d'appels par jour à ce modèle sur la période.",
-                                format="%.1f",
-                            ),
-                            "Médiane / jour": st.column_config.NumberColumn(
-                                "Médiane / jour",
-                                help="Médiane du nombre d'appels par jour. Moins sensible aux pics que la moyenne.",
-                                format="%.1f",
-                            ),
+                            "Modèle":         st.column_config.TextColumn("Modèle"),
+                            "Volume total":   st.column_config.NumberColumn("Volume total"),
+                            "Max / jour":     st.column_config.NumberColumn("Max / jour"),
+                            "Moy. / jour":    st.column_config.NumberColumn("Moy. / jour", format="%.1f"),
+                            "Médiane / jour": st.column_config.NumberColumn("Médiane / jour", format="%.1f"),
                         },
                     )
                 elif usage.get("by_model"):
@@ -414,82 +344,53 @@ with tab_users:
                         columns={"model_name": "Modèle", "calls": "Volume total", "errors": "Erreurs"}
                     )[["Modèle", "Volume total", "Erreurs"]]
                     st.subheader("Prédictions par modèle")
-                    st.dataframe(
-                        df_model,
-                        use_container_width=True,
-                        hide_index=True,
-                        column_config={
-                            "Modèle": st.column_config.TextColumn(
-                                "Modèle",
-                                help="Nom du modèle ML appelé par cet utilisateur.",
-                            ),
-                            "Volume total": st.column_config.NumberColumn(
-                                "Volume total",
-                                help="Nombre total d'appels à ce modèle sur la période sélectionnée.",
-                            ),
-                            "Erreurs": st.column_config.NumberColumn(
-                                "Erreurs",
-                                help="Nombre d'appels qui ont renvoyé une erreur (statut 'error').",
-                            ),
-                        },
-                    )
+                    st.dataframe(df_model, width='stretch', hide_index=True)
                 else:
                     st.info("Aucune prédiction sur la période sélectionnée.")
 
-                # --- Graphique volume par jour — une courbe par modèle ---
                 if by_model_day:
                     df_md_plot = pd.DataFrame(by_model_day)
                     df_md_plot["date"] = pd.to_datetime(df_md_plot["date"])
                     df_md_plot = df_md_plot.sort_values("date")
-
                     fig_day = go.Figure()
                     colors = px.colors.qualitative.Set2
                     for i, (model_name, grp) in enumerate(df_md_plot.groupby("model_name")):
                         color = colors[i % len(colors)]
                         fig_day.add_trace(go.Scatter(
-                            x=grp["date"],
-                            y=grp["calls"],
-                            mode="lines",
-                            name=model_name,
+                            x=grp["date"], y=grp["calls"],
+                            mode="lines", name=model_name,
                             stackgroup="one",
                             line={"color": color, "width": 1},
                             fillcolor=color,
                         ))
-
                     y_max = df_md_plot["calls"].max()
                     total_max = y_max * df_md_plot["model_name"].nunique()
                     if daily_limit > 0 and daily_limit <= total_max * 3:
                         fig_day.add_hline(
-                            y=daily_limit,
-                            line_dash="dash",
-                            line_color="red",
+                            y=daily_limit, line_dash="dash", line_color="red",
                             annotation_text=f"Quota ({daily_limit:,}/jour)",
                             annotation_position="top right",
                         )
                     else:
                         fig_day.add_annotation(
                             text=f"Quota : {daily_limit:,}/jour",
-                            xref="paper", yref="paper",
-                            x=1, y=1.08,
-                            showarrow=False,
-                            font=dict(color="red", size=11),
+                            xref="paper", yref="paper", x=1, y=1.08,
+                            showarrow=False, font=dict(color="red", size=11),
                         )
                     fig_day.update_layout(
                         title="Volume par jour",
-                        xaxis_title="Date",
-                        yaxis_title="Appels",
+                        xaxis_title="Date", yaxis_title="Appels",
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
                         margin={"t": 60, "r": 20},
                         yaxis=dict(rangemode="tozero"),
                         hovermode="x unified",
                     )
-                    st.plotly_chart(fig_day, use_container_width=True)
+                    st.plotly_chart(fig_day, width='stretch')
                 else:
                     st.info("Aucune donnée journalière sur la période.")
 
             except Exception as e:
                 st.error(f"Impossible de charger les analytics : {e}")
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Onglet 2 — Demandes d'accès

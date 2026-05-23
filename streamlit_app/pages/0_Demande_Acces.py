@@ -1,4 +1,4 @@
-"""
+﻿"""
 Page publique de demande de création de compte — accessible sans authentification
 """
 
@@ -41,7 +41,7 @@ with st.form("account_request_form"):
         placeholder="Décrivez votre cas d'usage, votre équipe, etc.",
         max_chars=500,
     )
-    submitted = st.form_submit_button("Soumettre ma demande", use_container_width=True, type="primary")
+    submitted = st.form_submit_button("Soumettre ma demande", width='stretch', type="primary")
 
 if submitted:
     if not username or not email:
