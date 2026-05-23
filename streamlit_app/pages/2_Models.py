@@ -474,6 +474,27 @@ _DEPLOY_BADGE = {
 }
 
 
+_TASK_LABELS = {
+    "regression": "📈 Régression",
+    "classification_binary": "🔵 Binaire",
+    "classification_multiclass": "🟡 Multiclass",
+}
+
+
+def _infer_task(m: dict) -> str:
+    """Retourne le label de tâche depuis model_task, ou l'infère depuis classes/métriques."""
+    task = m.get("model_task")
+    if not task:
+        classes = m.get("classes")
+        if classes:
+            task = "classification_binary" if len(classes) == 2 else "classification_multiclass"
+        elif m.get("r2_score") is not None or m.get("rmse") is not None:
+            task = "regression"
+        elif m.get("accuracy") is not None or m.get("f1_score") is not None:
+            task = "classification_multiclass"  # faute de mieux
+    return _TASK_LABELS.get(task or "", "—")
+
+
 def _statut(m: dict) -> str:
     mode = m.get("deployment_mode")
     weight = m.get("traffic_weight")
@@ -500,11 +521,7 @@ for m in models:
             "Version": m.get("version", ""),
             "Tags": ", ".join(m.get("tags") or []) or "—",
             "Algorithme": m.get("algorithm") or "—",
-            "Tâche": {
-                "regression": "📈 Régression",
-                "classification_binary": "🔵 Binaire",
-                "classification_multiclass": "🟡 Multiclass",
-            }.get(m.get("model_task") or "", "—"),
+            "Tâche": _infer_task(m),
             "Baseline": "✅ Baseline" if m.get("feature_baseline") else "⚠️ No baseline",
             "Cache": "🔥 En cache" if in_cache else "❄️ Non chargé",
             "Statut": statut,
@@ -744,11 +761,7 @@ with st.expander("📊 Comparaison multi-versions", expanded=False):
                             row = {
                                 "Version": v["version"],
                                 "Statut": _statut(full),
-                                "Tâche": {
-                                    "regression": "📈 Régression",
-                                    "classification_binary": "🔵 Binaire",
-                                    "classification_multiclass": "🟡 Multiclass",
-                                }.get(v.get("model_task") or "", "—"),
+                                "Tâche": _infer_task(v),
                                 "Nb préd.": v.get("prediction_count") or 0,
                                 "Nb préd. shadow": v.get("shadow_prediction_count") or 0,
                                 "Latence p50 (ms)": _r(v.get("latency_p50_ms"), 1),
