@@ -1,4 +1,4 @@
-"""
+﻿"""
 Gestion des modèles ML
 """
 
@@ -78,7 +78,7 @@ def _view_script_dialog(rel_path: str) -> None:
         file_name=basename,
         mime="text/x-python",
         key=f"dl_dialog_{rel_path}",
-        use_container_width=True,
+        width='stretch',
     )
 
 
@@ -87,7 +87,7 @@ require_auth()
 
 col_title, col_refresh = st.columns([8, 1])
 col_title.title("🤖 Gestion des modèles")
-if col_refresh.button("🔄 Rafraîchir", key="models_refresh", use_container_width=True):
+if col_refresh.button("🔄 Rafraîchir", key="models_refresh", width='stretch'):
     st.cache_data.clear()
     st.rerun()
 
@@ -249,7 +249,7 @@ if is_admin:
             _col_desc, _col_view, _col_dl = st.columns([5, 1.5, 1.5])
             _script_basename = Path(_script_rel).name
             _col_desc.markdown(f"**`{_script_basename}`**  \n{_script_desc}")
-            if _col_view.button("👁 Visualiser", key=f"view_{_script_rel}", use_container_width=True):
+            if _col_view.button("👁 Visualiser", key=f"view_{_script_rel}", width='stretch'):
                 _view_script_dialog(_script_rel)
             _col_dl.download_button(
                 "⬇️ Télécharger",
@@ -257,7 +257,7 @@ if is_admin:
                 file_name=_script_basename,
                 mime="text/x-python",
                 key=f"dl_{_script_rel}",
-                use_container_width=True,
+                width='stretch',
             )
 
 if is_admin:
@@ -430,26 +430,43 @@ col3.metric("Avec MLflow", sum(1 for m in models if m.get("mlflow_run_id")))
 
 st.divider()
 
-# Recherche texte libre
-search_query = st.text_input(
-    "Rechercher un modèle",
-    placeholder="Nom ou description…",
-    key="models_search",
-)
+# ── Barre de filtres (une seule ligne) ───────────────────────────────────────
+_all_model_names = sorted({m["name"] for m in models})
+_all_tags = sorted({t for m in models for t in (m.get("tags") or [])})
+_filter_cols = st.columns([3, 2, 2]) if _all_tags else st.columns([3, 2])
+
+with _filter_cols[0]:
+    search_query = st.text_input(
+        "Rechercher",
+        placeholder="Nom ou description…",
+        key="models_search",
+        label_visibility="collapsed",
+    )
+
+with _filter_cols[1]:
+    model_name_filter = st.selectbox(
+        "Modèle",
+        ["(tous les modèles)"] + _all_model_names,
+        key="models_name_filter",
+    )
+
+if len(_filter_cols) == 3:
+    with _filter_cols[2]:
+        tag_filter = st.selectbox("Tag", ["(tous les tags)"] + _all_tags, key="tag_filter")
+else:
+    tag_filter = "(tous les tags)"
+
+# Appliquer les filtres
 if search_query:
     q = search_query.lower()
     models = [
-        m
-        for m in models
+        m for m in models
         if q in (m.get("name") or "").lower() or q in (m.get("description") or "").lower()
     ]
-
-# Filtre par tag
-all_tags = sorted({t for m in models for t in (m.get("tags") or [])})
-if all_tags:
-    tag_filter = st.selectbox("Filtrer par tag", ["(tous)"] + all_tags, key="tag_filter")
-    if tag_filter != "(tous)":
-        models = [m for m in models if tag_filter in (m.get("tags") or [])]
+if model_name_filter != "(tous les modèles)":
+    models = [m for m in models if m.get("name") == model_name_filter]
+if tag_filter != "(tous les tags)":
+    models = [m for m in models if tag_filter in (m.get("tags") or [])]
 
 _DEPLOY_BADGE = {
     "ab_test": "🟠 A/B",
@@ -520,7 +537,7 @@ for m in models:
 
 st.dataframe(
     pd.DataFrame(rows),
-    use_container_width=True,
+    width='stretch',
     hide_index=True,
     column_config={
         "Nom": st.column_config.TextColumn(
@@ -797,7 +814,7 @@ with st.expander("📊 Comparaison multi-versions", expanded=False):
 
                         st.dataframe(
                             pd.DataFrame(cmp_rows),
-                            use_container_width=True,
+                            width='stretch',
                             hide_index=True,
                             column_config=col_config,
                         )
@@ -947,7 +964,7 @@ with st.expander("📋 Détails complets", expanded=True):
                 pd.DataFrame(
                     [{"Paramètre": k, "Valeur": str(v)} for k, v in hp.items()],
                 ),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
             )
         else:
@@ -974,7 +991,7 @@ with st.expander("📋 Détails complets", expanded=True):
                     data=_csv_bytes,
                     file_name=_ds.split("/")[-1],
                     mime="text/csv",
-                    use_container_width=True,
+                    width='stretch',
                     key=f"dl_dataset_{selected['name']}_{selected['version']}",
                 )
             _btn_idx += 1
@@ -985,7 +1002,7 @@ with st.expander("📋 Détails complets", expanded=True):
                     data=_script_bytes,
                     file_name=_script_filename or "train.py",
                     mime="text/x-python",
-                    use_container_width=True,
+                    width='stretch',
                     key=f"dl_script_{selected['name']}_{selected['version']}",
                 )
             _btn_idx += 1
@@ -994,7 +1011,7 @@ with st.expander("📋 Détails complets", expanded=True):
                 _is_visible = st.session_state.get(_show_key, False)
                 if st.button(
                     "🙈 Masquer le script" if _is_visible else "👁 Visualiser le script",
-                    use_container_width=True,
+                    width='stretch',
                     key=f"toggle_script_{selected['name']}_{selected['version']}",
                 ):
                     st.session_state[_show_key] = not _is_visible
@@ -1007,7 +1024,7 @@ with st.expander("📋 Détails complets", expanded=True):
                     data=_pkl_bytes,
                     file_name=f"{selected['name']}_{selected['version']}.joblib",
                     mime="application/octet-stream",
-                    use_container_width=True,
+                    width='stretch',
                     key=f"dl_pkl_{selected['name']}_{selected['version']}",
                 )
 
@@ -1048,7 +1065,7 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
             "📊 Charger l'analyse",
             key=f"btn_ana_{selected['name']}_{selected['version']}",
             type="primary",
-            use_container_width=True,
+            width='stretch',
         ):
             st.session_state[_ana_key] = True
             st.rerun()
@@ -1107,7 +1124,7 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
 
         st.dataframe(
             pd.DataFrame(_table_rows),
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             column_config={
                 "Métrique": st.column_config.TextColumn("Métrique"),
@@ -1221,7 +1238,7 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                         xaxis_title="Importance SHAP (valeur absolue moyenne)",
                         margin={"l": 10, "r": 10, "t": 40, "b": 10},
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
                 except ImportError:
                     st.bar_chart(fi_df.set_index("Feature")["Importance SHAP"])
                 st.caption(
@@ -1344,7 +1361,7 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                         yaxis_title="Réel",
                         margin={"l": 10, "r": 10, "t": 40, "b": 10},
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
 
                 per_class = perf.get("per_class_metrics")
                 if per_class:
@@ -1361,7 +1378,7 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                     ]
                     st.dataframe(
                         pd.DataFrame(pc_rows),
-                        use_container_width=True,
+                        width='stretch',
                         hide_index=True,
                         column_config={
                             "Classe": st.column_config.TextColumn(
@@ -1477,7 +1494,7 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                     ]
                     st.dataframe(
                         pd.DataFrame(bc_rows),
-                        use_container_width=True,
+                        width='stretch',
                         hide_index=True,
                         column_config={
                             "Classe": st.column_config.TextColumn(
@@ -1534,7 +1551,7 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                         color_discrete_map={"Baseline": "#636EFA", "Actuel": "#EF553B"},
                     )
                     fig_od.update_layout(yaxis_tickformat=".0%", yaxis_title="Proportion")
-                    st.plotly_chart(fig_od, use_container_width=True)
+                    st.plotly_chart(fig_od, width='stretch')
         except Exception as e:
             st.warning(f"Impossible de calculer le drift de sortie : {e}")
 
@@ -1618,7 +1635,7 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                 df_fd = pd.DataFrame(rows_fd)
                 st.dataframe(
                     df_fd,
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True,
                     column_config={
                         "Z-score": st.column_config.TextColumn(
@@ -1696,7 +1713,7 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                     fig_z.add_vline(x=3.0, line_dash="dash", line_color="#E74C3C",
                                     annotation_text="seuil critical (3σ)", annotation_position="top right")
                     fig_z.update_layout(height=max(250, len(_rows_z) * 32), yaxis_title="")
-                    st.plotly_chart(fig_z, use_container_width=True)
+                    st.plotly_chart(fig_z, width='stretch')
 
                 _rows_psi = [r for r in rows_fd if r["PSI"] != "—"]
                 if _rows_psi:
@@ -1717,7 +1734,7 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                     fig_psi.add_vline(x=0.2, line_dash="dash", line_color="#E74C3C",
                                       annotation_text="seuil critical (0.2)", annotation_position="top right")
                     fig_psi.update_layout(height=max(250, len(_rows_psi) * 32), yaxis_title="")
-                    st.plotly_chart(fig_psi, use_container_width=True)
+                    st.plotly_chart(fig_psi, width='stretch')
 
         except Exception as e:
             st.warning(f"Impossible de charger le drift des features : {e}")
@@ -2137,7 +2154,7 @@ with st.expander("🔮 Explorateur What-if", expanded=False):
                             ]
                         st.dataframe(
                             pd.DataFrame(_wif_prob_rows),
-                            use_container_width=True,
+                            width='stretch',
                             hide_index=True,
                         )
 
@@ -2173,7 +2190,7 @@ with st.expander("🔮 Explorateur What-if", expanded=False):
                                 margin={"l": 10, "r": 10, "t": 10, "b": 10},
                                 showlegend=False,
                             )
-                            st.plotly_chart(_wif_shap_fig, use_container_width=True)
+                            st.plotly_chart(_wif_shap_fig, width='stretch')
                         except ImportError:
                             st.bar_chart(pd.DataFrame({"SHAP": _wif_shap}))
                     elif wif_use_shap:
@@ -2214,7 +2231,7 @@ with st.expander("🔮 Explorateur What-if", expanded=False):
                         labels={"x": _wif_sel_feat, "y": _wif_y_label},
                         title=f"Évolution vs {_wif_sel_feat}",
                     )
-                    st.plotly_chart(_wif_evo_fig, use_container_width=True)
+                    st.plotly_chart(_wif_evo_fig, width='stretch')
                 except ImportError:
                     st.line_chart(_wif_chart_df.set_index("x")["y"])
 
@@ -2257,7 +2274,7 @@ if is_admin:
             promote_help = None if ready else "Résoudre les checks ❌ ci-dessus avant de promouvoir"
             if col_p.button(
                 "🚀 Passer en production",
-                use_container_width=True,
+                width='stretch',
                 type="primary",
                 disabled=not ready,
                 help=promote_help,
@@ -2285,7 +2302,7 @@ if is_admin:
         if not is_selected_cached:
             if col_w2.button(
                 "🔥 Préchauffer le cache",
-                use_container_width=True,
+                width='stretch',
                 key="warmup_btn",
                 help="Charge le modèle en mémoire pour éliminer la latence de cold-start",
             ):
@@ -2304,7 +2321,7 @@ if is_admin:
             col_w2.info("Le modèle est déjà en cache — aucun préchauffage nécessaire.")
 
         # Supprimer
-        if col_d.button("🗑️ Supprimer cette version", use_container_width=True, type="secondary"):
+        if col_d.button("🗑️ Supprimer cette version", width='stretch', type="secondary"):
             st.session_state["confirm_delete_model"] = f"{selected['name']}:{selected['version']}"
 
         key = f"{selected['name']}:{selected['version']}"
