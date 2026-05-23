@@ -1053,23 +1053,53 @@ with st.expander("📊 Évolution multi-métriques — un modèle", expanded=Tru
                 col_w.metric(cfg["label"], fmt_val)
 
 
+
 # ── Expander 5 : Drift de performance ────────────────────────────────────────
-with st.expander("📉 Drift de performance — accuracy rolling", expanded=True):
-    drift_col_model, drift_col_threshold, drift_col_dates = st.columns([2, 2, 2])
+# Catalogue des métriques supportées par l'expander drift
+_DRIFT_METRIC_CFG: dict[str, dict] = {
+    "accuracy":    {"label": "Accuracy",   "ratio": True,  "higher_better": True,  "help_key": "accuracy"},
+    "f1_weighted": {"label": "F1 pondéré", "ratio": True,  "higher_better": True,  "help_key": "f1"},
+    "mae":         {"label": "MAE",        "ratio": False, "higher_better": False, "help_key": "mae"},
+    "rmse":        {"label": "RMSE",       "ratio": False, "higher_better": False, "help_key": "rmse"},
+}
+
+with st.expander("📉 Drift de performance — métrique rolling", expanded=True):
+    drift_col_model, drift_col_metric, drift_col_threshold, drift_col_dates = st.columns([2, 2, 2, 2])
+
     with drift_col_model:
         drift_search = st.text_input("Filtrer par nom", key="drift_model_search", placeholder="Rechercher…")
         drift_filtered = [n for n in model_names if drift_search.lower() in n.lower()] if drift_search else model_names
         drift_model = st.selectbox("Modèle (drift)", drift_filtered or model_names, key="drift_model")
+
+    with drift_col_metric:
+        drift_metric_key = st.selectbox(
+            "Métrique",
+            options=list(_DRIFT_METRIC_CFG.keys()),
+            format_func=lambda k: _DRIFT_METRIC_CFG[k]["label"],
+            key="drift_metric_select",
+        )
+        _dcfg = _DRIFT_METRIC_CFG[drift_metric_key]
+        metric_label = _dcfg["label"]
+        _is_ratio = _dcfg["ratio"]
+        _higher_better = _dcfg["higher_better"]
+
     with drift_col_threshold:
         alert_enabled = st.checkbox("Activer alerte seuil", value=True)
-        threshold = st.slider(
-            "Seuil d'alerte accuracy",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.7,
-            step=0.05,
-            disabled=not alert_enabled,
-        )
+        if _is_ratio:
+            threshold = st.slider(
+                f"Seuil {metric_label} (min)",
+                min_value=0.0, max_value=1.0, value=0.7, step=0.05,
+                disabled=not alert_enabled,
+                help="Alerte si la moyenne mobile passe en dessous de ce seuil.",
+            )
+        else:
+            threshold = st.number_input(
+                f"Seuil {metric_label} (max)",
+                min_value=0.0, value=0.5, step=0.05, format="%.3f",
+                disabled=not alert_enabled,
+                help="Alerte si la moyenne mobile dépasse ce seuil.",
+            )
+
     with drift_col_dates:
         _default_end = datetime.utcnow().date()
         _default_start = _default_end - timedelta(days=45)
@@ -1105,106 +1135,109 @@ with st.expander("📉 Drift de performance — accuracy rolling", expanded=True
             "Soumettez des résultats via POST /observed-results pour activer le suivi."
         )
     else:
-        metric_col = "accuracy" if model_type == "classification" else "mae"
-        metric_label = "Accuracy" if model_type == "classification" else "MAE"
-
         drift_df = pd.DataFrame(by_period)
         drift_df["date"] = pd.to_datetime(drift_df["period"])
         drift_df = drift_df.sort_values("date").reset_index(drop=True)
 
-        if metric_col in drift_df.columns and drift_df[metric_col].notna().any():
-            # Fenêtres mobiles adaptées à la plage sélectionnée
+        # Vérifier disponibilité de la métrique pour ce type de modèle
+        _classif_metrics = {"accuracy", "f1_weighted"}
+        _regress_metrics = {"mae", "rmse"}
+        _wrong_type = (
+            (drift_metric_key in _classif_metrics and model_type != "classification") or
+            (drift_metric_key in _regress_metrics and model_type == "classification")
+        )
+        if _wrong_type or drift_metric_key not in drift_df.columns or drift_df[drift_metric_key].isna().all():
+            _expected = "classification" if drift_metric_key in _classif_metrics else "régression"
+            st.warning(
+                f"La métrique **{metric_label}** n'est pas disponible pour ce modèle "
+                f"(type détecté : **{model_type}**). "
+                f"Elle s'applique aux modèles de **{_expected}**."
+            )
+        else:
             win_short = min(7, max(1, _n_drift_days // 6))
             win_long  = min(30, max(3, _n_drift_days // 2))
-            drift_df["rolling_7d"]  = drift_df[metric_col].rolling(win_short, min_periods=1).mean().round(4)
-            drift_df["rolling_30d"] = drift_df[metric_col].rolling(win_long,  min_periods=1).mean().round(4)
+            drift_df["rolling_short"] = drift_df[drift_metric_key].rolling(win_short, min_periods=1).mean().round(4)
+            drift_df["rolling_long"]  = drift_df[drift_metric_key].rolling(win_long,  min_periods=1).mean().round(4)
             roll_short_label = f"Moy. mobile {win_short}j"
             roll_long_label  = f"Moy. mobile {win_long}j"
 
-            # Métriques résumé
-            last_val = drift_df[metric_col].iloc[-1]
-            prev_7d_val = (
-                drift_df[metric_col].iloc[-8] if len(drift_df) >= 8 else drift_df[metric_col].iloc[0]
-            )
-            delta = round(last_val - prev_7d_val, 4)
+            last_val    = drift_df[drift_metric_key].iloc[-1]
+            prev_val    = drift_df[drift_metric_key].iloc[-8] if len(drift_df) >= 8 else drift_df[drift_metric_key].iloc[0]
+            delta       = round(last_val - prev_val, 4)
             matched_total = int(drift_df["matched_count"].sum())
 
+            def _fmt(v: float) -> str:
+                return f"{v:.1%}" if _is_ratio else f"{v:.4f}"
+
             m1, m2, m3 = st.columns(3)
-            _perf_help = METRIC_HELP["accuracy"] if model_type == "classification" else METRIC_HELP["mae"]
             m1.metric(
                 f"{metric_label} (dernier jour)",
-                f"{last_val:.1%}" if model_type == "classification" else f"{last_val:.4f}",
-                delta=f"{delta:+.1%}" if model_type == "classification" else f"{delta:+.4f}",
-                help=_perf_help,
+                _fmt(last_val),
+                delta=f"{delta:+.1%}" if _is_ratio else f"{delta:+.4f}",
+                delta_color="normal" if _higher_better else "inverse",
+                help=METRIC_HELP.get(_dcfg["help_key"], ""),
             )
             m2.metric(
                 roll_short_label,
-                (
-                    f"{drift_df['rolling_7d'].iloc[-1]:.1%}"
-                    if model_type == "classification"
-                    else f"{drift_df['rolling_7d'].iloc[-1]:.4f}"
-                ),
-                help=_perf_help,
+                _fmt(drift_df["rolling_short"].iloc[-1]),
+                help=METRIC_HELP.get(_dcfg["help_key"], ""),
             )
             m3.metric(f"Prédictions avec résultat observé ({_n_drift_days}j)", f"{matched_total:,}")
 
-            # Alerte drift
-            if alert_enabled and model_type == "classification":
-                last_rolling_7d = drift_df["rolling_7d"].iloc[-1]
-                if last_rolling_7d < threshold:
+            # Alerte seuil
+            if alert_enabled:
+                last_rolling = drift_df["rolling_short"].iloc[-1]
+                _breach = (last_rolling < threshold) if _higher_better else (last_rolling > threshold)
+                if _breach:
+                    _direction = "en dessous" if _higher_better else "au-dessus"
+                    _seuil_fmt = f"{threshold:.0%}" if _is_ratio else f"{threshold:.3f}"
                     st.warning(
-                        f"Drift détecté : la moyenne mobile 7j de l'accuracy ({last_rolling_7d:.1%}) "
-                        f"est en dessous du seuil configuré ({threshold:.0%})."
+                        f"⚠️ Drift détecté : la moyenne mobile {win_short}j de **{metric_label}** "
+                        f"({_fmt(last_rolling)}) est {_direction} du seuil configuré ({_seuil_fmt})."
                     )
 
-            # Graphique Plotly
+            _h_fmt = ".1%" if _is_ratio else ".4f"
             fig = go.Figure()
-            fig.add_trace(
-                go.Scatter(
-                    x=drift_df["date"],
-                    y=drift_df[metric_col],
-                    mode="lines+markers",
-                    name=f"{metric_label} journalier",
-                    line=dict(color="#AAAAAA", width=1, dash="dot"),
-                    marker=dict(size=5),
-                    opacity=0.6,
+            fig.add_trace(go.Scatter(
+                x=drift_df["date"], y=drift_df[drift_metric_key],
+                mode="lines+markers",
+                name=f"{metric_label} journalier",
+                line=dict(color="#AAAAAA", width=1, dash="dot"),
+                marker=dict(size=5), opacity=0.6,
+                hovertemplate=f"%{{x|%Y-%m-%d}}<br>{metric_label} : %{{y:{_h_fmt}}}<extra></extra>",
+            ))
+            fig.add_trace(go.Scatter(
+                x=drift_df["date"], y=drift_df["rolling_short"],
+                mode="lines", name=roll_short_label,
+                line=dict(color="#636EFA", width=2),
+                hovertemplate=f"%{{x|%Y-%m-%d}}<br>{roll_short_label} : %{{y:{_h_fmt}}}<extra></extra>",
+            ))
+            fig.add_trace(go.Scatter(
+                x=drift_df["date"], y=drift_df["rolling_long"],
+                mode="lines", name=roll_long_label,
+                line=dict(color="#FF7F0E", width=2, dash="dash"),
+                hovertemplate=f"%{{x|%Y-%m-%d}}<br>{roll_long_label} : %{{y:{_h_fmt}}}<extra></extra>",
+            ))
+            if alert_enabled and threshold > 0:
+                _seuil_annotation = (
+                    f"Seuil min {threshold:.0%}" if _is_ratio and _higher_better
+                    else f"Seuil max {threshold:.0%}" if _is_ratio
+                    else f"Seuil max {threshold:.3f}"
                 )
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=drift_df["date"],
-                    y=drift_df["rolling_7d"],
-                    mode="lines",
-                    name=roll_short_label,
-                    line=dict(color="#636EFA", width=2),
-                )
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=drift_df["date"],
-                    y=drift_df["rolling_30d"],
-                    mode="lines",
-                    name=roll_long_label,
-                    line=dict(color="#FF7F0E", width=2, dash="dash"),
-                )
-            )
-            if alert_enabled and model_type == "classification":
                 fig.add_hline(
                     y=threshold,
-                    line_dash="dot",
-                    line_color="red",
-                    annotation_text=f"Seuil {threshold:.0%}",
+                    line_dash="dot", line_color="#E74C3C",
+                    annotation_text=_seuil_annotation,
                     annotation_position="bottom right",
+                    annotation_font_color="#E74C3C",
                 )
             fig.update_layout(
                 xaxis_title="Date",
                 yaxis_title=metric_label,
-                yaxis_tickformat=".0%" if model_type == "classification" else None,
-                yaxis_range=[0, 1.05] if model_type == "classification" else None,
+                yaxis_tickformat=".0%" if _is_ratio else None,
+                yaxis_range=[0, 1.05] if _is_ratio else None,
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                 margin=dict(t=40),
                 hovermode="x unified",
             )
             st.plotly_chart(fig, width='stretch')
-        else:
-            st.info(f"Métrique '{metric_col}' non disponible pour ce modèle (type : {model_type}).")
