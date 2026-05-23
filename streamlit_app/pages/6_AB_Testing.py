@@ -242,29 +242,38 @@ else:
             "RMSE":          meta.get("rmse"),
         })
 
-    st.dataframe(
-        pd.DataFrame(_rows),
-        width="stretch",
-        hide_index=True,
-        column_config={
-            "Version":      st.column_config.TextColumn("Version"),
-            "Mode":         st.column_config.TextColumn("Mode"),
-            "Poids":        st.column_config.TextColumn("Poids", help="Part de trafic allouée à cette version."),
-            "Algorithme":   st.column_config.TextColumn("Algorithme"),
-            "Créé le":      st.column_config.TextColumn("Créé le"),
-            "Créateur":     st.column_config.TextColumn("Créateur"),
-            "Préd. (prod)": st.column_config.NumberColumn("Préd. (prod)", help=METRIC_HELP.get("predictions_prod", "Prédictions hors shadow.")),
-            "Shadow":       st.column_config.NumberColumn("Shadow", help=METRIC_HELP.get("shadow_predictions", "Prédictions shadow (non exposées au client).")),
-            "Err. (%)":     st.column_config.NumberColumn("Err. (%)", format="%.2f %%", help=METRIC_HELP.get("taux_erreur", "Taux d'erreur API sur la période.")),
-            "Lat. avg (ms)":st.column_config.NumberColumn("Lat. avg (ms)", format="%.1f", help=METRIC_HELP.get("latence_avg", "Latence moyenne de réponse.")),
-            "Lat. p95 (ms)":st.column_config.NumberColumn("Lat. p95 (ms)", format="%.1f", help=METRIC_HELP.get("latence_p95", "95e percentile de latence.")),
-            "Concordance":  st.column_config.NumberColumn("Concordance (%)", format="%.1f %%", help=METRIC_HELP.get("concordance_shadow", "Taux d'accord entre shadow et prod.")),
-            "Accuracy":     st.column_config.NumberColumn("Accuracy", format="%.3f", help="Accuracy sur le jeu de test à l'entraînement."),
-            "F1":           st.column_config.NumberColumn("F1", format="%.3f", help="F1-score sur le jeu de test à l'entraînement."),
-            "R²":           st.column_config.NumberColumn("R²", format="%.3f", help="Coefficient de détermination (régression)."),
-            "RMSE":         st.column_config.NumberColumn("RMSE", format="%.4f", help="Root Mean Squared Error (régression)."),
-        },
-    )
+    _all_col_config = {
+        "Version":       st.column_config.TextColumn("Version"),
+        "Mode":          st.column_config.TextColumn("Mode"),
+        "Poids":         st.column_config.TextColumn("Poids", help="Part de trafic allouée à cette version."),
+        "Algorithme":    st.column_config.TextColumn("Algorithme"),
+        "Créé le":       st.column_config.TextColumn("Créé le"),
+        "Créateur":      st.column_config.TextColumn("Créateur"),
+        "Préd. (prod)":  st.column_config.NumberColumn("Préd. (prod)", help=METRIC_HELP.get("predictions_prod", "Prédictions hors shadow.")),
+        "Shadow":        st.column_config.NumberColumn("Shadow", help=METRIC_HELP.get("shadow_predictions", "Prédictions shadow (non exposées au client).")),
+        "Err. (%)":      st.column_config.NumberColumn("Err. (%)", format="%.2f %%", help=METRIC_HELP.get("taux_erreur", "Taux d'erreur API sur la période.")),
+        "Lat. avg (ms)": st.column_config.NumberColumn("Lat. avg (ms)", format="%.1f", help=METRIC_HELP.get("latence_avg", "Latence moyenne de réponse.")),
+        "Lat. p95 (ms)": st.column_config.NumberColumn("Lat. p95 (ms)", format="%.1f", help=METRIC_HELP.get("latence_p95", "95e percentile de latence.")),
+        "Concordance":   st.column_config.NumberColumn("Concordance (%)", format="%.1f %%", help=METRIC_HELP.get("concordance_shadow", "Taux d'accord entre shadow et prod.")),
+        "Accuracy":      st.column_config.NumberColumn("Accuracy", format="%.3f", help="Accuracy sur le jeu de test à l'entraînement."),
+        "F1":            st.column_config.NumberColumn("F1", format="%.3f", help="F1-score sur le jeu de test à l'entraînement."),
+        "R²":            st.column_config.NumberColumn("R²", format="%.3f", help="Coefficient de détermination (régression)."),
+        "RMSE":          st.column_config.NumberColumn("RMSE", format="%.4f", help="Root Mean Squared Error (régression)."),
+    }
+
+    # Colonnes toujours visibles
+    _base_cols = ["Version", "Mode", "Poids", "Algorithme", "Créé le", "Créateur",
+                  "Préd. (prod)", "Shadow"]
+    # Colonnes de métriques : masquées si toutes les valeurs sont null
+    _metric_cols = ["Err. (%)", "Lat. avg (ms)", "Lat. p95 (ms)", "Concordance",
+                    "Accuracy", "F1", "R²", "RMSE"]
+
+    _df = pd.DataFrame(_rows)
+    _visible_metrics = [c for c in _metric_cols if _df[c].notna().any()]
+    _df = _df[_base_cols + _visible_metrics]
+    _col_config = {k: v for k, v in _all_col_config.items() if k in _df.columns}
+
+    st.dataframe(_df, width="stretch", hide_index=True, column_config=_col_config)
 
     # ===========================================================================
     # Bloc significativité statistique
