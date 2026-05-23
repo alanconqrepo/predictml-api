@@ -1,0 +1,344 @@
+"""
+upload_titanic_model.py — Entraîne et uploade titanic-survival v1.0.0 via l'API PredictML
+===========================================================================================
+
+Ce script tourne LOCALEMENT. Il :
+  1. Exécute train_titanic.py en subprocess pour produire le .joblib
+  2. Uploade le .joblib + train_titanic.py via POST /models
+  3. Met le modèle en production avec le tag "Example" et la baseline des features
+
+Modèle : Pipeline sklearn — ColumnTransformer (StandardScaler + OneHotEncoder)
+           + GradientBoostingClassifier
+Problème : classification binaire (survived : 0/1) avec features numériques ET catégorielles
+
+Usage :
+  API_URL=http://localhost:8000 API_TOKEN=<token> python upload_titanic_model.py
+
+Variables d'environnement :
+  API_URL        URL de l'API          (défaut : http://localhost:80)
+  API_TOKEN      Token Bearer — requis
+  MODEL_NAME     Nom du modèle         (défaut : titanic-survival)
+  MODEL_VERSION  Version               (défaut : 1.0.0)
+  TRAIN_START    Date début training   (défaut : 2024-01-01)
+  TRAIN_END      Date fin training     (défaut : 2024-12-31)
+
+Prérequis Python :
+  pip install requests scikit-learn numpy pandas python-dotenv
+"""
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+
+import requests
+from dotenv import find_dotenv, load_dotenv
+
+load_dotenv(find_dotenv())
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+
+API_URL = os.environ.get("API_URL", "http://localhost:80")
+API_TOKEN = os.environ.get("API_TOKEN", os.environ.get("ADMIN_TOKEN", ""))
+
+MODEL_NAME = os.environ.get("MODEL_NAME", "titanic-survival")
+MODEL_VERSION = os.environ.get("MODEL_VERSION", "1.0.0")
+DESCRIPTION = (
+    "Pipeline sklearn (OneHotEncoder + StandardScaler + GradientBoostingClassifier) "
+    "entraîné sur des données synthétiques inspirées du Titanic — "
+    "prédit la survie d'un passager (0=mort, 1=survivant). "
+    "Features : age, fare, parch, sibsp (numériques) + pclass, sex, embarked (catégorielles)."
+)
+ALGORITHM = "GradientBoosting"
+
+TRAIN_START = os.environ.get("TRAIN_START", "2024-01-01")
+TRAIN_END = os.environ.get("TRAIN_END", "2024-12-31")
+
+RETRAIN_IN_API = False  # True = relance train.py côté API (librairies du serveur)
+
+MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
+MLFLOW_TRACKING_USERNAME = os.environ.get("MLFLOW_TRACKING_USERNAME", "admin")
+MLFLOW_TRACKING_PASSWORD = os.environ.get("MLFLOW_TRACKING_PASSWORD", "")
+
+MINIO_ENDPOINT = os.environ.get(
+    "MLFLOW_S3_ENDPOINT_URL",
+    f"http://localhost:{os.environ.get('MINIO_PORT', '9010')}",
+)
+MINIO_ACCESS_KEY = os.environ.get("AWS_ACCESS_KEY_ID", os.environ.get("MINIO_ROOT_USER", ""))
+MINIO_SECRET_KEY = os.environ.get(
+    "AWS_SECRET_ACCESS_KEY", os.environ.get("MINIO_ROOT_PASSWORD", "")
+)
+MINIO_BUCKET = os.environ.get("MINIO_BUCKET", "models")
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+TRAIN_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "train_titanic.py")
+
+# ── Validation ────────────────────────────────────────────────────────────────
+
+if not API_TOKEN:
+    print("❌  API_TOKEN non défini.")
+    print("    Lancez : API_TOKEN=<votre_token> python upload_titanic_model.py")
+    sys.exit(1)
+
+if not os.path.exists(TRAIN_SCRIPT_PATH):
+    print(f"❌  train_titanic.py introuvable : {TRAIN_SCRIPT_PATH}")
+    sys.exit(1)
+
+HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
+
+# ── 1. Vérification que l'API est accessible ──────────────────────────────────
+
+try:
+    health = requests.get(f"{API_URL}/health", timeout=5)
+    health.raise_for_status()
+    print(f"✅  API accessible : {API_URL}")
+except Exception as e:
+    print(f"❌  API inaccessible ({API_URL}) : {e}")
+    sys.exit(1)
+
+# ── 2. Exécution de train_titanic.py ──────────────────────────────────────────
+
+tmp_pkl = tempfile.NamedTemporaryFile(suffix=".joblib", delete=False)
+tmp_pkl.close()
+
+print(f"⏳  Entraînement via train_titanic.py ({TRAIN_START} → {TRAIN_END})…")
+
+train_env = {
+    **os.environ,
+    "TRAIN_START_DATE": TRAIN_START,
+    "TRAIN_END_DATE": TRAIN_END,
+    "OUTPUT_MODEL_PATH": tmp_pkl.name,
+    "MLFLOW_TRACKING_URI": MLFLOW_TRACKING_URI,
+    "MLFLOW_TRACKING_USERNAME": MLFLOW_TRACKING_USERNAME,
+    "MLFLOW_TRACKING_PASSWORD": MLFLOW_TRACKING_PASSWORD,
+    "MLFLOW_S3_ENDPOINT_URL": MINIO_ENDPOINT,
+    "AWS_ACCESS_KEY_ID": MINIO_ACCESS_KEY,
+    "AWS_SECRET_ACCESS_KEY": MINIO_SECRET_KEY,
+    "PYTHONIOENCODING": "utf-8",
+}
+
+result = subprocess.run(
+    [sys.executable, TRAIN_SCRIPT_PATH],
+    env=train_env,
+    capture_output=True,
+    text=True,
+    encoding="utf-8",
+)
+
+if result.returncode != 0:
+    print("❌  train_titanic.py a échoué :")
+    print(result.stderr)
+    os.unlink(tmp_pkl.name)
+    sys.exit(1)
+
+if result.stderr:
+    print(result.stderr.strip())
+
+# Récupération des métriques depuis la dernière ligne JSON de stdout
+metrics = {}
+for line in reversed(result.stdout.strip().splitlines()):
+    try:
+        metrics = json.loads(line)
+        break
+    except json.JSONDecodeError:
+        continue
+
+acc = metrics.get("accuracy")
+f1 = metrics.get("f1_score")
+precision = metrics.get("precision")
+recall = metrics.get("recall")
+roc_auc = metrics.get("roc_auc")
+features_count = metrics.get("features_count")
+classes = metrics.get("classes")
+training_dataset = metrics.get("training_dataset")
+mlflow_run_id = metrics.get("mlflow_run_id")
+hyperparameters = metrics.get("hyperparameters")
+dependencies = metrics.get("dependencies", {})
+
+print(
+    f"✅  Entraînement terminé — Accuracy : {acc} | F1 : {f1}"
+    f" | Precision : {precision} | Recall : {recall} | AUC-ROC : {roc_auc}"
+    + (f" | MLflow run : {mlflow_run_id}" if mlflow_run_id else "")
+)
+
+# ── 3. Upload via POST /models ────────────────────────────────────────────────
+
+print(f"⏳  Upload de {MODEL_NAME} v{MODEL_VERSION}…")
+
+try:
+    with open(tmp_pkl.name, "rb") as pkl_fh, open(TRAIN_SCRIPT_PATH, "rb") as train_fh:
+        data = {
+            "name": MODEL_NAME,
+            "version": MODEL_VERSION,
+            "description": DESCRIPTION,
+            "algorithm": ALGORITHM,
+        }
+        if acc is not None:
+            data["accuracy"] = str(round(acc, 4))
+        if f1 is not None:
+            data["f1_score"] = str(round(f1, 4))
+        if features_count is not None:
+            data["features_count"] = str(features_count)
+        if classes is not None:
+            data["classes"] = json.dumps(classes)
+        if training_dataset:
+            data["training_dataset"] = training_dataset
+
+        # training_metrics : métriques de classification (+ roc_auc pour binaire)
+        _tm = {
+            k: round(v, 4)
+            for k, v in {
+                "accuracy": acc,
+                "f1_score": f1,
+                "precision": precision,
+                "recall": recall,
+                "roc_auc": roc_auc,
+            }.items()
+            if v is not None
+        }
+        if _tm:
+            data["training_metrics"] = json.dumps(_tm)
+        if mlflow_run_id:
+            data["mlflow_run_id"] = mlflow_run_id
+        if hyperparameters:
+            data["hyperparameters"] = json.dumps(hyperparameters)
+        data["run_training"] = str(RETRAIN_IN_API).lower()
+        if dependencies:
+            data["local_dependencies"] = json.dumps(dependencies)
+
+        _upload_t0 = time.perf_counter()
+        response = requests.post(
+            f"{API_URL}/models",
+            headers=HEADERS,
+            files={
+                "file": (
+                    f"{MODEL_NAME}.joblib",
+                    pkl_fh,
+                    "application/octet-stream",
+                ),
+                "train_file": ("train_titanic.py", train_fh, "text/plain"),
+            },
+            data=data,
+            timeout=180,
+        )
+        _upload_elapsed = time.perf_counter() - _upload_t0
+        print(
+            f"  [TIMING] POST /models répondu en {_upload_elapsed:.2f}s"
+            f" — status {response.status_code}"
+        )
+finally:
+    os.unlink(tmp_pkl.name)
+
+# ── 4. Résultat upload ────────────────────────────────────────────────────────
+
+if response.status_code == 409:
+    # Modèle déjà existant → PATCH pour mettre à jour
+    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} existe déjà — mise à jour via PATCH…")
+    patch_payload = {
+        "is_production": True,
+        "deployment_mode": "ab_test",
+        "traffic_weight": 0.5,
+    }
+    if hyperparameters:
+        patch_payload["hyperparameters"] = hyperparameters
+    try:
+        patch_resp = requests.patch(
+            f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
+            headers={**HEADERS, "Content-Type": "application/json"},
+            json=patch_payload,
+            timeout=30,
+        )
+    except Exception as _e:
+        print(f"    [WARN] PATCH existe-déjà échoué : {_e} — continuons")
+        sys.exit(0)
+    if patch_resp.status_code == 200:
+        print("✅  Mode ab_test et hyperparamètres mis à jour.")
+    else:
+        print(f"❌  PATCH échoué ({patch_resp.status_code}) : {patch_resp.text[:200]}")
+    sys.exit(0)
+
+if response.status_code not in (200, 201):
+    print(f"\n❌  Erreur {response.status_code}")
+    try:
+        body = response.json()
+        print(f"   Détail : {json.dumps(body, indent=2, ensure_ascii=False)}")
+    except Exception:
+        print(f"   Réponse : {response.text[:500]}")
+    sys.exit(1)
+
+res = response.json()
+print("\n✅  Modèle uploadé avec succès !")
+print(f"   Nom           : {res.get('name')}")
+print(f"   Version       : {res.get('version')}")
+print(f"   ID            : {res.get('id')}")
+if res.get("requirements_object_key"):
+    print(f"   requirements  : {res.get('requirements_object_key')} (MinIO + MLflow)")
+
+# ── 5. Mise en production + tag "Example" + feature_baseline ──────────────────
+#
+# feature_baseline : uniquement les 4 features NUMÉRIQUES (age, fare, parch, sibsp).
+# FeatureStats attend mean/std/min/max — les features catégorielles (pclass, sex,
+# embarked) ne sont pas incluses dans la baseline mais restent dans
+# pipeline.feature_names_in_ pour la validation de schéma (/predict).
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+print("⏳  Mise en production, tag 'Example' et baseline des features…")
+
+patch_body = {
+    "is_production": True,
+    "deployment_mode": "ab_test",
+    "traffic_weight": 0.5,
+    "tags": ["Example"],
+}
+
+# feature_baseline = stats numériques seulement
+if metrics.get("feature_stats"):
+    patch_body["feature_baseline"] = metrics["feature_stats"]
+
+if metrics.get("confidence_threshold") is not None:
+    patch_body["confidence_threshold"] = metrics["confidence_threshold"]
+
+training_stats: dict = {}
+if metrics.get("label_distribution"):
+    training_stats["label_distribution"] = metrics["label_distribution"]
+if metrics.get("n_rows") is not None:
+    training_stats["n_rows"] = metrics["n_rows"]
+if TRAIN_START:
+    training_stats["train_start_date"] = TRAIN_START
+if TRAIN_END:
+    training_stats["train_end_date"] = TRAIN_END
+if training_stats:
+    patch_body["training_stats"] = training_stats
+
+# webhook_url : notifie un système externe après chaque prédiction (background task).
+patch_body["webhook_url"] = "https://webhook.site/00000000-0000-0000-0000-000000000000"
+
+patch = requests.patch(
+    f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
+    headers={**HEADERS, "Content-Type": "application/json"},
+    json=patch_body,
+    timeout=30,
+)
+
+if patch.status_code == 200:
+    baseline_ok = "feature_baseline" in patch_body
+    print(
+        f"✅  Modèle passé en production (ab_test) avec le tag 'Example'"
+        f"{' et baseline des features numériques' if baseline_ok else ''}."
+    )
+else:
+    print(f"⚠️   PATCH échoué ({patch.status_code}) : {patch.text[:200]}")
+
+print(f"\n   → Dashboard : {API_URL.replace(':8000', ':8501')}/Models")
+print("   → Exemple de prédiction :")
+print(
+    f"       POST {API_URL}/predict"
+    ' -d \'{"model_name":"titanic-survival",'
+    '"features":{"age":28,"fare":52.5,"parch":0,"sibsp":1,'
+    '"pclass":"1st","sex":"female","embarked":"C"}}\''
+)
+print("   → Ré-entraîner :")
+print(f"       POST {API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}/retrain")
