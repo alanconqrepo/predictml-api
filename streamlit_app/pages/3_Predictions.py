@@ -1,4 +1,4 @@
-﻿"""
+"""
 Historique des prédictions avec filtres
 """
 
@@ -222,372 +222,377 @@ with tab_history:
         if status_filter != "Tous":
             predictions = [p for p in predictions if p.get("status") == status_filter]
 
-        st.caption(f"**{total}** prédictions trouvées — {len(predictions)} affichées")
-
-        if not predictions:
-            st.info("Aucune prédiction pour ces critères.")
-        else:
-            # Fetch ground truth for visible id_obs values
-            gt_lookup: dict = {}
-            id_obs_list = [p["id_obs"] for p in predictions if p.get("id_obs")]
-            if id_obs_list:
-                try:
-                    obs_data = client.get_observed_results(
-                        model_name=model_name or None,
-                        limit=len(id_obs_list) + 50,
-                    )
-                    for obs in obs_data.get("results", obs_data if isinstance(obs_data, list) else []):
-                        if obs.get("id_obs"):
-                            gt_lookup[obs["id_obs"]] = str(obs.get("observed_result", ""))
-                except Exception:
-                    pass
-
-            rows = []
-            for p in predictions:
-                mc = p.get("max_confidence")
-                id_obs_val = p.get("id_obs")
-                gt_val = gt_lookup.get(id_obs_val, "—") if id_obs_val else "—"
-                pred_val = str(p.get("prediction_result", ""))
-                mismatch = gt_val != "—" and pred_val != gt_val
-                rows.append(
-                    {
-                        "ID": p.get("id"),
-                        "id_obs": id_obs_val or "—",
-                        "Timestamp": (
-                            pd.to_datetime(p.get("timestamp")).strftime("%Y-%m-%d %H:%M:%S")
-                            if p.get("timestamp")
-                            else "—"
-                        ),
-                        "Modèle": p.get("model_name", ""),
-                        "Version": p.get("model_version") or "—",
-                        "Résultat": pred_val,
-                        "Ground Truth": gt_val,
-                        "Confiance": f"{mc:.2%}" if mc is not None else "—",
-                        "Temps (ms)": (
-                            f"{p['response_time_ms']:.1f}"
-                            if p.get("response_time_ms") is not None
-                            else "—"
-                        ),
-                        "Statut": "✅" if p.get("status") == "success" else "❌",
-                        "Shadow": "🔮" if p.get("is_shadow") else "—",
-                        "Utilisateur": p.get("username") or "—",
-                        "_mismatch": mismatch,
-                    }
-                )
-
-            df = pd.DataFrame(rows)
-
-            if filter_mismatch_only:
-                df = df[df["_mismatch"]].reset_index(drop=True)
-                if df.empty:
-                    st.info("Aucune prédiction incorrecte sur cette page.")
-
-            mismatch_flags = df["_mismatch"].to_numpy()
-            df_display = df.drop(columns=["_mismatch"])
-
-            def _highlight_mismatch(row):
-                return (
-                    ["background-color: #ffcccc"] * len(row)
-                    if mismatch_flags[row.name]
-                    else [""] * len(row)
-                )
-
-            styled = df_display.style.apply(_highlight_mismatch, axis=1)
-            sel = st.dataframe(
-                styled,
-                width='stretch',
-                hide_index=True,
-                on_select="rerun",
-                selection_mode="single-row",
-                column_config={
-                    "ID": st.column_config.NumberColumn(
-                        "ID",
-                        help=(
-                            "Numéro d'identifiant interne attribué automatiquement à chaque "
-                            "prédiction enregistrée en base de données. Sert à retrouver une "
-                            "prédiction précise dans les logs ou via l'API."
-                        ),
-                    ),
-                    "id_obs": st.column_config.TextColumn(
-                        "id_obs",
-                        help=(
-                            "Identifiant de l'observation fourni par l'appelant au moment de "
-                            "la requête (champ optionnel). Permet de faire le lien entre une "
-                            "prédiction et une ligne de votre système métier (ex : ID client, "
-                            "ID commande). Vaut '—' si l'appelant n'en a pas fourni."
-                        ),
-                    ),
-                    "Timestamp": st.column_config.TextColumn(
-                        "Timestamp",
-                        help=(
-                            "Date et heure exactes auxquelles la prédiction a été effectuée "
-                            "(heure UTC). Utile pour corréler une prédiction avec un événement "
-                            "métier ou un incident."
-                        ),
-                    ),
-                    "Modèle": st.column_config.TextColumn(
-                        "Modèle",
-                        help="Nom du modèle ML qui a répondu à cette requête de prédiction.",
-                    ),
-                    "Version": st.column_config.TextColumn(
-                        "Version",
-                        help=(
-                            "Version du modèle utilisée au format X.Y.Z. Un même modèle peut "
-                            "exister en plusieurs versions — la version en production est "
-                            "utilisée par défaut sauf si l'appelant en précise une autre."
-                        ),
-                    ),
-                    "Résultat": st.column_config.TextColumn(
-                        "Résultat",
-                        help=(
-                            "La prédiction retournée par le modèle. Pour un modèle de "
-                            "classification (ex : iris), c'est le nom de la classe prédite. "
-                            "Pour un modèle de régression, c'est une valeur numérique. "
-                            "Les lignes surlignées en rouge indiquent que le résultat ne "
-                            "correspond pas au Ground Truth connu."
-                        ),
-                    ),
-                    "Ground Truth": st.column_config.TextColumn(
-                        "Ground Truth",
-                        help=(
-                            "Résultat réellement observé dans la réalité, renseigné "
-                            "après coup via l'endpoint /observed-results. Permet de mesurer "
-                            "si le modèle s'est trompé. Vaut '—' si personne n'a encore "
-                            "enregistré la vraie valeur pour cette observation."
-                        ),
-                    ),
-                    "Confiance": st.column_config.TextColumn(
-                        "Confiance",
-                        help=(
-                            "Niveau de certitude du modèle dans sa prédiction, exprimé en "
-                            "pourcentage. Calculé à partir de la probabilité maximale parmi "
-                            "toutes les classes (predict_proba). Ex : 97 % signifie que le "
-                            "modèle est très sûr de lui. En dessous du seuil configuré sur "
-                            "le modèle, la prédiction est marquée 'low confidence'. Vaut '—' "
-                            "si le modèle ne supporte pas les probabilités (ex : régression)."
-                        ),
-                    ),
-                    "Temps (ms)": st.column_config.TextColumn(
-                        "Temps (ms)",
-                        help=(
-                            "Temps de traitement de la requête côté API, en millisecondes. "
-                            "Inclut le chargement du modèle en mémoire (si pas en cache), "
-                            "le calcul de la prédiction et l'écriture en base. "
-                            "Une valeur élevée peut signaler un cold start (modèle non "
-                            "chargé) ou une surcharge du serveur."
-                        ),
-                    ),
-                    "Statut": st.column_config.TextColumn(
-                        "Statut",
-                        help=(
-                            "✅ Succès : la prédiction s'est déroulée sans erreur.\n"
-                            "❌ Échec : une erreur s'est produite pendant le traitement "
-                            "(ex : feature manquante, modèle indisponible). "
-                            "La prédiction a quand même été enregistrée pour traçabilité."
-                        ),
-                    ),
-                    "Shadow": st.column_config.TextColumn(
-                        "Shadow",
-                        help=(
-                            "🔮 Mode shadow : cette prédiction a été calculée en arrière-plan "
-                            "par une version candidate du modèle, mais le résultat n'a PAS "
-                            "été renvoyé au client — l'utilisateur final a reçu la réponse "
-                            "de la version en production. Permet de tester une nouvelle "
-                            "version sans risque. '—' = prédiction normale, visible par le client."
-                        ),
-                    ),
-                    "Utilisateur": st.column_config.TextColumn(
-                        "Utilisateur",
-                        help=(
-                            "Identifiant de l'utilisateur ou de l'application qui a effectué "
-                            "cette prédiction (authentifié via son token Bearer). Utile pour "
-                            "auditer qui consomme le modèle et en quelle quantité."
-                        ),
-                    ),
-                },
+        with st.expander("📋 Résultats", expanded=True):
+            st.caption(
+                "Les résultats ci-dessous dépendent des filtres appliqués dans l’expander « Filtres » ci-dessus."
             )
+            st.caption(f"**{total}** prédictions trouvées — {len(predictions)} affichées")
 
-            # ── Panneau détail (ligne sélectionnée) ───────────────────────────
-            selected_rows = sel.selection.rows if sel.selection else []
-            if selected_rows:
-                import plotly.graph_objects as go
-
-                row_idx = selected_rows[0]
-                pred_id_at_row = df_display.iloc[row_idx]["ID"]
-                p = next((x for x in predictions if x.get("id") == pred_id_at_row), None)
-                if p is None:
-                    st.info("Prédiction introuvable.")
-                    st.stop()
-                pred_id = pred_id_at_row
-                st.divider()
-                st.markdown(f"#### 🔍 Prédiction #{pred_id}")
-
-                col_l, col_r = st.columns(2)
-                with col_l:
-                    st.markdown("**Features d'entrée :**")
-                    st.json(p.get("input_features", {}))
-                with col_r:
-                    st.markdown("**Résultat :**")
-                    st.json({
-                        "prediction": p.get("prediction_result"),
-                        "probabilities": p.get("probabilities"),
-                    })
-                    if p.get("error_message"):
-                        st.error(f"Erreur : {p['error_message']}")
-
-                # Ground truth
-                st.divider()
-                st.markdown("**── Résultat observé ──**")
-                id_obs_val = p.get("id_obs")
-                if not id_obs_val:
-                    st.caption("Pas d'`id_obs` — impossible de soumettre un résultat observé.")
-                else:
-                    obs_cache_key = f"obs_result_{pred_id}"
-                    if obs_cache_key not in st.session_state:
-                        try:
-                            resp = client.get_observed_results(
-                                model_name=p.get("model_name"), id_obs=id_obs_val, limit=1
-                            )
-                            results = resp.get("results", [])
-                            st.session_state[obs_cache_key] = results[0] if results else None
-                        except Exception:
-                            st.session_state[obs_cache_key] = None
-
-                    existing = st.session_state.get(obs_cache_key)
-                    if existing is not None:
-                        st.success(f"✅ Résultat enregistré : **{existing['observed_result']}**")
-                    else:
-                        obs_input_val = st.text_input(
-                            "Valeur observée",
-                            key=f"obs_input_{pred_id}",
-                            placeholder="Ex: 0, 1.5, setosa…",
+            if not predictions:
+                st.info("Aucune prédiction pour ces critères.")
+            else:
+                # Fetch ground truth for visible id_obs values
+                gt_lookup: dict = {}
+                id_obs_list = [p["id_obs"] for p in predictions if p.get("id_obs")]
+                if id_obs_list:
+                    try:
+                        obs_data = client.get_observed_results(
+                            model_name=model_name or None,
+                            limit=len(id_obs_list) + 50,
                         )
-                        if st.button("Enregistrer le résultat réel", key=f"obs_btn_{pred_id}"):
-                            if not obs_input_val.strip():
-                                st.warning("Veuillez saisir une valeur.")
-                            else:
-                                try:
-                                    parsed_val = int(obs_input_val)
-                                except ValueError:
-                                    try:
-                                        parsed_val = float(obs_input_val)
-                                    except ValueError:
-                                        parsed_val = obs_input_val
-                                try:
-                                    client.submit_observed_result(
-                                        id_obs=id_obs_val,
-                                        model_name=p.get("model_name"),
-                                        observed_result=parsed_val,
-                                    )
-                                    st.session_state[obs_cache_key] = {"observed_result": parsed_val}
-                                    st.rerun()
-                                except Exception as exc:
-                                    st.error(f"Erreur : {exc}")
+                        for obs in obs_data.get("results", obs_data if isinstance(obs_data, list) else []):
+                            if obs.get("id_obs"):
+                                gt_lookup[obs["id_obs"]] = str(obs.get("observed_result", ""))
+                    except Exception:
+                        pass
 
-                # SHAP
-                if p.get("status") == "success":
+                rows = []
+                for p in predictions:
+                    mc = p.get("max_confidence")
+                    id_obs_val = p.get("id_obs")
+                    gt_val = gt_lookup.get(id_obs_val, "—") if id_obs_val else "—"
+                    pred_val = str(p.get("prediction_result", ""))
+                    mismatch = gt_val != "—" and pred_val != gt_val
+                    rows.append(
+                        {
+                            "ID": p.get("id"),
+                            "id_obs": id_obs_val or "—",
+                            "Timestamp": (
+                                pd.to_datetime(p.get("timestamp")).strftime("%Y-%m-%d %H:%M:%S")
+                                if p.get("timestamp")
+                                else "—"
+                            ),
+                            "Modèle": p.get("model_name", ""),
+                            "Version": p.get("model_version") or "—",
+                            "Résultat": pred_val,
+                            "Ground Truth": gt_val,
+                            "Confiance": f"{mc:.2%}" if mc is not None else "—",
+                            "Temps (ms)": (
+                                f"{p['response_time_ms']:.1f}"
+                                if p.get("response_time_ms") is not None
+                                else "—"
+                            ),
+                            "Statut": "✅" if p.get("status") == "success" else "❌",
+                            "Shadow": "🔮" if p.get("is_shadow") else "—",
+                            "Utilisateur": p.get("username") or "—",
+                            "_mismatch": mismatch,
+                        }
+                    )
+
+                df = pd.DataFrame(rows)
+
+                if filter_mismatch_only:
+                    df = df[df["_mismatch"]].reset_index(drop=True)
+                    if df.empty:
+                        st.info("Aucune prédiction incorrecte sur cette page.")
+
+                mismatch_flags = df["_mismatch"].to_numpy()
+                df_display = df.drop(columns=["_mismatch"])
+
+                def _highlight_mismatch(row):
+                    return (
+                        ["background-color: #ffcccc"] * len(row)
+                        if mismatch_flags[row.name]
+                        else [""] * len(row)
+                    )
+
+                styled = df_display.style.apply(_highlight_mismatch, axis=1)
+                sel = st.dataframe(
+                    styled,
+                    width='stretch',
+                    hide_index=True,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    column_config={
+                        "ID": st.column_config.NumberColumn(
+                            "ID",
+                            help=(
+                                "Numéro d'identifiant interne attribué automatiquement à chaque "
+                                "prédiction enregistrée en base de données. Sert à retrouver une "
+                                "prédiction précise dans les logs ou via l'API."
+                            ),
+                        ),
+                        "id_obs": st.column_config.TextColumn(
+                            "id_obs",
+                            help=(
+                                "Identifiant de l'observation fourni par l'appelant au moment de "
+                                "la requête (champ optionnel). Permet de faire le lien entre une "
+                                "prédiction et une ligne de votre système métier (ex : ID client, "
+                                "ID commande). Vaut '—' si l'appelant n'en a pas fourni."
+                            ),
+                        ),
+                        "Timestamp": st.column_config.TextColumn(
+                            "Timestamp",
+                            help=(
+                                "Date et heure exactes auxquelles la prédiction a été effectuée "
+                                "(heure UTC). Utile pour corréler une prédiction avec un événement "
+                                "métier ou un incident."
+                            ),
+                        ),
+                        "Modèle": st.column_config.TextColumn(
+                            "Modèle",
+                            help="Nom du modèle ML qui a répondu à cette requête de prédiction.",
+                        ),
+                        "Version": st.column_config.TextColumn(
+                            "Version",
+                            help=(
+                                "Version du modèle utilisée au format X.Y.Z. Un même modèle peut "
+                                "exister en plusieurs versions — la version en production est "
+                                "utilisée par défaut sauf si l'appelant en précise une autre."
+                            ),
+                        ),
+                        "Résultat": st.column_config.TextColumn(
+                            "Résultat",
+                            help=(
+                                "La prédiction retournée par le modèle. Pour un modèle de "
+                                "classification (ex : iris), c'est le nom de la classe prédite. "
+                                "Pour un modèle de régression, c'est une valeur numérique. "
+                                "Les lignes surlignées en rouge indiquent que le résultat ne "
+                                "correspond pas au Ground Truth connu."
+                            ),
+                        ),
+                        "Ground Truth": st.column_config.TextColumn(
+                            "Ground Truth",
+                            help=(
+                                "Résultat réellement observé dans la réalité, renseigné "
+                                "après coup via l'endpoint /observed-results. Permet de mesurer "
+                                "si le modèle s'est trompé. Vaut '—' si personne n'a encore "
+                                "enregistré la vraie valeur pour cette observation."
+                            ),
+                        ),
+                        "Confiance": st.column_config.TextColumn(
+                            "Confiance",
+                            help=(
+                                "Niveau de certitude du modèle dans sa prédiction, exprimé en "
+                                "pourcentage. Calculé à partir de la probabilité maximale parmi "
+                                "toutes les classes (predict_proba). Ex : 97 % signifie que le "
+                                "modèle est très sûr de lui. En dessous du seuil configuré sur "
+                                "le modèle, la prédiction est marquée 'low confidence'. Vaut '—' "
+                                "si le modèle ne supporte pas les probabilités (ex : régression)."
+                            ),
+                        ),
+                        "Temps (ms)": st.column_config.TextColumn(
+                            "Temps (ms)",
+                            help=(
+                                "Temps de traitement de la requête côté API, en millisecondes. "
+                                "Inclut le chargement du modèle en mémoire (si pas en cache), "
+                                "le calcul de la prédiction et l'écriture en base. "
+                                "Une valeur élevée peut signaler un cold start (modèle non "
+                                "chargé) ou une surcharge du serveur."
+                            ),
+                        ),
+                        "Statut": st.column_config.TextColumn(
+                            "Statut",
+                            help=(
+                                "✅ Succès : la prédiction s'est déroulée sans erreur.\n"
+                                "❌ Échec : une erreur s'est produite pendant le traitement "
+                                "(ex : feature manquante, modèle indisponible). "
+                                "La prédiction a quand même été enregistrée pour traçabilité."
+                            ),
+                        ),
+                        "Shadow": st.column_config.TextColumn(
+                            "Shadow",
+                            help=(
+                                "🔮 Mode shadow : cette prédiction a été calculée en arrière-plan "
+                                "par une version candidate du modèle, mais le résultat n'a PAS "
+                                "été renvoyé au client — l'utilisateur final a reçu la réponse "
+                                "de la version en production. Permet de tester une nouvelle "
+                                "version sans risque. '—' = prédiction normale, visible par le client."
+                            ),
+                        ),
+                        "Utilisateur": st.column_config.TextColumn(
+                            "Utilisateur",
+                            help=(
+                                "Identifiant de l'utilisateur ou de l'application qui a effectué "
+                                "cette prédiction (authentifié via son token Bearer). Utile pour "
+                                "auditer qui consomme le modèle et en quelle quantité."
+                            ),
+                        ),
+                    },
+                )
+
+                # ── Panneau détail (ligne sélectionnée) ───────────────────────────
+                selected_rows = sel.selection.rows if sel.selection else []
+                if selected_rows:
+                    import plotly.graph_objects as go
+
+                    row_idx = selected_rows[0]
+                    pred_id_at_row = df_display.iloc[row_idx]["ID"]
+                    p = next((x for x in predictions if x.get("id") == pred_id_at_row), None)
+                    if p is None:
+                        st.info("Prédiction introuvable.")
+                        st.stop()
+                    pred_id = pred_id_at_row
                     st.divider()
-                    st.markdown("**── Explication SHAP ──**")
-                    if st.button("🧠 Calculer l'explication SHAP", key=f"shap_btn_{pred_id}"):
-                        with st.spinner("Calcul SHAP en cours…"):
+                    st.markdown(f"#### 🔍 Prédiction #{pred_id}")
+
+                    col_l, col_r = st.columns(2)
+                    with col_l:
+                        st.markdown("**Features d'entrée :**")
+                        st.json(p.get("input_features", {}))
+                    with col_r:
+                        st.markdown("**Résultat :**")
+                        st.json({
+                            "prediction": p.get("prediction_result"),
+                            "probabilities": p.get("probabilities"),
+                        })
+                        if p.get("error_message"):
+                            st.error(f"Erreur : {p['error_message']}")
+
+                    # Ground truth
+                    st.divider()
+                    st.markdown("**── Résultat observé ──**")
+                    id_obs_val = p.get("id_obs")
+                    if not id_obs_val:
+                        st.caption("Pas d'`id_obs` — impossible de soumettre un résultat observé.")
+                    else:
+                        obs_cache_key = f"obs_result_{pred_id}"
+                        if obs_cache_key not in st.session_state:
                             try:
-                                st.session_state[f"shap_{pred_id}"] = client.explain_prediction(pred_id)
-                            except Exception as exc:
-                                st.error(f"Impossible de calculer : {exc}")
+                                resp = client.get_observed_results(
+                                    model_name=p.get("model_name"), id_obs=id_obs_val, limit=1
+                                )
+                                results = resp.get("results", [])
+                                st.session_state[obs_cache_key] = results[0] if results else None
+                            except Exception:
+                                st.session_state[obs_cache_key] = None
 
-                    shap_data = st.session_state.get(f"shap_{pred_id}")
-                    if shap_data:
-                        shap_values: dict = shap_data.get("shap_values", {})
-                        base_value: float = shap_data.get("base_value", 0.0)
-                        model_type: str = shap_data.get("model_type", "")
-                        col_s1, col_s2, col_s3 = st.columns(3)
-                        col_s1.metric("E[f(X)]", f"{base_value:.4f}")
-                        col_s2.metric("Prédiction", str(shap_data.get("prediction")))
-                        col_s3.metric("Type", model_type)
-                        if shap_values:
-                            sorted_features = sorted(
-                                shap_values.items(), key=lambda x: abs(x[1]), reverse=True
-                            )[:10]
-                            feat_names = [f for f, _ in sorted_features]
-                            shap_vals = [v for _, v in sorted_features]
-                            fig = go.Figure(go.Bar(
-                                x=shap_vals, y=feat_names, orientation="h",
-                                marker_color=["#e05252" if v >= 0 else "#5282e0" for v in shap_vals],
-                                text=[f"{v:+.4f}" for v in shap_vals],
-                                textposition="outside",
-                            ))
-                            fig.update_layout(
-                                title="Contributions SHAP (top 10)",
-                                xaxis_title="Contribution SHAP",
-                                yaxis={"autorange": "reversed"},
-                                height=max(300, len(sorted_features) * 40 + 100),
-                                margin={"l": 20, "r": 60, "t": 50, "b": 40},
-                                showlegend=False,
-                            )
-                            st.plotly_chart(fig, width='stretch')
-                            if len(shap_values) > 10:
-                                with st.expander("Voir toutes les features"):
-                                    st.dataframe(
-                                        pd.DataFrame(
-                                            sorted(shap_values.items(), key=lambda x: abs(x[1]), reverse=True),
-                                            columns=["Feature", "SHAP"],
-                                        ),
-                                        width='stretch', hide_index=True,
-                                    )
+                        existing = st.session_state.get(obs_cache_key)
+                        if existing is not None:
+                            st.success(f"✅ Résultat enregistré : **{existing['observed_result']}**")
                         else:
-                            st.info("Aucune valeur SHAP retournée.")
-
-                # Suppression
-                if st.session_state.get("is_admin", False):
-                    st.divider()
-                    if st.button(
-                        f"🗑️ Supprimer la prédiction #{pred_id}",
-                        key=f"del_pred_{pred_id}",
-                        type="primary",
-                    ):
-                        try:
-                            client.delete_prediction(pred_id)
-                            st.toast(f"Prédiction #{pred_id} supprimée.", icon="✅")
-                            st.rerun()
-                        except Exception as exc:
-                            st.error(f"Erreur : {exc}")
-
-            with st.expander("⬇️ Exporter toutes les prédictions (serveur)", expanded=False):
-                st.caption(
-                    "L'export serveur inclut **toutes** les prédictions correspondant aux filtres, "
-                    "pas seulement la page courante."
-                )
-                col_exp1, col_exp2 = st.columns(2)
-                export_fmt = col_exp1.selectbox(
-                    "Format", ["csv", "jsonl", "parquet"], key="pred_export_fmt"
-                )
-                export_status = col_exp2.selectbox(
-                    "Statut", ["(tous)", "success", "error"], key="pred_export_status"
-                )
-                if st.button("Préparer l'export", key="pred_export_btn"):
-                    with st.spinner("Préparation de l'export en cours…"):
-                        try:
-                            content = client.export_predictions(
-                                start=start_iso,
-                                end=end_iso,
-                                model_name=model_name,
-                                export_format=export_fmt,
-                                status=None if export_status == "(tous)" else export_status,
+                            obs_input_val = st.text_input(
+                                "Valeur observée",
+                                key=f"obs_input_{pred_id}",
+                                placeholder="Ex: 0, 1.5, setosa…",
                             )
-                            mime_map = {
-                                "csv": "text/csv",
-                                "jsonl": "application/x-ndjson",
-                                "parquet": "application/octet-stream",
-                            }
-                            st.download_button(
-                                label=f"⬇️ Télécharger predictions_export.{export_fmt}",
-                                data=content,
-                                file_name=f"predictions_export.{export_fmt}",
-                                mime=mime_map[export_fmt],
-                                key="pred_export_download",
-                            )
-                        except Exception as exc:
-                            st.error(f"Erreur lors de l'export : {exc}")
+                            if st.button("Enregistrer le résultat réel", key=f"obs_btn_{pred_id}"):
+                                if not obs_input_val.strip():
+                                    st.warning("Veuillez saisir une valeur.")
+                                else:
+                                    try:
+                                        parsed_val = int(obs_input_val)
+                                    except ValueError:
+                                        try:
+                                            parsed_val = float(obs_input_val)
+                                        except ValueError:
+                                            parsed_val = obs_input_val
+                                    try:
+                                        client.submit_observed_result(
+                                            id_obs=id_obs_val,
+                                            model_name=p.get("model_name"),
+                                            observed_result=parsed_val,
+                                        )
+                                        st.session_state[obs_cache_key] = {"observed_result": parsed_val}
+                                        st.rerun()
+                                    except Exception as exc:
+                                        st.error(f"Erreur : {exc}")
+
+                    # SHAP
+                    if p.get("status") == "success":
+                        st.divider()
+                        st.markdown("**── Explication SHAP ──**")
+                        if st.button("🧠 Calculer l'explication SHAP", key=f"shap_btn_{pred_id}"):
+                            with st.spinner("Calcul SHAP en cours…"):
+                                try:
+                                    st.session_state[f"shap_{pred_id}"] = client.explain_prediction(pred_id)
+                                except Exception as exc:
+                                    st.error(f"Impossible de calculer : {exc}")
+
+                        shap_data = st.session_state.get(f"shap_{pred_id}")
+                        if shap_data:
+                            shap_values: dict = shap_data.get("shap_values", {})
+                            base_value: float = shap_data.get("base_value", 0.0)
+                            model_type: str = shap_data.get("model_type", "")
+                            col_s1, col_s2, col_s3 = st.columns(3)
+                            col_s1.metric("E[f(X)]", f"{base_value:.4f}")
+                            col_s2.metric("Prédiction", str(shap_data.get("prediction")))
+                            col_s3.metric("Type", model_type)
+                            if shap_values:
+                                sorted_features = sorted(
+                                    shap_values.items(), key=lambda x: abs(x[1]), reverse=True
+                                )[:10]
+                                feat_names = [f for f, _ in sorted_features]
+                                shap_vals = [v for _, v in sorted_features]
+                                fig = go.Figure(go.Bar(
+                                    x=shap_vals, y=feat_names, orientation="h",
+                                    marker_color=["#e05252" if v >= 0 else "#5282e0" for v in shap_vals],
+                                    text=[f"{v:+.4f}" for v in shap_vals],
+                                    textposition="outside",
+                                ))
+                                fig.update_layout(
+                                    title="Contributions SHAP (top 10)",
+                                    xaxis_title="Contribution SHAP",
+                                    yaxis={"autorange": "reversed"},
+                                    height=max(300, len(sorted_features) * 40 + 100),
+                                    margin={"l": 20, "r": 60, "t": 50, "b": 40},
+                                    showlegend=False,
+                                )
+                                st.plotly_chart(fig, width='stretch')
+                                if len(shap_values) > 10:
+                                    with st.expander("Voir toutes les features"):
+                                        st.dataframe(
+                                            pd.DataFrame(
+                                                sorted(shap_values.items(), key=lambda x: abs(x[1]), reverse=True),
+                                                columns=["Feature", "SHAP"],
+                                            ),
+                                            width='stretch', hide_index=True,
+                                        )
+                            else:
+                                st.info("Aucune valeur SHAP retournée.")
+
+                    # Suppression
+                    if st.session_state.get("is_admin", False):
+                        st.divider()
+                        if st.button(
+                            f"🗑️ Supprimer la prédiction #{pred_id}",
+                            key=f"del_pred_{pred_id}",
+                            type="primary",
+                        ):
+                            try:
+                                client.delete_prediction(pred_id)
+                                st.toast(f"Prédiction #{pred_id} supprimée.", icon="✅")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Erreur : {exc}")
+
+                with st.expander("⬇️ Exporter toutes les prédictions (serveur)", expanded=False):
+                    st.caption(
+                        "L'export serveur inclut **toutes** les prédictions correspondant aux filtres, "
+                        "pas seulement la page courante."
+                    )
+                    col_exp1, col_exp2 = st.columns(2)
+                    export_fmt = col_exp1.selectbox(
+                        "Format", ["csv", "jsonl", "parquet"], key="pred_export_fmt"
+                    )
+                    export_status = col_exp2.selectbox(
+                        "Statut", ["(tous)", "success", "error"], key="pred_export_status"
+                    )
+                    if st.button("Préparer l'export", key="pred_export_btn"):
+                        with st.spinner("Préparation de l'export en cours…"):
+                            try:
+                                content = client.export_predictions(
+                                    start=start_iso,
+                                    end=end_iso,
+                                    model_name=model_name,
+                                    export_format=export_fmt,
+                                    status=None if export_status == "(tous)" else export_status,
+                                )
+                                mime_map = {
+                                    "csv": "text/csv",
+                                    "jsonl": "application/x-ndjson",
+                                    "parquet": "application/octet-stream",
+                                }
+                                st.download_button(
+                                    label=f"⬇️ Télécharger predictions_export.{export_fmt}",
+                                    data=content,
+                                    file_name=f"predictions_export.{export_fmt}",
+                                    mime=mime_map[export_fmt],
+                                    key="pred_export_download",
+                                )
+                            except Exception as exc:
+                                st.error(f"Erreur lors de l'export : {exc}")
+
 
         # --- Import / Export résultats observés ---
         CSV_TEMPLATE = (
