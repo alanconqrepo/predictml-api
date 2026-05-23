@@ -1,4 +1,4 @@
-"""
+﻿"""
 Validation des cas de référence (Golden Test Set) pour les modèles ML
 """
 
@@ -96,7 +96,7 @@ else:
 
     st.dataframe(
         pd.DataFrame(rows),
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         column_config={
             "ID": st.column_config.NumberColumn(

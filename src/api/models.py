@@ -2205,6 +2205,12 @@ async def update_retrain_schedule(
 async def get_ab_comparison(
     name: ModelNamePath,
     days: int = Query(30, ge=1, le=90, description="Fenêtre d'analyse en jours (max 90)"),
+    metric: Optional[str] = Query(
+        None,
+        description="Métrique pour le test de significativité : 'error_rate', 'mae', 'response_time_ms'. "
+                    "Par défaut : sélection automatique.",
+        pattern=r"^(error_rate|mae|response_time_ms)$",
+    ),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
@@ -2265,7 +2271,7 @@ async def get_ab_comparison(
             )
         )
 
-    significance_data = compute_ab_significance(raw_stats)
+    significance_data = compute_ab_significance(raw_stats, metric=metric)
     ab_significance = ABSignificance(**significance_data) if significance_data else None
 
     return ABCompareResponse(

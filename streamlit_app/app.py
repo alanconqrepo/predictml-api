@@ -1,4 +1,4 @@
-"""
+﻿"""
 Page d'accueil et login — PredictML Admin Dashboard
 """
 
@@ -91,7 +91,7 @@ def show_login():
     with st.form("login_form"):
         api_url = st.text_input("URL de l'API", value=DEFAULT_API_URL)
         token = st.text_input("API Token", type="password", placeholder="Votre token Bearer")
-        submitted = st.form_submit_button("Se connecter", use_container_width=True)
+        submitted = st.form_submit_button("Se connecter", width='stretch')
 
     if submitted:
         if not token:
@@ -291,7 +291,7 @@ if _logged_in:
             except Exception:
                 st.error("Impossible de charger le token.")
 
-        if st.button("Se déconnecter", type="secondary", use_container_width=True):
+        if st.button("Se déconnecter", type="secondary", width='stretch'):
             _clear_session()
             logout()
 

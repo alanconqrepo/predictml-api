@@ -1,4 +1,4 @@
-"""
+﻿"""
 Page d'aide avec chatbot LLM (function calling natif) — PredictML Admin
 """
 
@@ -319,7 +319,7 @@ with st.expander("📚 Documentation", expanded=True):
         selected_label = col_sel.selectbox("Choisir un document", display_names, key="help_doc_select")
         selected_key = name_map[selected_label]
 
-        if col_btn.button("⛶ Agrandir", key="open_doc_popup", use_container_width=True):
+        if col_btn.button("⛶ Agrandir", key="open_doc_popup", width='stretch'):
             _doc_popup(docs[selected_key], selected_label)
 
         col_dl.download_button(
@@ -327,7 +327,7 @@ with st.expander("📚 Documentation", expanded=True):
             data=docs[selected_key].encode("utf-8"),
             file_name=f"{selected_key.lower()}.md",
             mime="text/markdown",
-            use_container_width=True,
+            width='stretch',
             key="dl_doc",
         )
 
@@ -342,14 +342,14 @@ if snippets:
     with st.expander(f"🔧 Code source ({len(snippets)} fichiers)", expanded=False):
         col_src, col_src_btn, col_src_dl = st.columns([6, 1, 1], vertical_alignment="bottom")
         selected_src = col_src.selectbox("Fichier", list(snippets.keys()), key="help_src_select")
-        if col_src_btn.button("⛶ Agrandir", key="open_src_popup", use_container_width=True):
+        if col_src_btn.button("⛶ Agrandir", key="open_src_popup", width='stretch'):
             _src_popup(selected_src, snippets[selected_src])
         col_src_dl.download_button(
             "⬇ .py",
             data=snippets[selected_src].encode("utf-8"),
             file_name=selected_src.split("/")[-1],
             mime="text/x-python",
-            use_container_width=True,
+            width='stretch',
             key="dl_src",
         )
         st.code(snippets[selected_src], language="python")
@@ -372,7 +372,7 @@ with st.expander("💬 Assistant IA", expanded=True):
     ):
         cols = st.columns(3)
         for i, (label, prompt) in enumerate(QUICK_TOPICS):
-            if cols[i % 3].button(label, key=f"quick_{i}", use_container_width=True):
+            if cols[i % 3].button(label, key=f"quick_{i}", width='stretch'):
                 st.session_state["help_pending_prompt"] = prompt
 
     btn_col1, btn_col2 = st.columns([2, 5])

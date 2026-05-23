@@ -1,4 +1,4 @@
-"""
+﻿"""
 Gestion centralisée des ré-entraînements et plannings cron
 """
 
@@ -93,7 +93,7 @@ with tab_overview:
 
     st.dataframe(
         pd.DataFrame(rows),
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         column_config={
             "Modèle": st.column_config.TextColumn(
@@ -505,7 +505,7 @@ with tab_history:
         df_hist = pd.DataFrame(rows)
         st.dataframe(
             df_hist,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             column_config={
                 "Date": st.column_config.TextColumn(
@@ -703,7 +703,7 @@ with tab_history:
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     height=420,
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
 
                 with st.expander("Voir le détail par feature"):
                     detail_rows = sorted(comparison, key=lambda x: x["delta_pct"], reverse=True)
@@ -725,7 +725,7 @@ with tab_history:
                                 for c in detail_rows
                             ]
                         ),
-                        use_container_width=True,
+                        width='stretch',
                         hide_index=True,
                         column_config={
                             "Feature": st.column_config.TextColumn(
