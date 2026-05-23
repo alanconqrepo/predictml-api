@@ -399,7 +399,7 @@ with _tab_global:
         hovertemplate="<b>%{label}</b><br>%{value:,} prédictions<br>%{percent}<extra></extra>",
     )
     fig_pie.update_layout(showlegend=False, margin=dict(t=50, b=10, l=10, r=10))
-    col_pie.plotly_chart(fig_pie, use_container_width=True)
+    col_pie.plotly_chart(fig_pie, width='stretch')
 
     # — Évolution du taux d'erreur ——————————————————————————————————————
     if not df_ts.empty:
@@ -434,7 +434,7 @@ with _tab_global:
                 x=0.5, y=0.5, font_size=14, font_color="#888",
             )],
         )
-    col_err_ts.plotly_chart(fig_err_ts, use_container_width=True)
+    col_err_ts.plotly_chart(fig_err_ts, width='stretch')
 
     # — Évolution de la latence moyenne ————————————————————————————————
     df_lat = df_ts[df_ts["avg_latency_ms"].notna()].copy() if not df_ts.empty else df_ts
@@ -466,7 +466,7 @@ with _tab_global:
                 x=0.5, y=0.5, font_size=14, font_color="#888",
             )],
         )
-    st.plotly_chart(fig_lat, use_container_width=True)
+    st.plotly_chart(fig_lat, width='stretch')
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1082,7 +1082,7 @@ with _tab_detail:
                                     coloraxis_showscale=False,
                                     showlegend=False,
                                 )
-                                st.plotly_chart(_fig_z, use_container_width=True)
+                                st.plotly_chart(_fig_z, width='stretch')
 
                             with _dc2:
                                 st.caption("Valeurs reçues vs baseline d'entraînement")
@@ -1099,8 +1099,7 @@ with _tab_detail:
                                 } for fn, fd in _feats_sorted]
                                 st.dataframe(
                                     pd.DataFrame(_feat_detail_rows),
-                                    hide_index=True,
-                                    use_container_width=True,
+                                    hide_index=True, width='stretch',
                                     column_config={
                                         "Feature": st.column_config.TextColumn("Feature"),
                                         "Valeur reçue": st.column_config.NumberColumn(
@@ -1257,7 +1256,7 @@ with _tab_detail:
                                 showlegend=False, height=320,
                                 yaxis_title="Valeur prédite ŷ",
                             )
-                            st.plotly_chart(_fig_reg, use_container_width=True)
+                            st.plotly_chart(_fig_reg, width='stretch')
 
                 elif _all_dist_labels:
                     # ── Classification : barres 100 % empilées ──────────────
