@@ -275,9 +275,11 @@ async def _do_retrain(name: str, version: str) -> None:
                             "id_obs": row["id_obs"],
                             "input_features": json.dumps(row["input_features"]),
                             "prediction_result": json.dumps(row["prediction_result"]),
-                            "observed_result": json.dumps(row["observed_result"])
-                            if row["observed_result"] is not None
-                            else "",
+                            "observed_result": (
+                                json.dumps(row["observed_result"])
+                                if row["observed_result"] is not None
+                                else ""
+                            ),
                             "timestamp": row["timestamp"],
                             "model_version": row["model_version"],
                             "response_time_ms": row["response_time_ms"],
@@ -389,6 +391,8 @@ async def _do_retrain(name: str, version: str) -> None:
     # fallback sur AST + importlib.metadata si absent.
     from src.services.env_snapshot_service import (
         dependencies_to_requirements_txt as _deps_to_req,
+    )
+    from src.services.env_snapshot_service import (
         generate_requirements_txt as _gen_req,
     )
 

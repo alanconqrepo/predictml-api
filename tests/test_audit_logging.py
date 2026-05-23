@@ -287,17 +287,17 @@ def test_audit_retrain_trigger():
 
     _minio_mock.download_file_bytes.return_value = VALID_TRAIN_SCRIPT.encode()
 
-    with patch("asyncio.create_subprocess_exec", side_effect=_mock_exec_success), \
-         patch("src.api.models.audit_log") as mock_audit:
+    with patch("src.api.models.audit_log") as mock_audit:
         r = client.post(
             f"/models/{name}/1.0.0/retrain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
             json={"start_date": "2025-01-01", "end_date": "2025-12-31", "new_version": "1.1.0"},
         )
-    assert r.status_code == 200
-    assert r.json()["success"] is True
+    # Le retrain est maintenant asynchrone (ARQ) → 202 + job_id
+    assert r.status_code == 202
+    assert "job_id" in r.json()
     mock_audit.assert_called_once()
-    assert mock_audit.call_args[0][0] == "retrain.trigger"
+    assert mock_audit.call_args[0][0] == "retrain.enqueue"
     assert mock_audit.call_args[1]["actor_id"] == admin_id
     assert mock_audit.call_args[1]["resource"] == f"{name}:1.0.0"
     assert mock_audit.call_args[1]["details"]["new_version"] == "1.1.0"

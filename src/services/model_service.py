@@ -10,7 +10,6 @@ import random
 from typing import Any, Dict, List, Optional, Tuple
 
 import joblib
-
 import redis.asyncio as aioredis
 import structlog
 from fastapi import HTTPException, status

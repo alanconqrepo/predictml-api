@@ -7,7 +7,6 @@ import io
 from typing import Any, List, Optional
 
 import joblib
-
 import structlog
 from minio import Minio
 from minio.error import S3Error

@@ -50,7 +50,9 @@ class ModelMetadata(Base):
     algorithm = Column(String(100), nullable=True)  # RandomForest, LogisticRegression, etc.
     features_count = Column(Integer, nullable=True)
     classes = Column(JSON, nullable=True)  # Liste des classes
-    model_task = Column(String(50), nullable=True)  # "regression" | "classification_binary" | "classification_multiclass"
+    model_task = Column(
+        String(50), nullable=True
+    )  # "regression" | "classification_binary" | "classification_multiclass"
 
     # Performance
     accuracy = Column(Float, nullable=True)
@@ -58,7 +60,7 @@ class ModelMetadata(Base):
     recall = Column(Float, nullable=True)
     f1_score = Column(Float, nullable=True)
     training_metrics = Column(JSON, nullable=True)  # Métriques supplémentaires
-    hyperparameters = Column(JSON, nullable=True)   # Hyperparamètres du modèle
+    hyperparameters = Column(JSON, nullable=True)  # Hyperparamètres du modèle
 
     # Seuil de confiance
     confidence_threshold = Column(
@@ -70,7 +72,9 @@ class ModelMetadata(Base):
 
     # Script de ré-entraînement
     train_script_object_key = Column(String(255), nullable=True)  # Chemin MinIO vers train.py
-    requirements_object_key = Column(String(255), nullable=True)  # Chemin MinIO vers requirements.txt
+    requirements_object_key = Column(
+        String(255), nullable=True
+    )  # Chemin MinIO vers requirements.txt
 
     # Politique d'auto-promotion post-retrain
     promotion_policy = Column(JSON, nullable=True)

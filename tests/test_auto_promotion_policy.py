@@ -136,6 +136,7 @@ _minio_mock.upload_file_bytes.return_value = {
 
 
 async def _mock_exec_success(*args, **kwargs):
+    """Mock subprocess pour retrain_service — readline() + stderr.read()."""
     env = kwargs.get("env", {})
     output_path = env.get("OUTPUT_MODEL_PATH", "")
     if output_path:
@@ -145,14 +146,40 @@ async def _mock_exec_success(*args, **kwargs):
             joblib.dump(model, f)
     proc = MagicMock()
     proc.returncode = 0
-    proc.communicate = AsyncMock(
-        return_value=(
-            b'Training done\n{"accuracy": 0.95, "f1_score": 0.93}\n',
-            b"",
-        )
+    proc.stdout.readline = AsyncMock(
+        side_effect=[
+            b"Training done\n",
+            b'{"accuracy": 0.95, "f1_score": 0.93}\n',
+            b"",  # EOF
+        ]
     )
+    proc.stderr.read = AsyncMock(return_value=b"")
+    proc.wait = AsyncMock(return_value=0)
     proc.kill = MagicMock()
     return proc
+
+
+def _auto_promo_source_fields(train_script_key="mock_train.py", promotion_policy=None):
+    """Crée source_fields minimal pour les tests do_retrain() avec auto-promotion."""
+    return {
+        "train_script_object_key": train_script_key,
+        "description": None,
+        "algorithm": None,
+        "features_count": None,
+        "classes": None,
+        "model_task": None,
+        "training_params": None,
+        "hyperparameters": None,
+        "training_dataset": None,
+        "feature_baseline": None,
+        "confidence_threshold": None,
+        "tags": None,
+        "webhook_url": None,
+        "promotion_policy": promotion_policy,
+        "retrain_schedule": None,
+        "accuracy": 0.90,
+        "f1_score": 0.89,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +309,12 @@ class TestPolicyEndpoint:
 
 
 class TestAutoPromotionInRetrain:
-    """Tests de l'auto-promotion déclenchée par POST /models/{name}/{version}/retrain."""
+    """Tests de l'auto-promotion déclenchée par retrain_service.do_retrain().
+
+    Le retrain est maintenant asynchrone (ARQ) : l'endpoint retourne 202 et
+    l'auto-promotion est évaluée par le worker. Ces tests valident la logique
+    via do_retrain() directement.
+    """
 
     @classmethod
     def setup_class(cls):
@@ -294,174 +326,188 @@ class TestAutoPromotionInRetrain:
         _create_model(cls.model_policy_off, "1.0.0", with_train_script=True)
         _create_model(cls.model_policy_on, "1.0.0", with_train_script=True)
 
-        # Activer la policy sur model_policy_on
-        client.patch(
-            f"/models/{cls.model_policy_on}/policy",
-            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-            json={"min_accuracy": 0.80, "min_sample_validation": 3, "auto_promote": True},
-        )
-        # Policy présente mais auto_promote=False
-        client.patch(
-            f"/models/{cls.model_policy_off}/policy",
-            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-            json={"min_accuracy": 0.80, "min_sample_validation": 3, "auto_promote": False},
-        )
-
     def test_retrain_without_policy_auto_promoted_is_none(self):
-        """Sans policy, auto_promoted n'est pas renseigné (None)."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_success),
-        ):
-            r = client.post(
-                f"/models/{self.model_no_policy}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={"start_date": "2025-01-01", "end_date": "2025-12-31", "new_version": "2.0.0"},
-            )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["success"] is True
-        assert data["auto_promoted"] is None
+        """Sans policy, auto_promoted est None."""
+        from src.services.retrain_service import do_retrain
+
+        async def _run():
+            with patch("asyncio.create_subprocess_exec", new=AsyncMock(side_effect=_mock_exec_success)):
+                return await do_retrain(
+                    model_name=self.model_no_policy,
+                    source_version="1.0.0",
+                    new_version="auto_2.0.0",
+                    start_date="2025-01-01",
+                    end_date="2025-12-31",
+                    source_fields=_auto_promo_source_fields(promotion_policy=None),
+                )
+
+        result = asyncio.run(_run())
+        assert result["success"] is True
+        assert result["auto_promoted"] is None
 
     def test_retrain_policy_auto_promote_false_not_evaluated(self):
-        """Policy présente mais auto_promote=False → auto_promoted=None (non déclenché)."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_success),
-        ):
-            r = client.post(
-                f"/models/{self.model_policy_off}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={"start_date": "2025-01-01", "end_date": "2025-12-31", "new_version": "2.0.0"},
-            )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["success"] is True
-        # auto_promote=False → branche non déclenchée, pas de promotion → auto_promoted=False
-        assert data["auto_promoted"] is False
+        """Policy présente mais auto_promote=False → auto_promoted=None (non évalué)."""
+        from src.services.retrain_service import do_retrain
+
+        async def _run():
+            with patch("asyncio.create_subprocess_exec", new=AsyncMock(side_effect=_mock_exec_success)):
+                return await do_retrain(
+                    model_name=self.model_policy_off,
+                    source_version="1.0.0",
+                    new_version="auto_2.0.0",
+                    start_date="2025-01-01",
+                    end_date="2025-12-31",
+                    source_fields=_auto_promo_source_fields(
+                        promotion_policy={"min_accuracy": 0.80, "min_sample_validation": 3, "auto_promote": False},
+                    ),
+                )
+
+        result = asyncio.run(_run())
+        assert result["success"] is True
+        # auto_promote=False → branche non déclenchée → auto_promoted=None
+        assert result["auto_promoted"] is None
 
     def test_retrain_auto_promote_insufficient_samples(self):
-        """Policy active mais pas assez d'observed_results → auto_promoted=False."""
-        with (
-            patch(
-                "asyncio.create_subprocess_exec",
-                new=AsyncMock(side_effect=_mock_exec_success),
-            ),
-            patch(
-                "src.api.models.evaluate_auto_promotion",
-                new=AsyncMock(return_value=(False, "Échantillons insuffisants : 0/3 requis.")),
-            ),
-        ):
-            r = client.post(
-                f"/models/{self.model_policy_on}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={"start_date": "2025-01-01", "end_date": "2025-12-31", "new_version": "2.0.0"},
-            )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["success"] is True
-        assert data["auto_promoted"] is False
-        assert "insuffisant" in data["auto_promote_reason"].lower()
-        assert data["new_model_metadata"]["is_production"] is False
+        """Policy active, échantillons insuffisants → auto_promoted=False."""
+        from src.services.retrain_service import do_retrain
+
+        async def _run():
+            with (
+                patch("asyncio.create_subprocess_exec", new=AsyncMock(side_effect=_mock_exec_success)),
+                patch(
+                    "src.services.auto_promotion_service.evaluate_auto_promotion",
+                    new=AsyncMock(return_value=(False, "Échantillons insuffisants : 0/3 requis.")),
+                ),
+            ):
+                return await do_retrain(
+                    model_name=self.model_policy_on,
+                    source_version="1.0.0",
+                    new_version="auto_2.0.0",
+                    start_date="2025-01-01",
+                    end_date="2025-12-31",
+                    source_fields=_auto_promo_source_fields(
+                        promotion_policy={"min_accuracy": 0.80, "min_sample_validation": 3, "auto_promote": True},
+                    ),
+                )
+
+        result = asyncio.run(_run())
+        assert result["success"] is True
+        assert result["auto_promoted"] is False
+        assert "insuffisant" in result["auto_promote_reason"].lower()
+        assert result["is_production"] is False
 
     def test_retrain_auto_promote_success(self):
         """Policy active, critères satisfaits → auto_promoted=True, version en production."""
-        with (
-            patch(
-                "asyncio.create_subprocess_exec",
-                new=AsyncMock(side_effect=_mock_exec_success),
-            ),
-            patch(
-                "src.api.models.evaluate_auto_promotion",
-                new=AsyncMock(
-                    return_value=(True, "Tous les critères de promotion sont satisfaits.")
+        from src.services.retrain_service import do_retrain
+
+        async def _run():
+            with (
+                patch("asyncio.create_subprocess_exec", new=AsyncMock(side_effect=_mock_exec_success)),
+                patch(
+                    "src.services.auto_promotion_service.evaluate_auto_promotion",
+                    new=AsyncMock(return_value=(True, "Tous les critères de promotion sont satisfaits.")),
                 ),
-            ),
-        ):
-            r = client.post(
-                f"/models/{self.model_policy_on}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={"start_date": "2024-01-01", "end_date": "2024-12-31", "new_version": "3.0.0"},
-            )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["success"] is True
-        assert data["auto_promoted"] is True
-        assert "satisfait" in data["auto_promote_reason"].lower()
-        assert data["new_model_metadata"]["is_production"] is True
+            ):
+                return await do_retrain(
+                    model_name=self.model_policy_on,
+                    source_version="1.0.0",
+                    new_version="auto_3.0.0",
+                    start_date="2024-01-01",
+                    end_date="2024-12-31",
+                    source_fields=_auto_promo_source_fields(
+                        promotion_policy={"min_accuracy": 0.80, "min_sample_validation": 3, "auto_promote": True},
+                    ),
+                )
+
+        result = asyncio.run(_run())
+        assert result["success"] is True
+        assert result["auto_promoted"] is True
+        assert "satisfait" in result["auto_promote_reason"].lower()
+        assert result["is_production"] is True
 
     def test_retrain_auto_promote_accuracy_fails(self):
         """Policy active, accuracy insuffisante → auto_promoted=False, non promu."""
-        with (
-            patch(
-                "asyncio.create_subprocess_exec",
-                new=AsyncMock(side_effect=_mock_exec_success),
-            ),
-            patch(
-                "src.api.models.evaluate_auto_promotion",
-                new=AsyncMock(
-                    return_value=(False, "Précision insuffisante : 0.7500 < 0.8000 requis.")
+        from src.services.retrain_service import do_retrain
+
+        async def _run():
+            with (
+                patch("asyncio.create_subprocess_exec", new=AsyncMock(side_effect=_mock_exec_success)),
+                patch(
+                    "src.services.auto_promotion_service.evaluate_auto_promotion",
+                    new=AsyncMock(
+                        return_value=(False, "Précision insuffisante : 0.7500 < 0.8000 requis.")
+                    ),
                 ),
-            ),
-        ):
-            r = client.post(
-                f"/models/{self.model_policy_on}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={"start_date": "2023-01-01", "end_date": "2023-12-31", "new_version": "4.0.0"},
-            )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["success"] is True
-        assert data["auto_promoted"] is False
-        assert "précision" in data["auto_promote_reason"].lower()
-        assert data["new_model_metadata"]["is_production"] is False
+            ):
+                return await do_retrain(
+                    model_name=self.model_policy_on,
+                    source_version="1.0.0",
+                    new_version="auto_4.0.0",
+                    start_date="2023-01-01",
+                    end_date="2023-12-31",
+                    source_fields=_auto_promo_source_fields(
+                        promotion_policy={"min_accuracy": 0.80, "min_sample_validation": 3, "auto_promote": True},
+                    ),
+                )
+
+        result = asyncio.run(_run())
+        assert result["success"] is True
+        assert result["auto_promoted"] is False
+        assert "précision" in result["auto_promote_reason"].lower()
+        assert result["is_production"] is False
 
     def test_retrain_auto_promote_latency_fails(self):
         """Policy active, latence P95 trop élevée → auto_promoted=False."""
-        with (
-            patch(
-                "asyncio.create_subprocess_exec",
-                new=AsyncMock(side_effect=_mock_exec_success),
-            ),
-            patch(
-                "src.api.models.evaluate_auto_promotion",
-                new=AsyncMock(
-                    return_value=(False, "Latence P95 trop élevée : 350.0ms > 200.0ms max.")
+        from src.services.retrain_service import do_retrain
+
+        async def _run():
+            with (
+                patch("asyncio.create_subprocess_exec", new=AsyncMock(side_effect=_mock_exec_success)),
+                patch(
+                    "src.services.auto_promotion_service.evaluate_auto_promotion",
+                    new=AsyncMock(
+                        return_value=(False, "Latence P95 trop élevée : 350.0ms > 200.0ms max.")
+                    ),
                 ),
-            ),
-        ):
-            r = client.post(
-                f"/models/{self.model_policy_on}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={"start_date": "2022-01-01", "end_date": "2022-12-31", "new_version": "5.0.0"},
-            )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["auto_promoted"] is False
-        assert "latence" in data["auto_promote_reason"].lower()
+            ):
+                return await do_retrain(
+                    model_name=self.model_policy_on,
+                    source_version="1.0.0",
+                    new_version="auto_5.0.0",
+                    start_date="2022-01-01",
+                    end_date="2022-12-31",
+                    source_fields=_auto_promo_source_fields(
+                        promotion_policy={"min_accuracy": 0.80, "min_sample_validation": 3, "auto_promote": True},
+                    ),
+                )
+
+        result = asyncio.run(_run())
+        assert result["auto_promoted"] is False
+        assert "latence" in result["auto_promote_reason"].lower()
 
     def test_retrain_set_production_overrides_auto_promotion(self):
-        """set_production=True : promotion manuelle, auto_promoted non calculé."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_success),
-        ):
-            r = client.post(
-                f"/models/{self.model_policy_on}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2021-01-01",
-                    "end_date": "2021-12-31",
-                    "new_version": "6.0.0",
-                    "set_production": True,
-                },
-            )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["success"] is True
-        assert data["new_model_metadata"]["is_production"] is True
+        """set_production=True : promotion manuelle, auto_promoted est None."""
+        from src.services.retrain_service import do_retrain
+
+        async def _run():
+            with patch("asyncio.create_subprocess_exec", new=AsyncMock(side_effect=_mock_exec_success)):
+                return await do_retrain(
+                    model_name=self.model_policy_on,
+                    source_version="1.0.0",
+                    new_version="auto_6.0.0",
+                    start_date="2021-01-01",
+                    end_date="2021-12-31",
+                    set_production=True,
+                    source_fields=_auto_promo_source_fields(
+                        promotion_policy={"min_accuracy": 0.80, "min_sample_validation": 3, "auto_promote": True},
+                    ),
+                )
+
+        result = asyncio.run(_run())
+        assert result["success"] is True
+        assert result["is_production"] is True
         # set_production=True → branche auto-promotion non empruntée
-        assert data["auto_promoted"] is None
+        assert result["auto_promoted"] is None
 
 
 # ---------------------------------------------------------------------------

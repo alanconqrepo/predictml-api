@@ -37,7 +37,7 @@ from src.core.logging import setup_logging
 setup_logging(debug=settings.DEBUG)
 # ──────────────────────────────────────────────────────────────────────────────
 
-from src.api import account_requests, models, monitoring, observed_results, predict, users
+from src.api import account_requests, jobs, models, monitoring, observed_results, predict, users
 from src.core.rate_limit import limiter
 from src.core.security import require_admin
 from src.db.database import AsyncSessionLocal, close_db, engine, get_db, init_db
@@ -45,6 +45,7 @@ from src.schemas.health import DependencyDetail, DependencyHealthResponse
 from src.services.db_service import db_service
 from src.services.minio_service import minio_service
 from src.services.model_service import model_service
+
 logger = structlog.get_logger(__name__)
 
 
@@ -161,41 +162,31 @@ async def lifespan(app: FastAPI):
         minio_bucket=settings.MINIO_BUCKET,
     )
 
-    # Démarrer le scheduler de supervision (alertes + webhooks sur événements modèle)
+    # Initialiser le pool ARQ pour l'enqueue des tâches longues
+    # (retrain, etc.) vers le worker retrain-worker
     try:
-        from src.tasks.supervision_reporter import start_scheduler
+        import src.core.arq_pool as arq_pool_module
 
-        start_scheduler()
-        logger.info("Scheduler de supervision démarré")
+        await arq_pool_module.get_arq_pool()
+        logger.info("ARQ pool initialisé — worker retrain-worker prêt à recevoir des jobs")
     except Exception as e:
-        logger.warning("Impossible de démarrer le scheduler", error=str(e))
-
-    # Démarrer le scheduler de ré-entraînement automatique
-    try:
-        from src.tasks.retrain_scheduler import start_retrain_scheduler
-
-        await start_retrain_scheduler()
-        logger.info("Scheduler de ré-entraînement démarré")
-    except Exception as e:
-        logger.warning("Impossible de démarrer le scheduler de ré-entraînement", error=str(e))
+        logger.warning(
+            "ARQ pool indisponible au démarrage — les retrain manuels retourneront 503 "
+            "jusqu'à ce que le worker soit joignable",
+            error=str(e),
+        )
 
     yield
 
     # Shutdown
     logger.info("Fermeture de l'application")
     try:
-        from src.tasks.supervision_reporter import stop_scheduler
+        import src.core.arq_pool as arq_pool_module
 
-        stop_scheduler()
+        await arq_pool_module.close_arq_pool()
     except Exception:
         pass
 
-    try:
-        from src.tasks.retrain_scheduler import stop_retrain_scheduler
-
-        stop_retrain_scheduler()
-    except Exception:
-        pass
     try:
         await close_db()
         logger.info("Connexions DB fermées")
@@ -265,6 +256,7 @@ app.include_router(users.router)
 app.include_router(account_requests.router)
 app.include_router(observed_results.router)
 app.include_router(monitoring.router)
+app.include_router(jobs.router)
 
 
 @app.get("/metrics", include_in_schema=False)

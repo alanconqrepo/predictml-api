@@ -411,6 +411,66 @@ services:
       - internal
       - frontend
 
+  # Worker ARQ — exécute les tâches longues hors du processus API
+  # (retrain, alertes automatiques, rapports hebdo)
+  # 1 seul réplica : le scheduling est centralisé ici (plus d'APScheduler dans l'API)
+  retrain-worker:
+    build: .
+    command: python -m arq src.tasks.arq_worker.WorkerSettings
+    volumes:
+      - ./src:/app/src
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "2.0"   # le subprocess train.py peut être CPU-intensif
+          memory: 4G
+        reservations:
+          cpus: "0.5"
+          memory: 1G
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:${PGBOUNCER_PORT:-6432}/${POSTGRES_DB:-sklearn_api}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis-master:${REDIS_PORT:-6379}/0
+      - REDIS_SENTINEL_HOSTS=redis-sentinel-1:${REDIS_SENTINEL_PORT:-26379},redis-sentinel-2:${REDIS_SENTINEL_PORT:-26379},redis-sentinel-3:${REDIS_SENTINEL_PORT:-26379}
+      - SECRET_KEY=${SECRET_KEY:?Définissez SECRET_KEY dans .env}
+      - MINIO_ENDPOINT=minio:${MINIO_INTERNAL_PORT:-9000}
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
+      - MINIO_BUCKET=${MINIO_BUCKET:-models}
+      - MLFLOW_TRACKING_URI=http://mlflow:${MLFLOW_PORT:-5000}
+      - MLFLOW_TRACKING_USERNAME=${MLFLOW_ADMIN_USER:-admin}
+      - MLFLOW_TRACKING_PASSWORD=${MLFLOW_ADMIN_PASSWORD:-}
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:${MINIO_INTERNAL_PORT:-9000}
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:?Définissez MINIO_ROOT_USER dans .env}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      - ENABLE_EMAIL_ALERTS=${ENABLE_EMAIL_ALERTS:-false}
+      - WEEKLY_REPORT_ENABLED=${WEEKLY_REPORT_ENABLED:-false}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - ALERT_EMAIL_TO=${ALERT_EMAIL_TO:-}
+      - PERFORMANCE_DRIFT_ALERT_THRESHOLD=${PERFORMANCE_DRIFT_ALERT_THRESHOLD:-0.10}
+      - ERROR_RATE_ALERT_THRESHOLD=${ERROR_RATE_ALERT_THRESHOLD:-0.10}
+      - PYTHONDONTWRITEBYTECODE=1
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      pgbouncer:
+        condition: service_healthy
+      redis-sentinel-1:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
   # Worker — consommateur Redis Stream, batch INSERT en DB
   prediction-writer:
     build: .

@@ -49,7 +49,7 @@ _minio_mock.async_download_file_bytes = AsyncMock(return_value=b"fake-model-byte
 import src.api.models  # noqa: E402 — doit être importé avant le patch
 import src.tasks.retrain_scheduler  # noqa: E402 — doit être importé avant le patch
 patch("src.api.models.minio_service", _minio_mock).start()
-# Couvre les imports lazy du scheduler (from src.services.minio_service import minio_service)
+# Couvre les imports lazy du scheduler et de retrain_service
 patch("src.services.minio_service.minio_service", _minio_mock).start()
 
 # Mock MLflow service globalement — les tests ne nécessitent pas de serveur MLflow
@@ -61,8 +61,20 @@ _mlflow_mock.log_production_snapshot.return_value = "mock-monitoring-run-id"
 
 # Patch dans le namespace de api.models (import module-level déjà lié)
 patch("src.api.models.mlflow_service", _mlflow_mock).start()
-# Patch dans le module source : couvre les imports lazy du scheduler (from src.services.mlflow_service import mlflow_service)
+# Patch dans le module source : couvre les imports lazy du scheduler et retrain_service
 patch("src.services.mlflow_service.mlflow_service", _mlflow_mock).start()
+
+# Mock ARQ pool — les tests ne nécessitent pas de serveur ARQ/Redis pour les jobs
+_arq_mock_pool = MagicMock()
+_arq_mock_pool.enqueue_job = AsyncMock(return_value=MagicMock(job_id="test-arq-job-id-abc123"))
+
+async def _fake_get_arq_pool():
+    return _arq_mock_pool
+
+import src.core.arq_pool as _arq_pool_module  # noqa: E402
+patch.object(_arq_pool_module, "get_arq_pool", side_effect=_fake_get_arq_pool).start()
+# Patch dans le namespace de api.models où get_arq_pool est utilisé via module
+patch("src.api.models.arq_pool_module", _arq_pool_module).start()
 
 # Remplacer le client Redis du singleton par un FakeRedis en mémoire
 # (aucun serveur Redis requis pour les tests)
@@ -119,7 +131,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.pool import NullPool
 
 from src.db.database import get_db, get_read_db, Base
-from src.db.models import AccountRequest, GoldenTest, User, Prediction, ModelMetadata, ObservedResult  # noqa: F401 — enregistre les modèles dans Base
+from src.db.models import AccountRequest, GoldenTest, User, Prediction, ModelMetadata, ObservedResult, TaskRun  # noqa: F401 — enregistre les modèles dans Base
 from src.main import app
 
 

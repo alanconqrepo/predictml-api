@@ -350,8 +350,10 @@ async def compute_output_drift(
 
         current_distribution = {label: count / total for label, count in label_counts.items()}
 
-    all_labels = list(baseline_distribution.keys()) if regression_bins else sorted(
-        set(baseline_distribution.keys()) | set(current_distribution.keys())
+    all_labels = (
+        list(baseline_distribution.keys())
+        if regression_bins
+        else sorted(set(baseline_distribution.keys()) | set(current_distribution.keys()))
     )
 
     psi = 0.0

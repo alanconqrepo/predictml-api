@@ -157,7 +157,7 @@ class GoldenTestService:
                     description=gt.description,
                     input=features,
                     expected=str(gt.expected_output),
-                    actual=actual,          # label résolu (ex: "versicolor") pas l'index brut
+                    actual=actual,  # label résolu (ex: "versicolor") pas l'index brut
                     passed=passed,
                 )
             )
