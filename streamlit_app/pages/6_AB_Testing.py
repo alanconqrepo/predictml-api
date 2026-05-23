@@ -65,8 +65,14 @@ if is_admin:
             "La somme des poids A/B doit être **≤ 1.0**."
         )
 
-        MODES = ["(inchangé)", "ab_test", "shadow", "production"]
-        _BADGE = {"ab_test": "🟠 A/B", "shadow": "🟣 Shadow", "production": "🟢 Prod"}
+        # Mapping label ↔ valeur API (pas de "(inchangé)" — pré-rempli avec la valeur courante)
+        _MODE_TO_LABEL = {
+            "ab_test":    "🟠 A/B",
+            "shadow":     "🟣 Shadow",
+            "production": "🟢 Prod",
+        }
+        _LABEL_TO_MODE = {v: k for k, v in _MODE_TO_LABEL.items()}
+        _MODE_LABELS = list(_MODE_TO_LABEL.values())   # ["🟠 A/B", "🟣 Shadow", "🟢 Prod"]
         configs: dict = {}
 
         cols_header = st.columns([2, 2, 1, 2, 1])
@@ -78,31 +84,33 @@ if is_admin:
 
         for v in versions_for_model:
             ver = v["version"]
-            mode_current = v.get("deployment_mode") or "—"
+            mode_current = v.get("deployment_mode") or ""
             weight_current = v.get("traffic_weight")
 
             row_cols = st.columns([2, 2, 1, 2, 1])
             row_cols[0].markdown(f"`{ver}`")
 
             # Mode actuel (badge)
-            row_cols[1].markdown(_BADGE.get(mode_current, f"⚪ {mode_current}"))
+            row_cols[1].markdown(_MODE_TO_LABEL.get(mode_current, f"⚪ {mode_current or '—'}"))
 
             # Poids actuel
             row_cols[2].markdown(
                 f"`{weight_current:.0%}`" if weight_current is not None else "—"
             )
 
-            # Nouveau mode — pré-rempli avec la valeur courante
-            _default_idx = MODES.index(mode_current) if mode_current in MODES else 0
-            new_mode = row_cols[3].selectbox(
+            # Nouveau mode — même badge, pré-rempli avec la valeur courante
+            _cur_label = _MODE_TO_LABEL.get(mode_current, _MODE_LABELS[0])
+            _default_idx = _MODE_LABELS.index(_cur_label)
+            new_mode_label = row_cols[3].selectbox(
                 "Mode",
-                MODES,
+                _MODE_LABELS,
                 index=_default_idx,
                 key=f"mode_{ver}",
                 label_visibility="collapsed",
             )
+            new_mode = _LABEL_TO_MODE[new_mode_label]
 
-            # Nouveau poids — visible uniquement en mode ab_test, pré-rempli
+            # Nouveau poids — visible uniquement en mode A/B, pré-rempli
             new_weight = None
             if new_mode == "ab_test":
                 new_weight = row_cols[4].number_input(
@@ -110,7 +118,7 @@ if is_admin:
                     min_value=0.0,
                     max_value=1.0,
                     step=0.05,
-                    value=float(weight_current or 0.5),
+                    value=float(weight_current if weight_current is not None else 0.5),
                     key=f"weight_{ver}",
                     label_visibility="collapsed",
                 )
@@ -119,16 +127,12 @@ if is_admin:
 
             configs[ver] = {"mode": new_mode, "weight": new_weight, "current": v}
 
-        # Somme des poids preview
+        # Somme des poids A/B (toutes les versions sélectionnées en A/B)
         total_weight = sum(
             cfg["weight"]
             for cfg in configs.values()
             if cfg["mode"] == "ab_test" and cfg["weight"] is not None
         )
-        # Prendre en compte aussi les versions non modifiées (mode=(inchangé)) déjà en ab_test
-        for cfg in configs.values():
-            if cfg["mode"] == "(inchangé)" and cfg["current"].get("deployment_mode") == "ab_test":
-                total_weight += cfg["current"].get("traffic_weight") or 0.0
 
         weight_color = "🟢" if total_weight <= 1.0 else "🔴"
         st.markdown(f"**Somme des poids A/B :** {weight_color} `{total_weight:.2f}` / 1.0")
@@ -139,7 +143,12 @@ if is_admin:
             errors = []
             updated = 0
             for ver, cfg in configs.items():
-                if cfg["mode"] == "(inchangé)":
+                # Appliquer seulement si le mode ou le poids a changé
+                cur = cfg["current"]
+                if (
+                    cfg["mode"] == cur.get("deployment_mode")
+                    and cfg["weight"] == cur.get("traffic_weight")
+                ):
                     continue
                 try:
                     client.update_model_deployment(
