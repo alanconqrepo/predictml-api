@@ -1,4 +1,4 @@
-"""
+﻿"""
 Statistiques et graphiques d'utilisation
 """
 
@@ -17,7 +17,7 @@ require_auth()
 
 col_title, col_refresh = st.columns([8, 1])
 col_title.title("📈 Statistiques")
-if col_refresh.button("🔄 Rafraîchir", key="stats_refresh", use_container_width=True):
+if col_refresh.button("🔄 Rafraîchir", key="stats_refresh", width='stretch'):
     st.cache_data.clear()
     st.rerun()
 
@@ -232,7 +232,7 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
             )
             st.dataframe(
                 styled,
-                use_container_width=True,
+                width='stretch',
                 column_config={
                     "Accuracy": st.column_config.NumberColumn(
                         "Accuracy",
@@ -458,7 +458,7 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
                     layout_kwargs["yaxis_tickformat"] = ".0%"
 
                 fig.update_layout(**layout_kwargs)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
 
 
 # ── Expander 2 : Statistiques agrégées par modèle ────────────────────────────
@@ -501,7 +501,7 @@ with st.expander("📊 Statistiques agrégées par modèle", expanded=True):
             df_stats["Taux d'erreur"] = (df_stats["Taux d'erreur"] * 100).round(2).astype(str) + " %"
             st.dataframe(
                 df_stats,
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 column_config={
                     "Modèle": st.column_config.TextColumn(
@@ -587,7 +587,7 @@ with st.expander("📊 Statistiques agrégées par modèle", expanded=True):
             color_discrete_sequence=px.colors.qualitative.Set2,
         )
         fig.update_layout(showlegend=False, margin=dict(t=20))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     # Temps de réponse — courbe de densité (KDE) par modèle
     with row1_r:
@@ -634,7 +634,7 @@ with st.expander("📊 Statistiques agrégées par modèle", expanded=True):
                 legend=dict(orientation="h", y=-0.25),
                 hovermode="x unified",
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info("Données de temps de réponse non disponibles.")
 
@@ -653,7 +653,7 @@ with st.expander("📊 Statistiques agrégées par modèle", expanded=True):
             markers=True,
         )
         fig.update_layout(margin=dict(t=20))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
     # Erreurs par jour par modèle
     with row2_r:
@@ -677,7 +677,7 @@ with st.expander("📊 Statistiques agrégées par modèle", expanded=True):
                 labels={"Date": "Date", "Erreurs": "Nb erreurs", "Modèle": "Modèle"},
             )
             fig.update_layout(margin=dict(t=20), legend=dict(orientation="h", y=-0.25))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
     # Boîte à moustaches temps de réponse par modèle
     if "response_time_ms" in df.columns and df["response_time_ms"].notna().any():
@@ -691,10 +691,177 @@ with st.expander("📊 Statistiques agrégées par modèle", expanded=True):
             color_discrete_sequence=px.colors.qualitative.Set2,
         )
         fig.update_layout(showlegend=False, margin=dict(t=20))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
 
-# ── Expander 3 : Drift de performance ────────────────────────────────────────
+# ── Expander 3 : Accuracy temporelle multi-modèles ───────────────────────────
+with st.expander("📈 Accuracy temporelle — comparaison multi-modèles", expanded=True):
+    acc_col_models, acc_col_gran = st.columns([4, 1])
+
+    with acc_col_models:
+        _default_acc = model_names[:6] if len(model_names) > 6 else model_names
+        acc_models = st.multiselect(
+            "Modèles à comparer",
+            options=model_names,
+            default=_default_acc,
+            key="acc_models_multiselect",
+        )
+
+    with acc_col_gran:
+        acc_gran = st.selectbox(
+            "Granularité",
+            options=["day", "week"],
+            format_func=lambda x: {"day": "Jour", "week": "Semaine"}.get(x, x),
+            key="acc_granularity",
+        )
+
+    if not acc_models:
+        st.info("Sélectionnez au moins un modèle.")
+    else:
+        acc_rows: list[dict] = []
+        acc_errors: list[str] = []
+        with st.spinner("Chargement des métriques de performance…"):
+            for mname in acc_models:
+                try:
+                    perf = client.get_model_performance(
+                        model_name=mname,
+                        start=start_dt.isoformat(),
+                        end=end_dt.isoformat(),
+                        granularity=acc_gran,
+                    )
+                    mtype = perf.get("model_type", "classification")
+                    mcol = "accuracy" if mtype == "classification" else "mae"
+                    for period in perf.get("by_period") or []:
+                        v = period.get(mcol)
+                        if v is not None:
+                            acc_rows.append(
+                                {
+                                    "date": period["period"],
+                                    "Modèle": mname,
+                                    "metric": float(v),
+                                    "model_type": mtype,
+                                    "matched_count": int(period.get("matched_count") or 0),
+                                }
+                            )
+                except Exception:
+                    acc_errors.append(mname)
+
+        if acc_errors:
+            st.caption(f"⚠️ Données indisponibles pour : {', '.join(acc_errors)}")
+
+        if not acc_rows:
+            st.info(
+                "Aucune donnée d'accuracy sur la période sélectionnée. "
+                "Soumettez des résultats via **POST /observed-results** pour activer le suivi."
+            )
+        else:
+            df_acc = pd.DataFrame(acc_rows)
+            df_acc["date"] = pd.to_datetime(df_acc["date"])
+            df_acc = df_acc.sort_values("date")
+
+            # Détecter si tous les modèles sont du même type
+            _types = df_acc["model_type"].unique().tolist()
+            _all_classif = all(t == "classification" for t in _types)
+            _all_regress = all(t == "regression" for t in _types)
+            if _all_classif:
+                metric_label = "Accuracy"
+                y_fmt = ".0%"
+                y_range = [0, 1.05]
+                hover_fmt = ".1%"
+            elif _all_regress:
+                metric_label = "MAE"
+                y_fmt = None
+                y_range = None
+                hover_fmt = ".4f"
+            else:
+                metric_label = "Accuracy / MAE"
+                y_fmt = None
+                y_range = None
+                hover_fmt = ".4f"
+
+            colors = px.colors.qualitative.Set2
+            fig_acc = go.Figure()
+            for i, (model, grp) in enumerate(df_acc.groupby("Modèle", sort=False)):
+                grp = grp.sort_values("date")
+                color = colors[i % len(colors)]
+                mtype_grp = grp["model_type"].iloc[0]
+                # suffixe "(MAE)" si types mixtes
+                legend_label = model if len(_types) == 1 else (
+                    f"{model} (MAE)" if mtype_grp == "regression" else model
+                )
+                h_fmt = ".1%" if mtype_grp == "classification" else ".4f"
+                fig_acc.add_trace(
+                    go.Scatter(
+                        x=grp["date"],
+                        y=grp["metric"],
+                        mode="lines+markers",
+                        name=legend_label,
+                        line=dict(width=2, color=color),
+                        marker=dict(size=6, color=color),
+                        customdata=grp[["matched_count"]].values,
+                        hovertemplate=(
+                            f"<b>{model}</b><br>"
+                            "%{x|%Y-%m-%d}<br>"
+                            f"{metric_label} : %{{y:{h_fmt}}}<br>"
+                            "Paires obs. : %{customdata[0]}<extra></extra>"
+                        ),
+                    )
+                )
+
+            fig_acc.update_layout(
+                xaxis_title="Date",
+                yaxis_title=metric_label,
+                yaxis_tickformat=y_fmt,
+                yaxis_range=y_range,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                margin=dict(t=50, b=20),
+                hovermode="x unified",
+                plot_bgcolor="rgba(0,0,0,0)",
+                xaxis=dict(gridcolor="rgba(200,200,200,0.12)"),
+                yaxis=dict(gridcolor="rgba(200,200,200,0.12)"),
+            )
+            st.plotly_chart(fig_acc, width='stretch')
+
+            # Tableau résumé
+            _summary = []
+            for model, grp in df_acc.groupby("Modèle", sort=False):
+                last = grp.sort_values("date").iloc[-1]
+                mtype_grp = grp["model_type"].iloc[0]
+                _summary.append(
+                    {
+                        "Modèle": model,
+                        metric_label: round(last["metric"], 4),
+                        "Paires observées": int(grp["matched_count"].sum()),
+                    }
+                )
+            df_summary = (
+                pd.DataFrame(_summary)
+                .sort_values(metric_label, ascending=_all_regress)
+                .reset_index(drop=True)
+            )
+            st.dataframe(
+                df_summary,
+                width='stretch',
+                hide_index=True,
+                column_config={
+                    metric_label: st.column_config.NumberColumn(
+                        metric_label,
+                        help=(
+                            "Dernière valeur connue sur la période. "
+                            "Accuracy = proportion de prédictions correctes (classification). "
+                            "MAE = erreur absolue moyenne (régression)."
+                        ),
+                        format="%.4f",
+                    ),
+                    "Paires observées": st.column_config.NumberColumn(
+                        "Paires observées",
+                        help="Nombre de prédictions pour lesquelles un résultat observé a été soumis.",
+                    ),
+                },
+            )
+
+
+# ── Expander 4 : Drift de performance ────────────────────────────────────────
 with st.expander("📉 Drift de performance — accuracy rolling", expanded=True):
     drift_col_model, drift_col_threshold, drift_col_dates = st.columns([2, 2, 2])
     with drift_col_model:
@@ -846,6 +1013,6 @@ with st.expander("📉 Drift de performance — accuracy rolling", expanded=True
                 margin=dict(t=40),
                 hovermode="x unified",
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info(f"Métrique '{metric_col}' non disponible pour ce modèle (type : {model_type}).")
