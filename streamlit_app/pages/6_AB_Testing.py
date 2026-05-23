@@ -186,15 +186,28 @@ st.divider()
 # ===========================================================================
 st.subheader("📊 Comparaison des versions")
 
-_cmp_c1, _cmp_c2 = st.columns(2)
+_cmp_c1, _cmp_c2, _cmp_c3 = st.columns([2, 2, 3])
 _ab_start = _cmp_c1.date_input(
     "Date début", value=date.today() - timedelta(days=30), key="ab_start_date"
 )
 _ab_end = _cmp_c2.date_input("Date fin", value=date.today(), key="ab_end_date")
 days = max((_ab_end - _ab_start).days, 1)
 
+_METRIC_OPTIONS = {
+    "Auto (sélection intelligente)": None,
+    "Taux d'erreur — Chi-²":         "error_rate",
+    "MAE prédiction — Mann-Whitney":  "mae",
+    "Latence réponse — Mann-Whitney": "response_time_ms",
+}
+_sig_metric_label = _cmp_c3.selectbox(
+    "Métrique du test de significativité",
+    list(_METRIC_OPTIONS.keys()),
+    key="ab_sig_metric",
+)
+_sig_metric = _METRIC_OPTIONS[_sig_metric_label]
+
 try:
-    ab_data = client.get_ab_comparison(selected_model, days=days)
+    ab_data = client.get_ab_comparison(selected_model, days=days, metric=_sig_metric)
     versions_stats = ab_data.get("versions", [])
     ab_significance = ab_data.get("ab_significance")
 except Exception as e:

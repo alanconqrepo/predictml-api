@@ -479,9 +479,12 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
-    def get_ab_comparison(self, model_name: str, days: int = 30) -> dict:
+    def get_ab_comparison(self, model_name: str, days: int = 30, metric: str | None = None) -> dict:
         """Retourne les statistiques de comparaison A/B / shadow pour un modèle."""
-        r = self._get(f"/models/{model_name}/ab-compare", params={"days": days})
+        params: dict = {"days": days}
+        if metric:
+            params["metric"] = metric
+        r = self._get(f"/models/{model_name}/ab-compare", params=params)
         r.raise_for_status()
         return r.json()
 
