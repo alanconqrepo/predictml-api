@@ -65,14 +65,15 @@ if is_admin:
             "La somme des poids A/B doit être **≤ 1.0**."
         )
 
-        # Mapping label ↔ valeur API (pas de "(inchangé)" — pré-rempli avec la valeur courante)
+        # Mapping label ↔ valeur API
+        # "—" = aucun changement (utilisé quand le mode courant n'est pas dans la liste)
         _MODE_TO_LABEL = {
             "ab_test":    "🟠 A/B",
             "shadow":     "🟣 Shadow",
             "production": "🟢 Prod",
         }
         _LABEL_TO_MODE = {v: k for k, v in _MODE_TO_LABEL.items()}
-        _MODE_LABELS = list(_MODE_TO_LABEL.values())   # ["🟠 A/B", "🟣 Shadow", "🟢 Prod"]
+        _MODE_LABELS = ["—"] + list(_MODE_TO_LABEL.values())  # ["—", "🟠 A/B", "🟣 Shadow", "🟢 Prod"]
         configs: dict = {}
 
         cols_header = st.columns([2, 2, 1, 2, 1])
@@ -98,9 +99,9 @@ if is_admin:
                 f"`{weight_current:.0%}`" if weight_current is not None else "—"
             )
 
-            # Nouveau mode — même badge, pré-rempli avec la valeur courante
-            _cur_label = _MODE_TO_LABEL.get(mode_current, _MODE_LABELS[0])
-            _default_idx = _MODE_LABELS.index(_cur_label)
+            # Nouveau mode — badge pré-rempli ; "—" si mode inconnu (ex: uploaded)
+            _cur_label = _MODE_TO_LABEL.get(mode_current)   # None si mode inconnu
+            _default_idx = _MODE_LABELS.index(_cur_label) if _cur_label else 0  # 0 = "—"
             new_mode_label = row_cols[3].selectbox(
                 "Mode",
                 _MODE_LABELS,
@@ -108,7 +109,7 @@ if is_admin:
                 key=f"mode_{ver}",
                 label_visibility="collapsed",
             )
-            new_mode = _LABEL_TO_MODE[new_mode_label]
+            new_mode = _LABEL_TO_MODE.get(new_mode_label)  # None si "—"
 
             # Nouveau poids — visible uniquement en mode A/B, pré-rempli
             new_weight = None
@@ -127,12 +128,15 @@ if is_admin:
 
             configs[ver] = {"mode": new_mode, "weight": new_weight, "current": v}
 
-        # Somme des poids A/B (toutes les versions sélectionnées en A/B)
+        # Somme des poids A/B — inclut les versions sélectionnées ET celles inchangées déjà en A/B
         total_weight = sum(
             cfg["weight"]
             for cfg in configs.values()
             if cfg["mode"] == "ab_test" and cfg["weight"] is not None
         )
+        for cfg in configs.values():
+            if cfg["mode"] is None and cfg["current"].get("deployment_mode") == "ab_test":
+                total_weight += cfg["current"].get("traffic_weight") or 0.0
 
         weight_color = "🟢" if total_weight <= 1.0 else "🔴"
         st.markdown(f"**Somme des poids A/B :** {weight_color} `{total_weight:.2f}` / 1.0")
@@ -143,7 +147,10 @@ if is_admin:
             errors = []
             updated = 0
             for ver, cfg in configs.items():
-                # Appliquer seulement si le mode ou le poids a changé
+                # Ignorer "—" (aucun changement demandé)
+                if cfg["mode"] is None:
+                    continue
+                # Ignorer si mode et poids identiques à l'état actuel
                 cur = cfg["current"]
                 if (
                     cfg["mode"] == cur.get("deployment_mode")
