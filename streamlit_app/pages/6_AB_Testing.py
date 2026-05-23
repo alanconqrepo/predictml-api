@@ -106,7 +106,7 @@ if is_admin:
                 "Mode",
                 _MODE_LABELS,
                 index=_default_idx,
-                key=f"mode_{ver}",
+                key=f"mode_{selected_model}_{ver}",
                 label_visibility="collapsed",
             )
             new_mode = _LABEL_TO_MODE.get(new_mode_label)  # None si "—"
@@ -114,13 +114,16 @@ if is_admin:
             # Nouveau poids — visible uniquement en mode A/B, pré-rempli
             new_weight = None
             if new_mode == "ab_test":
+                _weight_key = f"weight_{selected_model}_{ver}"
+                # Pré-remplir avec le poids actuel si l'état n'existe pas encore pour ce modèle
+                if _weight_key not in st.session_state:
+                    st.session_state[_weight_key] = float(weight_current if weight_current is not None else 0.5)
                 new_weight = row_cols[4].number_input(
                     "Poids",
                     min_value=0.0,
                     max_value=1.0,
                     step=0.05,
-                    value=float(weight_current if weight_current is not None else 0.5),
-                    key=f"weight_{ver}",
+                    key=_weight_key,
                     label_visibility="collapsed",
                 )
             else:
@@ -213,6 +216,69 @@ except Exception as e:
     versions_stats = []
     ab_significance = None
 
+def _output_summary(dist: dict, meta: dict) -> "str | None":
+    """
+    Résumé compact des prédictions d'une version.
+    - Régression      → moyenne pondérée des valeurs prédites  (ex: µ = 3.42)
+    - Classification  → répartition des classes top-3 avec labels réels
+                        (ex: setosa: 45% · versicolor: 33%)
+    Retourne None si la distribution est vide.
+    """
+    try:
+        if not dist:
+            return None
+        total = sum(dist.values())
+        if total == 0:
+            return None
+
+        # Détecter le type de tâche depuis les métadonnées du modèle
+        task = meta.get("model_task") or ""
+        classes_list: list = meta.get("classes") or []
+        if not task:
+            if classes_list:
+                task = "classification"
+            elif meta.get("r2_score") is not None or meta.get("rmse") is not None:
+                task = "regression"
+            elif meta.get("accuracy") is not None or meta.get("f1_score") is not None:
+                task = "classification"
+
+        # Heuristique de secours : clés numériques nombreuses → régression
+        if not task:
+            try:
+                float_vals = [float(k) for k in dist.keys()]
+                task = "regression" if len(float_vals) > 5 else "classification"
+            except (ValueError, TypeError):
+                task = "classification"
+
+        if "regression" in task:
+            try:
+                float_keys = [float(k) for k in dist.keys()]
+                mean_val = sum(cnt * val for cnt, val in zip(dist.values(), float_keys)) / total
+                return f"µ = {mean_val:.2f}"
+            except (ValueError, TypeError):
+                pass  # fall through to classification display
+
+        # Classification — mapper les indices entiers vers les labels si disponibles
+        def _resolve_label(key: str) -> str:
+            if classes_list:
+                try:
+                    idx = int(key)
+                    if 0 <= idx < len(classes_list):
+                        return str(classes_list[idx])
+                except (ValueError, TypeError):
+                    pass
+            return key
+
+        # Top-3 classes triées par fréquence décroissante (exclure les classes à 0)
+        sorted_classes = [(cls, cnt) for cls, cnt in sorted(dist.items(), key=lambda x: -x[1]) if cnt > 0]
+        parts = [f"{_resolve_label(cls)}: {cnt / total:.0%}" for cls, cnt in sorted_classes[:3]]
+        if len(sorted_classes) > 3:
+            parts.append("…")
+        return " · ".join(parts)
+    except Exception:
+        return None
+
+
 if not versions_stats:
     st.info("Aucune prédiction enregistrée pour ce modèle sur la période sélectionnée.")
 else:
@@ -235,48 +301,56 @@ else:
             created_str = str(created_raw)[:10] if created_raw else "—"
 
         _rows.append({
-            "Version":       ver,
-            "Mode":          _BADGE_CMP.get(mode, f"⚪ {mode or '—'}"),
-            "Poids":         f"{weight:.0%}" if weight is not None else "—",
-            "Algorithme":    meta.get("algorithm") or "—",
-            "Créé le":       created_str,
-            "Créateur":      meta.get("creator_username") or "—",
-            "Préd. (prod)":  vs.get("total_predictions", 0),
-            "Shadow":        vs.get("shadow_predictions", 0),
-            "Err. (%)":      round(vs.get("error_rate", 0) * 100, 2) if vs.get("error_rate") is not None else None,
-            "Lat. avg (ms)": round(vs["avg_response_time_ms"], 1) if vs.get("avg_response_time_ms") is not None else None,
-            "Lat. p95 (ms)": round(vs["p95_response_time_ms"], 1) if vs.get("p95_response_time_ms") is not None else None,
-            "Concordance":   round(vs["agreement_rate"] * 100, 1) if vs.get("agreement_rate") is not None else None,
-            "Accuracy":      meta.get("accuracy"),
-            "F1":            meta.get("f1_score"),
-            "R²":            meta.get("r2_score"),
-            "RMSE":          meta.get("rmse"),
+            "Version":        ver,
+            "Mode":           _BADGE_CMP.get(mode, f"⚪ {mode or '—'}"),
+            "Poids":          f"{weight:.0%}" if weight is not None else "—",
+            "Algorithme":     meta.get("algorithm") or "—",
+            "Créé le":        created_str,
+            "Créateur":       meta.get("creator_username") or "—",
+            "Préd. (prod)":   vs.get("total_predictions", 0),
+            "Shadow":         vs.get("shadow_predictions", 0),
+            "Sortie prédite": _output_summary(vs.get("prediction_distribution", {}), meta),
+            "Err. (%)":       round(vs.get("error_rate", 0) * 100, 2) if vs.get("error_rate") is not None else None,
+            "Lat. avg (ms)":  round(vs["avg_response_time_ms"], 1) if vs.get("avg_response_time_ms") is not None else None,
+            "Lat. p95 (ms)":  round(vs["p95_response_time_ms"], 1) if vs.get("p95_response_time_ms") is not None else None,
+            "Concordance":    round(vs["agreement_rate"] * 100, 1) if vs.get("agreement_rate") is not None else None,
+            "Accuracy":       meta.get("accuracy"),
+            "F1":             meta.get("f1_score"),
+            "R²":             meta.get("r2_score"),
+            "RMSE":           meta.get("rmse"),
         })
 
     _all_col_config = {
-        "Version":       st.column_config.TextColumn("Version"),
-        "Mode":          st.column_config.TextColumn("Mode"),
-        "Poids":         st.column_config.TextColumn("Poids", help="Part de trafic allouée à cette version."),
-        "Algorithme":    st.column_config.TextColumn("Algorithme"),
-        "Créé le":       st.column_config.TextColumn("Créé le"),
-        "Créateur":      st.column_config.TextColumn("Créateur"),
-        "Préd. (prod)":  st.column_config.NumberColumn("Préd. (prod)", help=METRIC_HELP.get("predictions_prod", "Prédictions hors shadow.")),
-        "Shadow":        st.column_config.NumberColumn("Shadow", help=METRIC_HELP.get("shadow_predictions", "Prédictions shadow (non exposées au client).")),
-        "Err. (%)":      st.column_config.NumberColumn("Err. (%)", format="%.2f %%", help=METRIC_HELP.get("taux_erreur", "Taux d'erreur API sur la période.")),
-        "Lat. avg (ms)": st.column_config.NumberColumn("Lat. avg (ms)", format="%.1f", help=METRIC_HELP.get("latence_avg", "Latence moyenne de réponse.")),
-        "Lat. p95 (ms)": st.column_config.NumberColumn("Lat. p95 (ms)", format="%.1f", help=METRIC_HELP.get("latence_p95", "95e percentile de latence.")),
-        "Concordance":   st.column_config.NumberColumn("Concordance (%)", format="%.1f %%", help=METRIC_HELP.get("concordance_shadow", "Taux d'accord entre shadow et prod.")),
-        "Accuracy":      st.column_config.NumberColumn("Accuracy", format="%.3f", help="Accuracy sur le jeu de test à l'entraînement."),
-        "F1":            st.column_config.NumberColumn("F1", format="%.3f", help="F1-score sur le jeu de test à l'entraînement."),
-        "R²":            st.column_config.NumberColumn("R²", format="%.3f", help="Coefficient de détermination (régression)."),
-        "RMSE":          st.column_config.NumberColumn("RMSE", format="%.4f", help="Root Mean Squared Error (régression)."),
+        "Version":        st.column_config.TextColumn("Version"),
+        "Mode":           st.column_config.TextColumn("Mode"),
+        "Poids":          st.column_config.TextColumn("Poids", help="Part de trafic allouée à cette version."),
+        "Algorithme":     st.column_config.TextColumn("Algorithme"),
+        "Créé le":        st.column_config.TextColumn("Créé le"),
+        "Créateur":       st.column_config.TextColumn("Créateur"),
+        "Préd. (prod)":   st.column_config.NumberColumn("Préd. (prod)", help=METRIC_HELP.get("predictions_prod", "Prédictions hors shadow.")),
+        "Shadow":         st.column_config.NumberColumn("Shadow", help=METRIC_HELP.get("shadow_predictions", "Prédictions shadow (non exposées au client).")),
+        "Sortie prédite": st.column_config.TextColumn(
+            "Sortie prédite",
+            help=(
+                "Régression : moyenne pondérée des valeurs prédites (µ). "
+                "Classification : répartition des classes prédites sur la période (top 3)."
+            ),
+        ),
+        "Err. (%)":       st.column_config.NumberColumn("Err. (%)", format="%.2f %%", help=METRIC_HELP.get("taux_erreur", "Taux d'erreur API sur la période.")),
+        "Lat. avg (ms)":  st.column_config.NumberColumn("Lat. avg (ms)", format="%.1f", help=METRIC_HELP.get("latence_avg", "Latence moyenne de réponse.")),
+        "Lat. p95 (ms)":  st.column_config.NumberColumn("Lat. p95 (ms)", format="%.1f", help=METRIC_HELP.get("latence_p95", "95e percentile de latence.")),
+        "Concordance":    st.column_config.NumberColumn("Concordance (%)", format="%.1f %%", help=METRIC_HELP.get("concordance_shadow", "Taux d'accord entre shadow et prod.")),
+        "Accuracy":       st.column_config.NumberColumn("Accuracy", format="%.3f", help="Accuracy sur le jeu de test à l'entraînement."),
+        "F1":             st.column_config.NumberColumn("F1", format="%.3f", help="F1-score sur le jeu de test à l'entraînement."),
+        "R²":             st.column_config.NumberColumn("R²", format="%.3f", help="Coefficient de détermination (régression)."),
+        "RMSE":           st.column_config.NumberColumn("RMSE", format="%.4f", help="Root Mean Squared Error (régression)."),
     }
 
     # Colonnes toujours visibles
     _base_cols = ["Version", "Mode", "Algorithme", "Créé le", "Créateur",
                   "Préd. (prod)", "Shadow"]
-    # Colonnes de métriques : masquées si toutes les valeurs sont null
-    _metric_cols = ["Err. (%)", "Lat. avg (ms)", "Lat. p95 (ms)", "Concordance",
+    # Colonnes de métriques : masquées si toutes les valeurs sont null/None
+    _metric_cols = ["Sortie prédite", "Err. (%)", "Lat. avg (ms)", "Lat. p95 (ms)", "Concordance",
                     "Accuracy", "F1", "R²", "RMSE"]
 
     _df = pd.DataFrame(_rows)
