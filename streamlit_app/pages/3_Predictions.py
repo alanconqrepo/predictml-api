@@ -7,6 +7,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
@@ -107,8 +109,9 @@ with tab_history:
             st.caption("Données de couverture non disponibles.")
 
     # --- Filtres ---
-    with st.expander("🔍 Filtres", expanded=True):
-        col1, col2, col3, col4, col5 = st.columns(5)
+    with st.expander("🔍 Filtres", expanded=False):
+        # Recherche + Modèle sur la même ligne, puis date/statut/limite
+        col_search, col_model, col2, col3, col4, col5 = st.columns([1.2, 1.8, 1.2, 1.2, 1.2, 1.2])
 
         # Liste des modèles disponibles
         try:
@@ -120,16 +123,15 @@ with tab_history:
             models = []
             model_names = []
 
-        with col1:
-            hist_search = st.text_input(
-                "Filtrer par nom", key="hist_model_search", placeholder="Rechercher…"
-            )
-            hist_filtered = (
-                [n for n in model_names if hist_search.lower() in n.lower()]
-                if hist_search
-                else model_names
-            )
-            model_name = st.selectbox("Modèle", ["(tous)"] + (hist_filtered or model_names))
+        hist_search = col_search.text_input(
+            "Filtrer par nom", key="hist_model_search", placeholder="Rechercher…"
+        )
+        hist_filtered = (
+            [n for n in model_names if hist_search.lower() in n.lower()]
+            if hist_search
+            else model_names
+        )
+        model_name = col_model.selectbox("Modèle", ["(tous)"] + (hist_filtered or model_names))
         if model_name == "(tous)":
             model_name = model_names[0] if model_names else None
 
@@ -246,7 +248,7 @@ with tab_history:
         if status_filter != "Tous":
             predictions = [p for p in predictions if p.get("status") == status_filter]
 
-        with st.expander("📋 Résultats", expanded=True):
+        with st.expander("📋 Résultats", expanded=False):
             st.caption(
                 "Les résultats ci-dessous dépendent des filtres appliqués dans l’expander « Filtres » ci-dessus."
             )
@@ -618,6 +620,241 @@ with tab_history:
                                 st.error(f"Erreur lors de l'export : {exc}")
 
 
+        # --- Activité par utilisateur & modèle (admin uniquement) ---
+        if st.session_state.get("is_admin", False):
+            with st.expander("👥 Activité par utilisateur & modèle", expanded=False):
+                st.caption(
+                    "Identifiez les utilisateurs les plus actifs, les modèles les plus sollicités "
+                    "et les pics d'usage susceptibles d'impacter la production."
+                )
+
+                # Chargement des utilisateurs
+                try:
+                    _all_users = client.list_users()
+                except Exception as _e:
+                    st.error(f"Impossible de charger les utilisateurs : {_e}")
+                    _all_users = []
+
+                if not _all_users:
+                    st.info("Aucun utilisateur disponible.")
+                else:
+                    _usage_summary: list[dict] = []   # 1 ligne par user actif
+                    _by_model_rows: list[dict] = []   # 1 ligne par (user, model)
+                    _by_day_rows:   list[dict] = []   # 1 ligne par (user, jour)
+
+                    with st.spinner("Chargement des statistiques d'activité…"):
+                        for _u in _all_users:
+                            try:
+                                _udata = client.get_user_usage(
+                                    _u["id"],
+                                    start_date=start_date.isoformat(),
+                                    end_date=end_date.isoformat(),
+                                )
+                            except Exception:
+                                continue
+
+                            _total = _udata.get("total_calls", 0)
+                            if _total == 0:
+                                continue  # inactif sur la période
+
+                            _uname  = _udata.get("username", _u.get("username", f"user_{_u['id']}"))
+                            _bm     = _udata.get("by_model", [])
+                            _errors = sum(m.get("errors", 0) for m in _bm)
+                            _lats   = [m["avg_latency_ms"] for m in _bm if m.get("avg_latency_ms")]
+                            _avg_lat = round(sum(_lats) / len(_lats), 1) if _lats else None
+
+                            _usage_summary.append({
+                                "username":       _uname,
+                                "total_calls":    _total,
+                                "nb_modeles":     len(_bm),
+                                "errors":         _errors,
+                                "avg_latency_ms": _avg_lat,
+                            })
+                            for _m in _bm:
+                                _by_model_rows.append({
+                                    "username":       _uname,
+                                    "model_name":     _m["model_name"],
+                                    "calls":          _m["calls"],
+                                    "errors":         _m.get("errors", 0),
+                                    "avg_latency_ms": _m.get("avg_latency_ms"),
+                                })
+                            for _d in _udata.get("by_day", []):
+                                _by_day_rows.append({
+                                    "username": _uname,
+                                    "date":     _d["date"],
+                                    "calls":    _d["calls"],
+                                })
+
+                    if not _usage_summary:
+                        st.info("Aucune activité enregistrée sur la période sélectionnée.")
+                    else:
+                        df_usumm = pd.DataFrame(_usage_summary).sort_values(
+                            "total_calls", ascending=False
+                        ).reset_index(drop=True)
+                        _total_all = int(df_usumm["total_calls"].sum())
+
+                        # ── KPIs ──────────────────────────────────────────────────────
+                        _ku1, _ku2, _ku3, _ku4 = st.columns(4)
+                        _ku1.metric("Appels totaux", f"{_total_all:,}")
+                        _ku2.metric(
+                            "Utilisateurs actifs", len(df_usumm),
+                            help="Utilisateurs ayant émis au moins 1 prédiction sur la période."
+                        )
+                        _top = df_usumm.iloc[0]
+                        _top_pct = _top["total_calls"] / _total_all * 100
+                        _ku3.metric(
+                            "Top utilisateur",
+                            _top["username"],
+                            delta=f"{_top['total_calls']:,} appels ({_top_pct:.0f} % du trafic)",
+                            delta_color="off",
+                        )
+                        _top3_pct = df_usumm.head(3)["total_calls"].sum() / _total_all * 100
+                        _ku4.metric(
+                            "Concentration top 3",
+                            f"{_top3_pct:.0f} %",
+                            help=(
+                                "Part du trafic total générée par les 3 utilisateurs les plus actifs. "
+                                "Une valeur élevée indique un risque de dépendance forte envers quelques appelants."
+                            ),
+                        )
+
+                        st.divider()
+
+                        # ── Tableau synthèse par utilisateur ─────────────────────────
+                        st.markdown("#### 📋 Synthèse par utilisateur")
+                        _df_disp = df_usumm.copy()
+                        _df_disp["Part trafic"] = _df_disp["total_calls"].apply(
+                            lambda v: f"{v / _total_all * 100:.1f} %"
+                        )
+                        _df_disp["Taux erreur"] = _df_disp.apply(
+                            lambda r: f"{r['errors'] / r['total_calls'] * 100:.1f} %"
+                            if r["total_calls"] > 0 else "—",
+                            axis=1,
+                        )
+                        _df_disp["Latence moy."] = _df_disp["avg_latency_ms"].apply(
+                            lambda v: f"{v} ms" if v is not None else "—"
+                        )
+                        st.dataframe(
+                            _df_disp.rename(columns={
+                                "username":    "Utilisateur",
+                                "total_calls": "Appels",
+                                "nb_modeles":  "Modèles utilisés",
+                                "errors":      "Erreurs",
+                            })[["Utilisateur", "Appels", "Part trafic",
+                                "Modèles utilisés", "Erreurs", "Taux erreur", "Latence moy."]],
+                            hide_index=True,
+                            width='stretch',
+                            column_config={
+                                "Appels": st.column_config.NumberColumn(
+                                    "Appels",
+                                    help="Nombre total de prédictions (hors shadow) sur la période.",
+                                ),
+                                "Part trafic": st.column_config.TextColumn(
+                                    "Part trafic",
+                                    help="Part de cet utilisateur dans le volume total de prédictions.",
+                                ),
+                                "Modèles utilisés": st.column_config.NumberColumn(
+                                    "Modèles utilisés",
+                                    help="Nombre de modèles distincts appelés par cet utilisateur.",
+                                ),
+                                "Taux erreur": st.column_config.TextColumn(
+                                    "Taux erreur",
+                                    help="Erreurs d'exécution (status ≠ 'success') / total appels.",
+                                ),
+                                "Latence moy.": st.column_config.TextColumn(
+                                    "Latence moy.",
+                                    help="Latence moyenne en ms sur les requêtes réussies.",
+                                ),
+                            },
+                        )
+
+                        st.divider()
+
+                        # ── Graphiques ────────────────────────────────────────────────
+                        _gc1, _gc2 = st.columns([1, 2])
+
+                        # Barres horizontales — top utilisateurs
+                        _fig_top = px.bar(
+                            df_usumm.head(10).sort_values("total_calls"),
+                            y="username", x="total_calls",
+                            orientation="h",
+                            title="Top utilisateurs par volume d'appels",
+                            labels={"username": "", "total_calls": "Appels"},
+                            color="total_calls",
+                            color_continuous_scale=["#74b9ff", "#0984e3", "#2d3436"],
+                            text="total_calls",
+                        )
+                        _fig_top.update_traces(textposition="outside")
+                        _fig_top.update_layout(
+                            coloraxis_showscale=False,
+                            margin=dict(l=10, r=30, t=50, b=10),
+                        )
+                        _gc1.plotly_chart(_fig_top, use_container_width=True)
+
+                        # Évolution quotidienne par utilisateur
+                        if _by_day_rows:
+                            _df_day = pd.DataFrame(_by_day_rows)
+                            _df_day["date"] = pd.to_datetime(_df_day["date"])
+                            _df_day = _df_day.sort_values("date")
+                            _fig_day = px.line(
+                                _df_day,
+                                x="date", y="calls", color="username",
+                                title="Évolution quotidienne des appels par utilisateur",
+                                labels={"date": "Date", "calls": "Appels", "username": "Utilisateur"},
+                                markers=True,
+                            )
+                            _fig_day.update_layout(legend_title_text="Utilisateur")
+                            _gc2.plotly_chart(_fig_day, use_container_width=True)
+
+                        # Répartition user × modèle (stacked bar)
+                        if _by_model_rows:
+                            st.markdown("#### 🔍 Détail par utilisateur × modèle")
+                            _df_bm = pd.DataFrame(_by_model_rows)
+
+                            _col_tbl, _col_chart = st.columns([1, 1])
+
+                            # Table détail
+                            _df_bm_disp = _df_bm.copy()
+                            _df_bm_disp["Taux erreur"] = _df_bm_disp.apply(
+                                lambda r: f"{r['errors'] / r['calls'] * 100:.1f} %"
+                                if r["calls"] > 0 else "—",
+                                axis=1,
+                            )
+                            _df_bm_disp["Latence moy."] = _df_bm_disp["avg_latency_ms"].apply(
+                                lambda v: f"{v} ms" if v is not None else "—"
+                            )
+                            _col_tbl.dataframe(
+                                _df_bm_disp.sort_values(
+                                    ["username", "calls"], ascending=[True, False]
+                                ).rename(columns={
+                                    "username":   "Utilisateur",
+                                    "model_name": "Modèle",
+                                    "calls":      "Appels",
+                                    "errors":     "Erreurs",
+                                })[["Utilisateur", "Modèle", "Appels",
+                                    "Erreurs", "Taux erreur", "Latence moy."]],
+                                hide_index=True,
+                                use_container_width=True,
+                            )
+
+                            # Stacked bar user × modèle
+                            _fig_stack = px.bar(
+                                _df_bm.sort_values("calls", ascending=False),
+                                x="username", y="calls", color="model_name",
+                                title="Appels par utilisateur × modèle",
+                                labels={
+                                    "username":   "Utilisateur",
+                                    "calls":      "Appels",
+                                    "model_name": "Modèle",
+                                },
+                                barmode="stack",
+                            )
+                            _fig_stack.update_layout(
+                                legend_title_text="Modèle",
+                                xaxis_title="Utilisateur",
+                            )
+                            _col_chart.plotly_chart(_fig_stack, use_container_width=True)
+
         # --- Import / Export résultats observés ---
         CSV_TEMPLATE = (
             "id_obs,model_name,observed_result,date_time\n"
@@ -626,7 +863,7 @@ with tab_history:
             "obs-003,wine-regressor,13.5,2026-05-20\n"
         )
 
-        with st.expander("📤 Importer des résultats observés (CSV)"):
+        with st.expander("📤 Importer des résultats observés (CSV)", expanded=False):
             st.markdown(
                 "Enregistrez la **vraie valeur** observée pour chaque prédiction afin de "
                 "mesurer la précision du modèle en production (Ground Truth)."
@@ -696,7 +933,7 @@ with tab_history:
 
         # --- Maintenance RGPD (admin uniquement) ---
         if st.session_state.get("is_admin", False):
-            with st.expander("🗑️ Maintenance RGPD — Purge des prédictions"):
+            with st.expander("🗑️ Maintenance RGPD — Purge des prédictions", expanded=False):
                 st.caption(
                     "Supprime définitivement les prédictions anciennes. "
                     "Utilisez **Simuler** avant de confirmer."

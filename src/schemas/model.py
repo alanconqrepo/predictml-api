@@ -633,12 +633,23 @@ class CalibrationResponse(BaseModel):
     model_name: str
     version: Optional[str]
     sample_size: int
-    brier_score: Optional[float]
-    calibration_status: str  # "ok" | "overconfident" | "underconfident" | "insufficient_data"
-    mean_confidence: Optional[float]
-    mean_accuracy: Optional[float]
-    overconfidence_gap: Optional[float]
-    reliability: List[ReliabilityBin]
+    # Champ commun — "classification" | "regression"
+    model_type: str = "classification"
+    # ── Classification ──
+    brier_score: Optional[float] = None
+    calibration_status: str = "insufficient_data"
+    # "ok" | "overconfident" | "underconfident" | "insufficient_data"
+    # "biased_high" | "biased_low"  (régression)
+    mean_confidence: Optional[float] = None
+    mean_accuracy: Optional[float] = None
+    overconfidence_gap: Optional[float] = None
+    reliability: List[ReliabilityBin] = []
+    # ── Régression ──
+    mae: Optional[float] = None   # Mean Absolute Error
+    rmse: Optional[float] = None  # Root Mean Square Error
+    r2: Optional[float] = None    # Coefficient de détermination
+    bias: Optional[float] = None  # mean(ŷ − y) : positif = sur-estimation
+    scatter_data: Optional[List[dict]] = None  # [{pred, obs}, …] échantillon ≤ 300
 
 
 # ---------------------------------------------------------------------------

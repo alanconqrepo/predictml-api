@@ -14,6 +14,23 @@ import streamlit as st
 from utils.auth import get_client, require_auth
 from utils.metrics_help import METRIC_HELP
 
+def _fmt_pred_result(value) -> str:
+    """Formate un résultat de prédiction : float → 3 décimales, sinon str brut."""
+    if value is None:
+        return ""
+    try:
+        return f"{float(value):.3f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+# Labels de mode cohérents avec les pages Modèles et A/B Testing
+_MODE_LABEL = {
+    "production": "🟢 Production",
+    "ab_test":    "🟠 A/B",
+    "shadow":     "🟣 Shadow",
+}
+
 st.set_page_config(
     page_title="Supervision — PredictML",
     page_icon="🔍",
@@ -100,8 +117,10 @@ if models_data:
     _md_lines = [
         f"# Rapport de supervision — {start_date} → {end_date}", "",
         "## Résumé global", "",
-        f"- **Prédictions** : {gs.get('total_predictions', 0):,}",
-        f"- **Taux d'erreur** : {gs.get('error_rate', 0) * 100:.1f} %",
+        f"- **Prédictions production** : {gs.get('total_predictions', 0):,}",
+        f"- **Prédictions shadow** : {gs.get('total_shadow', 0):,}",
+        f"- **Taux d'erreur exécution** : {gs.get('error_rate', 0) * 100:.1f} % "
+        f"(erreurs serveur, hors qualité ML)",
         f"- **Latence moyenne** : {gs.get('avg_latency_ms') or '—'} ms",
         f"- **Modèles actifs** : {gs.get('active_models', 0)}",
         f"- **Alertes** : 🔴 {gs.get('models_critical', 0)} critique(s) · 🟡 {gs.get('models_warning', 0)} avertissement(s)",
@@ -137,25 +156,39 @@ def _icon(status: str) -> str:
 # KPIs globaux — toujours visibles
 # ---------------------------------------------------------------------------
 st.divider()
-k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Prédictions", f"{gs.get('total_predictions', 0):,}")
+k1, k2, k3, k4, k5, k6 = st.columns(6)
+k1.metric(
+    "Préd. production",
+    f"{gs.get('total_predictions', 0):,}",
+    help=METRIC_HELP["predictions_prod"],
+)
 k2.metric(
+    "Préd. shadow",
+    f"{gs.get('total_shadow', 0):,}",
+    help=METRIC_HELP["predictions_shadow"],
+)
+k3.metric(
     "Taux d'erreur",
     f"{gs.get('error_rate', 0) * 100:.1f} %",
     help=METRIC_HELP["taux_erreur"],
 )
-k3.metric(
+k4.metric(
     "Latence moy.",
     f"{gs.get('avg_latency_ms') or '—'} ms" if gs.get("avg_latency_ms") else "—",
     help=METRIC_HELP["latence_avg"],
 )
-k4.metric("Modèles actifs", gs.get("active_models", 0))
-_alerts = gs.get("models_critical", 0) + gs.get("models_warning", 0)
 k5.metric(
+    "Modèles actifs",
+    gs.get("active_models", 0),
+    help=METRIC_HELP["modeles_actifs"],
+)
+_alerts = gs.get("models_critical", 0) + gs.get("models_warning", 0)
+k6.metric(
     "Alertes",
     f"🔴 {gs.get('models_critical', 0)} · 🟡 {gs.get('models_warning', 0)}",
     delta=f"{_alerts} modèle(s) à surveiller" if _alerts else "Tout est OK",
     delta_color="inverse" if _alerts else "normal",
+    help=METRIC_HELP["alertes_sante"],
 )
 
 if not models_data:
@@ -199,7 +232,9 @@ with _tab_global:
         rows_table.append({
             "Modèle": m["model_name"],
             "Versions": ", ".join(m.get("versions", [])),
-            "Mode": ", ".join(sorted(set(v for v in m.get("deployment_modes", {}).values() if v))) or "—",
+            "Mode": ", ".join(sorted(set(
+                _MODE_LABEL.get(v, "⚪ —") for v in m.get("deployment_modes", {}).values() if v
+            ))) or "—",
             "Prédictions": m["total_predictions"],
             "Shadow": m["shadow_predictions"],
             "Erreurs": f"{m['error_rate'] * 100:.1f} %",
@@ -217,50 +252,231 @@ with _tab_global:
         hide_index=True,
         column_config={
             "Modèle": st.column_config.TextColumn("Modèle", help="Nom du modèle ML déployé."),
-            "Versions": st.column_config.TextColumn("Versions", help="Versions actives."),
-            "Mode": st.column_config.TextColumn("Mode", help="Mode de déploiement actif."),
-            "Prédictions": st.column_config.NumberColumn("Prédictions", help="Prédictions production sur la période."),
-            "Shadow": st.column_config.NumberColumn("Shadow", help="Prédictions shadow sur la période."),
-            "Erreurs": st.column_config.TextColumn("Erreurs", help="Taux d'erreur. Seuil warning 5 %, critique 10 %."),
-            "Latence moy.": st.column_config.TextColumn("Latence moy.", help="Temps de réponse moyen (ms)."),
-            "p95": st.column_config.TextColumn("p95", help="95e percentile du temps de réponse."),
-            "Drift features": st.column_config.TextColumn("Drift features", help="Écart features prod vs baseline."),
-            "Drift perf.": st.column_config.TextColumn("Drift perf.", help="Dégradation accuracy en production."),
-            "Drift sortie": st.column_config.TextColumn("Drift sortie", help="Changement de distribution des labels."),
-            "Statut": st.column_config.TextColumn("Statut", help="🟢 ok · 🟡 warning · 🔴 critical · ⚪ no_data."),
+            "Versions": st.column_config.TextColumn("Versions", help="Versions actives (is_active=True)."),
+            "Mode": st.column_config.TextColumn(
+                "Mode",
+                help=(
+                    "Mode(s) de déploiement des versions actives :\n"
+                    "🟢 Production · 🟠 A/B · 🟣 Shadow · ⚪ — (aucun routage)"
+                ),
+            ),
+            "Prédictions": st.column_config.NumberColumn(
+                "Prédictions",
+                help=(
+                    "Prédictions production retournées aux clients (is_shadow=False) "
+                    "sur la période sélectionnée."
+                ),
+            ),
+            "Shadow": st.column_config.NumberColumn(
+                "Shadow",
+                help=(
+                    "Prédictions silencieuses (is_shadow=True) calculées en arrière-plan "
+                    "et non retournées au client.\n"
+                    "Utilisées pour comparer de nouvelles versions sans impacter le trafic réel."
+                ),
+            ),
+            "Erreurs": st.column_config.TextColumn(
+                "Erreurs",
+                help=(
+                    "Taux d'erreurs d'exécution : COUNT(status ≠ 'success') / COUNT(*)\n\n"
+                    "⚠️ Erreurs serveur uniquement (exception, modèle non chargé, timeout…). "
+                    "Ce n'est PAS un indicateur de qualité ML.\n\n"
+                    "🟡 Warning : ≥ 5 %\n"
+                    "🔴 Critical : ≥ 10 %"
+                ),
+            ),
+            "Latence moy.": st.column_config.TextColumn(
+                "Latence moy.",
+                help=(
+                    "Temps de réponse moyen (ms) calculé sur les requêtes réussies "
+                    "(status = 'success') sur la période."
+                ),
+            ),
+            "p95": st.column_config.TextColumn(
+                "p95",
+                help=(
+                    "95e percentile de latence : 95 % des requêtes réussies sont traitées "
+                    "en moins de ce temps. Indicateur clé pour détecter les pics de lenteur."
+                ),
+            ),
+            "Drift features": st.column_config.TextColumn(
+                "Drift features",
+                help=(
+                    "Détection de dérive sur chaque feature numérique. "
+                    "Statut = pire parmi 3 métriques :\n\n"
+                    "• Z-score = |moy_prod − moy_baseline| / σ_baseline\n"
+                    "  🟡 Warning : ≥ 2  ·  🔴 Critical : ≥ 3\n\n"
+                    "• PSI (Population Stability Index) sur 10 bins normaux\n"
+                    "  🟡 Warning : ≥ 0.1  ·  🔴 Critical : ≥ 0.2\n\n"
+                    "• Null rate : écart du taux de valeurs manquantes vs baseline\n"
+                    "  🟡 Warning : écart ≥ 5 pts  ·  🔴 Critical : écart ≥ 15 pts ou null > 30 %\n\n"
+                    "⚪ no_baseline = aucune baseline stockée pour ce modèle.\n"
+                    "⚪ insufficient_data = moins de 10 prédictions sur la période."
+                ),
+            ),
+            "Drift perf.": st.column_config.TextColumn(
+                "Drift perf.",
+                help=(
+                    "Détection de dégradation de performance dans le temps.\n\n"
+                    "Méthode : compare la performance moyenne entre la 1ère moitié "
+                    "et la 2ème moitié de la période sélectionnée.\n"
+                    "• Classification : utilise l'accuracy (résultats observés liés requis)\n"
+                    "• Régression : utilise le MAE (une hausse = dégradation)\n\n"
+                    "🟡 Warning : baisse ≥ 5 points\n"
+                    "🔴 Critical : baisse ≥ 10 points\n\n"
+                    "⚪ no_data = moins de 4 jours de données ou aucun résultat observé lié."
+                ),
+            ),
+            "Drift sortie": st.column_config.TextColumn(
+                "Drift sortie",
+                help=(
+                    "Dérive de la distribution des valeurs prédites par le modèle.\n\n"
+                    "Méthode : PSI (Population Stability Index) entre la distribution "
+                    "de prédictions actuelle et la baseline :\n"
+                    "• Classification : distribution des classes prédites\n"
+                    "• Régression : distribution via quartiles d'entraînement\n\n"
+                    "🟡 Warning : PSI ≥ 0.1\n"
+                    "🔴 Critical : PSI ≥ 0.2\n\n"
+                    "⚪ no_baseline = aucun label_distribution stocké pour ce modèle."
+                ),
+            ),
+            "Statut": st.column_config.TextColumn(
+                "Statut",
+                help=(
+                    "Statut de santé global = pire des 4 indicateurs :\n"
+                    "① Taux d'erreur exécution\n"
+                    "② Drift features (Z-score + PSI + null rate)\n"
+                    "③ Drift performance (baisse accuracy/MAE)\n"
+                    "④ Drift sortie (PSI distribution des prédictions)\n\n"
+                    "🟢 ok · 🟡 warning · 🔴 critical\n"
+                    "⚪ no_data / no_baseline / insufficient_data = données insuffisantes "
+                    "(ne dégrade pas le statut global)"
+                ),
+            ),
         },
     )
 
-    # ── Graphiques volume + erreurs ───────────────────────────────────────
-    col_vol, col_err = st.columns(2)
+    # ── Fetch timeseries par modèle (pour les graphiques d'évolution) ────
+    _ts_by_model: dict[str, list] = {}
+    with st.spinner("Chargement des séries temporelles…"):
+        for _m in models_data:
+            try:
+                _det = client.get_monitoring_model(
+                    name=_m["model_name"], start=start_iso, end=end_iso
+                )
+                _ts_by_model[_m["model_name"]] = _det.get("timeseries", [])
+            except Exception:
+                _ts_by_model[_m["model_name"]] = []
+
+    _ts_rows = []
+    for _mname, _ts in _ts_by_model.items():
+        for _pt in _ts:
+            _ts_rows.append({
+                "date":            _pt["date"],
+                "model_name":      _mname,
+                "error_rate_pct":  round(_pt["error_rate"] * 100, 2),
+                "avg_latency_ms":  _pt.get("avg_latency_ms"),
+            })
+    df_ts = pd.DataFrame(
+        _ts_rows if _ts_rows
+        else {"date": [], "model_name": [], "error_rate_pct": [], "avg_latency_ms": []}
+    )
+    if not df_ts.empty:
+        df_ts["date"] = pd.to_datetime(df_ts["date"])
+        df_ts = df_ts.sort_values("date")
+
+    # ── Graphiques ────────────────────────────────────────────────────────
     df_models = pd.DataFrame([{
-        "model_name": m["model_name"],
+        "model_name":       m["model_name"],
         "total_predictions": m["total_predictions"],
-        "error_rate_pct": round(m["error_rate"] * 100, 2),
+        "error_rate_pct":   round(m["error_rate"] * 100, 2),
     } for m in models_data])
 
-    fig_vol = px.bar(
-        df_models.sort_values("total_predictions", ascending=False),
-        x="model_name", y="total_predictions",
-        title="Volume de prédictions par modèle",
-        labels={"model_name": "Modèle", "total_predictions": "Prédictions"},
+    col_pie, col_err_ts = st.columns([1, 2])
+
+    # — Camembert : répartition des prédictions production ——————————————
+    fig_pie = px.pie(
+        df_models,
+        values="total_predictions",
+        names="model_name",
+        title="Répartition des prédictions production",
+        hole=0.45,
         color_discrete_sequence=px.colors.qualitative.Set2,
     )
-    fig_vol.update_layout(showlegend=False)
-    col_vol.plotly_chart(fig_vol, width='stretch')
-
-    fig_err = px.bar(
-        df_models.sort_values("error_rate_pct", ascending=False),
-        x="model_name", y="error_rate_pct",
-        title="Taux d'erreur par modèle (%)",
-        labels={"model_name": "Modèle", "error_rate_pct": "Erreurs (%)"},
-        color="error_rate_pct",
-        color_continuous_scale=["#27ae60", "#e67e22", "#c0392b"],
+    fig_pie.update_traces(
+        textposition="inside",
+        textinfo="percent+label",
+        hovertemplate="<b>%{label}</b><br>%{value:,} prédictions<br>%{percent}<extra></extra>",
     )
-    fig_err.add_hline(y=5,  line_dash="dash", line_color="#e67e22", annotation_text="Seuil warning 5%")
-    fig_err.add_hline(y=10, line_dash="dash", line_color="#c0392b", annotation_text="Seuil critique 10%")
-    fig_err.update_layout(showlegend=False, coloraxis_showscale=False)
-    col_err.plotly_chart(fig_err, width='stretch')
+    fig_pie.update_layout(showlegend=False, margin=dict(t=50, b=10, l=10, r=10))
+    col_pie.plotly_chart(fig_pie, width='stretch')
+
+    # — Évolution du taux d'erreur ——————————————————————————————————————
+    if not df_ts.empty:
+        fig_err_ts = px.line(
+            df_ts,
+            x="date", y="error_rate_pct",
+            color="model_name",
+            title="Évolution du taux d'erreur d'exécution (%)",
+            labels={"date": "Date", "error_rate_pct": "Erreurs (%)", "model_name": "Modèle"},
+            markers=True,
+        )
+        fig_err_ts.add_hline(
+            y=5, line_dash="dash", line_color="#e67e22",
+            annotation_text="Warning 5 %", annotation_position="top right",
+        )
+        fig_err_ts.add_hline(
+            y=10, line_dash="dash", line_color="#c0392b",
+            annotation_text="Critique 10 %", annotation_position="top right",
+        )
+        fig_err_ts.update_layout(
+            legend_title_text="Modèle",
+            yaxis_rangemode="tozero",
+            yaxis_title="Erreurs (%)",
+        )
+    else:
+        fig_err_ts = go.Figure()
+        fig_err_ts.update_layout(
+            title="Évolution du taux d'erreur d'exécution (%)",
+            annotations=[dict(
+                text="Pas de données temporelles disponibles",
+                showarrow=False, xref="paper", yref="paper",
+                x=0.5, y=0.5, font_size=14, font_color="#888",
+            )],
+        )
+    col_err_ts.plotly_chart(fig_err_ts, width='stretch')
+
+    # — Évolution de la latence moyenne ————————————————————————————————
+    df_lat = df_ts[df_ts["avg_latency_ms"].notna()].copy() if not df_ts.empty else df_ts
+    if not df_lat.empty:
+        fig_lat = px.line(
+            df_lat,
+            x="date", y="avg_latency_ms",
+            color="model_name",
+            title="Évolution de la latence moyenne de réponse (ms)",
+            labels={
+                "date": "Date",
+                "avg_latency_ms": "Latence moy. (ms)",
+                "model_name": "Modèle",
+            },
+            markers=True,
+        )
+        fig_lat.update_layout(
+            legend_title_text="Modèle",
+            yaxis_rangemode="tozero",
+            yaxis_title="Latence moy. (ms)",
+        )
+    else:
+        fig_lat = go.Figure()
+        fig_lat.update_layout(
+            title="Évolution de la latence moyenne de réponse (ms)",
+            annotations=[dict(
+                text="Pas de données de latence disponibles",
+                showarrow=False, xref="paper", yref="paper",
+                x=0.5, y=0.5, font_size=14, font_color="#888",
+            )],
+        )
+    st.plotly_chart(fig_lat, width='stretch')
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -268,12 +484,12 @@ with _tab_global:
 # ═══════════════════════════════════════════════════════════════════════════
 with _tab_detail:
 
-    # ── Sélecteur ────────────────────────────────────────────────────────
+    # ── Sélecteur — recherche + modèle sur la même ligne ─────────────────
     model_names = [m["model_name"] for m in models_data]
-    _det_c1, _det_c2 = st.columns([3, 1])
+    _det_c1, _det_c2 = st.columns([1, 2])
     sup_search = _det_c1.text_input("Filtrer par nom", key="sup_model_search", placeholder="Rechercher un modèle…")
     sup_filtered = [n for n in model_names if sup_search.lower() in n.lower()] if sup_search else model_names
-    selected_model = st.selectbox("Sélectionner un modèle", sup_filtered or model_names)
+    selected_model = _det_c2.selectbox("Sélectionner un modèle", sup_filtered or model_names)
 
     if not selected_model:
         st.stop()
@@ -326,7 +542,7 @@ with _tab_detail:
         if per_version:
             df_ver = pd.DataFrame([{
                 "Version": v["version"],
-                "Mode": v.get("deployment_mode") or "—",
+                "Mode": _MODE_LABEL.get(v.get("deployment_mode") or "", "⚪ —"),
                 "Poids trafic": f"{v['traffic_weight']:.0%}" if v.get("traffic_weight") else "—",
                 "Prédictions": v["total_predictions"],
                 "Shadow": v["shadow_predictions"],
@@ -355,7 +571,7 @@ with _tab_detail:
     # ────────────────────────────────────────────────────────────────────
     # EXPANDER 2 — Activité & Latence
     # ────────────────────────────────────────────────────────────────────
-    with st.expander("📈 Activité & Latence", expanded=bool(timeseries)):
+    with st.expander("📈 Activité & Latence", expanded=False):
         if timeseries:
             df_ts = pd.DataFrame(timeseries)
             df_ts["date"] = pd.to_datetime(df_ts["date"])
@@ -420,7 +636,7 @@ with _tab_detail:
     _drift_icon = STATUS_ICON.get(_feat_drift_status, "⚪")
     with st.expander(
         f"🌡️ Drift & Anomalies  {_drift_icon} {_feat_drift_status}",
-        expanded=_has_drift_alert,
+        expanded=False,
     ):
         # Drift de performance + drift features côte à côte
         col_perf, col_feat = st.columns(2)
@@ -432,34 +648,80 @@ with _tab_detail:
                 df_perf["date"] = pd.to_datetime(df_perf["date"])
                 df_perf = df_perf[df_perf["matched_count"] > 0].sort_values("date")
                 if not df_perf.empty:
-                    df_perf["rolling_3d"] = df_perf["accuracy"].rolling(window=3, min_periods=1).mean()
+                    # Detect regression via mae (available even on older API versions)
+                    _is_regression = (
+                        "mae" in df_perf.columns
+                        and df_perf["mae"].notna().any()
+                    )
+                    # Choose best metric: R² if available, MAE as fallback for regression
+                    _has_r2 = (
+                        _is_regression
+                        and "r2" in df_perf.columns
+                        and df_perf["r2"].notna().any()
+                    )
+                    if _has_r2:
+                        _metric_col   = "r2"
+                        _metric_label = "R² / jour"
+                        _y_label      = "R²"
+                        _tick_fmt     = ".3f"
+                        _delta_fmt    = lambda d: f"{-d:+.3f} (1re vs 2e moitié)"  # noqa: E731
+                        _drop_invert  = False   # drop > 0 = R² fell = bad
+                    elif _is_regression:
+                        # MAE fallback: lower is better so invert sign for trend
+                        _metric_col   = "mae"
+                        _metric_label = "MAE / jour"
+                        _y_label      = "MAE"
+                        _tick_fmt     = ".3f"
+                        _delta_fmt    = lambda d: f"{-d:+.3f} (1re vs 2e moitié)"  # noqa: E731
+                        _drop_invert  = True    # drop > 0 = MAE increased = bad (same logic)
+                    else:
+                        _metric_col   = "accuracy"
+                        _metric_label = "Accuracy / jour"
+                        _y_label      = "Accuracy"
+                        _tick_fmt     = ".0%"
+                        _delta_fmt    = lambda d: f"{-d:.1%} (1re vs 2e moitié)"  # noqa: E731
+                        _drop_invert  = False
+
+                    df_perf["rolling_3d"] = (
+                        df_perf[_metric_col].rolling(window=3, min_periods=1).mean()
+                    )
                     fig_perf = go.Figure()
                     fig_perf.add_trace(go.Scatter(
-                        x=df_perf["date"], y=df_perf["accuracy"],
-                        name="Accuracy / jour", mode="markers+lines",
+                        x=df_perf["date"], y=df_perf[_metric_col],
+                        name=_metric_label, mode="markers+lines",
                         marker=dict(size=6), line=dict(color="#95a5a6"),
                     ))
                     fig_perf.add_trace(go.Scatter(
                         x=df_perf["date"], y=df_perf["rolling_3d"],
                         name="Moyenne 3j", line=dict(color="#2980b9", width=2),
                     ))
-                    if _acc_min is not None:
+                    if not _is_regression and _acc_min is not None:
                         fig_perf.add_hline(y=_acc_min, line_dash="dash", line_color="#c0392b",
                                            annotation_text=f"Min {_acc_min:.0%}",
                                            annotation_position="bottom right")
                     fig_perf.update_layout(
-                        xaxis_title="Date", yaxis_title="Accuracy",
-                        yaxis=dict(tickformat=".0%"),
+                        xaxis_title="Date", yaxis_title=_y_label,
+                        yaxis=dict(tickformat=_tick_fmt),
                         hovermode="x unified", legend=dict(orientation="h", y=1.02),
                     )
                     st.plotly_chart(fig_perf, width='stretch')
                     mid = len(df_perf) // 2
                     if mid > 0:
-                        drop = df_perf["accuracy"].iloc[:mid].mean() - df_perf["accuracy"].iloc[mid:].mean()
+                        raw_drop = (
+                            df_perf[_metric_col].iloc[:mid].mean()
+                            - df_perf[_metric_col].iloc[mid:].mean()
+                        )
+                        # For MAE: increase = bad, so invert sign to match "drop" semantics
+                        drop = -raw_drop if _drop_invert else raw_drop
+                        _status = (
+                            "🔴 Critique" if drop >= 0.10
+                            else "🟡 Attention" if drop >= 0.05
+                            else "🟢 Stable"
+                        )
                         st.metric(
                             "Tendance performance",
-                            "🔴 Critique" if drop >= 0.10 else "🟡 Attention" if drop >= 0.05 else "🟢 Stable",
-                            delta=f"{-drop:.1%} (1re vs 2e moitié)", delta_color="inverse",
+                            _status,
+                            delta=_delta_fmt(raw_drop), delta_color="inverse",
                             help=METRIC_HELP["tendance_performance"],
                         )
                 else:
@@ -488,13 +750,93 @@ with _tab_detail:
                 st.dataframe(
                     pd.DataFrame(rows_drift), width='stretch', hide_index=True,
                     column_config={
-                        "Feature": st.column_config.TextColumn("Feature", help="Variable d'entrée."),
-                        "Statut": st.column_config.TextColumn("Statut", help="🟢 stable · 🟡 warning · 🔴 critique."),
-                        "Moy. prod.": st.column_config.TextColumn("Moy. prod.", help="Moyenne en production."),
-                        "Moy. baseline": st.column_config.TextColumn("Moy. baseline", help="Moyenne à l'entraînement."),
-                        "Z-score": st.column_config.TextColumn("Z-score", help="|Z| > 2 = warning, > 3 = critique."),
-                        "PSI": st.column_config.TextColumn("PSI", help="< 0.1 stable · 0.1–0.2 modéré · ≥ 0.2 critique."),
-                        "N prod.": st.column_config.NumberColumn("N prod.", help="Prédictions analysées."),
+                        "Feature": st.column_config.TextColumn(
+                            "Feature",
+                            help=(
+                                "Nom de la feature d'entrée du modèle.\n\n"
+                                "Les lignes sont triées par ordre alphabétique. "
+                                "Triez sur « Statut » pour faire remonter les features "
+                                "en alerte."
+                            ),
+                        ),
+                        "Statut": st.column_config.TextColumn(
+                            "Statut",
+                            help=(
+                                "Statut de drift de la feature — pire parmi 3 indicateurs :\n\n"
+                                "• Z-score (déplacement de la moyenne)\n"
+                                "• PSI (changement de distribution)\n"
+                                "• Taux de valeurs nulles (données manquantes)\n\n"
+                                "🟢 ok — distribution stable\n"
+                                "🟡 warning — dérive modérée à surveiller\n"
+                                "🔴 critical — dérive forte, action recommandée\n"
+                                "⚪ no_baseline / insufficient_data — pas de référence "
+                                "ou moins de 10 prédictions"
+                            ),
+                        ),
+                        "Moy. prod.": st.column_config.TextColumn(
+                            "Moy. prod.",
+                            help=(
+                                "Moyenne des valeurs reçues en production sur la période "
+                                "sélectionnée.\n\n"
+                                "Calculée sur les N prédictions récentes (colonne N prod.). "
+                                "Comparez avec « Moy. baseline » pour détecter un déplacement "
+                                "de la distribution d'entrée — par exemple un capteur qui dérive "
+                                "ou une population de clients qui change."
+                            ),
+                        ),
+                        "Moy. baseline": st.column_config.TextColumn(
+                            "Moy. baseline",
+                            help=(
+                                "Moyenne des valeurs de cette feature dans le dataset "
+                                "d'entraînement (feature_baseline stockée avec le modèle).\n\n"
+                                "C'est la référence de normalité : si « Moy. prod. » s'en "
+                                "éloigne significativement, le modèle reçoit des données "
+                                "différentes de celles sur lesquelles il a été entraîné."
+                            ),
+                        ),
+                        "Z-score": st.column_config.TextColumn(
+                            "Z-score",
+                            help=(
+                                "Déplacement de la moyenne, exprimé en unités d'écart-type "
+                                "d'entraînement :\n\n"
+                                "Z = |μ_prod − μ_baseline| / σ_baseline\n\n"
+                                "Interprétation :\n"
+                                "• Z = 1 → la moyenne a bougé d'1 écart-type (normal)\n"
+                                "• Z = 2 → déplacement notable — la moitié des distributions "
+                                "normales ne se chevauchent plus qu'à ~5 %\n"
+                                "• Z = 3 → déplacement fort — signal de drift avéré\n\n"
+                                "🟡 Warning : Z ≥ 2  ·  🔴 Critical : Z ≥ 3\n\n"
+                                "⚠️ N'indique que le déplacement de la moyenne, "
+                                "pas les changements de forme de la distribution "
+                                "(compléter avec PSI)."
+                            ),
+                        ),
+                        "PSI": st.column_config.TextColumn(
+                            "PSI",
+                            help=(
+                                "Population Stability Index — mesure la différence globale "
+                                "entre la distribution en production et la distribution "
+                                "d'entraînement, sur 10 bins de largeur égale :\n\n"
+                                "PSI = Σ (P_i − Q_i) × ln(P_i / Q_i)\n\n"
+                                "Interprétation :\n"
+                                "• PSI < 0.1 → distribution stable\n"
+                                "• PSI 0.1–0.2 → dérive modérée — à surveiller\n"
+                                "• PSI ≥ 0.2 → dérive forte — recalibration recommandée\n\n"
+                                "🟡 Warning : ≥ 0.1  ·  🔴 Critical : ≥ 0.2\n\n"
+                                "Contrairement au Z-score, le PSI détecte aussi les changements "
+                                "de forme (asymétrie, queues plus lourdes, bimodalité…)."
+                            ),
+                        ),
+                        "N prod.": st.column_config.NumberColumn(
+                            "N prod.",
+                            help=(
+                                "Nombre de prédictions récentes utilisées pour calculer "
+                                "les statistiques de production (Moy. prod., Z-score, PSI).\n\n"
+                                "Un N faible (< 30) rend les estimations moins fiables : "
+                                "le Z-score et le PSI peuvent être bruyants. "
+                                "Le seuil minimal requis est 10 (en dessous : ⚪ insufficient_data)."
+                            ),
+                        ),
                     },
                 )
             elif not feat_baseline:
@@ -561,6 +903,12 @@ with _tab_detail:
 
         # Prédictions anomales
         st.markdown("**🚨 Prédictions anomales**")
+        st.caption(
+            "Une prédiction est marquée **anomale** lorsqu'au moins une de ses features d'entrée "
+            "présente un Z-score ≥ seuil par rapport aux données d'entraînement. "
+            "Ces prédictions ont été reçues sur des entrées inhabituelles — "
+            "le modèle a potentiellement extrapolé hors de sa zone de confiance."
+        )
         _anom_col1, _anom_col2 = st.columns([1, 2])
         _anom_days = _anom_col1.number_input(
             "Fenêtre (jours)", min_value=1, max_value=90,
@@ -569,7 +917,14 @@ with _tab_detail:
         _anom_z = _anom_col2.slider(
             "Seuil z-score", min_value=1.0, max_value=6.0, value=3.0, step=0.1,
             format="%.1f", key="anom_z_threshold",
-            help="Features dont |z| ≥ seuil sont considérées aberrantes.",
+            help=(
+                "Seuil de détection : une feature est considérée aberrante si\n\n"
+                "Z = |valeur reçue − moyenne entraînement| / écart-type entraînement ≥ seuil\n\n"
+                "• Z = 2 → valeur à 2 écarts-types de la moyenne (5 % d'occurrence si distribution normale)\n"
+                "• Z = 3 → valeur à 3 écarts-types (0.3 % d'occurrence) — anomalie forte\n\n"
+                "Abaisser le seuil remonte plus d'anomalies (moins strict). "
+                "Le remonter filtre uniquement les cas extrêmes."
+            ),
         )
         try:
             _anom_data = client.get_predictions_anomalies(
@@ -589,62 +944,236 @@ with _tab_detail:
                 _rate  = _anom_data.get("anomaly_rate", 0.0)
                 _preds = _anom_data.get("predictions", [])
                 _mc1, _mc2, _mc3 = st.columns(3)
-                _mc1.metric("Prédictions analysées", _total)
-                _mc2.metric("Prédictions anomales", _count)
-                _mc3.metric("Taux d'anomalie", f"{_rate:.1%}")
+                _mc1.metric("Prédictions analysées", _total,
+                            help=f"Prédictions récentes analysées sur les {_anom_days} derniers jours.")
+                _mc2.metric("Prédictions anomales", _count,
+                            help=f"Prédictions avec au moins une feature dont |Z| ≥ {_anom_z:.1f}.")
+                _mc3.metric("Taux d'anomalie", f"{_rate:.1%}",
+                            help="Part des prédictions anomales parmi les prédictions analysées.")
                 if not _preds:
                     st.success(f"Aucune anomalie détectée (z ≥ {_anom_z:.1f}) sur {_total} prédiction(s).")
                 else:
+                    # Trier par z-score max décroissant — ordre stable pour le sélecteur
+                    _preds_sorted = sorted(
+                        _preds,
+                        key=lambda x: -max(f["z_score"] for f in x["anomalous_features"].values()),
+                    )
+                    # Détecte si au moins une prédiction a une confiance — sinon, modèle de régression
+                    _has_confidence = any(_p.get("max_confidence") is not None for _p in _preds_sorted)
+
                     _rows_anom = []
-                    for _p in _preds:
+                    for _p in _preds_sorted:
                         _feats = _p.get("anomalous_features", {})
                         _worst_z_val = max((_f["z_score"] for _f in _feats.values()), default=0.0)
-                        _feat_names = ", ".join(f"{_fn} (z={_fd['z_score']:.2f})" for _fn, _fd in _feats.items())
-                        _rows_anom.append({
+                        _feat_names = ", ".join(
+                            f"{_fn} (z={_fd['z_score']:.2f})"
+                            for _fn, _fd in sorted(_feats.items(), key=lambda x: -x[1]["z_score"])
+                        )
+                        _row = {
                             "ID": _p["prediction_id"],
-                            "Timestamp": _p["timestamp"],
-                            "Résultat": str(_p.get("prediction_result", "")),
-                            "Confiance": f"{_p['max_confidence']:.2%}" if _p.get("max_confidence") is not None else "—",
+                            "Timestamp": _p["timestamp"][:19].replace("T", " "),
+                            "Résultat": _fmt_pred_result(_p.get("prediction_result")),
+                            "Ground truth": _fmt_pred_result(_p.get("ground_truth")),
+                            "id_obs": _p.get("id_obs") or "—",
                             "Z-score max": round(_worst_z_val, 2),
                             "Features aberrantes": _feat_names,
-                        })
-                    _df_anom = pd.DataFrame(_rows_anom).sort_values("Z-score max", ascending=False)
-                    st.dataframe(
-                        _df_anom, width='stretch', hide_index=True,
-                        column_config={
-                            "ID": st.column_config.NumberColumn("ID", help="Identifiant de la prédiction."),
-                            "Timestamp": st.column_config.TextColumn("Timestamp"),
-                            "Résultat": st.column_config.TextColumn("Résultat"),
-                            "Confiance": st.column_config.TextColumn("Confiance"),
-                            "Z-score max": st.column_config.NumberColumn("Z-score max", help="|Z| le plus élevé.", format="%.2f"),
-                            "Features aberrantes": st.column_config.TextColumn("Features aberrantes"),
-                        },
+                        }
+                        if _has_confidence:
+                            _row["Confiance"] = (
+                                f"{_p['max_confidence']:.2%}"
+                                if _p.get("max_confidence") is not None else "—"
+                            )
+                        _rows_anom.append(_row)
+
+                    # Ordre des colonnes
+                    _cols_order = ["ID", "Timestamp", "Résultat", "Ground truth", "id_obs"]
+                    if _has_confidence:
+                        _cols_order.append("Confiance")
+                    _cols_order += ["Z-score max", "Features aberrantes"]
+                    _df_anom = pd.DataFrame(_rows_anom)[_cols_order]
+
+                    _col_cfg_anom = {
+                        "ID": st.column_config.NumberColumn(
+                            "ID",
+                            help="Identifiant unique de la prédiction dans la base.",
+                        ),
+                        "Timestamp": st.column_config.TextColumn(
+                            "Timestamp",
+                            help="Date et heure de la prédiction.",
+                        ),
+                        "Résultat": st.column_config.TextColumn(
+                            "Résultat",
+                            help=(
+                                "Valeur prédite par le modèle pour cette requête. "
+                                "Peut être moins fiable si plusieurs features sont aberrantes."
+                            ),
+                        ),
+                        "Ground truth": st.column_config.TextColumn(
+                            "Ground truth",
+                            help=(
+                                "Valeur réelle observée (si un observed_result a été soumis "
+                                "pour cet id_obs). Permet de mesurer directement l'erreur "
+                                "du modèle sur cette prédiction anomale."
+                            ),
+                        ),
+                        "id_obs": st.column_config.TextColumn(
+                            "id_obs",
+                            help=(
+                                "Identifiant métier de l'observation, transmis lors de la requête "
+                                "de prédiction. Sert de clé de jointure avec les observed_results. "
+                                "— si absent (prédiction sans id_obs)."
+                            ),
+                        ),
+                        "Z-score max": st.column_config.NumberColumn(
+                            "Z-score max",
+                            format="%.2f",
+                            help=(
+                                "Z-score le plus élevé parmi toutes les features aberrantes "
+                                "de cette prédiction.\n\n"
+                                "Z = |valeur reçue − μ entraînement| / σ entraînement\n\n"
+                                "Plus Z est élevé, plus l'entrée est atypique par rapport "
+                                "aux données vues à l'entraînement."
+                            ),
+                        ),
+                        "Features aberrantes": st.column_config.TextColumn(
+                            "Features aberrantes",
+                            help=(
+                                "Features dont |Z| ≥ seuil, classées par Z-score décroissant. "
+                                "Format : nom_feature (z=X.XX). "
+                                "Sélectionnez une ligne ci-dessous pour voir le détail complet."
+                            ),
+                        ),
+                    }
+                    if _has_confidence:
+                        _col_cfg_anom["Confiance"] = st.column_config.TextColumn(
+                            "Confiance",
+                            help=(
+                                "Probabilité max retournée par le modèle (classifieurs uniquement). "
+                                "Une confiance haute sur une prédiction anomale est un signal fort "
+                                "de sur-confiance du modèle hors de sa zone d'entraînement."
+                            ),
+                        )
+                    st.dataframe(_df_anom, width='stretch', hide_index=True, column_config=_col_cfg_anom)
+
+                    # ── Sélecteur de prédiction pour le détail ──────────────
+                    st.markdown("##### 🔍 Détail d'une prédiction")
+                    _sel_labels = [
+                        f"#{_p['prediction_id']}  ·  {_p['timestamp'][:16].replace('T', ' ')}  "
+                        f"·  z_max = {max(f['z_score'] for f in _p['anomalous_features'].values()):.2f}"
+                        f"  ({', '.join(sorted(_p['anomalous_features'].keys())[:2])}"
+                        f"{'…' if len(_p['anomalous_features']) > 2 else ''})"
+                        for _p in _preds_sorted
+                    ]
+                    _pred_by_label = dict(zip(_sel_labels, _preds_sorted))
+                    _sel_label = st.selectbox(
+                        "Prédiction à inspecter",
+                        options=_sel_labels,
+                        index=0,
+                        key="anom_detail_sel",
+                        label_visibility="collapsed",
+                        placeholder="Sélectionnez une prédiction…",
                     )
-                    with st.expander("Détail des features par prédiction", expanded=False):
-                        for _p in sorted(_preds, key=lambda x: -max(f["z_score"] for f in x["anomalous_features"].values())):
-                            _feats = _p.get("anomalous_features", {})
-                            st.markdown(
-                                f"**Prédiction #{_p['prediction_id']}** — {_p['timestamp'][:19]}  "
-                                f"résultat : `{_p.get('prediction_result')}`"
+                    if _sel_label:
+                        _sel_pred = _pred_by_label[_sel_label]
+                        _feats = _sel_pred.get("anomalous_features", {})
+                        _feats_sorted = sorted(_feats.items(), key=lambda x: -x[1]["z_score"])
+
+                        with st.container(border=True):
+                            # En-tête
+                            _hc1, _hc2, _hc3, _hc4 = st.columns([3, 1, 1, 1])
+                            _hc1.markdown(
+                                f"**Prédiction #{_sel_pred['prediction_id']}**  ·  "
+                                f"{_sel_pred['timestamp'][:19].replace('T', ' ')}"
+                                + (f"  ·  id_obs: `{_sel_pred['id_obs']}`" if _sel_pred.get("id_obs") else "")
                             )
-                            _feat_rows = [{
-                                "Feature": _fn,
-                                "Valeur": round(_fd["value"], 4),
-                                "Z-score": round(_fd["z_score"], 4),
-                                "Baseline μ": round(_fd["baseline_mean"], 4),
-                                "Baseline σ": round(_fd["baseline_std"], 4),
-                            } for _fn, _fd in sorted(_feats.items(), key=lambda x: -x[1]["z_score"])]
-                            st.dataframe(
-                                pd.DataFrame(_feat_rows), width='stretch', hide_index=True,
-                                column_config={
-                                    "Feature": st.column_config.TextColumn("Feature"),
-                                    "Valeur": st.column_config.NumberColumn("Valeur", format="%.4f"),
-                                    "Z-score": st.column_config.NumberColumn("Z-score", format="%.4f"),
-                                    "Baseline μ": st.column_config.NumberColumn("Baseline μ", format="%.4f"),
-                                    "Baseline σ": st.column_config.NumberColumn("Baseline σ", format="%.4f"),
-                                },
-                            )
-                            st.divider()
+                            _hc2.metric("Résultat", _fmt_pred_result(_sel_pred.get("prediction_result")))
+                            if _sel_pred.get("ground_truth") is not None:
+                                _hc3.metric("Ground truth", _fmt_pred_result(_sel_pred.get("ground_truth")),
+                                            help="Valeur réelle observée (via observed_results).")
+                            if _sel_pred.get("max_confidence") is not None:
+                                _hc4.metric("Confiance", f"{_sel_pred['max_confidence']:.2%}")
+
+                            # Graphique + tableau côte à côte
+                            _dc1, _dc2 = st.columns([1, 1])
+
+                            with _dc1:
+                                st.caption("Z-scores des features aberrantes")
+                                _z_df = pd.DataFrame([
+                                    {"Feature": fn, "Z-score": round(fd["z_score"], 2)}
+                                    for fn, fd in _feats_sorted
+                                ])
+                                _z_max_val = _z_df["Z-score"].max()
+                                _fig_z = px.bar(
+                                    _z_df, x="Z-score", y="Feature", orientation="h",
+                                    color="Z-score",
+                                    color_continuous_scale=[
+                                        [0.0, "#f39c12"], [0.5, "#e67e22"], [1.0, "#c0392b"]
+                                    ],
+                                    range_color=[_anom_z, max(_z_max_val, _anom_z + 0.1)],
+                                    height=max(160, len(_feats_sorted) * 48 + 60),
+                                    labels={"Z-score": "Z-score", "Feature": ""},
+                                )
+                                _fig_z.add_vline(
+                                    x=_anom_z, line_dash="dash", line_color="#7f8c8d",
+                                    annotation_text=f"Seuil {_anom_z:.1f}",
+                                    annotation_position="top right",
+                                )
+                                _fig_z.update_layout(
+                                    margin=dict(l=0, r=10, t=10, b=30),
+                                    yaxis=dict(autorange="reversed"),
+                                    coloraxis_showscale=False,
+                                    showlegend=False,
+                                )
+                                st.plotly_chart(_fig_z, width='stretch')
+
+                            with _dc2:
+                                st.caption("Valeurs reçues vs baseline d'entraînement")
+                                _feat_detail_rows = [{
+                                    "Feature": fn,
+                                    "Valeur reçue": round(fd["value"], 4),
+                                    "Moy. entraîn. (μ)": round(fd["baseline_mean"], 4),
+                                    "Écart-type (σ)": round(fd["baseline_std"], 4),
+                                    "Plage normale": (
+                                        f"[{fd['baseline_mean'] - 2*fd['baseline_std']:.3g}"
+                                        f" – {fd['baseline_mean'] + 2*fd['baseline_std']:.3g}]"
+                                    ),
+                                    "Z-score": round(fd["z_score"], 2),
+                                } for fn, fd in _feats_sorted]
+                                st.dataframe(
+                                    pd.DataFrame(_feat_detail_rows),
+                                    hide_index=True, width='stretch',
+                                    column_config={
+                                        "Feature": st.column_config.TextColumn("Feature"),
+                                        "Valeur reçue": st.column_config.NumberColumn(
+                                            "Valeur reçue", format="%.4f",
+                                            help="Valeur reçue dans la requête de prédiction.",
+                                        ),
+                                        "Moy. entraîn. (μ)": st.column_config.NumberColumn(
+                                            "μ entraîn.", format="%.4f",
+                                            help="Moyenne de cette feature dans le dataset d'entraînement.",
+                                        ),
+                                        "Écart-type (σ)": st.column_config.NumberColumn(
+                                            "σ entraîn.", format="%.4f",
+                                            help="Écart-type de cette feature dans le dataset d'entraînement.",
+                                        ),
+                                        "Plage normale": st.column_config.TextColumn(
+                                            "Plage normale [μ±2σ]",
+                                            help=(
+                                                "Intervalle μ ± 2σ — 95 % des valeurs d'entraînement "
+                                                "se situaient dans cette plage. "
+                                                "Une valeur hors de cette plage est statistiquement rare."
+                                            ),
+                                        ),
+                                        "Z-score": st.column_config.NumberColumn(
+                                            "Z-score", format="%.2f",
+                                            help=(
+                                                "Z = |valeur reçue − μ| / σ\n\n"
+                                                "Nombre d'écarts-types séparant la valeur reçue "
+                                                "de la moyenne d'entraînement."
+                                            ),
+                                        ),
+                                    },
+                                )
 
     # ────────────────────────────────────────────────────────────────────
     # EXPANDER 4 — Comparaison A/B & Shadow
@@ -652,7 +1181,7 @@ with _tab_detail:
     if ab_comparison:
         ab_versions = ab_comparison.get("versions", [])
         agreement   = ab_comparison.get("shadow_agreement_rate", {})
-        with st.expander("⚖️ Comparaison A/B & Shadow", expanded=bool(ab_versions)):
+        with st.expander("⚖️ Comparaison A/B & Shadow", expanded=False):
             if ab_versions:
                 df_ab = pd.DataFrame([{
                     "Version": v["version"],
@@ -663,20 +1192,300 @@ with _tab_detail:
                     "p95": f"{v.get('p95_response_time_ms')} ms" if v.get("p95_response_time_ms") else "—",
                     "Accord shadow": f"{agreement.get(v['version'], 0) * 100:.1f} %" if v["version"] in agreement else "—",
                 } for v in ab_versions])
-                st.dataframe(df_ab, width='stretch', hide_index=True)
+                st.dataframe(
+                    df_ab, width='stretch', hide_index=True,
+                    column_config={
+                        "Version": st.column_config.TextColumn(
+                            "Version",
+                            help=(
+                                "Numéro de version du modèle (ex. 1.0.0, 1.1.0).\n\n"
+                                "En A/B test, plusieurs versions reçoivent du trafic "
+                                "simultanément. En Shadow, une version tourne en parallèle "
+                                "sans que ses résultats soient retournés au client."
+                            ),
+                        ),
+                        "Prédictions": st.column_config.NumberColumn(
+                            "Prédictions",
+                            help=(
+                                "Nombre de prédictions **retournées aux clients** "
+                                "(is_shadow = False) sur la période.\n\n"
+                                "Une version en mode Shadow uniquement affiche 0 ici : "
+                                "elle calcule des prédictions mais ne les expose pas."
+                            ),
+                        ),
+                        "Shadow": st.column_config.NumberColumn(
+                            "Shadow",
+                            help=(
+                                "Nombre de prédictions **silencieuses** calculées en "
+                                "arrière-plan (is_shadow = True).\n\n"
+                                "Utilisées pour comparer une nouvelle version avec la "
+                                "version en production sans impacter les utilisateurs. "
+                                "Le client ne voit jamais ces résultats."
+                            ),
+                        ),
+                        "Taux d'erreur": st.column_config.TextColumn(
+                            "Taux d'erreur",
+                            help=(
+                                "Proportion de requêtes ayant échoué techniquement "
+                                "(exception serveur, modèle non chargé, timeout…).\n\n"
+                                "⚠️ Ce n'est PAS un indicateur de qualité ML : une "
+                                "prédiction peut être techniquement réussie mais fausse "
+                                "sur le plan métier.\n\n"
+                                "🟡 Attention : ≥ 5 %  ·  🔴 Critique : ≥ 10 %"
+                            ),
+                        ),
+                        "Latence moy.": st.column_config.TextColumn(
+                            "Latence moy.",
+                            help=(
+                                "Temps de réponse moyen de l'API pour cette version, "
+                                "en millisecondes (ms).\n\n"
+                                "Inclut le chargement du modèle en mémoire (si pas en "
+                                "cache), l'inférence et la sérialisation de la réponse. "
+                                "Une latence élevée peut indiquer un modèle plus lourd "
+                                "ou un problème de ressources."
+                            ),
+                        ),
+                        "p95": st.column_config.TextColumn(
+                            "p95",
+                            help=(
+                                "95e percentile de latence : 95 % des requêtes sont "
+                                "traitées en moins de ce temps.\n\n"
+                                "C'est l'indicateur clé pour la qualité de service : "
+                                "la moyenne peut sembler bonne, mais un p95 élevé "
+                                "signifie que certains utilisateurs attendent beaucoup "
+                                "plus longtemps (pics de charge, cold start…)."
+                            ),
+                        ),
+                        "Accord shadow": st.column_config.TextColumn(
+                            "Accord shadow",
+                            help=(
+                                "Taux d'accord entre cette version et le modèle de "
+                                "production : proportion de requêtes où les deux "
+                                "modèles donnent **exactement la même prédiction**.\n\n"
+                                "• 100 % → les deux versions sont identiques sur le "
+                                "trafic récent\n"
+                                "• 90–99 % → légères divergences, à analyser\n"
+                                "• < 90 % → comportement significativement différent\n\n"
+                                "— si la version n'est pas en mode Shadow ou si aucune "
+                                "prédiction shadow n'est disponible."
+                            ),
+                        ),
+                    },
+                )
 
-                dist_data = []
-                for v in ab_versions:
-                    for label, count in v.get("prediction_distribution", {}).items():
-                        dist_data.append({"version": v["version"], "label": str(label), "count": count})
-                if dist_data:
-                    fig_dist = px.bar(
-                        pd.DataFrame(dist_data), x="label", y="count", color="version",
-                        barmode="group", title="Distribution des prédictions par version",
-                        labels={"label": "Classe prédite", "count": "Nombre", "version": "Version"},
-                        color_discrete_sequence=px.colors.qualitative.Set2,
+                # ── Distribution des sorties prédites ─────────────────────
+                _all_dist_labels = sorted({
+                    str(lbl)
+                    for v in ab_versions
+                    for lbl in v.get("prediction_distribution", {}).keys()
+                })
+                _is_reg_ab = any("." in lbl for lbl in _all_dist_labels)
+
+                if _is_reg_ab:
+                    # ── Régression : stats pondérées depuis la distribution ──
+                    st.markdown("**📊 Distribution des sorties prédites — régression (prod + shadow)**")
+                    _reg_rows = []
+                    for v in ab_versions:
+                        _dist = {
+                            str(k): int(c)
+                            for k, c in v.get("prediction_distribution", {}).items()
+                        }
+                        try:
+                            _numeric = [(float(k), c) for k, c in _dist.items()]
+                        except (ValueError, TypeError):
+                            continue
+                        _n = sum(c for _, c in _numeric)
+                        if _n == 0:
+                            continue
+                        _mean = sum(val * c for val, c in _numeric) / _n
+                        _var  = sum((val - _mean) ** 2 * c for val, c in _numeric) / _n
+                        _reg_rows.append({
+                            "Version": v["version"],
+                            "N": _n,
+                            "Moyenne ŷ": round(_mean, 3),
+                            "Écart-type σ": round(_var ** 0.5, 3),
+                            "Min": round(min(val for val, _ in _numeric), 3),
+                            "Max": round(max(val for val, _ in _numeric), 3),
+                        })
+                    if _reg_rows:
+                        _df_reg = pd.DataFrame(_reg_rows)
+                        # Ligne delta si exactement 2 versions
+                        if len(_reg_rows) == 2:
+                            r0, r1 = _reg_rows[0], _reg_rows[1]
+                            _df_reg = pd.concat([
+                                _df_reg,
+                                pd.DataFrame([{
+                                    "Version": f"Δ  ({r1['Version']} − {r0['Version']})",
+                                    "N": r1["N"] - r0["N"],
+                                    "Moyenne ŷ": round(r1["Moyenne ŷ"] - r0["Moyenne ŷ"], 3),
+                                    "Écart-type σ": round(r1["Écart-type σ"] - r0["Écart-type σ"], 3),
+                                    "Min": round(r1["Min"] - r0["Min"], 3),
+                                    "Max": round(r1["Max"] - r0["Max"], 3),
+                                }]),
+                            ], ignore_index=True)
+                        st.dataframe(
+                            _df_reg, hide_index=True, width='stretch',
+                            column_config={
+                                "Version": st.column_config.TextColumn(
+                                    "Version",
+                                    help="Numéro de version du modèle. La ligne Δ montre l'écart entre les deux versions.",
+                                ),
+                                "N": st.column_config.NumberColumn(
+                                    "N (prod + shadow)",
+                                    help=(
+                                        "Nombre total de prédictions analysées pour cette version "
+                                        "(production **et** shadow confondus).\n\n"
+                                        "Inclure le shadow permet de comparer même les versions "
+                                        "qui ne reçoivent pas encore de trafic réel."
+                                    ),
+                                ),
+                                "Moyenne ŷ": st.column_config.NumberColumn(
+                                    "Moyenne ŷ", format="%.3f",
+                                    help=(
+                                        "Valeur prédite moyenne sur toutes les requêtes (prod + shadow).\n\n"
+                                        "Un écart entre versions révèle un **biais systématique** : "
+                                        "les deux modèles ne ciblent pas la même plage de valeurs. "
+                                        "Exemple : l'une prédit en moyenne 6.1 et l'autre 5.8 "
+                                        "pour les mêmes entrées.\n\n"
+                                        "La ligne Δ montre directement cet écart."
+                                    ),
+                                ),
+                                "Écart-type σ": st.column_config.NumberColumn(
+                                    "Écart-type σ", format="%.3f",
+                                    help=(
+                                        "Dispersion des prédictions autour de la moyenne.\n\n"
+                                        "Un σ faible = prédictions groupées (modèle conservateur). "
+                                        "Un σ élevé = prédictions étalées (modèle plus expressif).\n\n"
+                                        "Si σ diffère beaucoup entre versions, les deux modèles "
+                                        "n'ont pas le même comportement face aux cas extrêmes."
+                                    ),
+                                ),
+                                "Min": st.column_config.NumberColumn(
+                                    "Min", format="%.3f",
+                                    help=(
+                                        "Valeur prédite la plus basse observée sur la période.\n\n"
+                                        "Un Min très bas par rapport à la baseline peut indiquer "
+                                        "que le modèle extrapole en dehors de sa plage d'entraînement."
+                                    ),
+                                ),
+                                "Max": st.column_config.NumberColumn(
+                                    "Max", format="%.3f",
+                                    help=(
+                                        "Valeur prédite la plus haute observée sur la période.\n\n"
+                                        "Un Max très élevé peut signaler des extrapolations anormales "
+                                        "sur des entrées inhabituelles."
+                                    ),
+                                ),
+                            },
+                        )
+                        # Graphique Moyenne ± σ
+                        if len(_reg_rows) >= 2:
+                            _fig_reg = px.bar(
+                                pd.DataFrame(_reg_rows),
+                                x="Version", y="Moyenne ŷ",
+                                error_y="Écart-type σ",
+                                color="Version",
+                                text="Moyenne ŷ",
+                                labels={"Moyenne ŷ": "Valeur prédite ŷ"},
+                                color_discrete_sequence=px.colors.qualitative.Set2,
+                                title="Moyenne ŷ ± σ par version",
+                            )
+                            _fig_reg.update_traces(
+                                texttemplate="%{text:.3f}", textposition="outside",
+                            )
+                            _fig_reg.update_layout(
+                                showlegend=False, height=320,
+                                yaxis_title="Valeur prédite ŷ",
+                            )
+                            st.plotly_chart(_fig_reg, width='stretch')
+
+                elif _all_dist_labels:
+                    # ── Classification : barres 100 % empilées ──────────────
+                    st.markdown("**📊 Répartition des classes prédites (prod + shadow)**")
+                    # Table % + count
+                    _cls_rows_pct = []
+                    for v in ab_versions:
+                        _dist = {
+                            str(k): int(c)
+                            for k, c in v.get("prediction_distribution", {}).items()
+                        }
+                        _total = sum(_dist.values()) or 1
+                        _row = {"Version": v["version"], "Total (prod+shadow)": sum(_dist.values())}
+                        for _lbl in _all_dist_labels:
+                            _cnt = _dist.get(_lbl, 0)
+                            _row[f"Cl. {_lbl}"] = f"{_cnt / _total:.1%}  ({_cnt})"
+                        _cls_rows_pct.append(_row)
+
+                    # column_config dynamique : une entrée par classe
+                    _cls_col_cfg = {
+                        "Version": st.column_config.TextColumn(
+                            "Version",
+                            help="Numéro de version du modèle.",
+                        ),
+                        "Total (prod+shadow)": st.column_config.NumberColumn(
+                            "Total (prod+shadow)",
+                            help=(
+                                "Nombre total de prédictions analysées (production + shadow).\n\n"
+                                "Inclure le shadow permet de comparer même les versions qui "
+                                "ne reçoivent pas encore de trafic réel."
+                            ),
+                        ),
+                    }
+                    for _lbl in _all_dist_labels:
+                        _cls_col_cfg[f"Cl. {_lbl}"] = st.column_config.TextColumn(
+                            f"Classe {_lbl}",
+                            help=(
+                                f"Part des prédictions classées **{_lbl}** sur le total "
+                                f"(prod + shadow), suivie du nombre brut entre parenthèses.\n\n"
+                                "Si la répartition diffère beaucoup entre versions, les modèles "
+                                "n'ont pas le même comportement — à investiguer avec les "
+                                "résultats observés."
+                            ),
+                        )
+                    st.dataframe(
+                        pd.DataFrame(_cls_rows_pct), hide_index=True, width='stretch',
+                        column_config=_cls_col_cfg,
                     )
-                    st.plotly_chart(fig_dist, width='stretch')
+
+                    # Graphique 100 % empilé
+                    _pct_plot = []
+                    for v in ab_versions:
+                        _dist = {
+                            str(k): int(c)
+                            for k, c in v.get("prediction_distribution", {}).items()
+                        }
+                        _total = sum(_dist.values()) or 1
+                        for _lbl in _all_dist_labels:
+                            _cnt = _dist.get(_lbl, 0)
+                            _pct_plot.append({
+                                "Version": v["version"],
+                                "Classe": _lbl,
+                                "%": round(_cnt / _total * 100, 2),
+                                "N": _cnt,
+                            })
+                    _fig_pct = px.bar(
+                        pd.DataFrame(_pct_plot),
+                        x="Version", y="%", color="Classe",
+                        barmode="stack",
+                        text=pd.DataFrame(_pct_plot)["%"].apply(lambda v: f"{v:.1f}%"),
+                        labels={"%": "Part (%)", "Classe": "Classe prédite"},
+                        color_discrete_sequence=px.colors.qualitative.Set2,
+                        custom_data=["N"],
+                        title="Répartition des classes prédites — prod + shadow (%)",
+                    )
+                    _fig_pct.update_traces(
+                        hovertemplate=(
+                            "Classe %{fullData.name}<br>"
+                            "%{y:.1f}%  (%{customdata[0]} prédictions prod+shadow)"
+                            "<extra></extra>"
+                        ),
+                    )
+                    _fig_pct.update_layout(
+                        yaxis=dict(ticksuffix="%", range=[0, 108]),
+                        legend_title="Classe prédite",
+                        height=380,
+                    )
+                    st.plotly_chart(_fig_pct, width='stretch')
 
     # ────────────────────────────────────────────────────────────────────
     # EXPANDER 5 — Calibration des probabilités
@@ -689,53 +1498,155 @@ with _tab_detail:
             calib = None
 
         if calib:
+            calib_model_type = calib.get("model_type", "classification")
             calib_status = calib.get("calibration_status", "insufficient_data")
-            if calib_status == "insufficient_data":
-                st.info(f"Soumettez des observed_results pour activer la calibration (échantillon : {calib.get('sample_size', 0)} paires).")
-            else:
-                STATUS_CALIB = {"ok": "🟢 OK", "overconfident": "🟡 Sur-confiant", "underconfident": "🔴 Sous-confiant"}
-                brier = calib.get("brier_score")
-                gap   = calib.get("overconfidence_gap")
-                cc1, cc2, cc3 = st.columns(3)
-                cc1.metric("Brier score", f"{brier:.4f}" if brier is not None else "—", help=METRIC_HELP["brier_score"])
-                cc2.metric("Gap confiance/précision", f"{gap:+.2%}" if gap is not None else "—", help=METRIC_HELP["gap_confiance"])
-                cc3.metric("Statut", STATUS_CALIB.get(calib_status, calib_status), help=METRIC_HELP["statut_calibration"])
-                reliability = calib.get("reliability", [])
-                if reliability:
-                    bins       = [b["confidence_bin"]  for b in reliability]
-                    obs_rates  = [b["observed_rate"]   for b in reliability]
-                    counts     = [b["count"]            for b in reliability]
-                    diag_vals  = [(float(b.split("–")[0]) + float(b.split("–")[1])) / 2 for b in bins]
-                    fig_cal = go.Figure()
-                    fig_cal.add_trace(go.Scatter(x=bins, y=diag_vals, name="Calibration parfaite",
-                                                 line=dict(color="grey", dash="dot", width=1), mode="lines"))
-                    fig_cal.add_trace(go.Scatter(
-                        x=bins + bins[::-1], y=obs_rates + diag_vals[::-1],
-                        fill="toself", fillcolor="rgba(200,200,200,0.25)",
-                        line=dict(color="rgba(0,0,0,0)"), showlegend=False, hoverinfo="skip",
-                    ))
-                    fig_cal.add_trace(go.Scatter(
-                        x=bins, y=obs_rates, name="Taux observé",
-                        mode="markers+lines",
-                        marker=dict(size=[max(8, min(24, c // 5)) for c in counts], color="#2980b9"),
-                        customdata=counts,
-                        hovertemplate="Bucket : %{x}<br>Taux observé : %{y:.2%}<br>N : %{customdata}<extra></extra>",
-                    ))
-                    fig_cal.update_layout(
-                        title="Courbe de calibration (reliability diagram)",
-                        xaxis_title="Confiance prédite", yaxis_title="Taux observé",
-                        yaxis=dict(tickformat=".0%", range=[0, 1]),
-                        hovermode="x unified", legend=dict(orientation="h", y=1.05),
+
+            # ── Régression ──────────────────────────────────────────────────
+            if calib_model_type == "regression":
+                if calib_status == "insufficient_data":
+                    st.info(f"Soumettez des observed_results pour activer la calibration régression (échantillon : {calib.get('sample_size', 0)} paires).")
+                else:
+                    st.caption(
+                        "La calibration d'un modèle de régression mesure à quel point les prédictions "
+                        "ŷ sont proches des valeurs réelles y. "
+                        "Le nuage de points ŷ vs y doit se concentrer autour de la diagonale (calibration parfaite). "
+                        "Les résidus (ŷ − y) doivent être centrés sur 0 sans biais systématique."
                     )
-                    st.plotly_chart(fig_cal, width='stretch')
-                if calib_status == "overconfident":
-                    st.warning("Envisagez `CalibratedClassifierCV(method='isotonic')` lors du prochain retrain.")
+                    STATUS_REG = {
+                        "ok":           "🟢 OK",
+                        "biased_high":  "🟡 Sur-estimation",
+                        "biased_low":   "🟡 Sous-estimation",
+                    }
+                    _calib_mae   = calib.get("mae")
+                    _calib_rmse  = calib.get("rmse")
+                    _calib_r2    = calib.get("r2")
+                    _calib_bias  = calib.get("bias")
+                    _bias_status = STATUS_REG.get(calib_status, calib_status)
+
+                    rc1, rc2, rc3, rc4 = st.columns(4)
+                    rc1.metric("MAE", f"{_calib_mae:.3f}" if _calib_mae is not None else "—", help=METRIC_HELP["calib_mae"])
+                    rc2.metric("RMSE", f"{_calib_rmse:.3f}" if _calib_rmse is not None else "—", help=METRIC_HELP["calib_rmse"])
+                    rc3.metric("R²", f"{_calib_r2:.3f}" if _calib_r2 is not None else "—", help=METRIC_HELP["calib_r2"])
+                    rc4.metric("Biais moyen", f"{_calib_bias:+.3f}" if _calib_bias is not None else "—",
+                               delta=_bias_status, delta_color="off", help=METRIC_HELP["calib_biais"])
+
+                    scatter_data = calib.get("scatter_data") or []
+                    if scatter_data:
+                        _preds = [pt["pred"] for pt in scatter_data]
+                        _obs   = [pt["obs"]  for pt in scatter_data]
+
+                        # ── Scatter ŷ vs y ──────────────────────────────
+                        _all_vals  = _preds + _obs
+                        _axis_min  = min(_all_vals)
+                        _axis_max  = max(_all_vals)
+                        _pad       = (_axis_max - _axis_min) * 0.05 or 0.1
+                        _diag_vals = [_axis_min - _pad, _axis_max + _pad]
+
+                        fig_scatter = go.Figure()
+                        fig_scatter.add_trace(go.Scatter(
+                            x=_diag_vals, y=_diag_vals,
+                            mode="lines",
+                            name="Calibration parfaite (ŷ = y)",
+                            line=dict(color="grey", dash="dot", width=1),
+                            hoverinfo="skip",
+                        ))
+                        fig_scatter.add_trace(go.Scatter(
+                            x=_obs, y=_preds,
+                            mode="markers",
+                            name="Prédictions",
+                            marker=dict(color="#2980b9", size=5, opacity=0.6),
+                            hovertemplate="y réel : %{x:.3f}<br>ŷ prédit : %{y:.3f}<extra></extra>",
+                        ))
+                        fig_scatter.update_layout(
+                            title=f"Calibration régression — ŷ prédit vs y réel (n={len(scatter_data)})",
+                            xaxis_title="y réel (observé)",
+                            yaxis_title="ŷ prédit",
+                            xaxis=dict(range=[_axis_min - _pad, _axis_max + _pad]),
+                            yaxis=dict(range=[_axis_min - _pad, _axis_max + _pad]),
+                            hovermode="closest",
+                            legend=dict(orientation="h", y=1.05),
+                        )
+                        st.plotly_chart(fig_scatter, width='stretch')
+
+                        # ── Histogramme des résidus ─────────────────────
+                        _residuals = [p - o for p, o in zip(_preds, _obs)]
+                        _res_mean  = sum(_residuals) / len(_residuals)
+                        fig_res = go.Figure()
+                        fig_res.add_vline(x=0, line=dict(color="grey", dash="dot", width=1))
+                        fig_res.add_vline(x=_res_mean, line=dict(color="#e74c3c", dash="dash", width=1.5),
+                                          annotation_text=f"Biais moyen = {_res_mean:+.3f}",
+                                          annotation_position="top right")
+                        fig_res.add_trace(go.Histogram(
+                            x=_residuals,
+                            name="Résidus (ŷ − y)",
+                            marker_color="#2980b9",
+                            opacity=0.8,
+                            hovertemplate="Résidu : %{x:.3f}<br>Nb : %{y}<extra></extra>",
+                        ))
+                        fig_res.update_layout(
+                            title="Distribution des résidus (ŷ − y)",
+                            xaxis_title="Résidu (ŷ − y)",
+                            yaxis_title="Nombre de prédictions",
+                            bargap=0.05,
+                        )
+                        st.plotly_chart(fig_res, width='stretch')
+
+                    if calib_status in ("biased_high", "biased_low"):
+                        _bias_dir = "surestime" if calib_status == "biased_high" else "sous-estime"
+                        st.warning(
+                            f"Le modèle **{_bias_dir}** systématiquement ses prédictions. "
+                            "Envisagez un ré-entraînement ou un post-processing de calibration "
+                            "(ex. isotonic regression, Platt scaling sur les sorties)."
+                        )
+
+            # ── Classification ──────────────────────────────────────────────
+            else:
+                if calib_status == "insufficient_data":
+                    st.info(f"Soumettez des observed_results pour activer la calibration (échantillon : {calib.get('sample_size', 0)} paires).")
+                else:
+                    STATUS_CALIB = {"ok": "🟢 OK", "overconfident": "🟡 Sur-confiant", "underconfident": "🔴 Sous-confiant"}
+                    brier = calib.get("brier_score")
+                    gap   = calib.get("overconfidence_gap")
+                    cc1, cc2, cc3 = st.columns(3)
+                    cc1.metric("Brier score", f"{brier:.4f}" if brier is not None else "—", help=METRIC_HELP["brier_score"])
+                    cc2.metric("Gap confiance/précision", f"{gap:+.2%}" if gap is not None else "—", help=METRIC_HELP["gap_confiance"])
+                    cc3.metric("Statut", STATUS_CALIB.get(calib_status, calib_status), help=METRIC_HELP["statut_calibration"])
+                    reliability = calib.get("reliability", [])
+                    if reliability:
+                        bins       = [b["confidence_bin"]  for b in reliability]
+                        obs_rates  = [b["observed_rate"]   for b in reliability]
+                        counts     = [b["count"]            for b in reliability]
+                        diag_vals  = [(float(b.split("–")[0]) + float(b.split("–")[1])) / 2 for b in bins]
+                        fig_cal = go.Figure()
+                        fig_cal.add_trace(go.Scatter(x=bins, y=diag_vals, name="Calibration parfaite",
+                                                     line=dict(color="grey", dash="dot", width=1), mode="lines"))
+                        fig_cal.add_trace(go.Scatter(
+                            x=bins + bins[::-1], y=obs_rates + diag_vals[::-1],
+                            fill="toself", fillcolor="rgba(200,200,200,0.25)",
+                            line=dict(color="rgba(0,0,0,0)"), showlegend=False, hoverinfo="skip",
+                        ))
+                        fig_cal.add_trace(go.Scatter(
+                            x=bins, y=obs_rates, name="Taux observé",
+                            mode="markers+lines",
+                            marker=dict(size=[max(8, min(24, c // 5)) for c in counts], color="#2980b9"),
+                            customdata=counts,
+                            hovertemplate="Bucket : %{x}<br>Taux observé : %{y:.2%}<br>N : %{customdata}<extra></extra>",
+                        ))
+                        fig_cal.update_layout(
+                            title="Courbe de calibration (reliability diagram)",
+                            xaxis_title="Confiance prédite", yaxis_title="Taux observé",
+                            yaxis=dict(tickformat=".0%", range=[0, 1]),
+                            hovermode="x unified", legend=dict(orientation="h", y=1.05),
+                        )
+                        st.plotly_chart(fig_cal, width='stretch')
+                    if calib_status == "overconfident":
+                        st.warning("Envisagez `CalibratedClassifierCV(method='isotonic')` lors du prochain retrain.")
 
     # ────────────────────────────────────────────────────────────────────
     # EXPANDER 6 — Erreurs récentes
     # ────────────────────────────────────────────────────────────────────
     if recent_errors:
-        with st.expander(f"🔔 Erreurs récentes ({len(recent_errors)})", expanded=True):
+        with st.expander(f"🔔 Erreurs récentes ({len(recent_errors)})", expanded=False):
             for i, err in enumerate(recent_errors, 1):
                 st.markdown(f"`{i}.` {err}")
 

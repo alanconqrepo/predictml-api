@@ -2392,18 +2392,76 @@ async def get_model_calibration(
 
     if not pairs:
         return CalibrationResponse(
-            model_name=name,
-            version=version,
-            sample_size=0,
-            brier_score=None,
+            model_name=name, version=version, sample_size=0,
             calibration_status="insufficient_data",
-            mean_confidence=None,
-            mean_accuracy=None,
-            overconfidence_gap=None,
-            reliability=[],
         )
 
-    # Filtrer les paires avec des probabilités disponibles (list ou dict)
+    # ── Détection du type de modèle ──────────────────────────────────────────
+    # Régression : aucune paire n'a de probabilités
+    has_proba = any(row.probabilities for row in pairs)
+
+    # ── Branche Régression ───────────────────────────────────────────────────
+    if not has_proba:
+        reg_pairs: list[tuple[float, float]] = []
+        for row in pairs:
+            try:
+                pred = float(row.prediction_result)
+                obs  = float(row.observed_result)
+                reg_pairs.append((pred, obs))
+            except (TypeError, ValueError):
+                pass
+
+        sample_size = len(reg_pairs)
+        if sample_size < 2:
+            return CalibrationResponse(
+                model_name=name, version=version, sample_size=sample_size,
+                model_type="regression", calibration_status="insufficient_data",
+            )
+
+        preds_arr = np.array([p for p, _ in reg_pairs], dtype=float)
+        obs_arr   = np.array([o for _, o in reg_pairs], dtype=float)
+        residuals = preds_arr - obs_arr
+
+        mae  = float(np.mean(np.abs(residuals)))
+        rmse = float(np.sqrt(np.mean(residuals ** 2)))
+        bias = float(np.mean(residuals))
+
+        ss_res = float(np.sum(residuals ** 2))
+        ss_tot = float(np.sum((obs_arr - float(np.mean(obs_arr))) ** 2))
+        r2 = float(1.0 - ss_res / ss_tot) if ss_tot > 0 else None
+
+        # Statut : basé sur le biais relatif (en unités d'écart-type observé)
+        obs_std = float(np.std(obs_arr)) if sample_size > 1 else 1.0
+        rel_bias = bias / obs_std if obs_std > 0 else 0.0
+        if abs(rel_bias) < 0.10:
+            reg_status = "ok"
+        elif rel_bias > 0:
+            reg_status = "biased_high"
+        else:
+            reg_status = "biased_low"
+
+        # Scatter data — échantillon aléatoire ≤ 300 points
+        rng = np.random.default_rng(42)
+        idx = rng.choice(sample_size, min(300, sample_size), replace=False)
+        scatter_data = [
+            {"pred": round(float(preds_arr[i]), 4), "obs": round(float(obs_arr[i]), 4)}
+            for i in sorted(idx)
+        ]
+
+        return CalibrationResponse(
+            model_name=name,
+            version=version,
+            sample_size=sample_size,
+            model_type="regression",
+            calibration_status=reg_status,
+            mae=round(mae, 4),
+            rmse=round(rmse, 4),
+            r2=round(r2, 4) if r2 is not None else None,
+            bias=round(bias, 4),
+            scatter_data=scatter_data,
+        )
+
+    # ── Branche Classification ────────────────────────────────────────────────
     valid = [
         (row.prediction_result, row.observed_result, row.probabilities)
         for row in pairs
@@ -2411,12 +2469,9 @@ async def get_model_calibration(
     ]
 
     if not valid:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "Toutes les probabilités sont null pour ce modèle. "
-                "Ce modèle ne supporte pas predict_proba."
-            ),
+        return CalibrationResponse(
+            model_name=name, version=version, sample_size=len(pairs),
+            calibration_status="insufficient_data",
         )
 
     def _max_prob(p) -> float:
@@ -2432,15 +2487,8 @@ async def get_model_calibration(
 
     if sample_size < 30:
         return CalibrationResponse(
-            model_name=name,
-            version=version,
-            sample_size=sample_size,
-            brier_score=None,
+            model_name=name, version=version, sample_size=sample_size,
             calibration_status="insufficient_data",
-            mean_confidence=None,
-            mean_accuracy=None,
-            overconfidence_gap=None,
-            reliability=[],
         )
 
     brier_score = float(np.mean((confidences - corrects) ** 2))
@@ -2477,6 +2525,7 @@ async def get_model_calibration(
         model_name=name,
         version=version,
         sample_size=sample_size,
+        model_type="classification",
         brier_score=round(brier_score, 4),
         calibration_status=calibration_status,
         mean_confidence=round(mean_confidence, 4),

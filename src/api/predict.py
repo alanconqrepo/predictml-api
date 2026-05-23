@@ -547,7 +547,7 @@ async def get_anomalous_predictions(
     total_checked = len(predictions)
     anomalous: list[AnomalyPredictionEntry] = []
 
-    for pred in predictions:
+    for pred, obs in predictions:
         features = pred.input_features
         if not isinstance(features, dict):
             continue
@@ -589,6 +589,8 @@ async def get_anomalous_predictions(
                     timestamp=pred.timestamp,
                     prediction_result=pred.prediction_result,
                     max_confidence=max_confidence,
+                    id_obs=pred.id_obs,
+                    ground_truth=obs.observed_result if obs is not None else None,
                     anomalous_features=anomalous_features,
                 )
             )

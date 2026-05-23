@@ -440,15 +440,24 @@ class DBService:
         model_name: str,
         days: int = 7,
         limit: int = 200,
-    ) -> List[Prediction]:
+    ) -> List[tuple]:
         """
         Récupère les N dernières prédictions réussies d'un modèle sur une fenêtre glissante,
         avec leurs input_features (pour le calcul de z-scores par feature).
+
+        Retourne une liste de tuples (Prediction, Optional[ObservedResult]).
         """
         cutoff = _utcnow() - timedelta(days=days)
 
         stmt = (
-            select(Prediction)
+            select(Prediction, ObservedResult)
+            .outerjoin(
+                ObservedResult,
+                and_(
+                    Prediction.id_obs == ObservedResult.id_obs,
+                    Prediction.model_name == ObservedResult.model_name,
+                ),
+            )
             .where(
                 and_(
                     Prediction.model_name == model_name,
@@ -461,7 +470,7 @@ class DBService:
             .limit(limit)
         )
         result = await db.execute(stmt)
-        return list(result.scalars().all())
+        return list(result.all())
 
     @staticmethod
     async def count_predictions(
@@ -660,7 +669,34 @@ class DBService:
                             )
                             ELSE NULL
                         END
-                    ) AS mae
+                    ) AS mae,
+                    CASE
+                        WHEN NULLIF(
+                            VAR_POP(
+                                CASE WHEN o.observed_result::text ~ '^-?[0-9]+\\.?[0-9]*$'
+                                     THEN o.observed_result::text::float
+                                     ELSE NULL END
+                            ), 0
+                        ) IS NOT NULL
+                        THEN
+                            1.0 - AVG(
+                                CASE
+                                    WHEN p.prediction_result::text ~ '^-?[0-9]+\\.?[0-9]*$'
+                                     AND o.observed_result::text  ~ '^-?[0-9]+\\.?[0-9]*$'
+                                    THEN POWER(
+                                        p.prediction_result::text::float
+                                        - o.observed_result::text::float,
+                                        2
+                                    )
+                                    ELSE NULL
+                                END
+                            ) / VAR_POP(
+                                CASE WHEN o.observed_result::text ~ '^-?[0-9]+\\.?[0-9]*$'
+                                     THEN o.observed_result::text::float
+                                     ELSE NULL END
+                            )
+                        ELSE NULL
+                    END AS r2
                 FROM predictions p
                 JOIN observed_results o
                   ON p.id_obs = o.id_obs AND p.model_name = o.model_name
@@ -680,12 +716,16 @@ class DBService:
                 mae_val = (
                     round(float(row.mae), 4) if row.is_regression and row.mae is not None else None
                 )
+                r2_val = (
+                    round(float(row.r2), 4) if row.is_regression and row.r2 is not None else None
+                )
                 output.append(
                     {
                         "date": row.day,
                         "matched_count": int(row.matched_count),
                         "accuracy": round(float(row.accuracy), 4),
                         "mae": mae_val,
+                        "r2": r2_val,
                     }
                 )
             return output
@@ -734,6 +774,13 @@ class DBService:
             except (ValueError, TypeError):
                 return False
 
+        def _is_numeric(v: str) -> bool:
+            try:
+                float(v)
+                return True
+            except (ValueError, TypeError):
+                return False
+
         output = []
         for day, items in sorted(daily.items()):
             is_regression = any(_is_float_val(p) or _is_float_val(o) for p, o in items)
@@ -749,8 +796,25 @@ class DBService:
                     )
                 except (ValueError, TypeError):
                     entry["mae"] = None
+                # R² = 1 - SS_res / SS_tot
+                try:
+                    numeric_pairs = [
+                        (float(p), float(o)) for p, o in items
+                        if _is_numeric(p) and _is_numeric(o)
+                    ]
+                    if len(numeric_pairs) > 1:
+                        obs_vals = [o for _, o in numeric_pairs]
+                        obs_mean = sum(obs_vals) / len(obs_vals)
+                        ss_res = sum((pv - ov) ** 2 for pv, ov in numeric_pairs)
+                        ss_tot = sum((ov - obs_mean) ** 2 for ov in obs_vals)
+                        entry["r2"] = round(1.0 - ss_res / ss_tot, 4) if ss_tot > 0 else None
+                    else:
+                        entry["r2"] = None
+                except (ValueError, TypeError):
+                    entry["r2"] = None
             else:
                 entry["mae"] = None
+                entry["r2"] = None
             output.append(entry)
         return output
 
@@ -1991,7 +2055,7 @@ class DBService:
                 ORDER BY model_version, is_shadow
             """)
 
-            # 2. Distribution des labels (production uniquement)
+            # 2. Distribution des labels (production + shadow)
             dist_sql = text(f"""
                 SELECT
                     COALESCE(model_version, 'unknown') AS version,
@@ -2000,7 +2064,6 @@ class DBService:
                 FROM predictions
                 WHERE model_name     = :name
                   AND timestamp      >= :cutoff {end_filter}
-                  AND is_shadow      = false
                   AND status         = 'success'
                   AND prediction_result IS NOT NULL
                 GROUP BY model_version, prediction_result::text
@@ -2126,7 +2189,8 @@ class DBService:
             else:
                 if row.response_time_ms is not None:
                     g["times"].append(row.response_time_ms)
-                if not shadow and row.prediction_result is not None:
+                if row.prediction_result is not None:
+                    # Distribution inclut prod + shadow
                     g["dist"][str(row.prediction_result)] += 1
 
         def _p95(data: list) -> Optional[float]:
@@ -2151,7 +2215,10 @@ class DBService:
                     "error_rate": round(prod["errors"] / total_prod, 4) if total_prod > 0 else 0.0,
                     "avg_response_time_ms": round(sum(times_list) / n, 2) if n > 0 else None,
                     "p95_response_time_ms": _p95(times_list),
-                    "prediction_distribution": dict(prod["dist"]),
+                    "prediction_distribution": {
+                        k: prod["dist"].get(k, 0) + shad["dist"].get(k, 0)
+                        for k in set(prod["dist"]) | set(shad["dist"])
+                    },
                     "response_times": times_list,
                     "error_count": prod["errors"],
                 }
