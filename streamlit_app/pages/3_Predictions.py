@@ -188,10 +188,11 @@ with tab_history:
         start_iso = datetime.combine(start_date, datetime.min.time()).isoformat()
         end_iso = datetime.combine(end_date, datetime.max.time()).isoformat()
 
-        # Fetch — si limit est None ("Tout afficher"), on récupère d'abord le total
+        # Fetch — "Tout afficher" pagine par chunks de _API_MAX (plafond API = 1000)
+        _API_MAX = 1000
         try:
-            effective_limit = limit
-            if effective_limit is None:
+            if limit is None:
+                # Sonde : récupère le total sans charger les données
                 _probe = client.get_predictions(
                     model_name=model_name,
                     start=start_iso,
@@ -201,16 +202,39 @@ with tab_history:
                     min_confidence=filter_min_conf,
                     max_confidence=filter_max_conf,
                 )
-                effective_limit = max(_probe.get("total", 1), 1)
-            data = client.get_predictions(
-                model_name=model_name,
-                start=start_iso,
-                end=end_iso,
-                limit=effective_limit,
-                offset=0,
-                min_confidence=filter_min_conf,
-                max_confidence=filter_max_conf,
-            )
+                _total_count = _probe.get("total", 0)
+                _all_preds: list = []
+                _offset = 0
+                _bar = st.progress(0, text=f"Chargement… 0 / {_total_count}")
+                while _offset < max(_total_count, 1):
+                    _chunk = client.get_predictions(
+                        model_name=model_name,
+                        start=start_iso,
+                        end=end_iso,
+                        limit=_API_MAX,
+                        offset=_offset,
+                        min_confidence=filter_min_conf,
+                        max_confidence=filter_max_conf,
+                    )
+                    _preds = _chunk.get("predictions", [])
+                    _all_preds.extend(_preds)
+                    _offset += _API_MAX
+                    _pct = min(len(_all_preds) / _total_count, 1.0) if _total_count else 1.0
+                    _bar.progress(_pct, text=f"Chargement… {len(_all_preds)} / {_total_count}")
+                    if not _preds:  # plus rien à charger
+                        break
+                _bar.empty()
+                data = {"total": _total_count, "predictions": _all_preds}
+            else:
+                data = client.get_predictions(
+                    model_name=model_name,
+                    start=start_iso,
+                    end=end_iso,
+                    limit=limit,
+                    offset=0,
+                    min_confidence=filter_min_conf,
+                    max_confidence=filter_max_conf,
+                )
         except Exception as e:
             st.error(f"Erreur lors du chargement : {e}")
             st.stop()
