@@ -309,10 +309,20 @@ if is_admin:
             up_algorithm = st.selectbox("Algorithme", _ALGO_OPTIONS)
 
             st.markdown("##### Métriques")
-            col_acc, col_f1s = st.columns(2)
+            col_acc, col_auc, col_f1s = st.columns(3)
             with col_acc:
                 up_accuracy = st.number_input(
                     "Accuracy", min_value=0.0, max_value=1.0, value=None, step=0.001, format="%.4f"
+                )
+            with col_auc:
+                up_auc = st.number_input(
+                    "AUC-ROC",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=None,
+                    step=0.001,
+                    format="%.4f",
+                    help="AUC-ROC du modèle sur le jeu de test (classification binaire / multiclasse).",
                 )
             with col_f1s:
                 up_f1 = st.number_input(
@@ -377,6 +387,7 @@ if is_admin:
                             description=up_description.strip() or None,
                             algorithm=algorithm,
                             accuracy=up_accuracy,
+                            auc=up_auc,
                             f1_score=up_f1,
                             tags=tags or None,
                             train_file_bytes=train_bytes,
@@ -539,6 +550,7 @@ for m in models:
                 else "—"
             ),
             "Accuracy (eval)": f"{m['accuracy']:.3f}" if m.get("accuracy") is not None else "—",
+            "AUC (eval)": f"{m['auc']:.3f}" if m.get("auc") is not None else "—",
             "F1 (eval)": f"{m['f1_score']:.3f}" if m.get("f1_score") is not None else "—",
             "R² (train)": (
                 f"{(m.get('training_metrics') or {}).get('r2'):.3f}"
@@ -755,6 +767,7 @@ with st.expander("📊 Comparaison multi-versions", expanded=False):
                             show["r2"]   = any(v.get("r2_eval")   is not None for v in cmp_versions)
                         else:
                             show["accuracy"] = any(v.get("accuracy")  is not None for v in cmp_versions)
+                            show["auc"]      = any(v.get("auc") is not None or v.get("live_auc") is not None for v in cmp_versions)
                             show["f1"]       = any(v.get("f1_score")  is not None for v in cmp_versions)
                             show["brier"]    = any(v.get("brier_score") is not None for v in cmp_versions)
 
@@ -788,6 +801,9 @@ with st.expander("📊 Comparaison multi-versions", expanded=False):
                                 if show["accuracy"]:
                                     row["Accuracy (eval)"] = _r(v.get("accuracy"))
                                     row["Accuracy (live)"] = _r(v.get("live_accuracy"))
+                                if show.get("auc"):
+                                    row["AUC (eval)"]      = _r(v.get("auc"))
+                                    row["AUC (live)"]      = _r(v.get("live_auc"))
                                 if show["f1"]:
                                     row["F1 (eval)"]       = _r(v.get("f1_score"))
                                     row["F1 (live)"]       = _r(v.get("live_f1"))
@@ -815,6 +831,17 @@ with st.expander("📊 Comparaison multi-versions", expanded=False):
                             for col, fmt in [("Accuracy", "%.3f"), ("F1", "%.3f")]:
                                 col_config[f"{col} (eval)"] = st.column_config.NumberColumn(f"{col} (eval)", help=f"{col} sur le jeu de test d'entraînement.", format=fmt)
                                 col_config[f"{col} (live)"] = st.column_config.NumberColumn(f"{col} (live)", help=f"{col} sur les prédictions réelles avec ground truth.", format=fmt)
+                            if show.get("auc"):
+                                col_config["AUC (eval)"] = st.column_config.NumberColumn(
+                                    "AUC (eval)",
+                                    help="AUC-ROC sur le jeu de test d'entraînement. Requiert des probabilités prédites.",
+                                    format="%.3f",
+                                )
+                                col_config["AUC (live)"] = st.column_config.NumberColumn(
+                                    "AUC (live)",
+                                    help="AUC-ROC calculé sur les prédictions réelles avec ground truth et probabilités.",
+                                    format="%.3f",
+                                )
                             if show.get("brier"):
                                 col_config["Brier score"] = st.column_config.NumberColumn(
                                     "Brier score (?)",
@@ -836,6 +863,84 @@ with st.expander("📊 Comparaison multi-versions", expanded=False):
                             f"Comparé le {pd.to_datetime(cmp['compared_at']).strftime('%Y-%m-%d %H:%M')} UTC"
                             f" — période : {compare_date_start} → {compare_date_end}"
                         )
+
+                        # ── Courbe ROC multi-versions (classification avec probas) ──
+                        if not is_regression:
+                            import plotly.graph_objects as _go
+
+                            roc_data = {}
+                            for _v in cmp_versions:
+                                try:
+                                    _perf = fetch_model_performance(
+                                        st.session_state.get("api_url", ""),
+                                        st.session_state.get("api_token", ""),
+                                        compare_name,
+                                        _v["version"],
+                                        period_days=compare_days,
+                                    )
+                                    if (
+                                        _perf
+                                        and _perf.get("roc_curve_fpr")
+                                        and _perf.get("roc_curve_tpr")
+                                    ):
+                                        roc_data[_v["version"]] = {
+                                            "fpr": _perf["roc_curve_fpr"],
+                                            "tpr": _perf["roc_curve_tpr"],
+                                            "auc": _perf.get("auc"),
+                                        }
+                                except Exception:
+                                    pass
+
+                            if roc_data:
+                                st.markdown("#### 📉 Courbe ROC — comparaison multi-versions")
+                                st.caption(
+                                    "Calculée depuis les prédictions réelles avec ground truth "
+                                    f"(période : {compare_date_start} → {compare_date_end}). "
+                                    "Requiert des probabilités prédites et des observed_results."
+                                )
+                                fig_roc = _go.Figure()
+                                fig_roc.add_trace(
+                                    _go.Scatter(
+                                        x=[0, 1],
+                                        y=[0, 1],
+                                        mode="lines",
+                                        line=dict(dash="dash", color="gray", width=1),
+                                        name="Aléatoire (AUC = 0.50)",
+                                    )
+                                )
+                                for _ver, _d in sorted(roc_data.items()):
+                                    _auc_lbl = (
+                                        f" — AUC {_d['auc']:.3f}"
+                                        if _d["auc"] is not None
+                                        else ""
+                                    )
+                                    fig_roc.add_trace(
+                                        _go.Scatter(
+                                            x=_d["fpr"],
+                                            y=_d["tpr"],
+                                            mode="lines",
+                                            name=f"v{_ver}{_auc_lbl}",
+                                            line=dict(width=2),
+                                        )
+                                    )
+                                fig_roc.update_layout(
+                                    xaxis_title="Taux de faux positifs (FPR)",
+                                    yaxis_title="Taux de vrais positifs (TPR)",
+                                    xaxis=dict(range=[0, 1]),
+                                    yaxis=dict(range=[0, 1]),
+                                    legend=dict(
+                                        orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0
+                                    ),
+                                    margin=dict(l=40, r=20, t=60, b=40),
+                                    height=420,
+                                )
+                                st.plotly_chart(fig_roc, width="stretch")
+                            else:
+                                st.info(
+                                    "📉 Courbe ROC indisponible — elle requiert des probabilités "
+                                    "prédites et des observed_results correspondants pour au moins "
+                                    "une version sur cette période."
+                                )
                 except Exception as e:
                     st.error(f"Erreur lors de la comparaison : {e}")
 

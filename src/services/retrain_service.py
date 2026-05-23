@@ -177,6 +177,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
                 "promotion_policy": src.promotion_policy,
                 "retrain_schedule": src.retrain_schedule,
                 "accuracy": src.accuracy,
+                "auc": src.auc,
                 "f1_score": src.f1_score,
             }
 
@@ -392,6 +393,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
     # 5. Extraire les métriques JSON depuis la dernière ligne stdout
     # ------------------------------------------------------------------ #
     new_accuracy = source_fields.get("accuracy")
+    new_auc = source_fields.get("auc")
     new_f1 = source_fields.get("f1_score")
     parsed_metrics: dict = {}
     for line in reversed(stdout_lines):
@@ -400,6 +402,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
             try:
                 parsed_metrics = json.loads(stripped)
                 new_accuracy = parsed_metrics.get("accuracy", new_accuracy)
+                new_auc = parsed_metrics.get("auc", new_auc)
                 new_f1 = parsed_metrics.get("f1_score", new_f1)
             except json.JSONDecodeError:
                 pass
@@ -446,6 +449,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
             train_start_date=start_date,
             train_end_date=end_date,
             accuracy=new_accuracy,
+            auc=new_auc,
             f1_score=new_f1,
             n_rows=parsed_metrics.get("n_rows"),
             feature_stats=parsed_metrics.get("feature_stats"),
@@ -525,6 +529,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
             algorithm=source_fields.get("algorithm"),
             mlflow_run_id=_mlflow_run_id,
             accuracy=new_accuracy,
+            auc=new_auc,
             f1_score=new_f1,
             features_count=source_fields.get("features_count"),
             classes=source_fields.get("classes"),
@@ -731,6 +736,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
         "stderr": stderr_text,
         "error": None,
         "accuracy": new_accuracy,
+        "auc": new_auc,
         "f1_score": new_f1,
         "auto_promoted": (
             None

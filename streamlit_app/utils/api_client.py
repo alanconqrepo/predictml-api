@@ -152,6 +152,7 @@ class APIClient:
         description: Optional[str] = None,
         algorithm: Optional[str] = None,
         accuracy: Optional[float] = None,
+        auc: Optional[float] = None,
         f1_score: Optional[float] = None,
         tags: Optional[list] = None,
         train_file_bytes: Optional[bytes] = None,
@@ -167,6 +168,8 @@ class APIClient:
             data["algorithm"] = algorithm
         if accuracy is not None:
             data["accuracy"] = str(accuracy)
+        if auc is not None:
+            data["auc"] = str(auc)
         if f1_score is not None:
             data["f1_score"] = str(f1_score)
         if tags:

@@ -210,6 +210,7 @@ async def _do_retrain(name: str, version: str) -> None:
             "webhook_url": source_model.webhook_url,
             "promotion_policy": source_model.promotion_policy,
             "accuracy": source_model.accuracy,
+            "auc": source_model.auc,
             "f1_score": source_model.f1_score,
         }
 
@@ -364,6 +365,7 @@ async def _do_retrain(name: str, version: str) -> None:
 
     # 5. Extraire les métriques depuis la dernière ligne JSON de stdout
     new_accuracy = source_fields["accuracy"]
+    new_auc = source_fields.get("auc")
     new_f1 = source_fields["f1_score"]
     parsed_metrics: dict = {}
     for line in reversed(stdout_text.strip().splitlines()):
@@ -372,6 +374,7 @@ async def _do_retrain(name: str, version: str) -> None:
             try:
                 parsed_metrics = json.loads(stripped)
                 new_accuracy = parsed_metrics.get("accuracy", new_accuracy)
+                new_auc = parsed_metrics.get("auc", new_auc)
                 new_f1 = parsed_metrics.get("f1_score", new_f1)
             except json.JSONDecodeError:
                 pass
@@ -414,6 +417,7 @@ async def _do_retrain(name: str, version: str) -> None:
             train_start_date=start_date,
             train_end_date=end_date,
             accuracy=new_accuracy,
+            auc=new_auc,
             f1_score=new_f1,
             n_rows=parsed_metrics.get("n_rows"),
             feature_stats=parsed_metrics.get("feature_stats"),
@@ -463,6 +467,7 @@ async def _do_retrain(name: str, version: str) -> None:
             algorithm=source_fields["algorithm"],
             mlflow_run_id=_mlflow_run_id,
             accuracy=new_accuracy,
+            auc=new_auc,
             f1_score=new_f1,
             features_count=source_fields["features_count"],
             classes=source_fields["classes"],

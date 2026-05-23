@@ -478,6 +478,7 @@ with tab_history:
         rows = []
         for e in retrain_entries:
             accuracy = e.get("accuracy")
+            auc = e.get("auc")
             f1 = e.get("f1_score")
             auto_promoted = e.get("auto_promoted")
             if auto_promoted is True:
@@ -493,6 +494,7 @@ with tab_history:
                     "Trained by": e.get("trained_by") or "—",
                     "Version source": e.get("source_version") or "—",
                     "Accuracy": round(accuracy, 4) if accuracy is not None else None,
+                    "AUC-ROC": round(auc, 4) if auc is not None else None,
                     "F1 Score": round(f1, 4) if f1 is not None else None,
                     "Auto-promotion": promo_badge,
                     "Raison": e.get("auto_promote_reason") or "—",
@@ -527,6 +529,11 @@ with tab_history:
                 "Accuracy": st.column_config.NumberColumn(
                     "Accuracy",
                     help="Précision du modèle ré-entraîné sur le jeu de test. Entre 0 et 1 — plus c'est proche de 1, meilleur est le modèle.",
+                    format="%.4f",
+                ),
+                "AUC-ROC": st.column_config.NumberColumn(
+                    "AUC-ROC",
+                    help="AUC-ROC du modèle ré-entraîné. 1.0 = parfait, 0.5 = aléatoire. Requiert des probabilités prédites (classification).",
                     format="%.4f",
                 ),
                 "F1 Score": st.column_config.NumberColumn(

@@ -117,6 +117,7 @@ from src.services.ab_significance_service import compute_ab_significance
 from src.services.db_service import _ROLLBACK_FIELDS, DBService, _build_snapshot
 from src.services.golden_test_service import GoldenTestService
 from src.services.input_validation_service import resolve_expected_features, validate_input_features
+from src.services.metrics_service import compute_auc, compute_roc_curve
 from src.services.minio_service import minio_service
 from src.services.mlflow_service import mlflow_service
 from src.services.model_service import compute_model_hmac, model_service
@@ -483,7 +484,7 @@ async def list_cached_models():
 @router.get("/models/leaderboard", response_model=List[LeaderboardEntry])
 async def get_models_leaderboard(
     metric: Literal[
-        "accuracy", "f1_score", "r2", "rmse", "latency_p95_ms", "predictions_count"
+        "accuracy", "auc", "f1_score", "r2", "rmse", "latency_p95_ms", "predictions_count"
     ] = Query("accuracy", description="Metric to rank by"),
     days: int = Query(30, ge=1, le=365, description="Sliding window in days"),
     db: AsyncSession = Depends(get_read_db),
@@ -517,6 +518,7 @@ async def get_models_leaderboard(
                 name=m.name,
                 version=m.version,
                 accuracy=m.accuracy,
+                auc=m.auc,
                 f1_score=m.f1_score,
                 r2=tm.get("r2"),
                 rmse=tm.get("rmse"),
@@ -532,6 +534,8 @@ async def get_models_leaderboard(
         )
     elif metric == "predictions_count":
         entries.sort(key=lambda e: e.predictions_count, reverse=True)
+    elif metric == "auc":
+        entries.sort(key=lambda e: e.auc if e.auc is not None else -1, reverse=True)
     elif metric == "f1_score":
         entries.sort(key=lambda e: e.f1_score if e.f1_score is not None else -1, reverse=True)
     elif metric == "r2":
@@ -674,6 +678,7 @@ async def get_model_performance(
 
     y_true = [row.observed_result for row in pairs]
     y_pred = [row.prediction_result for row in pairs]
+    y_prob = [row.probabilities for row in pairs]
 
     response = ModelPerformanceResponse(
         model_name=name,
@@ -696,6 +701,11 @@ async def get_model_performance(
         response.confusion_matrix = cm
         response.classes = classes
         response.per_class_metrics = per_class
+        # AUC et courbe ROC (nécessitent des probabilités)
+        response.auc = compute_auc(y_true, y_prob, metadata.classes)
+        fpr, tpr = compute_roc_curve(y_true, y_prob)
+        response.roc_curve_fpr = fpr
+        response.roc_curve_tpr = tpr
     else:
         y_true_f = [float(v) for v in y_true]
         y_pred_f = [float(v) for v in y_pred]
@@ -716,6 +726,7 @@ async def get_model_performance(
             idxs = buckets[period_key]
             bt = [y_true[i] for i in idxs]
             bp = [y_pred[i] for i in idxs]
+            bprob = [y_prob[i] for i in idxs]
             pp = PeriodPerformance(period=period_key, matched_count=len(idxs))
             if model_type == "classification":
                 bt_s = [str(v) for v in bt]
@@ -724,6 +735,7 @@ async def get_model_performance(
                 pp.f1_weighted = round(
                     float(f1_score(bt_s, bp_s, average="weighted", zero_division=0)), 4
                 )
+                pp.auc = compute_auc(bt, bprob, metadata.classes)
             else:
                 bt_f = [float(v) for v in bt]
                 bp_f = [float(v) for v in bp]
@@ -2646,12 +2658,14 @@ async def compare_model_versions(
 
         brier_score = None
         live_accuracy = None
+        live_auc = None
         live_f1 = None
         live_mae = None
         live_rmse = None
         live_r2 = None
         valid_pairs = [(row[0], row[1], row[2]) for row in pairs if row[2]]
         all_pairs = [(row[0], row[1]) for row in pairs]
+        all_probs = [row[2] for row in pairs]  # probabilités de chaque prédiction
 
         # Déterminer le type de modèle : model_task en priorité, fallback sur training_metrics
         if meta.model_task == "regression":
@@ -2685,6 +2699,8 @@ async def compare_model_versions(
                     )
                 except Exception:
                     pass
+                # AUC live depuis les probabilités stockées
+                live_auc = compute_auc([obs for _, obs in all_pairs], all_probs, meta.classes)
 
         if len(valid_pairs) >= 30:
 
@@ -2697,7 +2713,16 @@ async def compare_model_versions(
             )
             brier_score = round(float(np.mean((confidences - corrects) ** 2)), 4)
 
-        return drift_status, brier_score, live_accuracy, live_f1, live_mae, live_rmse, live_r2
+        return (
+            drift_status,
+            brier_score,
+            live_accuracy,
+            live_auc,
+            live_f1,
+            live_mae,
+            live_rmse,
+            live_r2,
+        )
 
     ordered_versions = sorted(meta_by_version.keys())
     extras_list = await asyncio.gather(
@@ -2708,9 +2733,16 @@ async def compare_model_versions(
     version_summaries = []
     for version in ordered_versions:
         meta = meta_by_version[version]
-        drift_status, brier_score, live_accuracy, live_f1, live_mae, live_rmse, live_r2 = (
-            extras_by_version[version]
-        )
+        (
+            drift_status,
+            brier_score,
+            live_accuracy,
+            live_auc,
+            live_f1,
+            live_mae,
+            live_rmse,
+            live_r2,
+        ) = extras_by_version[version]
         lat = latency_by_version.get(version, {})
         training_stats = meta.training_stats or {}
         n_rows = training_stats.get("n_rows")
@@ -2721,6 +2753,7 @@ async def compare_model_versions(
                 is_production=meta.is_production,
                 model_task=meta.model_task,
                 accuracy=meta.accuracy,
+                auc=meta.auc,
                 f1_score=meta.f1_score,
                 latency_p50_ms=lat.get("p50"),
                 latency_p95_ms=lat.get("p95"),
@@ -2734,6 +2767,7 @@ async def compare_model_versions(
                 rmse_eval=training_metrics.get("rmse") if training_metrics else None,
                 r2_eval=training_metrics.get("r2") if training_metrics else None,
                 live_accuracy=live_accuracy,
+                live_auc=live_auc,
                 live_f1=live_f1,
                 live_mae=live_mae,
                 live_rmse=live_rmse,
@@ -3168,6 +3202,7 @@ async def create_model(
     algorithm: Optional[str] = Form(None),
     mlflow_run_id: Optional[str] = Form(None),
     accuracy: Optional[float] = Form(None),
+    auc: Optional[float] = Form(None, description="AUC-ROC (0–1, classification uniquement)"),
     f1_score: Optional[float] = Form(None),
     features_count: Optional[int] = Form(None),
     classes: Optional[str] = Form(None, description="JSON array ex: [0, 1, 2]"),
@@ -3457,6 +3492,7 @@ async def create_model(
         algorithm=algorithm,
         mlflow_run_id=mlflow_run_id,
         accuracy=accuracy,
+        auc=auc,
         f1_score=f1_score,
         features_count=features_count,
         classes=classes_parsed,
