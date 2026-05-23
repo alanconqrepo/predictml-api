@@ -47,9 +47,10 @@ for m in all_models:
     model_groups[m["name"]].append(m)
 
 model_names = sorted(model_groups.keys())
-ab_search = st.text_input("Filtrer par nom", key="ab_model_search", placeholder="Rechercher un modèle…")
+_ab_col1, _ab_col2 = st.columns([2, 3])
+ab_search = _ab_col1.text_input("Filtrer par nom", key="ab_model_search", placeholder="Rechercher un modèle…")
 ab_filtered = [n for n in model_names if ab_search.lower() in n.lower()] if ab_search else model_names
-selected_model = st.selectbox("🔍 Modèle", ab_filtered or model_names, key="ab_model_select")
+selected_model = _ab_col2.selectbox("🔍 Modèle", ab_filtered or model_names, key="ab_model_select")
 versions_for_model = model_groups[selected_model]
 
 st.divider()
