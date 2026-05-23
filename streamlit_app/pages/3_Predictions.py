@@ -137,7 +137,10 @@ with tab_history:
         start_date = col2.date_input("Date début", value=today - timedelta(days=7))
         end_date = col3.date_input("Date fin", value=today)
         status_filter = col4.selectbox("Statut", ["Tous", "success", "error"])
-        limit = col5.selectbox("Limite", [50, 100, 500], index=1)
+        _LIMIT_LABELS = ["50", "100", "500", "Tout afficher"]
+        _LIMIT_VALUES = [50, 100, 500, None]
+        _limit_label = col5.selectbox("Limite", _LIMIT_LABELS, index=1)
+        limit = _LIMIT_VALUES[_LIMIT_LABELS.index(_limit_label)]
 
         # Confidence sliders — désactivés pour les régresseurs (pas de classes)
         is_classifier = any(
@@ -185,13 +188,25 @@ with tab_history:
         start_iso = datetime.combine(start_date, datetime.min.time()).isoformat()
         end_iso = datetime.combine(end_date, datetime.max.time()).isoformat()
 
-        # Fetch
+        # Fetch — si limit est None ("Tout afficher"), on récupère d'abord le total
         try:
+            effective_limit = limit
+            if effective_limit is None:
+                _probe = client.get_predictions(
+                    model_name=model_name,
+                    start=start_iso,
+                    end=end_iso,
+                    limit=1,
+                    offset=0,
+                    min_confidence=filter_min_conf,
+                    max_confidence=filter_max_conf,
+                )
+                effective_limit = max(_probe.get("total", 1), 1)
             data = client.get_predictions(
                 model_name=model_name,
                 start=start_iso,
                 end=end_iso,
-                limit=limit,
+                limit=effective_limit,
                 offset=0,
                 min_confidence=filter_min_conf,
                 max_confidence=filter_max_conf,
