@@ -66,38 +66,46 @@ if is_admin:
         )
 
         MODES = ["(inchangé)", "ab_test", "shadow", "production"]
+        _BADGE = {"ab_test": "🟠 A/B", "shadow": "🟣 Shadow", "production": "🟢 Prod"}
         configs: dict = {}
 
-        cols_header = st.columns([2, 2, 2, 1])
+        cols_header = st.columns([2, 2, 1, 2, 1])
         cols_header[0].markdown("**Version**")
         cols_header[1].markdown("**Mode actuel**")
-        cols_header[2].markdown("**Nouveau mode**")
-        cols_header[3].markdown("**Poids**")
+        cols_header[2].markdown("**Poids actuel**")
+        cols_header[3].markdown("**Nouveau mode**")
+        cols_header[4].markdown("**Nouveau poids**")
 
         for v in versions_for_model:
             ver = v["version"]
             mode_current = v.get("deployment_mode") or "—"
             weight_current = v.get("traffic_weight")
 
-            row_cols = st.columns([2, 2, 2, 1])
+            row_cols = st.columns([2, 2, 1, 2, 1])
             row_cols[0].markdown(f"`{ver}`")
 
-            # Badge mode actuel
-            badge = {"ab_test": "🟠 A/B", "shadow": "🟣 Shadow", "production": "🟢 Prod"}.get(
-                mode_current, f"⚪ {mode_current}"
-            )
-            row_cols[1].markdown(badge)
+            # Mode actuel (badge)
+            row_cols[1].markdown(_BADGE.get(mode_current, f"⚪ {mode_current}"))
 
-            new_mode = row_cols[2].selectbox(
+            # Poids actuel
+            row_cols[2].markdown(
+                f"`{weight_current:.0%}`" if weight_current is not None else "—"
+            )
+
+            # Nouveau mode — pré-rempli avec la valeur courante
+            _default_idx = MODES.index(mode_current) if mode_current in MODES else 0
+            new_mode = row_cols[3].selectbox(
                 "Mode",
                 MODES,
+                index=_default_idx,
                 key=f"mode_{ver}",
                 label_visibility="collapsed",
             )
 
+            # Nouveau poids — visible uniquement en mode ab_test, pré-rempli
             new_weight = None
             if new_mode == "ab_test":
-                new_weight = row_cols[3].number_input(
+                new_weight = row_cols[4].number_input(
                     "Poids",
                     min_value=0.0,
                     max_value=1.0,
@@ -107,7 +115,7 @@ if is_admin:
                     label_visibility="collapsed",
                 )
             else:
-                row_cols[3].markdown("—")
+                row_cols[4].markdown("—")
 
             configs[ver] = {"mode": new_mode, "weight": new_weight, "current": v}
 
