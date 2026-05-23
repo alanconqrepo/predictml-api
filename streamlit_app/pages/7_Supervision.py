@@ -1150,7 +1150,86 @@ with _tab_detail:
                     "p95": f"{v.get('p95_response_time_ms')} ms" if v.get("p95_response_time_ms") else "—",
                     "Accord shadow": f"{agreement.get(v['version'], 0) * 100:.1f} %" if v["version"] in agreement else "—",
                 } for v in ab_versions])
-                st.dataframe(df_ab, width='stretch', hide_index=True)
+                st.dataframe(
+                    df_ab, width='stretch', hide_index=True,
+                    column_config={
+                        "Version": st.column_config.TextColumn(
+                            "Version",
+                            help=(
+                                "Numéro de version du modèle (ex. 1.0.0, 1.1.0).\n\n"
+                                "En A/B test, plusieurs versions reçoivent du trafic "
+                                "simultanément. En Shadow, une version tourne en parallèle "
+                                "sans que ses résultats soient retournés au client."
+                            ),
+                        ),
+                        "Prédictions": st.column_config.NumberColumn(
+                            "Prédictions",
+                            help=(
+                                "Nombre de prédictions **retournées aux clients** "
+                                "(is_shadow = False) sur la période.\n\n"
+                                "Une version en mode Shadow uniquement affiche 0 ici : "
+                                "elle calcule des prédictions mais ne les expose pas."
+                            ),
+                        ),
+                        "Shadow": st.column_config.NumberColumn(
+                            "Shadow",
+                            help=(
+                                "Nombre de prédictions **silencieuses** calculées en "
+                                "arrière-plan (is_shadow = True).\n\n"
+                                "Utilisées pour comparer une nouvelle version avec la "
+                                "version en production sans impacter les utilisateurs. "
+                                "Le client ne voit jamais ces résultats."
+                            ),
+                        ),
+                        "Taux d'erreur": st.column_config.TextColumn(
+                            "Taux d'erreur",
+                            help=(
+                                "Proportion de requêtes ayant échoué techniquement "
+                                "(exception serveur, modèle non chargé, timeout…).\n\n"
+                                "⚠️ Ce n'est PAS un indicateur de qualité ML : une "
+                                "prédiction peut être techniquement réussie mais fausse "
+                                "sur le plan métier.\n\n"
+                                "🟡 Attention : ≥ 5 %  ·  🔴 Critique : ≥ 10 %"
+                            ),
+                        ),
+                        "Latence moy.": st.column_config.TextColumn(
+                            "Latence moy.",
+                            help=(
+                                "Temps de réponse moyen de l'API pour cette version, "
+                                "en millisecondes (ms).\n\n"
+                                "Inclut le chargement du modèle en mémoire (si pas en "
+                                "cache), l'inférence et la sérialisation de la réponse. "
+                                "Une latence élevée peut indiquer un modèle plus lourd "
+                                "ou un problème de ressources."
+                            ),
+                        ),
+                        "p95": st.column_config.TextColumn(
+                            "p95",
+                            help=(
+                                "95e percentile de latence : 95 % des requêtes sont "
+                                "traitées en moins de ce temps.\n\n"
+                                "C'est l'indicateur clé pour la qualité de service : "
+                                "la moyenne peut sembler bonne, mais un p95 élevé "
+                                "signifie que certains utilisateurs attendent beaucoup "
+                                "plus longtemps (pics de charge, cold start…)."
+                            ),
+                        ),
+                        "Accord shadow": st.column_config.TextColumn(
+                            "Accord shadow",
+                            help=(
+                                "Taux d'accord entre cette version et le modèle de "
+                                "production : proportion de requêtes où les deux "
+                                "modèles donnent **exactement la même prédiction**.\n\n"
+                                "• 100 % → les deux versions sont identiques sur le "
+                                "trafic récent\n"
+                                "• 90–99 % → légères divergences, à analyser\n"
+                                "• < 90 % → comportement significativement différent\n\n"
+                                "— si la version n'est pas en mode Shadow ou si aucune "
+                                "prédiction shadow n'est disponible."
+                            ),
+                        ),
+                    },
+                )
 
                 # ── Distribution des sorties prédites ─────────────────────
                 _all_dist_labels = sorted({
