@@ -295,10 +295,21 @@ else:
     st.subheader("🔬 Significativité statistique")
 
     if ab_significance is None:
-        st.info(
-            "💡 Le test de significativité sera disponible dès que deux versions "
-            "auront accumulé des prédictions sur la période sélectionnée."
-        )
+        _no_data_reasons = {
+            "error_rate":       "le Chi-² requiert au moins une erreur observée dans l'un des groupes",
+            "mae":              "Mann-Whitney sur MAE requiert des résidus de prédiction (modèle de régression avec observed-results)",
+            "response_time_ms": "Mann-Whitney sur la latence requiert au moins 2 prédictions par version",
+        }
+        if _sig_metric:
+            st.warning(
+                f"⚠️ Pas assez de données pour la métrique **{_sig_metric_label}** "
+                f"sur cette période ({_no_data_reasons.get(_sig_metric, '')})."
+            )
+        else:
+            st.info(
+                "💡 Le test de significativité sera disponible dès que deux versions "
+                "auront accumulé des prédictions sur la période sélectionnée."
+            )
     else:
         sig = ab_significance
         is_significant = sig.get("significant", False)
@@ -307,6 +318,12 @@ else:
         winner = sig.get("winner")
         metric = sig.get("metric", "")
         test = sig.get("test", "")
+        # Avertir si la métrique réellement utilisée diffère de celle demandée
+        if _sig_metric and metric != _sig_metric:
+            st.warning(
+                f"⚠️ La métrique **{_sig_metric_label}** n'était pas disponible — "
+                f"test effectué sur : **{metric}**."
+            )
         min_needed = sig.get("min_samples_needed", 0)
         current_samples: dict = sig.get("current_samples", {})
 
