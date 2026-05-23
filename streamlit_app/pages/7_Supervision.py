@@ -107,8 +107,10 @@ if models_data:
     _md_lines = [
         f"# Rapport de supervision — {start_date} → {end_date}", "",
         "## Résumé global", "",
-        f"- **Prédictions** : {gs.get('total_predictions', 0):,}",
-        f"- **Taux d'erreur** : {gs.get('error_rate', 0) * 100:.1f} %",
+        f"- **Prédictions production** : {gs.get('total_predictions', 0):,}",
+        f"- **Prédictions shadow** : {gs.get('total_shadow', 0):,}",
+        f"- **Taux d'erreur exécution** : {gs.get('error_rate', 0) * 100:.1f} % "
+        f"(erreurs serveur, hors qualité ML)",
         f"- **Latence moyenne** : {gs.get('avg_latency_ms') or '—'} ms",
         f"- **Modèles actifs** : {gs.get('active_models', 0)}",
         f"- **Alertes** : 🔴 {gs.get('models_critical', 0)} critique(s) · 🟡 {gs.get('models_warning', 0)} avertissement(s)",
@@ -144,25 +146,39 @@ def _icon(status: str) -> str:
 # KPIs globaux — toujours visibles
 # ---------------------------------------------------------------------------
 st.divider()
-k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Prédictions", f"{gs.get('total_predictions', 0):,}")
+k1, k2, k3, k4, k5, k6 = st.columns(6)
+k1.metric(
+    "Préd. production",
+    f"{gs.get('total_predictions', 0):,}",
+    help=METRIC_HELP["predictions_prod"],
+)
 k2.metric(
+    "Préd. shadow",
+    f"{gs.get('total_shadow', 0):,}",
+    help=METRIC_HELP["predictions_shadow"],
+)
+k3.metric(
     "Taux d'erreur",
     f"{gs.get('error_rate', 0) * 100:.1f} %",
     help=METRIC_HELP["taux_erreur"],
 )
-k3.metric(
+k4.metric(
     "Latence moy.",
     f"{gs.get('avg_latency_ms') or '—'} ms" if gs.get("avg_latency_ms") else "—",
     help=METRIC_HELP["latence_avg"],
 )
-k4.metric("Modèles actifs", gs.get("active_models", 0))
-_alerts = gs.get("models_critical", 0) + gs.get("models_warning", 0)
 k5.metric(
+    "Modèles actifs",
+    gs.get("active_models", 0),
+    help=METRIC_HELP["modeles_actifs"],
+)
+_alerts = gs.get("models_critical", 0) + gs.get("models_warning", 0)
+k6.metric(
     "Alertes",
     f"🔴 {gs.get('models_critical', 0)} · 🟡 {gs.get('models_warning', 0)}",
     delta=f"{_alerts} modèle(s) à surveiller" if _alerts else "Tout est OK",
     delta_color="inverse" if _alerts else "normal",
+    help=METRIC_HELP["alertes_sante"],
 )
 
 if not models_data:

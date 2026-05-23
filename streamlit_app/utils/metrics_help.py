@@ -1,6 +1,43 @@
 METRIC_HELP = {
+    # Supervision globale — KPIs
+    "predictions_prod": (
+        "Prédictions production retournées aux clients (is_shadow=False) sur la période. "
+        "N'inclut pas les exécutions shadow."
+    ),
+    "predictions_shadow": (
+        "Prédictions silencieuses calculées en arrière-plan (is_shadow=True), "
+        "non retournées au client.\n\n"
+        "Utilisées pour comparer de nouvelles versions avec la production "
+        "sans impacter le trafic réel."
+    ),
+    "modeles_actifs": (
+        "Nombre de modèles distincts ayant au moins une version active (is_active=True) "
+        "avec des prédictions sur la période sélectionnée.\n\n"
+        "Un modèle est « actif » dès qu'une version est chargeable, "
+        "quel que soit son mode de déploiement (Production, A/B, Shadow ou aucun routage).\n\n"
+        "À ne pas confondre avec « en production » : un modèle actif peut n'être "
+        "qu'en shadow ou uploadé sans être exposé au trafic."
+    ),
+    "alertes_sante": (
+        "Nombre de modèles en alerte sur la période.\n\n"
+        "Le statut de santé de chaque modèle est le pire des 4 indicateurs suivants :\n"
+        "• Taux d'erreur exécution — 🟡 ≥ 5 % · 🔴 ≥ 10 %\n"
+        "• Drift features — déviation des distributions en production vs baseline stockée\n"
+        "• Drift performance — baisse d'accuracy (ou hausse de MAE) "
+        "entre la 1ère et la 2ème moitié de la période\n"
+        "• Drift sortie — dérive de la distribution des valeurs prédites\n\n"
+        "Le statut final retenu est le plus sévère parmi ces quatre."
+    ),
     # Erreur / performance
-    "taux_erreur": "Part des prédictions incorrectes sur le total. 0 % = aucune erreur, 100 % = toutes incorrectes.",
+    "taux_erreur": (
+        "Proportion de requêtes ayant échoué à l'exécution sur la période.\n\n"
+        "⚠️ Ce n'est PAS un indicateur de qualité ML : une prédiction peut être "
+        "correctement calculée et renvoyée au client, mais fausse sur le plan métier.\n\n"
+        "Une erreur d'exécution signifie que l'API n'a pas pu produire de prédiction "
+        "(exception serveur, modèle non chargé, timeout, entrée invalide…). "
+        "Calculé sur les prédictions production uniquement (hors shadow).\n\n"
+        "🟡 Avertissement : ≥ 5 %  ·  🔴 Critique : ≥ 10 %"
+    ),
     "accuracy": "Proportion de prédictions correctes. 1.0 = 100 % de bonnes prédictions.",
     "mae": "Mean Absolute Error : écart moyen absolu entre la prédiction et la valeur réelle. Plus c'est bas, mieux c'est.",
     "rmse": "Root Mean Square Error : écart quadratique moyen. Pénalise davantage les grandes erreurs que le MAE.",
