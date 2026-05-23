@@ -20,13 +20,19 @@ METRIC_HELP = {
     ),
     "alertes_sante": (
         "Nombre de modèles en alerte sur la période.\n\n"
-        "Le statut de santé de chaque modèle est le pire des 4 indicateurs suivants :\n"
-        "• Taux d'erreur exécution — 🟡 ≥ 5 % · 🔴 ≥ 10 %\n"
-        "• Drift features — déviation des distributions en production vs baseline stockée\n"
-        "• Drift performance — baisse d'accuracy (ou hausse de MAE) "
-        "entre la 1ère et la 2ème moitié de la période\n"
-        "• Drift sortie — dérive de la distribution des valeurs prédites\n\n"
-        "Le statut final retenu est le plus sévère parmi ces quatre."
+        "Le statut de santé de chaque modèle est le pire des 4 indicateurs :\n\n"
+        "• Taux d'erreur exécution\n"
+        "  🟡 ≥ 5 %  ·  🔴 ≥ 10 %\n\n"
+        "• Drift features (Z-score + PSI + null rate)\n"
+        "  Z-score 🟡 ≥ 2  · 🔴 ≥ 3\n"
+        "  PSI 🟡 ≥ 0.1  ·  🔴 ≥ 0.2\n"
+        "  Null rate 🟡 écart ≥ 5 pts  ·  🔴 ≥ 15 pts ou > 30 %\n\n"
+        "• Drift performance (accuracy 1ère vs 2ème moitié de période)\n"
+        "  🟡 baisse ≥ 5 pts  ·  🔴 baisse ≥ 10 pts\n\n"
+        "• Drift sortie (PSI distribution des prédictions)\n"
+        "  🟡 PSI ≥ 0.1  ·  🔴 PSI ≥ 0.2\n\n"
+        "Le statut final retenu est le plus sévère parmi ces quatre.\n"
+        "⚪ no_data / no_baseline ne dégrade pas le statut global."
     ),
     # Erreur / performance
     "taux_erreur": (
