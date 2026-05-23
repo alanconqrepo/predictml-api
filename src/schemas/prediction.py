@@ -377,6 +377,8 @@ class AnomalyPredictionEntry(BaseModel):
     timestamp: datetime = Field(..., description="Horodatage de la prédiction")
     prediction_result: Any = Field(..., description="Résultat de la prédiction")
     max_confidence: Optional[float] = Field(None, description="Probabilité max (si disponible)")
+    id_obs: Optional[str] = Field(None, description="Identifiant métier de l'observation (clé de jointure avec observed_results)")
+    ground_truth: Optional[Any] = Field(None, description="Résultat réellement observé (si disponible via observed_results)")
     anomalous_features: Dict[str, AnomalyFeatureDetail] = Field(
         ..., description="Features dont le z-score dépasse le seuil"
     )

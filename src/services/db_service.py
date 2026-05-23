@@ -440,15 +440,24 @@ class DBService:
         model_name: str,
         days: int = 7,
         limit: int = 200,
-    ) -> List[Prediction]:
+    ) -> List[tuple]:
         """
         Récupère les N dernières prédictions réussies d'un modèle sur une fenêtre glissante,
         avec leurs input_features (pour le calcul de z-scores par feature).
+
+        Retourne une liste de tuples (Prediction, Optional[ObservedResult]).
         """
         cutoff = _utcnow() - timedelta(days=days)
 
         stmt = (
-            select(Prediction)
+            select(Prediction, ObservedResult)
+            .outerjoin(
+                ObservedResult,
+                and_(
+                    Prediction.id_obs == ObservedResult.id_obs,
+                    Prediction.model_name == ObservedResult.model_name,
+                ),
+            )
             .where(
                 and_(
                     Prediction.model_name == model_name,
@@ -461,7 +470,7 @@ class DBService:
             .limit(limit)
         )
         result = await db.execute(stmt)
-        return list(result.scalars().all())
+        return list(result.all())
 
     @staticmethod
     async def count_predictions(

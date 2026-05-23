@@ -14,6 +14,16 @@ import streamlit as st
 from utils.auth import get_client, require_auth
 from utils.metrics_help import METRIC_HELP
 
+def _fmt_pred_result(value) -> str:
+    """Formate un résultat de prédiction : float → 3 décimales, sinon str brut."""
+    if value is None:
+        return ""
+    try:
+        return f"{float(value):.3f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
 # Labels de mode cohérents avec les pages Modèles et A/B Testing
 _MODE_LABEL = {
     "production": "🟢 Production",
@@ -948,6 +958,9 @@ with _tab_detail:
                         _preds,
                         key=lambda x: -max(f["z_score"] for f in x["anomalous_features"].values()),
                     )
+                    # Détecte si au moins une prédiction a une confiance — sinon, modèle de régression
+                    _has_confidence = any(_p.get("max_confidence") is not None for _p in _preds_sorted)
+
                     _rows_anom = []
                     for _p in _preds_sorted:
                         _feats = _p.get("anomalous_features", {})
@@ -956,66 +969,91 @@ with _tab_detail:
                             f"{_fn} (z={_fd['z_score']:.2f})"
                             for _fn, _fd in sorted(_feats.items(), key=lambda x: -x[1]["z_score"])
                         )
-                        _rows_anom.append({
+                        _row = {
                             "ID": _p["prediction_id"],
                             "Timestamp": _p["timestamp"][:19].replace("T", " "),
-                            "Résultat": str(_p.get("prediction_result", "")),
-                            "Confiance": (
-                                f"{_p['max_confidence']:.2%}"
-                                if _p.get("max_confidence") is not None else "—"
-                            ),
+                            "Résultat": _fmt_pred_result(_p.get("prediction_result")),
+                            "Ground truth": _fmt_pred_result(_p.get("ground_truth")),
+                            "id_obs": _p.get("id_obs") or "—",
                             "Z-score max": round(_worst_z_val, 2),
                             "Features aberrantes": _feat_names,
-                        })
-                    _df_anom = pd.DataFrame(_rows_anom)
-                    st.dataframe(
-                        _df_anom, width='stretch', hide_index=True,
-                        column_config={
-                            "ID": st.column_config.NumberColumn(
-                                "ID",
-                                help="Identifiant unique de la prédiction dans la base.",
+                        }
+                        if _has_confidence:
+                            _row["Confiance"] = (
+                                f"{_p['max_confidence']:.2%}"
+                                if _p.get("max_confidence") is not None else "—"
+                            )
+                        _rows_anom.append(_row)
+
+                    # Ordre des colonnes
+                    _cols_order = ["ID", "Timestamp", "Résultat", "Ground truth", "id_obs"]
+                    if _has_confidence:
+                        _cols_order.append("Confiance")
+                    _cols_order += ["Z-score max", "Features aberrantes"]
+                    _df_anom = pd.DataFrame(_rows_anom)[_cols_order]
+
+                    _col_cfg_anom = {
+                        "ID": st.column_config.NumberColumn(
+                            "ID",
+                            help="Identifiant unique de la prédiction dans la base.",
+                        ),
+                        "Timestamp": st.column_config.TextColumn(
+                            "Timestamp",
+                            help="Date et heure de la prédiction.",
+                        ),
+                        "Résultat": st.column_config.TextColumn(
+                            "Résultat",
+                            help=(
+                                "Valeur prédite par le modèle pour cette requête. "
+                                "Peut être moins fiable si plusieurs features sont aberrantes."
                             ),
-                            "Timestamp": st.column_config.TextColumn(
-                                "Timestamp",
-                                help="Date et heure de la prédiction.",
+                        ),
+                        "Ground truth": st.column_config.TextColumn(
+                            "Ground truth",
+                            help=(
+                                "Valeur réelle observée (si un observed_result a été soumis "
+                                "pour cet id_obs). Permet de mesurer directement l'erreur "
+                                "du modèle sur cette prédiction anomale."
                             ),
-                            "Résultat": st.column_config.TextColumn(
-                                "Résultat",
-                                help=(
-                                    "Valeur prédite par le modèle pour cette requête. "
-                                    "Peut être moins fiable si plusieurs features sont aberrantes."
-                                ),
+                        ),
+                        "id_obs": st.column_config.TextColumn(
+                            "id_obs",
+                            help=(
+                                "Identifiant métier de l'observation, transmis lors de la requête "
+                                "de prédiction. Sert de clé de jointure avec les observed_results. "
+                                "— si absent (prédiction sans id_obs)."
                             ),
-                            "Confiance": st.column_config.TextColumn(
-                                "Confiance",
-                                help=(
-                                    "Probabilité max retournée par le modèle (classifieurs uniquement). "
-                                    "— pour les modèles de régression. "
-                                    "Une confiance haute sur une prédiction anomale est un signal fort "
-                                    "de sur-confiance du modèle hors de sa zone d'entraînement."
-                                ),
+                        ),
+                        "Z-score max": st.column_config.NumberColumn(
+                            "Z-score max",
+                            format="%.2f",
+                            help=(
+                                "Z-score le plus élevé parmi toutes les features aberrantes "
+                                "de cette prédiction.\n\n"
+                                "Z = |valeur reçue − μ entraînement| / σ entraînement\n\n"
+                                "Plus Z est élevé, plus l'entrée est atypique par rapport "
+                                "aux données vues à l'entraînement."
                             ),
-                            "Z-score max": st.column_config.NumberColumn(
-                                "Z-score max",
-                                format="%.2f",
-                                help=(
-                                    "Z-score le plus élevé parmi toutes les features aberrantes "
-                                    "de cette prédiction.\n\n"
-                                    "Z = |valeur reçue − μ entraînement| / σ entraînement\n\n"
-                                    "Plus Z est élevé, plus l'entrée est atypique par rapport "
-                                    "aux données vues à l'entraînement."
-                                ),
+                        ),
+                        "Features aberrantes": st.column_config.TextColumn(
+                            "Features aberrantes",
+                            help=(
+                                "Features dont |Z| ≥ seuil, classées par Z-score décroissant. "
+                                "Format : nom_feature (z=X.XX). "
+                                "Sélectionnez une ligne ci-dessous pour voir le détail complet."
                             ),
-                            "Features aberrantes": st.column_config.TextColumn(
-                                "Features aberrantes",
-                                help=(
-                                    "Features dont |Z| ≥ seuil, classées par Z-score décroissant. "
-                                    "Format : nom_feature (z=X.XX). "
-                                    "Sélectionnez une ligne ci-dessous pour voir le détail complet."
-                                ),
+                        ),
+                    }
+                    if _has_confidence:
+                        _col_cfg_anom["Confiance"] = st.column_config.TextColumn(
+                            "Confiance",
+                            help=(
+                                "Probabilité max retournée par le modèle (classifieurs uniquement). "
+                                "Une confiance haute sur une prédiction anomale est un signal fort "
+                                "de sur-confiance du modèle hors de sa zone d'entraînement."
                             ),
-                        },
-                    )
+                        )
+                    st.dataframe(_df_anom, width='stretch', hide_index=True, column_config=_col_cfg_anom)
 
                     # ── Sélecteur de prédiction pour le détail ──────────────
                     st.markdown("##### 🔍 Détail d'une prédiction")
@@ -1042,14 +1080,18 @@ with _tab_detail:
 
                         with st.container(border=True):
                             # En-tête
-                            _hc1, _hc2, _hc3 = st.columns([3, 1, 1])
+                            _hc1, _hc2, _hc3, _hc4 = st.columns([3, 1, 1, 1])
                             _hc1.markdown(
                                 f"**Prédiction #{_sel_pred['prediction_id']}**  ·  "
                                 f"{_sel_pred['timestamp'][:19].replace('T', ' ')}"
+                                + (f"  ·  id_obs: `{_sel_pred['id_obs']}`" if _sel_pred.get("id_obs") else "")
                             )
-                            _hc2.metric("Résultat", str(_sel_pred.get("prediction_result", "")))
+                            _hc2.metric("Résultat", _fmt_pred_result(_sel_pred.get("prediction_result")))
+                            if _sel_pred.get("ground_truth") is not None:
+                                _hc3.metric("Ground truth", _fmt_pred_result(_sel_pred.get("ground_truth")),
+                                            help="Valeur réelle observée (via observed_results).")
                             if _sel_pred.get("max_confidence") is not None:
-                                _hc3.metric("Confiance", f"{_sel_pred['max_confidence']:.2%}")
+                                _hc4.metric("Confiance", f"{_sel_pred['max_confidence']:.2%}")
 
                             # Graphique + tableau côte à côte
                             _dc1, _dc2 = st.columns([1, 1])
@@ -1456,47 +1498,149 @@ with _tab_detail:
             calib = None
 
         if calib:
+            calib_model_type = calib.get("model_type", "classification")
             calib_status = calib.get("calibration_status", "insufficient_data")
-            if calib_status == "insufficient_data":
-                st.info(f"Soumettez des observed_results pour activer la calibration (échantillon : {calib.get('sample_size', 0)} paires).")
-            else:
-                STATUS_CALIB = {"ok": "🟢 OK", "overconfident": "🟡 Sur-confiant", "underconfident": "🔴 Sous-confiant"}
-                brier = calib.get("brier_score")
-                gap   = calib.get("overconfidence_gap")
-                cc1, cc2, cc3 = st.columns(3)
-                cc1.metric("Brier score", f"{brier:.4f}" if brier is not None else "—", help=METRIC_HELP["brier_score"])
-                cc2.metric("Gap confiance/précision", f"{gap:+.2%}" if gap is not None else "—", help=METRIC_HELP["gap_confiance"])
-                cc3.metric("Statut", STATUS_CALIB.get(calib_status, calib_status), help=METRIC_HELP["statut_calibration"])
-                reliability = calib.get("reliability", [])
-                if reliability:
-                    bins       = [b["confidence_bin"]  for b in reliability]
-                    obs_rates  = [b["observed_rate"]   for b in reliability]
-                    counts     = [b["count"]            for b in reliability]
-                    diag_vals  = [(float(b.split("–")[0]) + float(b.split("–")[1])) / 2 for b in bins]
-                    fig_cal = go.Figure()
-                    fig_cal.add_trace(go.Scatter(x=bins, y=diag_vals, name="Calibration parfaite",
-                                                 line=dict(color="grey", dash="dot", width=1), mode="lines"))
-                    fig_cal.add_trace(go.Scatter(
-                        x=bins + bins[::-1], y=obs_rates + diag_vals[::-1],
-                        fill="toself", fillcolor="rgba(200,200,200,0.25)",
-                        line=dict(color="rgba(0,0,0,0)"), showlegend=False, hoverinfo="skip",
-                    ))
-                    fig_cal.add_trace(go.Scatter(
-                        x=bins, y=obs_rates, name="Taux observé",
-                        mode="markers+lines",
-                        marker=dict(size=[max(8, min(24, c // 5)) for c in counts], color="#2980b9"),
-                        customdata=counts,
-                        hovertemplate="Bucket : %{x}<br>Taux observé : %{y:.2%}<br>N : %{customdata}<extra></extra>",
-                    ))
-                    fig_cal.update_layout(
-                        title="Courbe de calibration (reliability diagram)",
-                        xaxis_title="Confiance prédite", yaxis_title="Taux observé",
-                        yaxis=dict(tickformat=".0%", range=[0, 1]),
-                        hovermode="x unified", legend=dict(orientation="h", y=1.05),
+
+            # ── Régression ──────────────────────────────────────────────────
+            if calib_model_type == "regression":
+                if calib_status == "insufficient_data":
+                    st.info(f"Soumettez des observed_results pour activer la calibration régression (échantillon : {calib.get('sample_size', 0)} paires).")
+                else:
+                    st.caption(
+                        "La calibration d'un modèle de régression mesure à quel point les prédictions "
+                        "ŷ sont proches des valeurs réelles y. "
+                        "Le nuage de points ŷ vs y doit se concentrer autour de la diagonale (calibration parfaite). "
+                        "Les résidus (ŷ − y) doivent être centrés sur 0 sans biais systématique."
                     )
-                    st.plotly_chart(fig_cal, width='stretch')
-                if calib_status == "overconfident":
-                    st.warning("Envisagez `CalibratedClassifierCV(method='isotonic')` lors du prochain retrain.")
+                    STATUS_REG = {
+                        "ok":           "🟢 OK",
+                        "biased_high":  "🟡 Sur-estimation",
+                        "biased_low":   "🟡 Sous-estimation",
+                    }
+                    _calib_mae   = calib.get("mae")
+                    _calib_rmse  = calib.get("rmse")
+                    _calib_r2    = calib.get("r2")
+                    _calib_bias  = calib.get("bias")
+                    _bias_status = STATUS_REG.get(calib_status, calib_status)
+
+                    rc1, rc2, rc3, rc4 = st.columns(4)
+                    rc1.metric("MAE", f"{_calib_mae:.3f}" if _calib_mae is not None else "—", help=METRIC_HELP["calib_mae"])
+                    rc2.metric("RMSE", f"{_calib_rmse:.3f}" if _calib_rmse is not None else "—", help=METRIC_HELP["calib_rmse"])
+                    rc3.metric("R²", f"{_calib_r2:.3f}" if _calib_r2 is not None else "—", help=METRIC_HELP["calib_r2"])
+                    rc4.metric("Biais moyen", f"{_calib_bias:+.3f}" if _calib_bias is not None else "—",
+                               delta=_bias_status, delta_color="off", help=METRIC_HELP["calib_biais"])
+
+                    scatter_data = calib.get("scatter_data") or []
+                    if scatter_data:
+                        _preds = [pt["pred"] for pt in scatter_data]
+                        _obs   = [pt["obs"]  for pt in scatter_data]
+
+                        # ── Scatter ŷ vs y ──────────────────────────────
+                        _all_vals  = _preds + _obs
+                        _axis_min  = min(_all_vals)
+                        _axis_max  = max(_all_vals)
+                        _pad       = (_axis_max - _axis_min) * 0.05 or 0.1
+                        _diag_vals = [_axis_min - _pad, _axis_max + _pad]
+
+                        fig_scatter = go.Figure()
+                        fig_scatter.add_trace(go.Scatter(
+                            x=_diag_vals, y=_diag_vals,
+                            mode="lines",
+                            name="Calibration parfaite (ŷ = y)",
+                            line=dict(color="grey", dash="dot", width=1),
+                            hoverinfo="skip",
+                        ))
+                        fig_scatter.add_trace(go.Scatter(
+                            x=_obs, y=_preds,
+                            mode="markers",
+                            name="Prédictions",
+                            marker=dict(color="#2980b9", size=5, opacity=0.6),
+                            hovertemplate="y réel : %{x:.3f}<br>ŷ prédit : %{y:.3f}<extra></extra>",
+                        ))
+                        fig_scatter.update_layout(
+                            title=f"Calibration régression — ŷ prédit vs y réel (n={len(scatter_data)})",
+                            xaxis_title="y réel (observé)",
+                            yaxis_title="ŷ prédit",
+                            xaxis=dict(range=[_axis_min - _pad, _axis_max + _pad]),
+                            yaxis=dict(range=[_axis_min - _pad, _axis_max + _pad]),
+                            hovermode="closest",
+                            legend=dict(orientation="h", y=1.05),
+                        )
+                        st.plotly_chart(fig_scatter, width='stretch')
+
+                        # ── Histogramme des résidus ─────────────────────
+                        _residuals = [p - o for p, o in zip(_preds, _obs)]
+                        _res_mean  = sum(_residuals) / len(_residuals)
+                        fig_res = go.Figure()
+                        fig_res.add_vline(x=0, line=dict(color="grey", dash="dot", width=1))
+                        fig_res.add_vline(x=_res_mean, line=dict(color="#e74c3c", dash="dash", width=1.5),
+                                          annotation_text=f"Biais moyen = {_res_mean:+.3f}",
+                                          annotation_position="top right")
+                        fig_res.add_trace(go.Histogram(
+                            x=_residuals,
+                            name="Résidus (ŷ − y)",
+                            marker_color="#2980b9",
+                            opacity=0.8,
+                            hovertemplate="Résidu : %{x:.3f}<br>Nb : %{y}<extra></extra>",
+                        ))
+                        fig_res.update_layout(
+                            title="Distribution des résidus (ŷ − y)",
+                            xaxis_title="Résidu (ŷ − y)",
+                            yaxis_title="Nombre de prédictions",
+                            bargap=0.05,
+                        )
+                        st.plotly_chart(fig_res, width='stretch')
+
+                    if calib_status in ("biased_high", "biased_low"):
+                        _bias_dir = "surestime" if calib_status == "biased_high" else "sous-estime"
+                        st.warning(
+                            f"Le modèle **{_bias_dir}** systématiquement ses prédictions. "
+                            "Envisagez un ré-entraînement ou un post-processing de calibration "
+                            "(ex. isotonic regression, Platt scaling sur les sorties)."
+                        )
+
+            # ── Classification ──────────────────────────────────────────────
+            else:
+                if calib_status == "insufficient_data":
+                    st.info(f"Soumettez des observed_results pour activer la calibration (échantillon : {calib.get('sample_size', 0)} paires).")
+                else:
+                    STATUS_CALIB = {"ok": "🟢 OK", "overconfident": "🟡 Sur-confiant", "underconfident": "🔴 Sous-confiant"}
+                    brier = calib.get("brier_score")
+                    gap   = calib.get("overconfidence_gap")
+                    cc1, cc2, cc3 = st.columns(3)
+                    cc1.metric("Brier score", f"{brier:.4f}" if brier is not None else "—", help=METRIC_HELP["brier_score"])
+                    cc2.metric("Gap confiance/précision", f"{gap:+.2%}" if gap is not None else "—", help=METRIC_HELP["gap_confiance"])
+                    cc3.metric("Statut", STATUS_CALIB.get(calib_status, calib_status), help=METRIC_HELP["statut_calibration"])
+                    reliability = calib.get("reliability", [])
+                    if reliability:
+                        bins       = [b["confidence_bin"]  for b in reliability]
+                        obs_rates  = [b["observed_rate"]   for b in reliability]
+                        counts     = [b["count"]            for b in reliability]
+                        diag_vals  = [(float(b.split("–")[0]) + float(b.split("–")[1])) / 2 for b in bins]
+                        fig_cal = go.Figure()
+                        fig_cal.add_trace(go.Scatter(x=bins, y=diag_vals, name="Calibration parfaite",
+                                                     line=dict(color="grey", dash="dot", width=1), mode="lines"))
+                        fig_cal.add_trace(go.Scatter(
+                            x=bins + bins[::-1], y=obs_rates + diag_vals[::-1],
+                            fill="toself", fillcolor="rgba(200,200,200,0.25)",
+                            line=dict(color="rgba(0,0,0,0)"), showlegend=False, hoverinfo="skip",
+                        ))
+                        fig_cal.add_trace(go.Scatter(
+                            x=bins, y=obs_rates, name="Taux observé",
+                            mode="markers+lines",
+                            marker=dict(size=[max(8, min(24, c // 5)) for c in counts], color="#2980b9"),
+                            customdata=counts,
+                            hovertemplate="Bucket : %{x}<br>Taux observé : %{y:.2%}<br>N : %{customdata}<extra></extra>",
+                        ))
+                        fig_cal.update_layout(
+                            title="Courbe de calibration (reliability diagram)",
+                            xaxis_title="Confiance prédite", yaxis_title="Taux observé",
+                            yaxis=dict(tickformat=".0%", range=[0, 1]),
+                            hovermode="x unified", legend=dict(orientation="h", y=1.05),
+                        )
+                        st.plotly_chart(fig_cal, width='stretch')
+                    if calib_status == "overconfident":
+                        st.warning("Envisagez `CalibratedClassifierCV(method='isotonic')` lors du prochain retrain.")
 
     # ────────────────────────────────────────────────────────────────────
     # EXPANDER 6 — Erreurs récentes

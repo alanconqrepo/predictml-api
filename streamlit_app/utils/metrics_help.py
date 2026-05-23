@@ -61,10 +61,39 @@ METRIC_HELP = {
     "niveau_confiance": "Niveau de confiance du test. 95 % signifie : on accepte 5 % de risque de conclure à tort à une différence alors qu'il n'y en a pas.",
     "test_statistique": "Test statistique utilisé pour comparer les versions. Chi-² pour les taux d'erreur (proportions), Mann-Whitney U pour les distributions de latence (continues).",
     "metrique_analysee": "Métrique sur laquelle porte le test statistique : taux d'erreur ou temps de réponse.",
-    # Calibration
+    # Calibration — classification
     "brier_score": "Brier score : mesure la précision des probabilités prédites. 0 = parfait (probabilités exactes), 1 = pire cas. En dessous de 0.25 est généralement acceptable.",
     "gap_confiance": "Écart entre la confiance moyenne prédite et la précision réelle observée. Positif = surconfiance (le modèle surestime ses certitudes), négatif = sous-confiance. Idéalement proche de 0.",
     "statut_calibration": "Statut de calibration du modèle : OK si l'écart est faible, Surconfiant si le modèle surestime ses probabilités, Sous-confiant s'il les sous-estime.",
+    # Calibration — régression
+    "calib_mae": (
+        "MAE (Mean Absolute Error) : erreur absolue moyenne entre ŷ prédit et y réel.\n\n"
+        "MAE = moyenne(|ŷ − y|)\n\n"
+        "Plus c'est bas, mieux c'est. "
+        "Même unité que la variable cible."
+    ),
+    "calib_rmse": (
+        "RMSE (Root Mean Square Error) : racine de l'erreur quadratique moyenne.\n\n"
+        "RMSE = √(moyenne((ŷ − y)²))\n\n"
+        "Pénalise davantage les grandes erreurs que le MAE. "
+        "Même unité que la variable cible. Plus c'est bas, mieux c'est."
+    ),
+    "calib_r2": (
+        "R² (coefficient de détermination) : part de variance expliquée par le modèle.\n\n"
+        "R² = 1 − SS_res / SS_tot\n"
+        "SS_res = Σ(ŷ − y)²,  SS_tot = Σ(y − ȳ)²\n\n"
+        "1.0 = modèle parfait · 0 = pas mieux que la moyenne · négatif = pire que la moyenne. "
+        "Idéalement > 0.80."
+    ),
+    "calib_biais": (
+        "Biais systématique du modèle : moyenne des résidus (ŷ − y).\n\n"
+        "Biais = moyenne(ŷ − y)\n\n"
+        "Positif → le modèle sur-estime en moyenne.\n"
+        "Négatif → le modèle sous-estime en moyenne.\n"
+        "Proche de 0 → pas de biais systématique (bonne calibration).\n\n"
+        "Statut : 🟢 OK si |biais relatif| < 10 % de l'écart-type des y observés, "
+        "🟡 Sur-estimation ou Sous-estimation sinon."
+    ),
     # Confiance
     "confiance_moyenne": "Probabilité maximale moyenne retournée par le modèle pour ses prédictions. Indique à quel point le modèle est 'sûr' en moyenne.",
     "p25_confiance": "25e percentile de confiance : 25 % des prédictions ont une confiance inférieure à cette valeur.",
