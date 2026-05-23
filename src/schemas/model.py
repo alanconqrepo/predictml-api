@@ -41,6 +41,7 @@ class ModelUpdateInput(BaseModel):
     description: Optional[str] = None
     is_production: Optional[bool] = None
     accuracy: Optional[float] = None
+    auc: Optional[float] = None
     features_count: Optional[int] = None
     classes: Optional[List[Any]] = None
     confidence_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
@@ -75,6 +76,7 @@ class ModelCreateResponse(BaseModel):
     minio_object_key: Optional[str]
     file_size_bytes: Optional[int]
     accuracy: Optional[float]
+    auc: Optional[float] = None
     f1_score: Optional[float]
     features_count: Optional[int]
     classes: Optional[List[Any]]
@@ -125,6 +127,7 @@ class ModelGetResponse(BaseModel):
 
     # Performance
     accuracy: Optional[float]
+    auc: Optional[float] = None
     f1_score: Optional[float]
     precision: Optional[float]
     recall: Optional[float]
@@ -188,6 +191,7 @@ class PeriodPerformance(BaseModel):
     period: str
     matched_count: int
     accuracy: Optional[float] = None
+    auc: Optional[float] = None
     f1_weighted: Optional[float] = None
     mae: Optional[float] = None
     rmse: Optional[float] = None
@@ -197,6 +201,7 @@ class VersionTimelineEntry(BaseModel):
     version: str
     deployed_at: datetime
     accuracy: Optional[float] = None
+    auc: Optional[float] = None
     mae: Optional[float] = None
     f1_score: Optional[float] = None
     sample_count: int
@@ -220,12 +225,17 @@ class ModelPerformanceResponse(BaseModel):
 
     # Classification
     accuracy: Optional[float] = None
+    auc: Optional[float] = None
     precision_weighted: Optional[float] = None
     recall_weighted: Optional[float] = None
     f1_weighted: Optional[float] = None
     confusion_matrix: Optional[List[List[int]]] = None
     classes: Optional[List[Any]] = None
     per_class_metrics: Optional[Dict[str, PerClassMetrics]] = None
+
+    # Courbe ROC (classification binaire avec probabilités disponibles)
+    roc_curve_fpr: Optional[List[float]] = None
+    roc_curve_tpr: Optional[List[float]] = None
 
     # Régression
     mae: Optional[float] = None
@@ -449,6 +459,7 @@ class RetrainHistoryEntry(BaseModel):
     new_version: str
     trained_by: Optional[str]
     accuracy: Optional[float]
+    auc: Optional[float] = None
     f1_score: Optional[float]
     auto_promoted: Optional[bool]
     auto_promote_reason: Optional[str]
@@ -792,6 +803,7 @@ class ModelVersionSummary(BaseModel):
         None  # "regression" | "classification_binary" | "classification_multiclass"
     )
     accuracy: Optional[float] = None
+    auc: Optional[float] = None
     f1_score: Optional[float] = None
     latency_p50_ms: Optional[float] = None
     latency_p95_ms: Optional[float] = None
@@ -807,6 +819,7 @@ class ModelVersionSummary(BaseModel):
     r2_eval: Optional[float] = None
     # Métriques live
     live_accuracy: Optional[float] = None
+    live_auc: Optional[float] = None
     live_f1: Optional[float] = None
     live_mae: Optional[float] = None
     live_rmse: Optional[float] = None
@@ -861,6 +874,7 @@ class LeaderboardEntry(BaseModel):
     name: str
     version: str
     accuracy: Optional[float] = None
+    auc: Optional[float] = None
     f1_score: Optional[float] = None
     r2: Optional[float] = None
     rmse: Optional[float] = None

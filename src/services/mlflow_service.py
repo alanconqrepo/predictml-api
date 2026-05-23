@@ -52,8 +52,9 @@ class MLflowService:
         train_start_date: str,
         train_end_date: str,
         accuracy: Optional[float],
-        f1_score: Optional[float],
-        n_rows: Optional[int],
+        auc: Optional[float] = None,
+        f1_score: Optional[float] = None,
+        n_rows: Optional[int] = None,
         feature_stats: Optional[dict],
         label_distribution: Optional[dict],
         algorithm: Optional[str],
@@ -99,6 +100,8 @@ class MLflowService:
                 # Metrics scalaires
                 if accuracy is not None:
                     mlflow.log_metric("accuracy", accuracy)
+                if auc is not None:
+                    mlflow.log_metric("auc", auc)
                 if f1_score is not None:
                     mlflow.log_metric("f1_score", f1_score)
                 if n_rows is not None:

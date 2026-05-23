@@ -107,6 +107,7 @@ def _build_leaderboard_fallback(models_list, stats_list, metric, n_days):
             "name": m["name"],
             "version": m.get("version", ""),
             "accuracy": m.get("accuracy"),
+            "auc": m.get("auc"),
             "f1_score": m.get("f1_score"),
             "r2": (m.get("training_metrics") or {}).get("r2"),
             "rmse": (m.get("training_metrics") or {}).get("rmse"),
@@ -123,6 +124,8 @@ def _build_leaderboard_fallback(models_list, stats_list, metric, n_days):
         )
     elif metric == "predictions_count":
         rows.sort(key=lambda r: r["predictions_count"], reverse=True)
+    elif metric == "auc":
+        rows.sort(key=lambda r: r["auc"] if r["auc"] is not None else -1, reverse=True)
     elif metric == "f1_score":
         rows.sort(key=lambda r: r["f1_score"] if r["f1_score"] is not None else -1, reverse=True)
     elif metric == "r2":
@@ -152,9 +155,10 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
     lb_col_metric, _ = st.columns([2, 3])
     lb_metric = lb_col_metric.selectbox(
         "Trier par",
-        options=["accuracy", "f1_score", "r2", "rmse", "latency_p95_ms", "predictions_count"],
+        options=["accuracy", "auc", "f1_score", "r2", "rmse", "latency_p95_ms", "predictions_count"],
         format_func=lambda x: {
             "accuracy": "Accuracy",
+            "auc": "AUC-ROC",
             "f1_score": "F1 Score",
             "r2": "R² (régression)",
             "rmse": "RMSE (régression)",
@@ -187,6 +191,7 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
                     "name": "Modèle",
                     "version": "Version",
                     "accuracy": "Accuracy",
+                    "auc": "AUC-ROC",
                     "f1_score": "F1 Score",
                     "r2": "R²",
                     "rmse": "RMSE",
@@ -199,6 +204,10 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
             df_display["Accuracy"] = df_display["Accuracy"].apply(
                 lambda x: round(x, 4) if pd.notna(x) and x is not None else None
             )
+            if "AUC-ROC" in df_display.columns:
+                df_display["AUC-ROC"] = df_display["AUC-ROC"].apply(
+                    lambda x: round(x, 4) if pd.notna(x) and x is not None else None
+                )
             df_display["F1 Score"] = df_display["F1 Score"].apply(
                 lambda x: round(x, 4) if pd.notna(x) and x is not None else None
             )
@@ -212,24 +221,26 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
                 lambda x: f"{x:.0f} ms" if pd.notna(x) and x is not None else "—"
             )
 
-            # Colonnes avec valeur active selon la métrique de tri
-            _style_subsets = ["Accuracy"]
+            _style_map = df_display.style.map(_bg_accuracy, subset=["Accuracy"])
+            if "AUC-ROC" in df_display.columns and df_display["AUC-ROC"].notna().any():
+                _style_map = _style_map.map(_bg_accuracy, subset=["AUC-ROC"])
             if "R²" in df_display.columns and df_display["R²"].notna().any():
-                _style_subsets.append("R²")
+                _style_map = _style_map.map(_bg_r2, subset=["R²"])
+            styled = _style_map.hide(axis="index")
 
-            styled = (
-                df_display.style
-                .map(_bg_accuracy, subset=["Accuracy"])
-                .map(_bg_r2, subset=["R²"])
-                .hide(axis="index")
-            )
-            st.dataframe(
-                styled,
-                width='stretch',
-                column_config={
+            _col_config = {
                     "Accuracy": st.column_config.NumberColumn(
                         "Accuracy",
                         help="Proportion de prédictions correctes sur le jeu de test (classification). Entre 0 et 1 — plus c'est proche de 1, meilleur est le modèle.",
+                        format="%.4f",
+                    ),
+                    "AUC-ROC": st.column_config.NumberColumn(
+                        "AUC-ROC",
+                        help=(
+                            "Aire sous la courbe ROC — mesure la capacité discriminatoire du modèle "
+                            "indépendamment du seuil (classification). 1.0 = parfait, 0.5 = aléatoire. "
+                            "Requiert des probabilités prédites."
+                        ),
                         format="%.4f",
                     ),
                     "F1 Score": st.column_config.NumberColumn(
@@ -259,8 +270,8 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
                         f"Prédictions ({days}j)",
                         help=f"Nombre total de prédictions servies sur les {days} derniers jours.",
                     ),
-                },
-            )
+                }
+            st.dataframe(styled, width='stretch', column_config=_col_config)
         else:
             st.info("Aucun modèle en production trouvé.")
 

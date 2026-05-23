@@ -56,6 +56,7 @@ class ModelMetadata(Base):
 
     # Performance
     accuracy = Column(Float, nullable=True)
+    auc = Column(Float, nullable=True)  # AUC-ROC (classification binaire / multiclasse OvR)
     precision = Column(Float, nullable=True)
     recall = Column(Float, nullable=True)
     f1_score = Column(Float, nullable=True)

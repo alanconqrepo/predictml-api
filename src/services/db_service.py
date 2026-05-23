@@ -26,6 +26,7 @@ from src.db.models import (
     Prediction,
     User,
 )
+from src.services.metrics_service import compute_auc
 
 
 def _pg(db: AsyncSession) -> bool:
@@ -565,12 +566,14 @@ class DBService:
             sample_count = len(pairs)
 
             accuracy = None
+            auc = None
             mae = None
             f1 = None
 
             if sample_count > 0:
                 y_true = [row.observed_result for row in pairs]
                 y_pred = [row.prediction_result for row in pairs]
+                y_prob = [row.probabilities for row in pairs]
 
                 is_classification = bool(meta.classes)
                 if not is_classification:
@@ -585,6 +588,7 @@ class DBService:
                     y_true_s = [str(v) for v in y_true]
                     y_pred_s = [str(v) for v in y_pred]
                     accuracy = round(accuracy_score(y_true_s, y_pred_s), 4)
+                    auc = compute_auc(y_true, y_prob, meta.classes)
                     f1 = round(
                         float(
                             sklearn_f1_score(
@@ -612,6 +616,7 @@ class DBService:
                     "version": meta.version,
                     "deployed_at": meta.created_at,
                     "accuracy": accuracy,
+                    "auc": auc,
                     "mae": mae,
                     "f1_score": f1,
                     "sample_count": sample_count,

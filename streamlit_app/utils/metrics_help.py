@@ -45,6 +45,19 @@ METRIC_HELP = {
         "🟡 Avertissement : ≥ 5 %  ·  🔴 Critique : ≥ 10 %"
     ),
     "accuracy": "Proportion de prédictions correctes. 1.0 = 100 % de bonnes prédictions.",
+    "auc": (
+        "AUC-ROC (Area Under the ROC Curve) : aire sous la courbe Receiver Operating Characteristic.\n\n"
+        "Mesure la capacité du modèle à distinguer les classes, indépendamment du seuil de décision.\n\n"
+        "• 1.0 = discriminant parfait\n"
+        "• 0.5 = pas mieux que le hasard (classificateur aléatoire)\n"
+        "• < 0.5 = pire que le hasard\n\n"
+        "Interprétation :\n"
+        "• 🟢 ≥ 0.90 → excellent\n"
+        "• 🟡 0.70–0.90 → bon à acceptable\n"
+        "• 🔴 < 0.70 → à améliorer\n\n"
+        "Requiert les probabilités prédites (le modèle doit sortir des scores de confiance, pas seulement une classe).\n"
+        "Classification binaire : AUC standard. Multiclasse : OvR (One vs Rest) pondéré."
+    ),
     "mae": "Mean Absolute Error : écart moyen absolu entre la prédiction et la valeur réelle. Plus c'est bas, mieux c'est.",
     "rmse": "Root Mean Square Error : écart quadratique moyen. Pénalise davantage les grandes erreurs que le MAE.",
     "r2": "Coefficient de détermination : part de variance expliquée par le modèle. 1.0 = modèle parfait, 0 = modèle nul, négatif = pire que la moyenne.",
