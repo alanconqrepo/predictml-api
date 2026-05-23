@@ -1153,18 +1153,170 @@ with _tab_detail:
                 } for v in ab_versions])
                 st.dataframe(df_ab, width='stretch', hide_index=True)
 
-                dist_data = []
-                for v in ab_versions:
-                    for label, count in v.get("prediction_distribution", {}).items():
-                        dist_data.append({"version": v["version"], "label": str(label), "count": count})
-                if dist_data:
-                    fig_dist = px.bar(
-                        pd.DataFrame(dist_data), x="label", y="count", color="version",
-                        barmode="group", title="Distribution des prédictions par version",
-                        labels={"label": "Classe prédite", "count": "Nombre", "version": "Version"},
-                        color_discrete_sequence=px.colors.qualitative.Set2,
+                # ── Distribution des sorties prédites ─────────────────────
+                _all_dist_labels = sorted({
+                    str(lbl)
+                    for v in ab_versions
+                    for lbl in v.get("prediction_distribution", {}).keys()
+                })
+                _is_reg_ab = any("." in lbl for lbl in _all_dist_labels)
+
+                if _is_reg_ab:
+                    # ── Régression : stats pondérées depuis la distribution ──
+                    st.markdown("**📊 Distribution des sorties prédites (régression)**")
+                    _reg_rows = []
+                    for v in ab_versions:
+                        _dist = {
+                            str(k): int(c)
+                            for k, c in v.get("prediction_distribution", {}).items()
+                        }
+                        try:
+                            _numeric = [(float(k), c) for k, c in _dist.items()]
+                        except (ValueError, TypeError):
+                            continue
+                        _n = sum(c for _, c in _numeric)
+                        if _n == 0:
+                            continue
+                        _mean = sum(val * c for val, c in _numeric) / _n
+                        _var  = sum((val - _mean) ** 2 * c for val, c in _numeric) / _n
+                        _reg_rows.append({
+                            "Version": v["version"],
+                            "N": _n,
+                            "Moyenne ŷ": round(_mean, 3),
+                            "Écart-type σ": round(_var ** 0.5, 3),
+                            "Min": round(min(val for val, _ in _numeric), 3),
+                            "Max": round(max(val for val, _ in _numeric), 3),
+                        })
+                    if _reg_rows:
+                        _df_reg = pd.DataFrame(_reg_rows)
+                        # Ligne delta si exactement 2 versions
+                        if len(_reg_rows) == 2:
+                            r0, r1 = _reg_rows[0], _reg_rows[1]
+                            _df_reg = pd.concat([
+                                _df_reg,
+                                pd.DataFrame([{
+                                    "Version": f"Δ  ({r1['Version']} − {r0['Version']})",
+                                    "N": r1["N"] - r0["N"],
+                                    "Moyenne ŷ": round(r1["Moyenne ŷ"] - r0["Moyenne ŷ"], 3),
+                                    "Écart-type σ": round(r1["Écart-type σ"] - r0["Écart-type σ"], 3),
+                                    "Min": round(r1["Min"] - r0["Min"], 3),
+                                    "Max": round(r1["Max"] - r0["Max"], 3),
+                                }]),
+                            ], ignore_index=True)
+                        st.dataframe(
+                            _df_reg, hide_index=True, width='stretch',
+                            column_config={
+                                "Version": st.column_config.TextColumn("Version"),
+                                "N": st.column_config.NumberColumn(
+                                    "N prédictions",
+                                    help="Nombre de prédictions production sur la période.",
+                                ),
+                                "Moyenne ŷ": st.column_config.NumberColumn(
+                                    "Moyenne ŷ", format="%.3f",
+                                    help=(
+                                        "Valeur prédite moyenne. "
+                                        "Un écart entre versions indique un biais systématique — "
+                                        "les deux modèles ne prédisent pas la même plage de valeurs."
+                                    ),
+                                ),
+                                "Écart-type σ": st.column_config.NumberColumn(
+                                    "Écart-type σ", format="%.3f",
+                                    help=(
+                                        "Dispersion des prédictions autour de la moyenne. "
+                                        "Un σ très différent entre versions peut indiquer "
+                                        "un comportement divergent (une version est plus "
+                                        "« prudente » que l'autre)."
+                                    ),
+                                ),
+                                "Min": st.column_config.NumberColumn(
+                                    "Min", format="%.3f",
+                                    help="Valeur prédite minimale — utile pour détecter des extrapolations basses.",
+                                ),
+                                "Max": st.column_config.NumberColumn(
+                                    "Max", format="%.3f",
+                                    help="Valeur prédite maximale — utile pour détecter des extrapolations hautes.",
+                                ),
+                            },
+                        )
+                        # Graphique Moyenne ± σ
+                        if len(_reg_rows) >= 2:
+                            _fig_reg = px.bar(
+                                pd.DataFrame(_reg_rows),
+                                x="Version", y="Moyenne ŷ",
+                                error_y="Écart-type σ",
+                                color="Version",
+                                text="Moyenne ŷ",
+                                labels={"Moyenne ŷ": "Valeur prédite ŷ"},
+                                color_discrete_sequence=px.colors.qualitative.Set2,
+                                title="Moyenne ŷ ± σ par version",
+                            )
+                            _fig_reg.update_traces(
+                                texttemplate="%{text:.3f}", textposition="outside",
+                            )
+                            _fig_reg.update_layout(
+                                showlegend=False, height=320,
+                                yaxis_title="Valeur prédite ŷ",
+                            )
+                            st.plotly_chart(_fig_reg, use_container_width=True)
+
+                elif _all_dist_labels:
+                    # ── Classification : barres 100 % empilées ──────────────
+                    st.markdown("**📊 Répartition des classes prédites**")
+                    # Table % + count
+                    _cls_rows_pct = []
+                    for v in ab_versions:
+                        _dist = {
+                            str(k): int(c)
+                            for k, c in v.get("prediction_distribution", {}).items()
+                        }
+                        _total = sum(_dist.values()) or 1
+                        _row = {"Version": v["version"], "Total": sum(_dist.values())}
+                        for _lbl in _all_dist_labels:
+                            _cnt = _dist.get(_lbl, 0)
+                            _row[f"Cl. {_lbl}"] = f"{_cnt / _total:.1%}  ({_cnt})"
+                        _cls_rows_pct.append(_row)
+                    st.dataframe(
+                        pd.DataFrame(_cls_rows_pct), hide_index=True, width='stretch',
                     )
-                    st.plotly_chart(fig_dist, width='stretch')
+                    # Graphique 100 % empilé
+                    _pct_plot = []
+                    for v in ab_versions:
+                        _dist = {
+                            str(k): int(c)
+                            for k, c in v.get("prediction_distribution", {}).items()
+                        }
+                        _total = sum(_dist.values()) or 1
+                        for _lbl in _all_dist_labels:
+                            _cnt = _dist.get(_lbl, 0)
+                            _pct_plot.append({
+                                "Version": v["version"],
+                                "Classe": _lbl,
+                                "%": round(_cnt / _total * 100, 2),
+                                "N": _cnt,
+                            })
+                    _fig_pct = px.bar(
+                        pd.DataFrame(_pct_plot),
+                        x="Version", y="%", color="Classe",
+                        barmode="stack",
+                        text=pd.DataFrame(_pct_plot)["%"].apply(lambda v: f"{v:.1f}%"),
+                        labels={"%": "Part (%)", "Classe": "Classe prédite"},
+                        color_discrete_sequence=px.colors.qualitative.Set2,
+                        custom_data=["N"],
+                        title="Répartition des classes prédites (%)",
+                    )
+                    _fig_pct.update_traces(
+                        hovertemplate=(
+                            "Classe %{fullData.name}<br>"
+                            "%{y:.1f}%  (%{customdata[0]} prédictions)"
+                            "<extra></extra>"
+                        ),
+                    )
+                    _fig_pct.update_layout(
+                        yaxis=dict(ticksuffix="%", range=[0, 108]),
+                        legend_title="Classe prédite",
+                        height=380,
+                    )
+                    st.plotly_chart(_fig_pct, width='stretch')
 
     # ────────────────────────────────────────────────────────────────────
     # EXPANDER 5 — Calibration des probabilités
