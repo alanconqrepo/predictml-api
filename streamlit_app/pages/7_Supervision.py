@@ -638,34 +638,69 @@ with _tab_detail:
                 df_perf["date"] = pd.to_datetime(df_perf["date"])
                 df_perf = df_perf[df_perf["matched_count"] > 0].sort_values("date")
                 if not df_perf.empty:
-                    df_perf["rolling_3d"] = df_perf["accuracy"].rolling(window=3, min_periods=1).mean()
+                    # Detect regression: prefer R², fall back to accuracy for classification
+                    _is_regression = (
+                        "r2" in df_perf.columns
+                        and df_perf["r2"].notna().any()
+                    )
+                    if _is_regression:
+                        _metric_col   = "r2"
+                        _metric_label = "R² / jour"
+                        _y_label      = "R²"
+                        _tick_fmt     = ".3f"
+                        _delta_fmt    = lambda d: f"{-d:+.3f} (1re vs 2e moitié)"  # noqa: E731
+                    else:
+                        _metric_col   = "accuracy"
+                        _metric_label = "Accuracy / jour"
+                        _y_label      = "Accuracy"
+                        _tick_fmt     = ".0%"
+                        _delta_fmt    = lambda d: f"{-d:.1%} (1re vs 2e moitié)"  # noqa: E731
+
+                    df_perf["rolling_3d"] = (
+                        df_perf[_metric_col].rolling(window=3, min_periods=1).mean()
+                    )
                     fig_perf = go.Figure()
                     fig_perf.add_trace(go.Scatter(
-                        x=df_perf["date"], y=df_perf["accuracy"],
-                        name="Accuracy / jour", mode="markers+lines",
+                        x=df_perf["date"], y=df_perf[_metric_col],
+                        name=_metric_label, mode="markers+lines",
                         marker=dict(size=6), line=dict(color="#95a5a6"),
                     ))
                     fig_perf.add_trace(go.Scatter(
                         x=df_perf["date"], y=df_perf["rolling_3d"],
                         name="Moyenne 3j", line=dict(color="#2980b9", width=2),
                     ))
-                    if _acc_min is not None:
+                    if not _is_regression and _acc_min is not None:
                         fig_perf.add_hline(y=_acc_min, line_dash="dash", line_color="#c0392b",
                                            annotation_text=f"Min {_acc_min:.0%}",
                                            annotation_position="bottom right")
                     fig_perf.update_layout(
-                        xaxis_title="Date", yaxis_title="Accuracy",
-                        yaxis=dict(tickformat=".0%"),
+                        xaxis_title="Date", yaxis_title=_y_label,
+                        yaxis=dict(tickformat=_tick_fmt),
                         hovermode="x unified", legend=dict(orientation="h", y=1.02),
                     )
                     st.plotly_chart(fig_perf, width='stretch')
                     mid = len(df_perf) // 2
                     if mid > 0:
-                        drop = df_perf["accuracy"].iloc[:mid].mean() - df_perf["accuracy"].iloc[mid:].mean()
+                        drop = (
+                            df_perf[_metric_col].iloc[:mid].mean()
+                            - df_perf[_metric_col].iloc[mid:].mean()
+                        )
+                        if _is_regression:
+                            _status = (
+                                "🔴 Critique" if drop >= 0.10
+                                else "🟡 Attention" if drop >= 0.05
+                                else "🟢 Stable"
+                            )
+                        else:
+                            _status = (
+                                "🔴 Critique" if drop >= 0.10
+                                else "🟡 Attention" if drop >= 0.05
+                                else "🟢 Stable"
+                            )
                         st.metric(
                             "Tendance performance",
-                            "🔴 Critique" if drop >= 0.10 else "🟡 Attention" if drop >= 0.05 else "🟢 Stable",
-                            delta=f"{-drop:.1%} (1re vs 2e moitié)", delta_color="inverse",
+                            _status,
+                            delta=_delta_fmt(drop), delta_color="inverse",
                             help=METRIC_HELP["tendance_performance"],
                         )
                 else:
