@@ -10,17 +10,21 @@ Ordre d'exécution :
     docker-compose up -d
     python init_data/create_multiple_advanced_models.py
 """
+
 import json
 import os
 import sys
-from pathlib import Path
 
 # Fix encoding sur Windows (cp1252 ne supporte pas les emojis MLflow)
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+import mlflow
+import mlflow.sklearn
 import numpy as np
+import pandas as pd
 import requests
+from minio import Minio
 from sklearn.compose import ColumnTransformer
 from sklearn.datasets import load_breast_cancer, load_iris, load_wine
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
@@ -29,10 +33,6 @@ from sklearn.metrics import accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-
-import mlflow
-import mlflow.sklearn
-from minio import Minio
 
 MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "localhost:9000")
@@ -48,6 +48,7 @@ API_TOKEN = os.environ.get("API_TOKEN", "")
 # Configuration
 # ---------------------------------------------------------------------------
 
+
 def configure_mlflow():
     """Configure les variables d'environnement S3 et l'URI MLflow."""
     os.environ["MLFLOW_S3_ENDPOINT_URL"] = f"http://{MINIO_ENDPOINT}"
@@ -55,8 +56,9 @@ def configure_mlflow():
     os.environ["AWS_SECRET_ACCESS_KEY"] = MINIO_SECRET_KEY
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
-    client = Minio(MINIO_ENDPOINT, access_key=MINIO_ACCESS_KEY,
-                   secret_key=MINIO_SECRET_KEY, secure=False)
+    client = Minio(
+        MINIO_ENDPOINT, access_key=MINIO_ACCESS_KEY, secret_key=MINIO_SECRET_KEY, secure=False
+    )
     if not client.bucket_exists("mlflow"):
         client.make_bucket("mlflow")
         print("   Bucket 'mlflow' cree dans MinIO")
@@ -66,32 +68,43 @@ def configure_mlflow():
 # Builders de pipelines
 # ---------------------------------------------------------------------------
 
+
 def make_numeric_pipeline(estimator) -> Pipeline:
-    return Pipeline([
-        ("scaler", StandardScaler()),
-        ("classifier", estimator),
-    ])
+    return Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            ("classifier", estimator),
+        ]
+    )
 
 
 def make_mixed_pipeline(numeric_cols: list, categorical_cols: list, estimator) -> Pipeline:
-    preprocessor = ColumnTransformer([
-        ("num", StandardScaler(), numeric_cols),
-        ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), categorical_cols),
-    ])
-    return Pipeline([
-        ("preprocessor", preprocessor),
-        ("classifier", estimator),
-    ])
+    preprocessor = ColumnTransformer(
+        [
+            ("num", StandardScaler(), numeric_cols),
+            ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), categorical_cols),
+        ]
+    )
+    return Pipeline(
+        [
+            ("preprocessor", preprocessor),
+            ("classifier", estimator),
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
 # Entraînement + logging MLflow + upload via API
 # ---------------------------------------------------------------------------
 
+
 def train_and_register(
     name: str,
     pipeline: Pipeline,
-    X_train, X_test, y_train, y_test,
+    X_train,
+    X_test,
+    y_train,
+    y_test,
     params: dict,
     description: str,
     classes: list = None,
@@ -149,6 +162,7 @@ def train_and_register(
 # Modèles
 # ---------------------------------------------------------------------------
 
+
 def create_iris_advanced():
     print("\n[1/4] iris_advanced_model — RandomForest + StandardScaler")
     X, y = load_iris(return_X_y=True)
@@ -157,7 +171,10 @@ def create_iris_advanced():
     train_and_register(
         name="iris_advanced_model",
         pipeline=pipeline,
-        X_train=X_tr, X_test=X_te, y_train=y_tr, y_test=y_te,
+        X_train=X_tr,
+        X_test=X_te,
+        y_train=y_tr,
+        y_test=y_te,
         params={
             "algorithm": "RandomForestClassifier",
             "n_estimators": 200,
@@ -181,7 +198,10 @@ def create_wine_advanced():
     train_and_register(
         name="wine_advanced_model",
         pipeline=pipeline,
-        X_train=X_tr, X_test=X_te, y_train=y_tr, y_test=y_te,
+        X_train=X_tr,
+        X_test=X_te,
+        y_train=y_tr,
+        y_test=y_te,
         params={
             "algorithm": "LogisticRegression",
             "C": 1.0,
@@ -202,12 +222,17 @@ def create_cancer_advanced():
     X, y = load_breast_cancer(return_X_y=True)
     X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     pipeline = make_numeric_pipeline(
-        GradientBoostingClassifier(n_estimators=100, max_depth=3, learning_rate=0.1, random_state=42)
+        GradientBoostingClassifier(
+            n_estimators=100, max_depth=3, learning_rate=0.1, random_state=42
+        )
     )
     train_and_register(
         name="cancer_advanced_model",
         pipeline=pipeline,
-        X_train=X_tr, X_test=X_te, y_train=y_tr, y_test=y_te,
+        X_train=X_tr,
+        X_test=X_te,
+        y_train=y_tr,
+        y_test=y_te,
         params={
             "algorithm": "GradientBoostingClassifier",
             "n_estimators": 100,
@@ -223,8 +248,91 @@ def create_cancer_advanced():
     )
 
 
+def create_titanic_model():
+    print("\n[4/5] titanic-survival — GradientBoosting + ColumnTransformer (num + cat)")
+    print("      Features : age, fare, parch, sibsp (num) + pclass, sex, embarked (cat)")
+
+    rng = np.random.default_rng(42)
+    n = 891  # référence : taille réelle du dataset Titanic
+
+    # Features catégorielles
+    pclass_vals = rng.choice(["1st", "2nd", "3rd"], size=n, p=[0.24, 0.21, 0.55])
+    sex_vals = rng.choice(["male", "female"], size=n, p=[0.65, 0.35])
+    embarked_vals = rng.choice(["S", "C", "Q"], size=n, p=[0.72, 0.19, 0.09])
+
+    # Features numériques
+    age_mu = np.where(pclass_vals == "1st", 39.0, np.where(pclass_vals == "2nd", 29.0, 25.0))
+    age_vals = rng.normal(age_mu, 14.0).clip(1.0, 80.0).round(1)
+    fare_mu = np.where(pclass_vals == "1st", 87.0, np.where(pclass_vals == "2nd", 21.0, 13.0))
+    fare_vals = np.exp(rng.normal(np.log(fare_mu), 0.6)).clip(5.0, 512.0).round(2)
+    sibsp_vals = rng.choice([0, 1, 2, 3, 4], size=n, p=[0.68, 0.16, 0.10, 0.04, 0.02])
+    parch_vals = rng.choice([0, 1, 2, 3, 4], size=n, p=[0.76, 0.13, 0.07, 0.03, 0.01])
+
+    # Cible : survie probabiliste
+    base_surv = np.where(sex_vals == "female", 0.74, 0.19)
+    class_bonus = np.where(pclass_vals == "1st", 0.15, np.where(pclass_vals == "3rd", -0.10, 0.0))
+    age_bonus = np.where(age_vals < 12, 0.15, 0.0)
+    survival_prob = np.clip(base_surv + class_bonus + age_bonus, 0.05, 0.95)
+    survived = (rng.uniform(size=n) < survival_prob).astype(int)
+
+    # DataFrame pandas → pipeline.feature_names_in_ contiendra les 7 noms de colonnes
+    NUMERIC_FEATURES = ["age", "fare", "parch", "sibsp"]
+    CATEGORICAL_FEATURES = ["pclass", "sex", "embarked"]
+    df = pd.DataFrame(
+        {
+            "age": age_vals,
+            "fare": fare_vals,
+            "parch": parch_vals.astype(float),
+            "sibsp": sibsp_vals.astype(float),
+            "pclass": pclass_vals,
+            "sex": sex_vals,
+            "embarked": embarked_vals,
+        }
+    )
+    X = df[NUMERIC_FEATURES + CATEGORICAL_FEATURES]
+    y = survived
+
+    X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+
+    # Utiliser les noms de colonnes (pas les indices) pour que feature_names_in_ soit défini
+    pipeline = make_mixed_pipeline(
+        numeric_cols=NUMERIC_FEATURES,
+        categorical_cols=CATEGORICAL_FEATURES,
+        estimator=GradientBoostingClassifier(
+            n_estimators=200, max_depth=4, learning_rate=0.08, random_state=42
+        ),
+    )
+
+    train_and_register(
+        name="titanic-survival",
+        pipeline=pipeline,
+        X_train=X_tr,
+        X_test=X_te,
+        y_train=y_tr,
+        y_test=y_te,
+        params={
+            "algorithm": "GradientBoostingClassifier",
+            "n_estimators": 200,
+            "max_depth": 4,
+            "learning_rate": 0.08,
+            "preprocessing": "ColumnTransformer(StandardScaler + OneHotEncoder)",
+            "dataset": "synthetic_titanic",
+            "n_numeric_features": len(NUMERIC_FEATURES),
+            "n_categorical_features": len(CATEGORICAL_FEATURES),
+            "n_samples": n,
+        },
+        description=(
+            "Dataset synthetique inspire du Titanic — features mixtes num + cat. "
+            "Predit la survie (0=mort, 1=survivant). "
+            "Numeriques : age, fare, parch, sibsp. "
+            "Categorielles : pclass (1st/2nd/3rd), sex (male/female), embarked (S/C/Q)."
+        ),
+        classes=[0, 1],
+    )
+
+
 def create_loan_model():
-    print("\n[4/4] loan_model — GradientBoosting + ColumnTransformer (num + cat)")
+    print("\n[5/5] loan_model — GradientBoosting + ColumnTransformer (num + cat)")
 
     rng = np.random.default_rng(42)
     n = 300
@@ -258,7 +366,10 @@ def create_loan_model():
     train_and_register(
         name="loan_model",
         pipeline=pipeline,
-        X_train=X_tr, X_test=X_te, y_train=y_tr, y_test=y_te,
+        X_train=X_tr,
+        X_test=X_te,
+        y_train=y_tr,
+        y_test=y_te,
         params={
             "algorithm": "GradientBoostingClassifier",
             "n_estimators": 100,
@@ -279,6 +390,7 @@ def create_loan_model():
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     print("=" * 60)
     print("Creation des modeles avances avec Pipelines + MLflow")
@@ -292,6 +404,7 @@ def main():
     create_iris_advanced()
     create_wine_advanced()
     create_cancer_advanced()
+    create_titanic_model()
     create_loan_model()
 
     print("\n" + "=" * 60)
