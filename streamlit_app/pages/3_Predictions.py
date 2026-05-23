@@ -109,8 +109,9 @@ with tab_history:
             st.caption("Données de couverture non disponibles.")
 
     # --- Filtres ---
-    with st.expander("🔍 Filtres", expanded=True):
-        col1, col2, col3, col4, col5 = st.columns(5)
+    with st.expander("🔍 Filtres", expanded=False):
+        # Recherche + Modèle sur la même ligne, puis date/statut/limite
+        col_search, col_model, col2, col3, col4, col5 = st.columns([1.2, 1.8, 1.2, 1.2, 1.2, 1.2])
 
         # Liste des modèles disponibles
         try:
@@ -122,16 +123,15 @@ with tab_history:
             models = []
             model_names = []
 
-        with col1:
-            hist_search = st.text_input(
-                "Filtrer par nom", key="hist_model_search", placeholder="Rechercher…"
-            )
-            hist_filtered = (
-                [n for n in model_names if hist_search.lower() in n.lower()]
-                if hist_search
-                else model_names
-            )
-            model_name = st.selectbox("Modèle", ["(tous)"] + (hist_filtered or model_names))
+        hist_search = col_search.text_input(
+            "Filtrer par nom", key="hist_model_search", placeholder="Rechercher…"
+        )
+        hist_filtered = (
+            [n for n in model_names if hist_search.lower() in n.lower()]
+            if hist_search
+            else model_names
+        )
+        model_name = col_model.selectbox("Modèle", ["(tous)"] + (hist_filtered or model_names))
         if model_name == "(tous)":
             model_name = model_names[0] if model_names else None
 
@@ -248,7 +248,7 @@ with tab_history:
         if status_filter != "Tous":
             predictions = [p for p in predictions if p.get("status") == status_filter]
 
-        with st.expander("📋 Résultats", expanded=True):
+        with st.expander("📋 Résultats", expanded=False):
             st.caption(
                 "Les résultats ci-dessous dépendent des filtres appliqués dans l’expander « Filtres » ci-dessus."
             )
@@ -863,7 +863,7 @@ with tab_history:
             "obs-003,wine-regressor,13.5,2026-05-20\n"
         )
 
-        with st.expander("📤 Importer des résultats observés (CSV)"):
+        with st.expander("📤 Importer des résultats observés (CSV)", expanded=False):
             st.markdown(
                 "Enregistrez la **vraie valeur** observée pour chaque prédiction afin de "
                 "mesurer la précision du modèle en production (Ground Truth)."
@@ -933,7 +933,7 @@ with tab_history:
 
         # --- Maintenance RGPD (admin uniquement) ---
         if st.session_state.get("is_admin", False):
-            with st.expander("🗑️ Maintenance RGPD — Purge des prédictions"):
+            with st.expander("🗑️ Maintenance RGPD — Purge des prédictions", expanded=False):
                 st.caption(
                     "Supprime définitivement les prédictions anciennes. "
                     "Utilisez **Simuler** avant de confirmer."
