@@ -638,23 +638,39 @@ with _tab_detail:
                 df_perf["date"] = pd.to_datetime(df_perf["date"])
                 df_perf = df_perf[df_perf["matched_count"] > 0].sort_values("date")
                 if not df_perf.empty:
-                    # Detect regression: prefer R², fall back to accuracy for classification
+                    # Detect regression via mae (available even on older API versions)
                     _is_regression = (
-                        "r2" in df_perf.columns
+                        "mae" in df_perf.columns
+                        and df_perf["mae"].notna().any()
+                    )
+                    # Choose best metric: R² if available, MAE as fallback for regression
+                    _has_r2 = (
+                        _is_regression
+                        and "r2" in df_perf.columns
                         and df_perf["r2"].notna().any()
                     )
-                    if _is_regression:
+                    if _has_r2:
                         _metric_col   = "r2"
                         _metric_label = "R² / jour"
                         _y_label      = "R²"
                         _tick_fmt     = ".3f"
                         _delta_fmt    = lambda d: f"{-d:+.3f} (1re vs 2e moitié)"  # noqa: E731
+                        _drop_invert  = False   # drop > 0 = R² fell = bad
+                    elif _is_regression:
+                        # MAE fallback: lower is better so invert sign for trend
+                        _metric_col   = "mae"
+                        _metric_label = "MAE / jour"
+                        _y_label      = "MAE"
+                        _tick_fmt     = ".3f"
+                        _delta_fmt    = lambda d: f"{-d:+.3f} (1re vs 2e moitié)"  # noqa: E731
+                        _drop_invert  = True    # drop > 0 = MAE increased = bad (same logic)
                     else:
                         _metric_col   = "accuracy"
                         _metric_label = "Accuracy / jour"
                         _y_label      = "Accuracy"
                         _tick_fmt     = ".0%"
                         _delta_fmt    = lambda d: f"{-d:.1%} (1re vs 2e moitié)"  # noqa: E731
+                        _drop_invert  = False
 
                     df_perf["rolling_3d"] = (
                         df_perf[_metric_col].rolling(window=3, min_periods=1).mean()
@@ -681,26 +697,21 @@ with _tab_detail:
                     st.plotly_chart(fig_perf, width='stretch')
                     mid = len(df_perf) // 2
                     if mid > 0:
-                        drop = (
+                        raw_drop = (
                             df_perf[_metric_col].iloc[:mid].mean()
                             - df_perf[_metric_col].iloc[mid:].mean()
                         )
-                        if _is_regression:
-                            _status = (
-                                "🔴 Critique" if drop >= 0.10
-                                else "🟡 Attention" if drop >= 0.05
-                                else "🟢 Stable"
-                            )
-                        else:
-                            _status = (
-                                "🔴 Critique" if drop >= 0.10
-                                else "🟡 Attention" if drop >= 0.05
-                                else "🟢 Stable"
-                            )
+                        # For MAE: increase = bad, so invert sign to match "drop" semantics
+                        drop = -raw_drop if _drop_invert else raw_drop
+                        _status = (
+                            "🔴 Critique" if drop >= 0.10
+                            else "🟡 Attention" if drop >= 0.05
+                            else "🟢 Stable"
+                        )
                         st.metric(
                             "Tendance performance",
                             _status,
-                            delta=_delta_fmt(drop), delta_color="inverse",
+                            delta=_delta_fmt(raw_drop), delta_color="inverse",
                             help=METRIC_HELP["tendance_performance"],
                         )
                 else:
