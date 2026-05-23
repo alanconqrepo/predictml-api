@@ -235,9 +235,11 @@ def _output_summary(dist: dict, meta: dict) -> "str | None":
         task = meta.get("model_task") or ""
         classes_list: list = meta.get("classes") or []
         if not task:
+            tm = meta.get("training_metrics") or {}
             if classes_list:
                 task = "classification"
-            elif meta.get("r2_score") is not None or meta.get("rmse") is not None:
+            elif tm.get("r2") is not None or tm.get("rmse") is not None or tm.get("mae") is not None:
+                # Fallback : training_metrics contient des métriques de régression
                 task = "regression"
             elif meta.get("accuracy") is not None or meta.get("f1_score") is not None:
                 task = "classification"
@@ -285,6 +287,20 @@ else:
     # --- Tableau de comparaison ---
     _BADGE_CMP = {"ab_test": "🟠 A/B", "shadow": "🟣 Shadow", "production": "🟢 Prod"}
     _vfm_lookup = {v["version"]: v for v in versions_for_model}
+
+    # Détecter si le modèle sélectionné est de régression (depuis n'importe quelle version)
+    def _model_is_regression(vfm: dict) -> bool:
+        """Retourne True si model_task = 'regression', avec fallback sur training_metrics."""
+        for v in vfm.values():
+            mt = v.get("model_task") or ""
+            if "regression" in mt:
+                return True
+            tm = v.get("training_metrics") or {}
+            if any(tm.get(k) is not None for k in ("r2", "rmse", "mae")):
+                return True
+        return False
+
+    _is_regression = _model_is_regression(_vfm_lookup)
 
     _rows = []
     for vs in versions_stats:
@@ -627,25 +643,52 @@ else:
                 st.info("Pas de prédictions production enregistrées.")
 
         with col_chart2:
-            st.markdown("**Distribution des labels par version (production)**")
-            dist_rows = []
-            for vs in versions_stats:
-                for label, count in vs.get("prediction_distribution", {}).items():
-                    dist_rows.append({"Version": vs["version"], "Label": str(label), "Count": count})
-
-            if dist_rows:
-                dist_df = pd.DataFrame(dist_rows)
-                fig_dist = px.bar(
-                    dist_df,
-                    x="Label",
-                    y="Count",
-                    color="Version",
-                    barmode="group",
-                )
-                fig_dist.update_layout(height=300)
-                st.plotly_chart(fig_dist, width='stretch')
+            if _is_regression:
+                st.markdown("**Distribution des valeurs prédites par version (production)**")
+                # Régression : histogramme des valeurs prédites (expand chaque valeur × count)
+                hist_rows = []
+                for vs in versions_stats:
+                    for label, count in vs.get("prediction_distribution", {}).items():
+                        try:
+                            val = float(label)
+                        except (ValueError, TypeError):
+                            continue
+                        for _ in range(count):
+                            hist_rows.append({"Version": vs["version"], "Valeur prédite": val})
+                if hist_rows:
+                    hist_df = pd.DataFrame(hist_rows)
+                    fig_dist = px.histogram(
+                        hist_df,
+                        x="Valeur prédite",
+                        color="Version",
+                        barmode="overlay",
+                        opacity=0.6,
+                        nbins=30,
+                    )
+                    fig_dist.update_layout(height=300)
+                    st.plotly_chart(fig_dist, width='stretch')
+                else:
+                    st.info("Pas de distribution disponible.")
             else:
-                st.info("Pas de distribution disponible.")
+                st.markdown("**Distribution des labels par version (production)**")
+                dist_rows = []
+                for vs in versions_stats:
+                    for label, count in vs.get("prediction_distribution", {}).items():
+                        dist_rows.append({"Version": vs["version"], "Label": str(label), "Count": count})
+
+                if dist_rows:
+                    dist_df = pd.DataFrame(dist_rows)
+                    fig_dist = px.bar(
+                        dist_df,
+                        x="Label",
+                        y="Count",
+                        color="Version",
+                        barmode="group",
+                    )
+                    fig_dist.update_layout(height=300)
+                    st.plotly_chart(fig_dist, width='stretch')
+                else:
+                    st.info("Pas de distribution disponible.")
 
     with st.expander("🟣 Shadow Deployment", expanded=True):
         # Taux de concordance shadow

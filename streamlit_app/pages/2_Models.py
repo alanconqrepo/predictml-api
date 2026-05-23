@@ -486,9 +486,11 @@ def _infer_task(m: dict) -> str:
     task = m.get("model_task")
     if not task:
         classes = m.get("classes")
+        tm = m.get("training_metrics") or {}
         if classes:
             task = "classification_binary" if len(classes) == 2 else "classification_multiclass"
-        elif m.get("r2_score") is not None or m.get("rmse") is not None:
+        elif tm.get("r2") is not None or tm.get("rmse") is not None or tm.get("mae") is not None:
+            # Fallback : training_metrics contient des métriques de régression
             task = "regression"
         elif m.get("accuracy") is not None or m.get("f1_score") is not None:
             task = "classification_multiclass"  # faute de mieux
@@ -2354,19 +2356,45 @@ if is_admin:
                 st.session_state.pop("confirm_delete_model", None)
                 st.rerun()
 
-        # Modifier tags, webhook et déploiement
+        # Modifier les métadonnées (tous les champs PATCH /models/{name}/{version})
         with st.expander("✏️ Modifier les métadonnées"):
-            new_webhook = st.text_input(
-                "Webhook URL",
-                value=selected.get("webhook_url") or "",
-                placeholder="https://example.com/webhook",
-            )
-            new_tags_raw = st.text_input(
-                "Tags (séparés par des virgules)",
-                value=", ".join(selected.get("tags") or []),
-                placeholder="production, finance, v2",
-            )
 
+            # ── Description & informations ─────────────────────────────────────
+            st.markdown("**Description & informations**")
+            _col_desc, _col_ds = st.columns(2)
+            with _col_desc:
+                new_description = st.text_area(
+                    "Description",
+                    value=selected.get("description") or "",
+                    placeholder="Description du modèle…",
+                    height=80,
+                )
+            with _col_ds:
+                new_training_dataset = st.text_input(
+                    "Dataset d'entraînement",
+                    value=selected.get("training_dataset") or "",
+                    placeholder="ex : iris_v2, s3://bucket/data.csv",
+                    help="Référence libre au jeu de données utilisé pour entraîner ce modèle.",
+                )
+
+            # ── Tags & Webhook ─────────────────────────────────────────────────
+            st.markdown("**Tags & Webhook**")
+            _col_tags, _col_wh = st.columns(2)
+            with _col_tags:
+                new_tags_raw = st.text_input(
+                    "Tags (séparés par des virgules)",
+                    value=", ".join(selected.get("tags") or []),
+                    placeholder="production, finance, v2",
+                )
+            with _col_wh:
+                new_webhook = st.text_input(
+                    "Webhook URL",
+                    value=selected.get("webhook_url") or "",
+                    placeholder="https://example.com/webhook",
+                )
+
+            # ── Inférence ──────────────────────────────────────────────────────
+            st.markdown("**Inférence**")
             _cur_ct = selected.get("confidence_threshold")
             new_confidence_threshold = st.slider(
                 "Confidence threshold",
@@ -2377,13 +2405,18 @@ if is_admin:
                 help="Seuil en dessous duquel la prédiction est marquée `low_confidence=True` dans la réponse.",
             )
 
+            # ── Déploiement A/B / Shadow ───────────────────────────────────────
             st.markdown("**Déploiement A/B / Shadow**")
-            deploy_options = ["(inchangé)", "ab_test", "shadow", "production"]
+            _deploy_opts = ["production", "ab_test", "shadow"]
+            _cur_deploy = selected.get("deployment_mode") or "production"
+            _deploy_idx = _deploy_opts.index(_cur_deploy) if _cur_deploy in _deploy_opts else 0
             new_deploy_mode = st.selectbox(
                 "Mode de déploiement",
-                deploy_options,
+                _deploy_opts,
+                index=_deploy_idx,
                 key="deploy_mode_select",
-                help="ab_test = routage pondéré, shadow = exécution silencieuse en background",
+                format_func=lambda m: {"production": "🟢 Production", "ab_test": "🟠 A/B Test", "shadow": "🟣 Shadow"}.get(m, m),
+                help="production = trafic direct · ab_test = routage pondéré · shadow = exécution silencieuse",
             )
             new_traffic_weight = None
             if new_deploy_mode == "ab_test":
@@ -2394,24 +2427,93 @@ if is_admin:
                     step=0.05,
                     value=float(selected.get("traffic_weight") or 0.5),
                     key="traffic_weight_input",
-                    help="Fraction du trafic routé vers cette version (ex: 0.3 = 30%)",
+                    help="Fraction du trafic routé vers cette version (ex: 0.3 = 30 %)",
                 )
 
+            # ── Seuils d'alerte ────────────────────────────────────────────────
+            st.markdown("**Seuils d'alerte**")
+            st.caption("Laissez à 0 pour désactiver le seuil correspondant.")
+            _cur_at = selected.get("alert_thresholds") or {}
+            _col_at1, _col_at2, _col_at3 = st.columns(3)
+            with _col_at1:
+                _acc_min_cur = _cur_at.get("accuracy_min")
+                new_accuracy_min = st.number_input(
+                    "Accuracy min",
+                    min_value=0.0,
+                    max_value=1.0,
+                    step=0.01,
+                    value=float(_acc_min_cur) if _acc_min_cur is not None else 0.0,
+                    help="Alerte si l'accuracy live passe sous ce seuil. 0 = désactivé.",
+                )
+            with _col_at2:
+                _err_max_cur = _cur_at.get("error_rate_max")
+                new_error_rate_max = st.number_input(
+                    "Taux d'erreur max",
+                    min_value=0.0,
+                    max_value=1.0,
+                    step=0.01,
+                    value=float(_err_max_cur) if _err_max_cur is not None else 0.0,
+                    help="Alerte si le taux d'erreur dépasse ce seuil. 0 = désactivé.",
+                )
+            with _col_at3:
+                new_drift_auto_alert = st.checkbox(
+                    "Alerte drift auto",
+                    value=bool(_cur_at.get("drift_auto_alert", True)),
+                    help="Activer les alertes automatiques en cas de drift critique détecté.",
+                )
+
+            # ── Enregistrer ────────────────────────────────────────────────────
             if st.button("💾 Enregistrer", key="save_meta"):
                 patch = {}
-                current_webhook = selected.get("webhook_url") or ""
-                if new_webhook != current_webhook:
+
+                # Description
+                new_desc = new_description.strip() or None
+                if new_desc != (selected.get("description") or None):
+                    patch["description"] = new_desc
+
+                # Training dataset
+                new_td = new_training_dataset.strip() or None
+                if new_td != (selected.get("training_dataset") or None):
+                    patch["training_dataset"] = new_td
+
+                # Webhook
+                _cur_wh = selected.get("webhook_url") or ""
+                if new_webhook != _cur_wh:
                     patch["webhook_url"] = new_webhook if new_webhook else None
+
+                # Tags
                 new_tags = [t.strip() for t in new_tags_raw.split(",") if t.strip()]
                 if new_tags != (selected.get("tags") or []):
                     patch["tags"] = new_tags if new_tags else None
+
+                # Confidence threshold
                 _stored_ct = float(_cur_ct) if _cur_ct is not None else 0.5
                 if abs(new_confidence_threshold - _stored_ct) > 1e-9:
                     patch["confidence_threshold"] = new_confidence_threshold
-                if new_deploy_mode != "(inchangé)":
+
+                # Deployment mode
+                _stored_dm = selected.get("deployment_mode") or "production"
+                _stored_tw = float(selected.get("traffic_weight") or 0.5)
+                if new_deploy_mode != _stored_dm:
                     patch["deployment_mode"] = new_deploy_mode
-                    if new_deploy_mode == "ab_test" and new_traffic_weight is not None:
+                if new_deploy_mode == "ab_test" and new_traffic_weight is not None:
+                    if new_deploy_mode != _stored_dm or abs(new_traffic_weight - _stored_tw) > 1e-9:
                         patch["traffic_weight"] = new_traffic_weight
+
+                # Alert thresholds
+                new_at = {
+                    "accuracy_min": new_accuracy_min if new_accuracy_min > 0 else None,
+                    "error_rate_max": new_error_rate_max if new_error_rate_max > 0 else None,
+                    "drift_auto_alert": new_drift_auto_alert,
+                }
+                _stored_at = {
+                    "accuracy_min": _cur_at.get("accuracy_min"),
+                    "error_rate_max": _cur_at.get("error_rate_max"),
+                    "drift_auto_alert": _cur_at.get("drift_auto_alert", True),
+                }
+                if new_at != _stored_at:
+                    patch["alert_thresholds"] = new_at
+
                 if patch:
                     try:
                         client.update_model(selected["name"], selected["version"], patch)
@@ -2479,6 +2581,133 @@ if is_admin:
                                     reload()
                             except Exception as e:
                                 st.toast(f"Erreur lors du ré-entraînement : {e}", icon="❌")
+
+        # Politique d'auto-promotion / circuit breaker
+        if is_admin:
+            _pp = selected.get("promotion_policy") or {}
+            _pp_promote_on = _pp.get("auto_promote", False)
+            _pp_demote_on  = _pp.get("auto_demote",  False)
+
+            with st.expander(
+                f"⚙️ Politique de promotion  "
+                f"{'🚀 Promo ' if _pp_promote_on else ''}"
+                f"{'⚡ CB' if _pp_demote_on else ''}".strip() or "⚙️ Politique de promotion",
+                expanded=False,
+            ):
+                st.caption(
+                    f"Appliquée à **toutes les versions** de `{selected['name']}`. "
+                    "0 = critère désactivé."
+                )
+
+                # ── Auto-promotion ─────────────────────────────────────────────
+                st.markdown(
+                    f"**🚀 Auto-promotion post-retrain** — "
+                    f"{'🟢 Activée' if _pp_promote_on else '⬜ Inactive'}"
+                )
+                _pp_c1, _pp_c2 = st.columns(2)
+                with _pp_c1:
+                    _pp_new_promote = st.checkbox(
+                        "Activer l'auto-promotion",
+                        value=_pp_promote_on,
+                        key="pp_auto_promote",
+                    )
+                    _pp_min_acc = _pp.get("min_accuracy")
+                    _pp_new_min_acc = st.number_input(
+                        "Accuracy minimale (0 = désactivé)",
+                        min_value=0.0, max_value=1.0, step=0.01,
+                        value=float(_pp_min_acc) if _pp_min_acc is not None else 0.0,
+                        key="pp_min_accuracy",
+                        help="Accuracy requise sur les paires de validation pour promotion.",
+                    )
+                    _pp_min_golden = _pp.get("min_golden_test_pass_rate")
+                    _pp_new_golden = st.number_input(
+                        "Taux Golden Tests min (0 = désactivé)",
+                        min_value=0.0, max_value=1.0, step=0.01,
+                        value=float(_pp_min_golden) if _pp_min_golden is not None else 0.0,
+                        key="pp_min_golden",
+                    )
+                with _pp_c2:
+                    _pp_max_mae = _pp.get("max_mae")
+                    _pp_new_max_mae = st.number_input(
+                        "MAE maximale (0 = désactivé)",
+                        min_value=0.0, step=0.01,
+                        value=float(_pp_max_mae) if _pp_max_mae is not None else 0.0,
+                        key="pp_max_mae",
+                        help="MAE maximale autorisée (régression uniquement).",
+                    )
+                    _pp_max_lat = _pp.get("max_latency_p95_ms")
+                    _pp_new_max_lat = st.number_input(
+                        "Latence P95 max (ms, 0 = désactivé)",
+                        min_value=0.0, step=10.0,
+                        value=float(_pp_max_lat) if _pp_max_lat is not None else 0.0,
+                        key="pp_max_latency",
+                    )
+                    _pp_new_min_samples = st.number_input(
+                        "Échantillons de validation min",
+                        min_value=1, step=1,
+                        value=int(_pp.get("min_sample_validation", 10)),
+                        key="pp_min_samples",
+                    )
+
+                st.divider()
+
+                # ── Circuit breaker ────────────────────────────────────────────
+                st.markdown(
+                    f"**⚡ Circuit breaker (auto-demotion)** — "
+                    f"{'🔴 Activé' if _pp_demote_on else '⬜ Inactif'}"
+                )
+                _pp_cb1, _pp_cb2 = st.columns(2)
+                with _pp_cb1:
+                    _pp_new_demote = st.checkbox(
+                        "Activer le circuit breaker",
+                        value=_pp_demote_on,
+                        key="pp_auto_demote",
+                    )
+                    _pp_new_drift = st.selectbox(
+                        "Niveau de drift déclencheur",
+                        ["warning", "critical"],
+                        index=0 if _pp.get("demote_on_drift", "critical") == "warning" else 1,
+                        key="pp_demote_on_drift",
+                        format_func=lambda x: "⚠️ Warning" if x == "warning" else "🔴 Critical",
+                        help="Warning = plus sensible, Critical = seuil strict.",
+                    )
+                with _pp_cb2:
+                    _pp_acc_thr = _pp.get("demote_on_accuracy_below")
+                    _pp_new_demote_acc = st.number_input(
+                        "Accuracy minimale (0 = désactivé)",
+                        min_value=0.0, max_value=1.0, step=0.01,
+                        value=float(_pp_acc_thr) if _pp_acc_thr is not None else 0.0,
+                        key="pp_demote_accuracy",
+                        help="Descend sous ce seuil → demotion automatique.",
+                    )
+                    _pp_new_cooldown = st.number_input(
+                        "Cooldown (heures)",
+                        min_value=0, step=1,
+                        value=int(_pp.get("demote_cooldown_hours", 24)),
+                        key="pp_cooldown",
+                        help="Délai minimal entre deux auto-demotions.",
+                    )
+
+                # ── Enregistrer (une seule fois, tout la policy d'un coup) ─────
+                if st.button("💾 Sauvegarder la politique", key="save_policy"):
+                    try:
+                        client.set_policy(
+                            selected["name"],
+                            auto_promote=_pp_new_promote,
+                            min_accuracy=_pp_new_min_acc if _pp_new_min_acc > 0 else None,
+                            max_mae=_pp_new_max_mae if _pp_new_max_mae > 0 else None,
+                            max_latency_p95_ms=_pp_new_max_lat if _pp_new_max_lat > 0 else None,
+                            min_sample_validation=_pp_new_min_samples,
+                            min_golden_test_pass_rate=_pp_new_golden if _pp_new_golden > 0 else None,
+                            auto_demote=_pp_new_demote,
+                            demote_on_drift=_pp_new_drift,
+                            demote_on_accuracy_below=_pp_new_demote_acc if _pp_new_demote_acc > 0 else None,
+                            demote_cooldown_hours=_pp_new_cooldown,
+                        )
+                        st.toast("Politique mise à jour.", icon="✅")
+                        reload()
+                    except Exception as e:
+                        st.toast(f"Erreur : {e}", icon="❌")
 
         # Calcul du baseline depuis la production
         with st.expander("📐 Calculer le baseline depuis la production"):
