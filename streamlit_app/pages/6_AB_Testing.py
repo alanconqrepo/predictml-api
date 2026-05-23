@@ -186,25 +186,23 @@ st.divider()
 # ===========================================================================
 st.subheader("📊 Comparaison des versions")
 
-_cmp_c1, _cmp_c2, _cmp_c3 = st.columns([2, 2, 3])
+_cmp_c1, _cmp_c2 = st.columns(2)
 _ab_start = _cmp_c1.date_input(
     "Date début", value=date.today() - timedelta(days=30), key="ab_start_date"
 )
 _ab_end = _cmp_c2.date_input("Date fin", value=date.today(), key="ab_end_date")
 days = max((_ab_end - _ab_start).days, 1)
 
+# Lire la métrique depuis session_state AVANT l'appel API
+# (Streamlit y stocke la nouvelle valeur du widget avant le rerun)
 _METRIC_OPTIONS = {
     "Auto (sélection intelligente)": None,
     "Taux d'erreur — Chi-²":         "error_rate",
     "MAE prédiction — Mann-Whitney":  "mae",
     "Latence réponse — Mann-Whitney": "response_time_ms",
 }
-_sig_metric_label = _cmp_c3.selectbox(
-    "Métrique du test de significativité",
-    list(_METRIC_OPTIONS.keys()),
-    key="ab_sig_metric",
-)
-_sig_metric = _METRIC_OPTIONS[_sig_metric_label]
+_sig_metric_label = st.session_state.get("ab_sig_metric", "Auto (sélection intelligente)")
+_sig_metric = _METRIC_OPTIONS.get(_sig_metric_label)
 
 try:
     ab_data = client.get_ab_comparison(selected_model, days=days, metric=_sig_metric)
@@ -292,7 +290,14 @@ else:
     # Bloc significativité statistique
     # ===========================================================================
     st.divider()
-    st.subheader("🔬 Significativité statistique")
+    _sig_col_title, _sig_col_select = st.columns([3, 2])
+    _sig_col_title.subheader("🔬 Significativité statistique")
+    _sig_metric_label = _sig_col_select.selectbox(
+        "Métrique du test",
+        list(_METRIC_OPTIONS.keys()),
+        key="ab_sig_metric",
+        label_visibility="collapsed",
+    )
 
     if ab_significance is None:
         _no_data_reasons = {
