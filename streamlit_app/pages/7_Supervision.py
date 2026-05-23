@@ -474,12 +474,12 @@ with _tab_global:
 # ═══════════════════════════════════════════════════════════════════════════
 with _tab_detail:
 
-    # ── Sélecteur ────────────────────────────────────────────────────────
+    # ── Sélecteur — recherche + modèle sur la même ligne ─────────────────
     model_names = [m["model_name"] for m in models_data]
-    _det_c1, _det_c2 = st.columns([3, 1])
+    _det_c1, _det_c2 = st.columns([1, 2])
     sup_search = _det_c1.text_input("Filtrer par nom", key="sup_model_search", placeholder="Rechercher un modèle…")
     sup_filtered = [n for n in model_names if sup_search.lower() in n.lower()] if sup_search else model_names
-    selected_model = st.selectbox("Sélectionner un modèle", sup_filtered or model_names)
+    selected_model = _det_c2.selectbox("Sélectionner un modèle", sup_filtered or model_names)
 
     if not selected_model:
         st.stop()
@@ -561,7 +561,7 @@ with _tab_detail:
     # ────────────────────────────────────────────────────────────────────
     # EXPANDER 2 — Activité & Latence
     # ────────────────────────────────────────────────────────────────────
-    with st.expander("📈 Activité & Latence", expanded=bool(timeseries)):
+    with st.expander("📈 Activité & Latence", expanded=False):
         if timeseries:
             df_ts = pd.DataFrame(timeseries)
             df_ts["date"] = pd.to_datetime(df_ts["date"])
@@ -626,7 +626,7 @@ with _tab_detail:
     _drift_icon = STATUS_ICON.get(_feat_drift_status, "⚪")
     with st.expander(
         f"🌡️ Drift & Anomalies  {_drift_icon} {_feat_drift_status}",
-        expanded=_has_drift_alert,
+        expanded=False,
     ):
         # Drift de performance + drift features côte à côte
         col_perf, col_feat = st.columns(2)
@@ -858,7 +858,7 @@ with _tab_detail:
     if ab_comparison:
         ab_versions = ab_comparison.get("versions", [])
         agreement   = ab_comparison.get("shadow_agreement_rate", {})
-        with st.expander("⚖️ Comparaison A/B & Shadow", expanded=bool(ab_versions)):
+        with st.expander("⚖️ Comparaison A/B & Shadow", expanded=False):
             if ab_versions:
                 df_ab = pd.DataFrame([{
                     "Version": v["version"],
@@ -941,7 +941,7 @@ with _tab_detail:
     # EXPANDER 6 — Erreurs récentes
     # ────────────────────────────────────────────────────────────────────
     if recent_errors:
-        with st.expander(f"🔔 Erreurs récentes ({len(recent_errors)})", expanded=True):
+        with st.expander(f"🔔 Erreurs récentes ({len(recent_errors)})", expanded=False):
             for i, err in enumerate(recent_errors, 1):
                 st.markdown(f"`{i}.` {err}")
 
