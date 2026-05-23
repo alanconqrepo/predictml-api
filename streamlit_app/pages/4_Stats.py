@@ -455,7 +455,7 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
 
 
 # ── Expander 2 : Statistiques agrégées par modèle ────────────────────────────
-with st.expander("📊 Statistiques agrégées par modèle", expanded=True):
+with st.expander("📊 Statistiques agrégées par modèle", expanded=False):
     # Filtre modèle local à cet expander
     _s2_col_search, _s2_col_model = st.columns([2, 2])
     with _s2_col_search:
@@ -697,7 +697,7 @@ with st.expander("📊 Statistiques agrégées par modèle", expanded=True):
 
 
 # ── Expander 3 : Accuracy temporelle multi-modèles ───────────────────────────
-with st.expander("📈 Accuracy temporelle — comparaison multi-modèles", expanded=True):
+with st.expander("📈 Accuracy temporelle — comparaison multi-modèles", expanded=False):
     acc_col_models, acc_col_gran = st.columns([4, 1])
 
     with acc_col_models:
@@ -873,7 +873,7 @@ with st.expander("📈 Accuracy temporelle — comparaison multi-modèles", expa
 
 
 # ── Expander 4 : Évolution multi-métriques — un modèle ───────────────────────
-with st.expander("📊 Évolution multi-métriques — un modèle", expanded=True):
+with st.expander("📊 Évolution multi-métriques — un modèle", expanded=False):
 
     # ── Contrôles ────────────────────────────────────────────────────────────
     _pm_col_model, _pm_col_ver, _pm_col_gran = st.columns([3, 2, 1])
@@ -1063,7 +1063,7 @@ _DRIFT_METRIC_CFG: dict[str, dict] = {
     "rmse":        {"label": "RMSE",       "ratio": False, "higher_better": False, "help_key": "rmse"},
 }
 
-with st.expander("📉 Drift de performance — métrique rolling", expanded=True):
+with st.expander("📉 Drift de performance — métrique rolling", expanded=False):
     drift_col_model, drift_col_metric, drift_col_threshold, drift_col_dates = st.columns([2, 2, 2, 2])
 
     with drift_col_model:
