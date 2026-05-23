@@ -740,13 +740,93 @@ with _tab_detail:
                 st.dataframe(
                     pd.DataFrame(rows_drift), width='stretch', hide_index=True,
                     column_config={
-                        "Feature": st.column_config.TextColumn("Feature", help="Variable d'entrée."),
-                        "Statut": st.column_config.TextColumn("Statut", help="🟢 stable · 🟡 warning · 🔴 critique."),
-                        "Moy. prod.": st.column_config.TextColumn("Moy. prod.", help="Moyenne en production."),
-                        "Moy. baseline": st.column_config.TextColumn("Moy. baseline", help="Moyenne à l'entraînement."),
-                        "Z-score": st.column_config.TextColumn("Z-score", help="|Z| > 2 = warning, > 3 = critique."),
-                        "PSI": st.column_config.TextColumn("PSI", help="< 0.1 stable · 0.1–0.2 modéré · ≥ 0.2 critique."),
-                        "N prod.": st.column_config.NumberColumn("N prod.", help="Prédictions analysées."),
+                        "Feature": st.column_config.TextColumn(
+                            "Feature",
+                            help=(
+                                "Nom de la feature d'entrée du modèle.\n\n"
+                                "Les lignes sont triées par ordre alphabétique. "
+                                "Triez sur « Statut » pour faire remonter les features "
+                                "en alerte."
+                            ),
+                        ),
+                        "Statut": st.column_config.TextColumn(
+                            "Statut",
+                            help=(
+                                "Statut de drift de la feature — pire parmi 3 indicateurs :\n\n"
+                                "• Z-score (déplacement de la moyenne)\n"
+                                "• PSI (changement de distribution)\n"
+                                "• Taux de valeurs nulles (données manquantes)\n\n"
+                                "🟢 ok — distribution stable\n"
+                                "🟡 warning — dérive modérée à surveiller\n"
+                                "🔴 critical — dérive forte, action recommandée\n"
+                                "⚪ no_baseline / insufficient_data — pas de référence "
+                                "ou moins de 10 prédictions"
+                            ),
+                        ),
+                        "Moy. prod.": st.column_config.TextColumn(
+                            "Moy. prod.",
+                            help=(
+                                "Moyenne des valeurs reçues en production sur la période "
+                                "sélectionnée.\n\n"
+                                "Calculée sur les N prédictions récentes (colonne N prod.). "
+                                "Comparez avec « Moy. baseline » pour détecter un déplacement "
+                                "de la distribution d'entrée — par exemple un capteur qui dérive "
+                                "ou une population de clients qui change."
+                            ),
+                        ),
+                        "Moy. baseline": st.column_config.TextColumn(
+                            "Moy. baseline",
+                            help=(
+                                "Moyenne des valeurs de cette feature dans le dataset "
+                                "d'entraînement (feature_baseline stockée avec le modèle).\n\n"
+                                "C'est la référence de normalité : si « Moy. prod. » s'en "
+                                "éloigne significativement, le modèle reçoit des données "
+                                "différentes de celles sur lesquelles il a été entraîné."
+                            ),
+                        ),
+                        "Z-score": st.column_config.TextColumn(
+                            "Z-score",
+                            help=(
+                                "Déplacement de la moyenne, exprimé en unités d'écart-type "
+                                "d'entraînement :\n\n"
+                                "Z = |μ_prod − μ_baseline| / σ_baseline\n\n"
+                                "Interprétation :\n"
+                                "• Z = 1 → la moyenne a bougé d'1 écart-type (normal)\n"
+                                "• Z = 2 → déplacement notable — la moitié des distributions "
+                                "normales ne se chevauchent plus qu'à ~5 %\n"
+                                "• Z = 3 → déplacement fort — signal de drift avéré\n\n"
+                                "🟡 Warning : Z ≥ 2  ·  🔴 Critical : Z ≥ 3\n\n"
+                                "⚠️ N'indique que le déplacement de la moyenne, "
+                                "pas les changements de forme de la distribution "
+                                "(compléter avec PSI)."
+                            ),
+                        ),
+                        "PSI": st.column_config.TextColumn(
+                            "PSI",
+                            help=(
+                                "Population Stability Index — mesure la différence globale "
+                                "entre la distribution en production et la distribution "
+                                "d'entraînement, sur 10 bins de largeur égale :\n\n"
+                                "PSI = Σ (P_i − Q_i) × ln(P_i / Q_i)\n\n"
+                                "Interprétation :\n"
+                                "• PSI < 0.1 → distribution stable\n"
+                                "• PSI 0.1–0.2 → dérive modérée — à surveiller\n"
+                                "• PSI ≥ 0.2 → dérive forte — recalibration recommandée\n\n"
+                                "🟡 Warning : ≥ 0.1  ·  🔴 Critical : ≥ 0.2\n\n"
+                                "Contrairement au Z-score, le PSI détecte aussi les changements "
+                                "de forme (asymétrie, queues plus lourdes, bimodalité…)."
+                            ),
+                        ),
+                        "N prod.": st.column_config.NumberColumn(
+                            "N prod.",
+                            help=(
+                                "Nombre de prédictions récentes utilisées pour calculer "
+                                "les statistiques de production (Moy. prod., Z-score, PSI).\n\n"
+                                "Un N faible (< 30) rend les estimations moins fiables : "
+                                "le Z-score et le PSI peuvent être bruyants. "
+                                "Le seuil minimal requis est 10 (en dessous : ⚪ insufficient_data)."
+                            ),
+                        ),
                     },
                 )
             elif not feat_baseline:
