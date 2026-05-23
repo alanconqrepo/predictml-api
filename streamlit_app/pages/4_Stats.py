@@ -756,7 +756,17 @@ with st.expander("📈 Accuracy temporelle — comparaison multi-modèles", expa
             )
         else:
             df_acc = pd.DataFrame(acc_rows)
-            df_acc["date"] = pd.to_datetime(df_acc["date"])
+            # L'API renvoie "2026-W19" (granularité semaine) ou "2026-05-11" (jour).
+            # pd.to_datetime ne reconnaît pas le format ISO semaine — on détecte et parse
+            # manuellement : "YYYY-Wnn" → lundi de la semaine via strptime %G-W%V-%u.
+            import re as _re
+            _sample = str(df_acc["date"].iloc[0]) if len(df_acc) else ""
+            if _re.match(r"^\d{4}-W\d{2}$", _sample):
+                df_acc["date"] = pd.to_datetime(
+                    df_acc["date"] + "-1", format="%G-W%V-%u"
+                )
+            else:
+                df_acc["date"] = pd.to_datetime(df_acc["date"])
             df_acc = df_acc.sort_values("date")
 
             # Détecter si tous les modèles sont du même type
