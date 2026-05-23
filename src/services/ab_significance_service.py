@@ -54,7 +54,9 @@ def _min_samples_continuous(d: float, alpha: float = 0.05, power: float = 0.80) 
     return math.ceil(2 * (z_alpha + z_beta) ** 2 / d**2)
 
 
-def _run_chi2_error_rate(va: dict, vb: dict, alpha: float, confidence_level: float) -> Optional[dict]:
+def _run_chi2_error_rate(
+    va: dict, vb: dict, alpha: float, confidence_level: float
+) -> Optional[dict]:
     """Chi-² sur le taux d'erreur API (métrique catégorielle)."""
     n_a = va["total_predictions"]
     n_b = vb["total_predictions"]
@@ -78,7 +80,9 @@ def _run_chi2_error_rate(va: dict, vb: dict, alpha: float, confidence_level: flo
     }
 
 
-def _run_mann_whitney_mae(va: dict, vb: dict, alpha: float, confidence_level: float) -> Optional[dict]:
+def _run_mann_whitney_mae(
+    va: dict, vb: dict, alpha: float, confidence_level: float
+) -> Optional[dict]:
     """Mann-Whitney U sur les résidus de prédiction (MAE — régression)."""
     errors_a: list[float] = va.get("prediction_errors", [])
     errors_b: list[float] = vb.get("prediction_errors", [])
@@ -102,7 +106,9 @@ def _run_mann_whitney_mae(va: dict, vb: dict, alpha: float, confidence_level: fl
     }
 
 
-def _run_mann_whitney_latency(va: dict, vb: dict, alpha: float, confidence_level: float) -> Optional[dict]:
+def _run_mann_whitney_latency(
+    va: dict, vb: dict, alpha: float, confidence_level: float
+) -> Optional[dict]:
     """Mann-Whitney U sur les temps de réponse (latence)."""
     times_a: list[float] = va.get("response_times", [])
     times_b: list[float] = vb.get("response_times", [])
@@ -127,8 +133,8 @@ def _run_mann_whitney_latency(va: dict, vb: dict, alpha: float, confidence_level
 
 
 _METRIC_RUNNERS = {
-    "error_rate":      _run_chi2_error_rate,
-    "mae":             _run_mann_whitney_mae,
+    "error_rate": _run_chi2_error_rate,
+    "mae": _run_mann_whitney_mae,
     "response_time_ms": _run_mann_whitney_latency,
 }
 

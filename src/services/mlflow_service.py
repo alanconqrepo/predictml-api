@@ -12,7 +12,6 @@ import tempfile
 from typing import Optional
 
 import joblib
-
 import mlflow
 import mlflow.sklearn
 import structlog
@@ -165,7 +164,9 @@ class MLflowService:
                         finally:
                             os.unlink(_tmp_path)
                     except Exception as exc:
-                        logger.warning("MLflow log requirements.txt échoué — artifact ignoré", error=str(exc))
+                        logger.warning(
+                            "MLflow log requirements.txt échoué — artifact ignoré", error=str(exc)
+                        )
 
                 run_id = run.info.run_id
 

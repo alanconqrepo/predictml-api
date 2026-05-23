@@ -139,7 +139,8 @@ _minio_mock.upload_file_bytes.return_value = {
 
 
 async def _mock_exec_success(*args, **kwargs):
-    """Subprocess mock : écrit un modèle factice et retourne succès (code 0)."""
+    """Subprocess mock (ancien format — conservé pour compatibilité).
+    Retourne stdout/stderr via communicate() pour les tests qui en ont besoin."""
     env = kwargs.get("env", {})
     output_path = env.get("OUTPUT_MODEL_PATH", "")
     if output_path:
@@ -174,6 +175,63 @@ async def _mock_exec_no_output_file(*args, **kwargs):
     proc = MagicMock()
     proc.returncode = 0
     proc.communicate = AsyncMock(return_value=(b"{}", b"Finished (sans sauvegarder)\n"))
+    proc.kill = MagicMock()
+    return proc
+
+
+# ---------------------------------------------------------------------------
+# Mocks subprocess pour retrain_service (lecture ligne-par-ligne via readline)
+# ---------------------------------------------------------------------------
+
+
+async def _mock_exec_success_service(*args, **kwargs):
+    """Mock pour retrain_service.do_retrain() — utilise readline() + stderr.read()."""
+    env = kwargs.get("env", {})
+    output_path = env.get("OUTPUT_MODEL_PATH", "")
+    if output_path:
+        X, y = load_iris(return_X_y=True)
+        model = LogisticRegression(max_iter=200).fit(X, y)
+        with open(output_path, "wb") as f:
+            joblib.dump(model, f)
+
+    stdout_lines = [
+        b"Training 80 samples\n",
+        b'{"accuracy": 0.95, "f1_score": 0.93}\n',
+        b"",  # EOF
+    ]
+    proc = MagicMock()
+    proc.returncode = 0
+    proc.stdout = AsyncMock()
+    proc.stdout.readline = AsyncMock(side_effect=stdout_lines)
+    proc.stderr = AsyncMock()
+    proc.stderr.read = AsyncMock(return_value=b"[train.py] Done\n")
+    proc.wait = AsyncMock(return_value=0)
+    proc.kill = MagicMock()
+    return proc
+
+
+async def _mock_exec_failure_service(*args, **kwargs):
+    """Mock retrain_service — returncode != 0."""
+    proc = MagicMock()
+    proc.returncode = 1
+    proc.stdout = AsyncMock()
+    proc.stdout.readline = AsyncMock(side_effect=[b""])  # EOF immédiat
+    proc.stderr = AsyncMock()
+    proc.stderr.read = AsyncMock(return_value=b"Error: fichier introuvable\n")
+    proc.wait = AsyncMock(return_value=1)
+    proc.kill = MagicMock()
+    return proc
+
+
+async def _mock_exec_no_output_service(*args, **kwargs):
+    """Mock retrain_service — returncode 0 mais pas de .joblib produit."""
+    proc = MagicMock()
+    proc.returncode = 0
+    proc.stdout = AsyncMock()
+    proc.stdout.readline = AsyncMock(side_effect=[b"{}\\n", b""])
+    proc.stderr = AsyncMock()
+    proc.stderr.read = AsyncMock(return_value=b"Finished (sans sauvegarder)\n")
+    proc.wait = AsyncMock(return_value=0)
     proc.kill = MagicMock()
     return proc
 
@@ -477,195 +535,180 @@ class TestRetrainEndpoint:
         assert "script" in r.json()["detail"].lower() or "train_script" in r.json()["detail"]
 
     def test_retrain_conflict_if_version_exists(self):
-        """POST /retrain avec new_version déjà existante → 409."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_success),
-        ):
-            r = client.post(
-                f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2025-01-01",
-                    "end_date": "2025-12-31",
-                    "new_version": "1.0.0",  # version déjà existante
-                },
-            )
+        """POST /retrain avec new_version déjà existante → 409 (vérifié avant enqueue)."""
+        r = client.post(
+            f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={
+                "start_date": "2025-01-01",
+                "end_date": "2025-12-31",
+                "new_version": "1.0.0",  # version déjà existante
+            },
+        )
         assert r.status_code == 409
         assert "existe déjà" in r.json()["detail"]
 
-    # --- Succès ---
+    # --- Succès (202 + job_id avec ARQ) ---
 
-    def test_retrain_success_creates_new_version(self):
-        """POST /retrain succès → nouvelle version créée dans la DB."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_success),
-        ):
-            r = client.post(
-                f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2025-01-01",
-                    "end_date": "2025-12-31",
-                    "new_version": "2.0.0",
-                },
-            )
-        assert r.status_code == 200
+    def test_retrain_enqueues_job_returns_202(self):
+        """POST /retrain → 202 Accepted avec job_id et statut queued."""
+        r = client.post(
+            f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={
+                "start_date": "2025-01-01",
+                "end_date": "2025-12-31",
+                "new_version": "2.0.0",
+            },
+        )
+        assert r.status_code == 202
         data = r.json()
-        assert data["success"] is True
+        assert "job_id" in data
+        assert data["status"] == "queued"
         assert data["model_name"] == f"{MODEL_PREFIX}_has_script"
-        assert data["source_version"] == "1.0.0"
+        assert data["model_version"] == "1.0.0"
         assert data["new_version"] == "2.0.0"
-        assert data["error"] is None
-        assert data["new_model_metadata"] is not None
-        assert data["new_model_metadata"]["version"] == "2.0.0"
-        assert data["new_model_metadata"]["is_production"] is False
+        assert data["triggered_by"] == "retrain_admin"
 
-    def test_retrain_success_extracts_metrics_from_stdout(self):
-        """POST /retrain : les métriques JSON sur stdout sont propagées à la nouvelle version."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_success),
-        ):
-            r = client.post(
-                f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2024-01-01",
-                    "end_date": "2024-12-31",
-                    "new_version": "2.1.0",
-                },
-            )
-        assert r.status_code == 200
+    def test_retrain_enqueues_job_with_set_production(self):
+        """POST /retrain avec set_production=True → 202, le job sera promu après exécution."""
+        r = client.post(
+            f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={
+                "start_date": "2023-01-01",
+                "end_date": "2023-12-31",
+                "new_version": "3.0.0",
+                "set_production": True,
+            },
+        )
+        assert r.status_code == 202
         data = r.json()
-        assert data["success"] is True
-        # Le mock retourne {"accuracy": 0.95, "f1_score": 0.93} dans stdout
-        new_meta = data["new_model_metadata"]
-        assert new_meta["accuracy"] == pytest.approx(0.95, abs=1e-6)
-        assert new_meta["f1_score"] == pytest.approx(0.93, abs=1e-6)
-
-    def test_retrain_success_with_set_production(self):
-        """POST /retrain avec set_production=True → nouvelle version en production."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_success),
-        ):
-            r = client.post(
-                f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2023-01-01",
-                    "end_date": "2023-12-31",
-                    "new_version": "3.0.0",
-                    "set_production": True,
-                },
-            )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["success"] is True
-        assert data["new_model_metadata"]["is_production"] is True
-
-    def test_retrain_success_new_version_has_train_script_key(self):
-        """La nouvelle version hérite du train_script_object_key (pour enchaîner les retrains)."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_success),
-        ):
-            r = client.post(
-                f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2022-01-01",
-                    "end_date": "2022-12-31",
-                    "new_version": "4.0.0",
-                },
-            )
-        assert r.status_code == 200
-        new_meta = r.json()["new_model_metadata"]
-        assert new_meta["train_script_object_key"] is not None
-
-    def test_retrain_success_returns_stdout_stderr(self):
-        """POST /retrain : stdout et stderr sont retournés dans la réponse."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_success),
-        ):
-            r = client.post(
-                f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2021-01-01",
-                    "end_date": "2021-12-31",
-                    "new_version": "5.0.0",
-                },
-            )
-        assert r.status_code == 200
-        data = r.json()
-        assert "stdout" in data
-        assert "stderr" in data
-        assert len(data["stdout"]) > 0
-        assert len(data["stderr"]) > 0
+        assert data["job_id"] is not None
+        assert data["status"] == "queued"
+        assert data["new_version"] == "3.0.0"
 
     def test_retrain_auto_generates_version_if_not_provided(self):
-        """POST /retrain sans new_version → version auto-générée non vide."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_success),
-        ):
-            r = client.post(
-                f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={"start_date": "2020-01-01", "end_date": "2020-12-31"},
-            )
-        assert r.status_code == 200
+        """POST /retrain sans new_version → 202 avec version auto-générée dans job_id."""
+        r = client.post(
+            f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={"start_date": "2020-01-01", "end_date": "2020-12-31"},
+        )
+        assert r.status_code == 202
         data = r.json()
-        assert data["success"] is True
-        # La version auto-générée ne doit pas être vide et doit être différente de 1.0.0
+        assert data["status"] == "queued"
         assert data["new_version"]
         assert data["new_version"] != "1.0.0"
+        # La version auto-générée contient le timestamp de type "1.0.0-retrain-YYYYMMDDHHMMSS"
+        assert "retrain" in data["new_version"]
 
-    # --- Échecs du script ---
+    def test_retrain_creates_task_run_in_db(self):
+        """POST /retrain → TaskRun créé en DB avec status=queued."""
+        import asyncio
+        from src.db.models.task_run import TaskRun
+        from tests.conftest import _TestSessionLocal
 
-    def test_retrain_script_failure_returns_success_false(self):
-        """Script qui retourne code != 0 → success=False dans la réponse (pas d'exception)."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_failure),
-        ):
-            r = client.post(
-                f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2019-01-01",
-                    "end_date": "2019-12-31",
-                    "new_version": "99.0.0",
-                },
-            )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["success"] is False
-        assert data["error"] is not None
-        assert data["new_model_metadata"] is None
-        assert "fichier" in data["stderr"].lower() or len(data["stderr"]) > 0
+        r = client.post(
+            f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={
+                "start_date": "2026-01-01",
+                "end_date": "2026-12-31",
+                "new_version": "7.0.0",
+            },
+        )
+        assert r.status_code == 202
+        job_id = r.json()["job_id"]
 
-    def test_retrain_script_no_output_file_returns_success_false(self):
-        """Script qui retourne code 0 mais n'écrit pas le .joblib → success=False."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_no_output_file),
-        ):
-            r = client.post(
-                f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2018-01-01",
-                    "end_date": "2018-12-31",
-                    "new_version": "98.0.0",
-                },
-            )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["success"] is False
-        assert data["error"] is not None
-        assert "OUTPUT_MODEL_PATH" in data["error"] or "modèle" in data["error"].lower()
+        async def _check():
+            from sqlalchemy import select
+            import uuid
+            async with _TestSessionLocal() as db:
+                result = await db.execute(
+                    select(TaskRun).where(TaskRun.id == uuid.UUID(job_id))
+                )
+                row = result.scalar_one_or_none()
+            return row
+
+        row = asyncio.run(_check())
+        assert row is not None
+        assert row.status == "queued"
+        assert row.model_name == f"{MODEL_PREFIX}_has_script"
+        assert row.new_version == "7.0.0"
+
+    # --- Tests unitaires de la logique retrain (via retrain_service) ---
+
+    def test_retrain_service_success(self):
+        """retrain_service.do_retrain() succès → nouvelle version créée + métriques."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from src.services.retrain_service import do_retrain
+
+        async def _run():
+            with patch(
+                "asyncio.create_subprocess_exec",
+                new=AsyncMock(side_effect=_mock_exec_success_service),
+            ):
+                return await do_retrain(
+                    model_name=f"{MODEL_PREFIX}_has_script",
+                    source_version="1.0.0",
+                    new_version="service_2.0.0",
+                    start_date="2025-01-01",
+                    end_date="2025-12-31",
+                    set_production=False,
+                    triggered_by="test_admin",
+                )
+
+        result = asyncio.run(_run())
+        assert result["success"] is True
+        assert result["new_version"] == "service_2.0.0"
+        assert result["accuracy"] == pytest.approx(0.95, abs=1e-6)
+        assert result["f1_score"] == pytest.approx(0.93, abs=1e-6)
+
+    def test_retrain_service_script_failure(self):
+        """retrain_service.do_retrain() avec script échoué → success=False."""
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        from src.services.retrain_service import do_retrain
+
+        async def _run():
+            with patch(
+                "asyncio.create_subprocess_exec",
+                new=AsyncMock(side_effect=_mock_exec_failure_service),
+            ):
+                return await do_retrain(
+                    model_name=f"{MODEL_PREFIX}_has_script",
+                    source_version="1.0.0",
+                    new_version="service_99.0.0",
+                    start_date="2019-01-01",
+                    end_date="2019-12-31",
+                )
+
+        result = asyncio.run(_run())
+        assert result["success"] is False
+        assert result["error"] is not None
+        assert "code 1" in result["error"]
+
+    def test_retrain_service_no_output_file(self):
+        """retrain_service.do_retrain() sans .joblib produit → success=False."""
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+        from src.services.retrain_service import do_retrain
+
+        async def _run():
+            with patch(
+                "asyncio.create_subprocess_exec",
+                new=AsyncMock(side_effect=_mock_exec_no_output_service),
+            ):
+                return await do_retrain(
+                    model_name=f"{MODEL_PREFIX}_has_script",
+                    source_version="1.0.0",
+                    new_version="service_98.0.0",
+                    start_date="2018-01-01",
+                    end_date="2018-12-31",
+                )
+
+        result = asyncio.run(_run())
+        assert result["success"] is False
+        assert "OUTPUT_MODEL_PATH" in result["error"] or "joblib" in result["error"].lower()

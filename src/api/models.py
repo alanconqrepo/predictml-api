@@ -4,7 +4,6 @@ Endpoints pour la gestion des modèles
 
 import ast
 import asyncio
-import csv
 import io
 import json
 import math
@@ -45,6 +44,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+import src.core.arq_pool as arq_pool_module
 from src.core.audit import audit_log
 from src.core.config import settings
 from src.core.rate_limit import limiter
@@ -52,6 +52,7 @@ from src.core.security import require_admin, verify_token
 from src.db.database import AsyncSessionLocal, get_db, get_read_db
 from src.db.models import HistoryActionType, ModelMetadata, User
 from src.db.models.model_metadata import DeploymentMode
+from src.db.models.task_run import TaskRun
 from src.schemas.golden_test import GoldenTestCreate, GoldenTestResponse, GoldenTestRunResponse
 from src.schemas.model import (
     ABCompareResponse,
@@ -102,7 +103,6 @@ from src.schemas.model import (
     RetrainHistoryEntry,
     RetrainHistoryResponse,
     RetrainRequest,
-    RetrainResponse,
     RetrainScheduleInput,
     RollbackResponse,
     ScheduleUpdateResponse,
@@ -111,9 +111,9 @@ from src.schemas.model import (
     VersionTimelineEntry,
     WarmupResponse,
 )
+from src.schemas.task_run import TaskRunEnqueued
 from src.services import drift_service
 from src.services.ab_significance_service import compute_ab_significance
-from src.services.auto_promotion_service import evaluate_auto_promotion
 from src.services.db_service import _ROLLBACK_FIELDS, DBService, _build_snapshot
 from src.services.golden_test_service import GoldenTestService
 from src.services.input_validation_service import resolve_expected_features, validate_input_features
@@ -121,7 +121,6 @@ from src.services.minio_service import minio_service
 from src.services.mlflow_service import mlflow_service
 from src.services.model_service import compute_model_hmac, model_service
 from src.services.shap_service import compute_shap_explanation
-from src.services.webhook_service import send_webhook
 
 logger = structlog.get_logger(__name__)
 
@@ -302,6 +301,7 @@ def _detect_task_type(model_bytes: bytes) -> Optional[str]:
     """
     try:
         import joblib
+
         obj = joblib.load(io.BytesIO(model_bytes))
         # Unwrap Pipeline : prendre le dernier estimateur
         if hasattr(obj, "steps"):
@@ -318,8 +318,17 @@ def _detect_task_type(model_bytes: bytes) -> Optional[str]:
 
 
 _SAFE_UPLOAD_ENV_KEYS = {
-    "PATH", "HOME", "USER", "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP",
-    "PYTHONPATH", "PYTHONDONTWRITEBYTECODE", "VIRTUAL_ENV",
+    "PATH",
+    "HOME",
+    "USER",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "PYTHONPATH",
+    "PYTHONDONTWRITEBYTECODE",
+    "VIRTUAL_ENV",
 }
 
 
@@ -339,7 +348,6 @@ async def _run_train_subprocess(
     """
     import asyncio
     import json as _json
-    import tempfile
     from datetime import datetime, timedelta
 
     from src.services.env_snapshot_service import dependencies_to_requirements_txt
@@ -356,11 +364,13 @@ async def _run_train_subprocess(
             f.write(train_source)
 
         env = {k: v for k, v in os.environ.items() if k in _SAFE_UPLOAD_ENV_KEYS}
-        env.update({
-            "TRAIN_START_DATE": start_date,
-            "TRAIN_END_DATE": end_date,
-            "OUTPUT_MODEL_PATH": output_path,
-        })
+        env.update(
+            {
+                "TRAIN_START_DATE": start_date,
+                "TRAIN_END_DATE": end_date,
+                "OUTPUT_MODEL_PATH": output_path,
+            }
+        )
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -373,9 +383,7 @@ async def _run_train_subprocess(
                 preexec_fn=_set_subprocess_limits,
             )
             try:
-                raw_stdout, raw_stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=120.0
-                )
+                raw_stdout, raw_stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
             except asyncio.TimeoutError:
                 proc.kill()
                 await proc.communicate()
@@ -474,9 +482,9 @@ async def list_cached_models():
 
 @router.get("/models/leaderboard", response_model=List[LeaderboardEntry])
 async def get_models_leaderboard(
-    metric: Literal["accuracy", "f1_score", "r2", "rmse", "latency_p95_ms", "predictions_count"] = Query(
-        "accuracy", description="Metric to rank by"
-    ),
+    metric: Literal[
+        "accuracy", "f1_score", "r2", "rmse", "latency_p95_ms", "predictions_count"
+    ] = Query("accuracy", description="Metric to rank by"),
     days: int = Query(30, ge=1, le=365, description="Sliding window in days"),
     db: AsyncSession = Depends(get_read_db),
     _user: User = Depends(verify_token),
@@ -646,7 +654,9 @@ async def get_model_performance(
 
     total = await DBService.count_predictions(db, name, start, end, version)
     _raw_pairs = await DBService.get_performance_pairs(db, name, start, end, version)
-    pairs = [p for p in _raw_pairs if p.prediction_result is not None and p.observed_result is not None]
+    pairs = [
+        p for p in _raw_pairs if p.prediction_result is not None and p.observed_result is not None
+    ]
 
     matched = len(pairs)
     model_type = _detect_model_type(metadata, pairs)
@@ -1369,7 +1379,8 @@ async def update_model_policy(
 
 @router.post(
     "/models/{name}/{version}/retrain",
-    response_model=RetrainResponse,
+    response_model=TaskRunEnqueued,
+    status_code=202,
 )
 async def retrain_model(
     name: ModelNamePath,
@@ -1379,20 +1390,19 @@ async def retrain_model(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Ré-entraîne un modèle en exécutant son script train.py stocké dans MinIO.
+    Enqueue un ré-entraînement du modèle — retourne immédiatement 202 avec un ``job_id``.
 
-    Le script reçoit via variables d'environnement :
-    - **TRAIN_START_DATE** / **TRAIN_END_DATE** : plage de dates (YYYY-MM-DD)
-    - **OUTPUT_MODEL_PATH** : chemin où déposer le `.joblib` produit
-    - **MLFLOW_TRACKING_URI**, **MODEL_NAME** : optionnels
+    Le script train.py est exécuté dans un worker ARQ séparé (hors du processus API).
 
-    Timeout d'exécution : 600 secondes.
-    Une nouvelle version du modèle est créée dans MinIO et enregistrée en base.
-    Si `set_production` est True, la nouvelle version est automatiquement mise en production.
+    **Suivi du job :**
+    - `GET /jobs/{job_id}` — statut et résultat
+    - `GET /jobs/{job_id}/logs` — logs en temps réel (SSE)
 
     Réservé aux administrateurs.
     """
-    # 1. Vérifier le modèle source et extraire les champs en mémoire
+    import uuid
+
+    # 1. Vérifier le modèle source
     result = await db.execute(
         select(ModelMetadata)
         .options(selectinload(ModelMetadata.creator))
@@ -1413,12 +1423,11 @@ async def retrain_model(
             ),
         )
 
-    # 2. Déterminer la nouvelle version
+    # 2. Déterminer la nouvelle version et vérifier l'unicité
     new_version = payload.new_version
     if not new_version:
         new_version = f"{version}-retrain-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
 
-    # Vérifier l'unicité de la nouvelle version
     existing = await db.execute(
         select(ModelMetadata).where(
             and_(ModelMetadata.name == name, ModelMetadata.version == new_version)
@@ -1430,8 +1439,7 @@ async def retrain_model(
             detail=f"La version '{new_version}' existe déjà pour le modèle '{name}'.",
         )
 
-    # Extraire les champs nécessaires en mémoire puis libérer la connexion DB
-    # avant le subprocess (600 s max) pour ne pas monopoliser le pool.
+    # 3. Extraire les champs source en mémoire (le worker en a besoin)
     source_fields = {
         "train_script_object_key": source_model.train_script_object_key,
         "description": source_model.description,
@@ -1447,598 +1455,83 @@ async def retrain_model(
         "tags": source_model.tags,
         "webhook_url": source_model.webhook_url,
         "promotion_policy": source_model.promotion_policy,
+        "retrain_schedule": source_model.retrain_schedule,
         "accuracy": source_model.accuracy,
         "f1_score": source_model.f1_score,
     }
 
-    # Exporter les données de production avant de libérer la connexion
-    retrain_rows = await DBService.export_retrain_data(
-        db, name, payload.start_date, payload.end_date
+    # 4. Créer l'entrée TaskRun en DB
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    job_id = uuid.uuid4()
+    task_run = TaskRun(
+        id=job_id,
+        task_type="retrain",
+        model_name=name,
+        model_version=version,
+        new_version=new_version,
+        triggered_by=user.username,
+        status="queued",
+        enqueued_at=now,
     )
+    db.add(task_run)
+    await db.commit()
 
-    await db.close()  # Libère la connexion avant le subprocess de 600 s
-
-    # 3. Télécharger train.py depuis MinIO
+    # 5. Enqueue dans ARQ
     try:
-        script_bytes = await minio_service.async_download_file_bytes(
-            source_fields["train_script_object_key"]
-        )
-    except Exception as e:
-        logger.error(
-            "Impossible de télécharger le script d'entraînement",
-            object_key=source_fields["train_script_object_key"],
-            error=str(e),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Impossible de télécharger le script train.py. Consulter les logs serveur.",
-        )
-
-    # 4. Exécuter le script dans un répertoire temporaire
-    stdout_text = ""
-    stderr_text = ""
-
-    mlflow_tracking_uri = settings.MLFLOW_TRACKING_URI
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        script_path = os.path.join(tmpdir, "train.py")
-        output_model_path = os.path.join(tmpdir, "output_model.joblib")
-
-        with open(script_path, "wb") as f:
-            f.write(script_bytes)
-
-        # Écrire le CSV de données de production si disponible
-        train_data_path = None
-        if retrain_rows:
-            train_data_path = os.path.join(tmpdir, "train_data.csv")
-            with open(train_data_path, "w", newline="", encoding="utf-8") as csvfile:
-                fieldnames = [
-                    "id_obs",
-                    "input_features",
-                    "prediction_result",
-                    "observed_result",
-                    "timestamp",
-                    "model_version",
-                    "response_time_ms",
-                ]
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-                for row in retrain_rows:
-                    writer.writerow(
-                        {
-                            "id_obs": row["id_obs"],
-                            "input_features": json.dumps(row["input_features"]),
-                            "prediction_result": json.dumps(row["prediction_result"]),
-                            "observed_result": json.dumps(row["observed_result"])
-                            if row["observed_result"] is not None
-                            else "",
-                            "timestamp": row["timestamp"],
-                            "model_version": row["model_version"],
-                            "response_time_ms": row["response_time_ms"],
-                        }
-                    )
-            logger.info(
-                "Données de production exportées pour le retrain",
-                model=name,
-                rows=len(retrain_rows),
-            )
-
-        # Construire un environnement minimal — ne pas passer os.environ entier
-        # pour éviter de transmettre SECRET_KEY, DATABASE_URL, etc. au script.
-        _safe_env_keys = {
-            "PATH",
-            "HOME",
-            "USER",
-            "LANG",
-            "LC_ALL",
-            "TMPDIR",
-            "TEMP",
-            "TMP",
-            "PYTHONPATH",
-            "PYTHONDONTWRITEBYTECODE",
-            "VIRTUAL_ENV",
-        }
-        env = {k: v for k, v in os.environ.items() if k in _safe_env_keys}
-        _minio_scheme = "https" if settings.MINIO_SECURE else "http"
-        env.update(
-            {
-                "TRAIN_START_DATE": payload.start_date,
-                "TRAIN_END_DATE": payload.end_date,
-                "OUTPUT_MODEL_PATH": output_model_path,
-                "MLFLOW_TRACKING_URI": mlflow_tracking_uri,
-                "MODEL_NAME": name,
-                "MINIO_ENDPOINT": settings.MINIO_ENDPOINT,
-                "MINIO_ACCESS_KEY": settings.MINIO_ACCESS_KEY,
-                "MINIO_SECRET_KEY": settings.MINIO_SECRET_KEY,
-                "MINIO_BUCKET": settings.MINIO_BUCKET,
-                "MINIO_SECURE": str(settings.MINIO_SECURE).lower(),
-                # Variables boto3/S3 pour MLflow log_artifact + upload direct
-                "MLFLOW_S3_ENDPOINT_URL": settings.MLFLOW_S3_ENDPOINT_URL or f"{_minio_scheme}://{settings.MINIO_ENDPOINT}",
-                "AWS_ACCESS_KEY_ID": settings.MINIO_ACCESS_KEY,
-                "AWS_SECRET_ACCESS_KEY": settings.MINIO_SECRET_KEY,
-            }
-        )
-        if train_data_path:
-            env["TRAIN_DATA_PATH"] = train_data_path
-
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "python",
-                script_path,
-                env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=tmpdir,
-                preexec_fn=_set_subprocess_limits,
-            )
-            try:
-                raw_stdout, raw_stderr = await asyncio.wait_for(proc.communicate(), timeout=600.0)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.communicate()
-                logger.error("Timeout ré-entraînement", model=name, version=version)
-                return RetrainResponse(
-                    model_name=name,
-                    source_version=version,
-                    new_version=new_version,
-                    success=False,
-                    stdout="",
-                    stderr="",
-                    error="Timeout : le script d'entraînement a dépassé 600 secondes.",
-                )
-
-            stdout_text = raw_stdout.decode("utf-8", errors="replace")
-            stderr_text = raw_stderr.decode("utf-8", errors="replace")
-
-            logger.info(
-                "Script d'entraînement exécuté",
-                model=name,
-                version=version,
-                returncode=proc.returncode,
-            )
-
-            if proc.returncode != 0:
-                logger.error(
-                    "Ré-entraînement échoué",
-                    model=name,
-                    version=version,
-                    returncode=proc.returncode,
-                    stderr=stderr_text,
-                )
-                return RetrainResponse(
-                    model_name=name,
-                    source_version=version,
-                    new_version=new_version,
-                    success=False,
-                    stdout=stdout_text,
-                    stderr=stderr_text,
-                    error=f"Le script a terminé avec le code {proc.returncode}.",
-                )
-
-            # 5. Vérifier que le fichier modèle a été produit
-            if not os.path.exists(output_model_path):
-                logger.error(
-                    "Script n'a pas produit de fichier modèle",
-                    model=name,
-                    version=version,
-                    output_model_path=output_model_path,
-                )
-                return RetrainResponse(
-                    model_name=name,
-                    source_version=version,
-                    new_version=new_version,
-                    success=False,
-                    stdout=stdout_text,
-                    stderr=stderr_text,
-                    error="Le script n'a pas produit de fichier modèle à OUTPUT_MODEL_PATH.",
-                )
-
-            with open(output_model_path, "rb") as f:
-                new_model_bytes = f.read()
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error("Erreur inattendue lors du ré-entraînement", model=name, error=str(e))
-            return RetrainResponse(
-                model_name=name,
-                source_version=version,
-                new_version=new_version,
-                success=False,
-                stdout=stdout_text,
-                stderr=stderr_text,
-                error="Erreur d'exécution inattendue. Consulter les logs serveur.",
-            )
-
-    # 6. Extraire les métriques JSON depuis la dernière ligne stdout
-    logger.info("Retrain post-subprocess : extraction métriques", model=name, new_version=new_version)
-    new_accuracy = source_fields["accuracy"]
-    new_f1 = source_fields["f1_score"]
-    parsed_metrics: dict = {}
-    for line in reversed(stdout_text.strip().splitlines()):
-        stripped = line.strip()
-        if stripped.startswith("{") and stripped.endswith("}"):
-            try:
-                parsed_metrics = json.loads(stripped)
-                new_accuracy = parsed_metrics.get("accuracy", new_accuracy)
-                new_f1 = parsed_metrics.get("f1_score", new_f1)
-            except json.JSONDecodeError:
-                pass
-            break
-    logger.info(
-        "Retrain métriques extraites",
-        model=name, new_version=new_version,
-        accuracy=new_accuracy, f1=new_f1,
-        training_dataset=parsed_metrics.get("training_dataset"),
-    )
-
-    training_stats = {
-        "train_start_date": str(payload.start_date),
-        "train_end_date": str(payload.end_date),
-        "trained_at": datetime.now(timezone.utc).isoformat(),
-        "n_rows": parsed_metrics.get("n_rows"),
-        "feature_stats": parsed_metrics.get("feature_stats"),
-        "label_distribution": parsed_metrics.get("label_distribution"),
-        "regression_bins": parsed_metrics.get("regression_bins"),
-    }
-
-    # 6b. Snapshot des versions de librairies (généré ici, uploadé MinIO en step 8b)
-    # Priorité : "dependencies" dans le stdout JSON (auto-reporté par le script),
-    # fallback sur AST + importlib.metadata si absent.
-    from src.services.env_snapshot_service import (
-        dependencies_to_requirements_txt as _deps_to_req,
-        generate_requirements_txt as _gen_req,
-    )
-
-    _deps_from_stdout = parsed_metrics.get("dependencies")
-    if _deps_from_stdout and isinstance(_deps_from_stdout, dict):
-        _req_txt = _deps_to_req(_deps_from_stdout)
-        logger.info("requirements.txt depuis stdout JSON (dependencies)", model=name, new_version=new_version)
-    else:
-        _req_txt = _gen_req(script_bytes.decode("utf-8", errors="replace"))
-        logger.info("requirements.txt depuis fallback AST+importlib.metadata", model=name, new_version=new_version)
-
-    # 6c. Créer le run MLflow (dégradation gracieuse si MLflow indisponible)
-    _mlflow_run_id: Optional[str] = None
-    try:
-        _mlflow_run_id = mlflow_service.log_retrain_run(
+        arq_pool = await arq_pool_module.get_arq_pool()
+        await arq_pool.enqueue_job(
+            "retrain_task",
+            job_id=str(job_id),
             model_name=name,
-            new_version=new_version,
             source_version=version,
-            trigger="manual",
-            trained_by=user.username,
-            train_start_date=str(payload.start_date),
-            train_end_date=str(payload.end_date),
-            accuracy=new_accuracy,
-            f1_score=new_f1,
-            n_rows=parsed_metrics.get("n_rows"),
-            feature_stats=parsed_metrics.get("feature_stats"),
-            label_distribution=parsed_metrics.get("label_distribution"),
-            algorithm=source_fields["algorithm"],
-            training_params=source_fields["training_params"],
-            hyperparameters=parsed_metrics.get("hyperparameters") or source_fields["hyperparameters"],
-            auto_promoted=False,
-            auto_promote_reason=None,
-            model_bytes=new_model_bytes,
-            requirements_txt=_req_txt,
-        )
-        logger.info("MLflow run créé", model=name, new_version=new_version, run_id=_mlflow_run_id)
-    except Exception as _exc:
-        logger.warning(
-            "MLflow logging échoué — ré-entraînement continue",
-            model=name, new_version=new_version, error=str(_exc),
-        )
-
-    # 7. Uploader le nouveau modèle dans MinIO
-    logger.info("Retrain upload .joblib MinIO", model=name, new_version=new_version)
-    try:
-        new_object_key = f"{name}/v{new_version}.joblib"
-        new_model_hmac_signature = compute_model_hmac(new_model_bytes)
-        upload_info = await minio_service.async_upload_model_bytes(new_model_bytes, new_object_key)
-        logger.info(
-            "Retrain upload .joblib OK",
-            model=name, new_version=new_version,
-            bucket=upload_info.get("bucket"), size=upload_info.get("size"),
+            new_version=new_version,
+            start_date=str(payload.start_date),
+            end_date=str(payload.end_date),
+            set_production=payload.set_production,
+            triggered_by=user.username,
+            source_fields=source_fields,
+            _job_id=str(job_id),  # ARQ job ID = notre task_run ID pour retrouver le résultat
         )
     except Exception as exc:
-        logger.error(
-            "Retrain STEP7 : upload .joblib MinIO échoué",
-            model=name, new_version=new_version, error=str(exc), exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Upload MinIO du .joblib échoué : {exc}",
-        ) from exc
+        # Si ARQ est indisponible, passer le job en failed et informer l'utilisateur
+        logger.error("Enqueue ARQ échoué", job_id=str(job_id), error=str(exc))
+        async with AsyncSessionLocal() as write_db:
+            from sqlalchemy import update
 
-    # 8. Copier le script train.py pour la nouvelle version (pour chaîner les ré-entraînements)
-    new_train_key = f"{name}/v{new_version}_train.py"
-    logger.info("Retrain upload train.py MinIO", model=name, new_version=new_version)
-    try:
-        await minio_service.async_upload_file_bytes(
-            script_bytes, new_train_key, content_type="text/x-python"
-        )
-        logger.info("Retrain upload train.py OK", model=name, new_version=new_version)
-    except Exception as exc:
-        logger.error(
-            "Retrain STEP8 : upload train.py MinIO échoué",
-            model=name, new_version=new_version, error=str(exc), exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Upload MinIO du train.py échoué : {exc}",
-        ) from exc
-
-    # 8b. Uploader le snapshot des versions de librairies généré en step 6b (non bloquant)
-    _req_object_key = f"{name}/v{new_version}_requirements.txt"
-    try:
-        await minio_service.async_upload_file_bytes(
-            _req_txt.encode("utf-8"), _req_object_key, content_type="text/plain"
-        )
-        logger.info("Retrain requirements.txt uploadé", model=name, new_version=new_version)
-    except Exception as _exc:
-        logger.warning(
-            "Retrain STEP8b : upload requirements.txt échoué — non bloquant",
-            model=name, new_version=new_version, error=str(_exc),
-        )
-        _req_object_key = None
-
-    # --- Session 2 : écriture post-subprocess ---
-    logger.info("Retrain écriture DB", model=name, new_version=new_version)
-    async with AsyncSessionLocal() as write_db:
-        # 9. Créer la nouvelle entrée ModelMetadata
-        try:
-            new_metadata = ModelMetadata(
-                name=name,
-                version=new_version,
-                minio_bucket=upload_info["bucket"],
-                minio_object_key=new_object_key,
-                file_size_bytes=upload_info["size"],
-                model_hmac_signature=new_model_hmac_signature,
-                train_script_object_key=new_train_key,
-                requirements_object_key=_req_object_key,
-                description=source_fields["description"],
-                algorithm=source_fields["algorithm"],
-                mlflow_run_id=_mlflow_run_id,
-                accuracy=new_accuracy,
-                f1_score=new_f1,
-                features_count=source_fields["features_count"],
-                classes=source_fields["classes"],
-                model_task=source_fields["model_task"],
-                training_params=source_fields["training_params"],
-                hyperparameters=parsed_metrics.get("hyperparameters") or source_fields["hyperparameters"],
-                training_dataset=(
-                    parsed_metrics.get("training_dataset")
-                    or f"{source_fields['training_dataset'] or name} [{payload.start_date} → {payload.end_date}]"
-                ),
-                feature_baseline=source_fields["feature_baseline"],
-                confidence_threshold=source_fields["confidence_threshold"],
-                tags=source_fields["tags"],
-                webhook_url=source_fields["webhook_url"],
-                promotion_policy=source_fields["promotion_policy"],
-                trained_by=user.username,
-                training_date=datetime.now(timezone.utc).replace(tzinfo=None),
-                user_id_creator=user.id,
-                is_active=True,
-                is_production=False,
-                parent_version=version,
-                training_stats=training_stats,
+            await write_db.execute(
+                update(TaskRun)
+                .where(TaskRun.id == job_id)
+                .values(status="failed", error=f"Enqueue ARQ échoué : {exc}")
             )
-            write_db.add(new_metadata)
-            await write_db.flush()
-            await DBService.log_model_history(
-                write_db, new_metadata, HistoryActionType.CREATED, user.id, user.username
-            )
-            logger.info("Retrain STEP9 : ModelMetadata créé", model=name, new_version=new_version, id=new_metadata.id)
-        except Exception as exc:
-            logger.error(
-                "Retrain STEP9 : création ModelMetadata en DB échouée",
-                model=name, new_version=new_version, error=str(exc), exc_info=True,
-            )
-            raise
-
-        # 10. Passer en production si demandé manuellement
-        auto_promoted = False
-        auto_promote_reason: Optional[str] = None
-
-        if payload.set_production:
-            other_result = await write_db.execute(
-                select(ModelMetadata).where(
-                    and_(
-                        ModelMetadata.name == name,
-                        ModelMetadata.version != new_version,
-                        ModelMetadata.is_production.is_(True),
-                    )
-                )
-            )
-            for other in other_result.scalars().all():
-                other.is_production = False
-                await DBService.log_model_history(
-                    write_db,
-                    other,
-                    HistoryActionType.SET_PRODUCTION,
-                    user.id,
-                    user.username,
-                    ["is_production"],
-                )
-            new_metadata.is_production = True
-            await write_db.flush()
-            await DBService.log_model_history(
-                write_db,
-                new_metadata,
-                HistoryActionType.SET_PRODUCTION,
-                user.id,
-                user.username,
-                ["is_production"],
-            )
-        elif source_fields["promotion_policy"] and source_fields["promotion_policy"].get(
-            "auto_promote"
-        ):
-            # 10b. Auto-promotion selon la politique configurée
-            should_promote, reason = await evaluate_auto_promotion(
-                write_db, name, source_fields["promotion_policy"], version=new_version
-            )
-            auto_promote_reason = reason
-            if should_promote:
-                other_result = await write_db.execute(
-                    select(ModelMetadata).where(
-                        and_(
-                            ModelMetadata.name == name,
-                            ModelMetadata.version != new_version,
-                            ModelMetadata.is_production.is_(True),
-                        )
-                    )
-                )
-                for other in other_result.scalars().all():
-                    other.is_production = False
-                    await DBService.log_model_history(
-                        write_db,
-                        other,
-                        HistoryActionType.SET_PRODUCTION,
-                        user.id,
-                        user.username,
-                        ["is_production"],
-                    )
-                new_metadata.is_production = True
-                auto_promoted = True
-                await write_db.flush()
-                await DBService.log_model_history(
-                    write_db,
-                    new_metadata,
-                    HistoryActionType.SET_PRODUCTION,
-                    user.id,
-                    user.username,
-                    ["is_production"],
-                )
-            logger.info(
-                "Évaluation auto-promotion",
-                model=name,
-                new_version=new_version,
-                auto_promoted=auto_promoted,
-                reason=reason,
-            )
-
-        # Persist auto_promoted outcome in training_stats so retrain-history can surface it
-        if source_fields["promotion_policy"] and not payload.set_production:
-            new_metadata.training_stats = {
-                **(new_metadata.training_stats or {}),
-                "auto_promoted": auto_promoted,
-                "auto_promote_reason": auto_promote_reason,
-            }
-
-        # Mettre à jour les tags MLflow avec le résultat final de promotion
-        if _mlflow_run_id:
-            try:
-                mlflow_service.update_run_tags(
-                    _mlflow_run_id,
-                    {
-                        "auto_promoted": str(auto_promoted),
-                        "auto_promote_reason": auto_promote_reason or "",
-                        "is_production": str(new_metadata.is_production),
-                    },
-                )
-            except Exception as _exc:
-                logger.warning("MLflow tag update échoué", error=str(_exc))
-
-        try:
             await write_db.commit()
-            logger.info("Retrain STEP10 : commit DB OK", model=name, new_version=new_version)
-        except Exception as exc:
-            logger.error(
-                "Retrain STEP10 : commit DB échoué",
-                model=name, new_version=new_version, error=str(exc), exc_info=True,
-            )
-            raise
-        _leaderboard_cache.clear()
-        await write_db.refresh(new_metadata)
-
-        # 11. Invalider le cache Redis et pré-chauffer la nouvelle version si en production
-        try:
-            await model_service.invalidate_model_cache(name)
-            logger.info("Retrain STEP11 : cache Redis invalidé", model=name, new_version=new_version)
-        except Exception as exc:
-            logger.warning(
-                "Retrain STEP11 : invalidation cache Redis échouée (non bloquant)",
-                model=name, new_version=new_version, error=str(exc),
-            )
-        if new_metadata.is_production:
-            try:
-                async with AsyncSessionLocal() as warmup_db:
-                    await model_service.load_model(warmup_db, name, new_version)
-                logger.info(
-                    "Cache pré-chauffé pour la nouvelle version",
-                    model=name,
-                    new_version=new_version,
-                )
-            except Exception as _exc:
-                logger.warning("Pré-chauffe cache échouée (non bloquant)", error=str(_exc))
-
-    _wh = source_fields["webhook_url"]
-    if _wh:
-        _ts = datetime.now(timezone.utc).isoformat()
-        asyncio.create_task(
-            send_webhook(
-                _wh,
-                {
-                    "model_name": name,
-                    "version": new_version,
-                    "timestamp": _ts,
-                    "details": {
-                        "source_version": version,
-                        "accuracy": new_metadata.accuracy,
-                        "f1_score": new_metadata.f1_score,
-                        "set_production": payload.set_production,
-                    },
-                },
-                event_type="retrain_completed",
-            )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Worker ARQ indisponible. Le job a été créé (id={job_id}) mais n'a pas pu être enqueued.",
         )
-        if auto_promoted:
-            asyncio.create_task(
-                send_webhook(
-                    _wh,
-                    {
-                        "model_name": name,
-                        "version": new_version,
-                        "timestamp": _ts,
-                        "details": {"reason": auto_promote_reason},
-                    },
-                    event_type="model_promoted",
-                )
-            )
 
+    audit_log(
+        "retrain.enqueue",
+        actor_id=user.id,
+        resource=f"{name}:{version}",
+        details={"job_id": str(job_id), "new_version": new_version},
+    )
     logger.info(
-        "Ré-entraînement réussi",
+        "Retrain enqueued",
         model=name,
         source_version=version,
         new_version=new_version,
-        set_production=payload.set_production,
-        auto_promoted=auto_promoted,
-    )
-    audit_log(
-        "retrain.trigger",
-        actor_id=user.id,
-        resource=f"{name}:{version}",
-        details={"new_version": new_version, "set_production": payload.set_production},
+        job_id=str(job_id),
+        triggered_by=user.username,
     )
 
-    return RetrainResponse(
+    return TaskRunEnqueued(
+        job_id=job_id,
+        status="queued",
         model_name=name,
-        source_version=version,
+        model_version=version,
         new_version=new_version,
-        success=True,
-        stdout=stdout_text,
-        stderr=stderr_text,
-        new_model_metadata=ModelCreateResponse(
-            **{c.name: getattr(new_metadata, c.name) for c in new_metadata.__table__.columns},
-            creator_username=user.username,
-        ),
-        auto_promoted=(
-            auto_promoted
-            if (source_fields["promotion_policy"] and not payload.set_production)
-            else None
-        ),
-        auto_promote_reason=auto_promote_reason,
-        training_stats=new_metadata.training_stats,
+        triggered_by=user.username,
+        enqueued_at=now,
     )
 
 
@@ -2208,7 +1701,7 @@ async def get_ab_comparison(
     metric: Optional[str] = Query(
         None,
         description="Métrique pour le test de significativité : 'error_rate', 'mae', 'response_time_ms'. "
-                    "Par défaut : sélection automatique.",
+        "Par défaut : sélection automatique.",
         pattern=r"^(error_rate|mae|response_time_ms)$",
     ),
     _auth: User = Depends(verify_token),
@@ -2392,7 +1885,9 @@ async def get_model_calibration(
 
     if not pairs:
         return CalibrationResponse(
-            model_name=name, version=version, sample_size=0,
+            model_name=name,
+            version=version,
+            sample_size=0,
             calibration_status="insufficient_data",
         )
 
@@ -2406,7 +1901,7 @@ async def get_model_calibration(
         for row in pairs:
             try:
                 pred = float(row.prediction_result)
-                obs  = float(row.observed_result)
+                obs = float(row.observed_result)
                 reg_pairs.append((pred, obs))
             except (TypeError, ValueError):
                 pass
@@ -2414,19 +1909,22 @@ async def get_model_calibration(
         sample_size = len(reg_pairs)
         if sample_size < 2:
             return CalibrationResponse(
-                model_name=name, version=version, sample_size=sample_size,
-                model_type="regression", calibration_status="insufficient_data",
+                model_name=name,
+                version=version,
+                sample_size=sample_size,
+                model_type="regression",
+                calibration_status="insufficient_data",
             )
 
         preds_arr = np.array([p for p, _ in reg_pairs], dtype=float)
-        obs_arr   = np.array([o for _, o in reg_pairs], dtype=float)
+        obs_arr = np.array([o for _, o in reg_pairs], dtype=float)
         residuals = preds_arr - obs_arr
 
-        mae  = float(np.mean(np.abs(residuals)))
-        rmse = float(np.sqrt(np.mean(residuals ** 2)))
+        mae = float(np.mean(np.abs(residuals)))
+        rmse = float(np.sqrt(np.mean(residuals**2)))
         bias = float(np.mean(residuals))
 
-        ss_res = float(np.sum(residuals ** 2))
+        ss_res = float(np.sum(residuals**2))
         ss_tot = float(np.sum((obs_arr - float(np.mean(obs_arr))) ** 2))
         r2 = float(1.0 - ss_res / ss_tot) if ss_tot > 0 else None
 
@@ -2470,7 +1968,9 @@ async def get_model_calibration(
 
     if not valid:
         return CalibrationResponse(
-            model_name=name, version=version, sample_size=len(pairs),
+            model_name=name,
+            version=version,
+            sample_size=len(pairs),
             calibration_status="insufficient_data",
         )
 
@@ -2487,7 +1987,9 @@ async def get_model_calibration(
 
     if sample_size < 30:
         return CalibrationResponse(
-            model_name=name, version=version, sample_size=sample_size,
+            model_name=name,
+            version=version,
+            sample_size=sample_size,
             calibration_status="insufficient_data",
         )
 
@@ -3041,10 +2543,17 @@ async def compare_model_versions(
         description="Versions séparées par des virgules (ex: 1.0.0,2.0.0). Toutes les versions actives si absent.",
     ),
     days: int = Query(
-        7, ge=1, le=90, description="Fenêtre temporelle pour les stats de latence et les métriques live (jours)"
+        7,
+        ge=1,
+        le=90,
+        description="Fenêtre temporelle pour les stats de latence et les métriques live (jours)",
     ),
-    start_date: Optional[str] = Query(None, description="Date début ISO (YYYY-MM-DD) — prioritaire sur days"),
-    end_date: Optional[str] = Query(None, description="Date fin ISO (YYYY-MM-DD) — prioritaire sur days"),
+    start_date: Optional[str] = Query(
+        None, description="Date début ISO (YYYY-MM-DD) — prioritaire sur days"
+    ),
+    end_date: Optional[str] = Query(
+        None, description="Date fin ISO (YYYY-MM-DD) — prioritaire sur days"
+    ),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
@@ -3100,7 +2609,9 @@ async def compare_model_versions(
         _period_end = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Latency stats — single DB query covering all versions, filtré sur la même période
-    ab_stats = await DBService.get_ab_comparison_stats(db, name, days=days, start=_period_start, end=_period_end)
+    ab_stats = await DBService.get_ab_comparison_stats(
+        db, name, days=days, start=_period_start, end=_period_end
+    )
     latency_by_version: dict = {}
     for s in ab_stats:
         times = sorted(s.get("response_times", []))
@@ -3116,8 +2627,12 @@ async def compare_model_versions(
     # Per-version extras (drift + live metrics) — parallel gather
     async def _version_extras(version: str, meta: ModelMetadata):
         prod_stats, pairs = await asyncio.gather(
-            DBService.get_feature_production_stats(db, name, version, days, start=_period_start, end=_period_end),
-            DBService.get_performance_pairs(db, name, model_version=version, start=_period_start, end=_period_end),
+            DBService.get_feature_production_stats(
+                db, name, version, days, start=_period_start, end=_period_end
+            ),
+            DBService.get_performance_pairs(
+                db, name, model_version=version, start=_period_start, end=_period_end
+            ),
         )
 
         baseline = meta.feature_baseline or {}
@@ -3165,7 +2680,9 @@ async def compare_model_versions(
                 correct = sum(p == o for p, o in zip(y_pred_s, y_obs_s))
                 live_accuracy = round(correct / len(all_pairs), 4)
                 try:
-                    live_f1 = round(float(f1_score(y_obs_s, y_pred_s, average="weighted", zero_division=0)), 4)
+                    live_f1 = round(
+                        float(f1_score(y_obs_s, y_pred_s, average="weighted", zero_division=0)), 4
+                    )
                 except Exception:
                     pass
 
@@ -3191,7 +2708,9 @@ async def compare_model_versions(
     version_summaries = []
     for version in ordered_versions:
         meta = meta_by_version[version]
-        drift_status, brier_score, live_accuracy, live_f1, live_mae, live_rmse, live_r2 = extras_by_version[version]
+        drift_status, brier_score, live_accuracy, live_f1, live_mae, live_rmse, live_r2 = (
+            extras_by_version[version]
+        )
         lat = latency_by_version.get(version, {})
         training_stats = meta.training_stats or {}
         n_rows = training_stats.get("n_rows")
@@ -3653,8 +3172,14 @@ async def create_model(
     features_count: Optional[int] = Form(None),
     classes: Optional[str] = Form(None, description="JSON array ex: [0, 1, 2]"),
     training_params: Optional[str] = Form(None, description="JSON object"),
-    training_metrics: Optional[str] = Form(None, description="JSON object — métriques d'entraînement (precision, recall, mae, rmse, r2…)"),
-    hyperparameters: Optional[str] = Form(None, description="JSON object — hyperparamètres du modèle (ex: {\"n_estimators\": 200, \"max_depth\": 10})"),
+    training_metrics: Optional[str] = Form(
+        None,
+        description="JSON object — métriques d'entraînement (precision, recall, mae, rmse, r2…)",
+    ),
+    hyperparameters: Optional[str] = Form(
+        None,
+        description='JSON object — hyperparamètres du modèle (ex: {"n_estimators": 200, "max_depth": 10})',
+    ),
     training_dataset: Optional[str] = Form(None),
     feature_baseline: Optional[str] = Form(
         None,
@@ -3698,7 +3223,7 @@ async def create_model(
         None,
         description=(
             "JSON {package: version} capturé depuis l'environnement local d'entraînement "
-            "(ex: {\"scikit-learn\": \"1.6.1\", \"numpy\": \"2.2.5\"}). "
+            '(ex: {"scikit-learn": "1.6.1", "numpy": "2.2.5"}). '
             "Utilisé pour générer requirements.txt quand run_training=False, "
             "reflétant les versions du poste ayant produit le modèle."
         ),
@@ -3791,7 +3316,9 @@ async def create_model(
         )
         logger.info(
             "Script train.py uploadé",
-            object_name=train_object_name, model=name, version=version,
+            object_name=train_object_name,
+            model=name,
+            version=version,
             duration_ms=round((time.perf_counter() - _t0) * 1000),
         )
         train_script_object_key = train_object_name
@@ -3806,22 +3333,27 @@ async def create_model(
             if req_txt is None:
                 logger.info(
                     "Fallback AST pour requirements.txt — subprocess sans 'dependencies'",
-                    model=name, version=version,
+                    model=name,
+                    version=version,
                 )
                 req_txt = generate_requirements_txt(train_source)
         else:
             logger.info(
                 "run_training=False — subprocess ignoré, modèle uploadé utilisé tel quel",
-                model=name, version=version,
+                model=name,
+                version=version,
             )
             if local_dependencies:
                 try:
                     local_deps_dict = json.loads(local_dependencies)
                     from src.services.env_snapshot_service import dependencies_to_requirements_txt
+
                     req_txt = dependencies_to_requirements_txt(local_deps_dict)
                     logger.info(
                         "requirements.txt généré depuis local_dependencies",
-                        packages=list(local_deps_dict.keys()), model=name, version=version,
+                        packages=list(local_deps_dict.keys()),
+                        model=name,
+                        version=version,
                     )
                 except (json.JSONDecodeError, Exception):
                     req_txt = generate_requirements_txt(train_source)
@@ -3835,7 +3367,9 @@ async def create_model(
         )
         logger.info(
             "requirements.txt uploadé",
-            object_name=req_object_name, model=name, version=version,
+            object_name=req_object_name,
+            model=name,
+            version=version,
             duration_ms=round((time.perf_counter() - _t0) * 1000),
         )
 
@@ -3844,19 +3378,26 @@ async def create_model(
         try:
             local_deps_dict = json.loads(local_dependencies)
             from src.services.env_snapshot_service import dependencies_to_requirements_txt
+
             req_txt = dependencies_to_requirements_txt(local_deps_dict)
             req_object_name = f"{name}/v{version}_requirements.txt"
-            minio_service.upload_file_bytes(req_txt.encode("utf-8"), req_object_name, content_type="text/plain")
+            minio_service.upload_file_bytes(
+                req_txt.encode("utf-8"), req_object_name, content_type="text/plain"
+            )
             requirements_object_key = req_object_name
             logger.info(
                 "requirements.txt généré depuis local_dependencies (sans train_file)",
-                packages=list(local_deps_dict.keys()), model=name, version=version,
+                packages=list(local_deps_dict.keys()),
+                model=name,
+                version=version,
             )
         except Exception:
             pass
 
     # Choisir les bytes du modèle à stocker : subprocess prioritaire, sinon fichier utilisateur
-    model_bytes_to_store = subprocess_model_bytes if subprocess_model_bytes is not None else model_bytes
+    model_bytes_to_store = (
+        subprocess_model_bytes if subprocess_model_bytes is not None else model_bytes
+    )
     if subprocess_model_bytes is not None:
         logger.info("Modèle subprocess utilisé (Docker env)", model=name, version=version)
     elif model_bytes is not None:
@@ -3867,16 +3408,25 @@ async def create_model(
         object_name = f"{name}/v{version}.joblib"
         logger.info(
             "Début upload modèle MinIO",
-            model=name, version=version, size_kb=round(len(model_bytes_to_store) / 1024),
+            model=name,
+            version=version,
+            size_kb=round(len(model_bytes_to_store) / 1024),
         )
         _t0 = time.perf_counter()
         model_hmac_signature = compute_model_hmac(model_bytes_to_store)
-        logger.info("HMAC calculé", model=name, version=version, duration_ms=round((time.perf_counter() - _t0) * 1000))
+        logger.info(
+            "HMAC calculé",
+            model=name,
+            version=version,
+            duration_ms=round((time.perf_counter() - _t0) * 1000),
+        )
         _t1 = time.perf_counter()
         upload_info = minio_service.upload_model_bytes(model_bytes_to_store, object_name)
         logger.info(
             "Modèle uploadé MinIO",
-            model=name, version=version, duration_ms=round((time.perf_counter() - _t1) * 1000),
+            model=name,
+            version=version,
+            duration_ms=round((time.perf_counter() - _t1) * 1000),
         )
         minio_bucket = upload_info["bucket"]
         minio_object_key = object_name
@@ -4018,7 +3568,9 @@ async def update_model(
     # Si is_production passe à True → retirer is_production des autres versions,
     # sauf celles en ab_test (elles partagent le trafic production simultanément).
     # La version courante hérite du deployment_mode du payload ou de son état actuel.
-    incoming_mode = payload.deployment_mode if payload.deployment_mode is not None else model.deployment_mode
+    incoming_mode = (
+        payload.deployment_mode if payload.deployment_mode is not None else model.deployment_mode
+    )
     if payload.is_production is True:
         other_versions = await db.execute(
             select(ModelMetadata).where(
@@ -4032,7 +3584,10 @@ async def update_model(
         for other in other_versions.scalars().all():
             # Garder is_production si l'autre version est en ab_test ET que la version
             # courante sera aussi en ab_test (coexistence A/B légale)
-            if other.deployment_mode == DeploymentMode.AB_TEST and incoming_mode == DeploymentMode.AB_TEST:
+            if (
+                other.deployment_mode == DeploymentMode.AB_TEST
+                and incoming_mode == DeploymentMode.AB_TEST
+            ):
                 continue
             other.is_production = False
             demoted_versions.append(other)
@@ -4170,7 +3725,7 @@ async def delete_model_version(
         actor_id=user.id,
         resource=f"{name}:{version}",
         details={
-            "cascade_predictions":      cascade["deleted_predictions"],
+            "cascade_predictions": cascade["deleted_predictions"],
             "cascade_observed_results": cascade["deleted_observed_results"],
         },
     )
@@ -4452,7 +4007,13 @@ async def download_training_dataset(
     try:
         csv_bytes = await minio_service.async_download_file_bytes(dataset_path)
     except Exception as e:
-        logger.error("Erreur téléchargement dataset", name=name, version=version, path=dataset_path, error=str(e))
+        logger.error(
+            "Erreur téléchargement dataset",
+            name=name,
+            version=version,
+            path=dataset_path,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Dataset introuvable dans MinIO ({dataset_path}).",
@@ -4501,7 +4062,13 @@ async def download_train_script(
     try:
         script_bytes = await minio_service.async_download_file_bytes(script_key)
     except Exception as e:
-        logger.error("Erreur téléchargement script", name=name, version=version, path=script_key, error=str(e))
+        logger.error(
+            "Erreur téléchargement script",
+            name=name,
+            version=version,
+            path=script_key,
+            error=str(e),
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Script introuvable dans MinIO ({script_key}).",
@@ -4544,7 +4111,7 @@ async def delete_model_all_versions(
     mlflow_runs_deleted = []
     minio_objects_deleted = []
     total_cascade_predictions = 0
-    total_cascade_observed    = 0
+    total_cascade_observed = 0
 
     for model in models:
         deleted_versions.append(model.version)
@@ -4558,7 +4125,7 @@ async def delete_model_all_versions(
         # Cascade par version
         cascade = await DBService.delete_predictions_for_version(db, name, model.version)
         total_cascade_predictions += cascade["deleted_predictions"]
-        total_cascade_observed    += cascade["deleted_observed_results"]
+        total_cascade_observed += cascade["deleted_observed_results"]
 
         await DBService.log_model_history(
             db, model, HistoryActionType.DELETED, user.id, user.username
@@ -4571,8 +4138,8 @@ async def delete_model_all_versions(
         actor_id=user.id,
         resource=name,
         details={
-            "versions":                 deleted_versions,
-            "cascade_predictions":      total_cascade_predictions,
+            "versions": deleted_versions,
+            "cascade_predictions": total_cascade_predictions,
             "cascade_observed_results": total_cascade_observed,
         },
     )

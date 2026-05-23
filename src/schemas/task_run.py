@@ -1,0 +1,51 @@
+"""
+Schémas Pydantic pour les task_runs (jobs ARQ).
+"""
+
+from datetime import datetime
+from typing import Any, Dict, Optional
+from uuid import UUID
+
+from pydantic import BaseModel
+
+
+class TaskRunEnqueued(BaseModel):
+    """Réponse 202 immédiate après enqueue d'un retrain."""
+
+    job_id: UUID
+    status: str  # "queued"
+    model_name: str
+    model_version: str
+    new_version: str  # version qui sera créée si succès
+    triggered_by: str
+    enqueued_at: datetime
+
+
+class TaskRunStatus(BaseModel):
+    """Statut complet d'un job — GET /jobs/{job_id}."""
+
+    job_id: UUID
+    task_type: str
+    model_name: Optional[str] = None
+    model_version: Optional[str] = None
+    new_version: Optional[str] = None
+    triggered_by: Optional[str] = None
+    status: str  # queued | running | success | failed | cancelled
+    enqueued_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    duration_seconds: Optional[float] = None
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class TaskRunList(BaseModel):
+    """Liste paginée de jobs — GET /jobs."""
+
+    items: list[TaskRunStatus]
+    total: int
+    limit: int
+    offset: int

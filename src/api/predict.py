@@ -1144,9 +1144,7 @@ async def predict_batch(
             resolved_version = input_data.model_version
 
         # Charger le modèle une seule fois (cache partagé)
-        model_data = await model_service.load_model(
-            db, input_data.model_name, resolved_version
-        )
+        model_data = await model_service.load_model(db, input_data.model_name, resolved_version)
         model = model_data["model"]
         metadata = model_data["metadata"]
 

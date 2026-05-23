@@ -113,7 +113,8 @@ _minio_mock.upload_file_bytes.return_value = {
 }
 
 
-async def _mock_exec_success(*args, **kwargs):
+async def _mock_exec_success_svc(*args, **kwargs):
+    """Mock subprocess pour retrain_service.do_retrain() — readline() + stderr.read()."""
     env = kwargs.get("env", {})
     output_path = env.get("OUTPUT_MODEL_PATH", "")
     if output_path:
@@ -122,11 +123,40 @@ async def _mock_exec_success(*args, **kwargs):
             joblib.dump(LogisticRegression(max_iter=200).fit(X, y), f)
     proc = MagicMock()
     proc.returncode = 0
-    proc.communicate = AsyncMock(
-        return_value=(b'{"accuracy": 0.95, "f1_score": 0.93}\n', b"")
+    proc.stdout.readline = AsyncMock(
+        side_effect=[
+            b"Training started\n",
+            b'{"accuracy": 0.95, "f1_score": 0.93}\n',
+            b"",  # EOF
+        ]
     )
+    proc.stderr.read = AsyncMock(return_value=b"Done.\n")
+    proc.wait = AsyncMock(return_value=0)
     proc.kill = MagicMock()
     return proc
+
+
+def _make_source_fields(webhook_url=None, promotion_policy=None):
+    """Crée un dict source_fields minimal pour les tests do_retrain()."""
+    return {
+        "train_script_object_key": "mock_train.py",
+        "description": None,
+        "algorithm": None,
+        "features_count": None,
+        "classes": None,
+        "model_task": None,
+        "training_params": None,
+        "hyperparameters": None,
+        "training_dataset": None,
+        "feature_baseline": None,
+        "confidence_threshold": None,
+        "tags": None,
+        "webhook_url": webhook_url,
+        "promotion_policy": promotion_policy,
+        "retrain_schedule": None,
+        "accuracy": None,
+        "f1_score": None,
+    }
 
 
 # ===========================================================================
@@ -271,7 +301,12 @@ class TestSendWebhookEnhanced:
 
 
 class TestRetrainWebhooks:
-    """Vérifie que les webhooks sont déclenchés depuis POST /models/{name}/{ver}/retrain."""
+    """Vérifie que les webhooks sont déclenchés par retrain_service.do_retrain().
+
+    Le retrain est maintenant asynchrone (ARQ) : l'endpoint retourne 202 immédiatement
+    et les webhooks sont déclenchés par le worker via retrain_service.do_retrain().
+    Ces tests valident la logique webhook au niveau service, pas endpoint.
+    """
 
     WEBHOOK_URL = "https://hooks.example.com/events"
     MODEL_WITH_WH = f"{MODEL_PREFIX}_retrain_wh"
@@ -294,39 +329,75 @@ class TestRetrainWebhooks:
             json={"auto_promote": True, "min_sample_validation": 1},
         )
 
-    def test_retrain_completed_webhook_fired(self):
-        """POST /retrain réussi + webhook_url configuré → retrain_completed envoyé."""
-        with (
-            patch("asyncio.create_subprocess_exec", new=AsyncMock(side_effect=_mock_exec_success)),
-            patch("src.api.models.send_webhook", new_callable=AsyncMock) as mock_wh,
-        ):
-            r = client.post(
-                f"/models/{self.MODEL_WITH_WH}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={"start_date": "2025-01-01", "end_date": "2025-12-31", "new_version": "2.0.0"},
-            )
+    def test_retrain_enqueue_returns_202(self):
+        """POST /retrain → 202 Accepted avec job_id (retrain asynchrone via ARQ)."""
+        r = client.post(
+            f"/models/{self.MODEL_WITH_WH}/1.0.0/retrain",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={"start_date": "2025-01-01", "end_date": "2025-12-31", "new_version": "2.0.0"},
+        )
+        assert r.status_code == 202
+        assert "job_id" in r.json()
 
-        assert r.status_code == 200
-        assert r.json()["success"] is True
+    def test_retrain_completed_webhook_fired(self):
+        """do_retrain() succès + webhook_url → retrain_completed déclenché."""
+        from src.services.retrain_service import do_retrain
+
+        async def _run():
+            with (
+                patch(
+                    "asyncio.create_subprocess_exec",
+                    new=AsyncMock(side_effect=_mock_exec_success_svc),
+                ),
+                patch(
+                    "src.services.webhook_service.send_webhook",
+                    new_callable=AsyncMock,
+                ) as mock_wh,
+            ):
+                await do_retrain(
+                    model_name=self.MODEL_WITH_WH,
+                    source_version="1.0.0",
+                    new_version="wh_2.0.0",
+                    start_date="2025-01-01",
+                    end_date="2025-12-31",
+                    source_fields=_make_source_fields(self.WEBHOOK_URL),
+                )
+                # Drain fire-and-forget create_task() webhooks
+                await asyncio.sleep(0)
+                return mock_wh
+
+        mock_wh = asyncio.run(_run())
         mock_wh.assert_called()
-        # Au moins un appel doit être retrain_completed
-        event_types = [c.kwargs.get("event_type") or c.args[2] for c in mock_wh.call_args_list]
+        event_types = [c.kwargs.get("event_type") for c in mock_wh.call_args_list]
         assert "retrain_completed" in event_types
 
     def test_retrain_completed_payload_contains_expected_fields(self):
         """Payload retrain_completed contient model_name, version, details avec accuracy."""
-        with (
-            patch("asyncio.create_subprocess_exec", new=AsyncMock(side_effect=_mock_exec_success)),
-            patch("src.api.models.send_webhook", new_callable=AsyncMock) as mock_wh,
-        ):
-            r = client.post(
-                f"/models/{self.MODEL_WITH_WH}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={"start_date": "2024-01-01", "end_date": "2024-12-31", "new_version": "2.1.0"},
-            )
+        from src.services.retrain_service import do_retrain
 
-        assert r.status_code == 200
-        # Trouver l'appel retrain_completed
+        async def _run():
+            with (
+                patch(
+                    "asyncio.create_subprocess_exec",
+                    new=AsyncMock(side_effect=_mock_exec_success_svc),
+                ),
+                patch(
+                    "src.services.webhook_service.send_webhook",
+                    new_callable=AsyncMock,
+                ) as mock_wh,
+            ):
+                await do_retrain(
+                    model_name=self.MODEL_WITH_WH,
+                    source_version="1.0.0",
+                    new_version="wh_2.1.0",
+                    start_date="2024-01-01",
+                    end_date="2024-12-31",
+                    source_fields=_make_source_fields(self.WEBHOOK_URL),
+                )
+                await asyncio.sleep(0)
+                return mock_wh
+
+        mock_wh = asyncio.run(_run())
         completed_call = next(
             (c for c in mock_wh.call_args_list if c.kwargs.get("event_type") == "retrain_completed"),
             None,
@@ -340,60 +411,106 @@ class TestRetrainWebhooks:
         assert "accuracy" in payload["details"]
 
     def test_no_webhook_when_url_not_set(self):
-        """POST /retrain sur modèle sans webhook_url → send_webhook non appelé."""
-        with (
-            patch("asyncio.create_subprocess_exec", new=AsyncMock(side_effect=_mock_exec_success)),
-            patch("src.api.models.send_webhook", new_callable=AsyncMock) as mock_wh,
-        ):
-            r = client.post(
-                f"/models/{self.MODEL_NO_WH}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={"start_date": "2025-06-01", "end_date": "2025-12-31", "new_version": "2.0.0"},
-            )
+        """do_retrain() sans webhook_url dans source_fields → send_webhook non appelé."""
+        from src.services.retrain_service import do_retrain
 
-        assert r.status_code == 200
+        async def _run():
+            with (
+                patch(
+                    "asyncio.create_subprocess_exec",
+                    new=AsyncMock(side_effect=_mock_exec_success_svc),
+                ),
+                patch(
+                    "src.services.webhook_service.send_webhook",
+                    new_callable=AsyncMock,
+                ) as mock_wh,
+            ):
+                await do_retrain(
+                    model_name=self.MODEL_NO_WH,
+                    source_version="1.0.0",
+                    new_version="wh_2.0.0",
+                    start_date="2025-01-01",
+                    end_date="2025-12-31",
+                    source_fields=_make_source_fields(webhook_url=None),
+                )
+                await asyncio.sleep(0)
+                return mock_wh
+
+        mock_wh = asyncio.run(_run())
         mock_wh.assert_not_called()
 
     def test_model_promoted_webhook_fired_on_auto_promotion(self):
-        """Auto-promotion déclenchée → model_promoted envoyé en plus de retrain_completed."""
-        with (
-            patch("asyncio.create_subprocess_exec", new=AsyncMock(side_effect=_mock_exec_success)),
-            patch(
-                "src.api.models.evaluate_auto_promotion",
-                new=AsyncMock(return_value=(True, "Critères satisfaits.")),
-            ),
-            patch("src.api.models.send_webhook", new_callable=AsyncMock) as mock_wh,
-        ):
-            r = client.post(
-                f"/models/{self.MODEL_PROMOTED}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={"start_date": "2025-01-01", "end_date": "2025-12-31", "new_version": "2.0.0"},
-            )
+        """do_retrain() auto-promotion réussie → model_promoted envoyé en plus de retrain_completed."""
+        from src.services.retrain_service import do_retrain
 
-        assert r.status_code == 200
-        assert r.json()["auto_promoted"] is True
+        async def _run():
+            with (
+                patch(
+                    "asyncio.create_subprocess_exec",
+                    new=AsyncMock(side_effect=_mock_exec_success_svc),
+                ),
+                patch(
+                    "src.services.auto_promotion_service.evaluate_auto_promotion",
+                    new=AsyncMock(return_value=(True, "Critères satisfaits.")),
+                ),
+                patch(
+                    "src.services.webhook_service.send_webhook",
+                    new_callable=AsyncMock,
+                ) as mock_wh,
+            ):
+                await do_retrain(
+                    model_name=self.MODEL_PROMOTED,
+                    source_version="1.0.0",
+                    new_version="wh_promo_2.0.0",
+                    start_date="2025-01-01",
+                    end_date="2025-12-31",
+                    source_fields=_make_source_fields(
+                        webhook_url=self.WEBHOOK_URL,
+                        promotion_policy={"auto_promote": True, "min_sample_validation": 1},
+                    ),
+                )
+                await asyncio.sleep(0)
+                return mock_wh
+
+        mock_wh = asyncio.run(_run())
         event_types = [c.kwargs.get("event_type") for c in mock_wh.call_args_list]
         assert "retrain_completed" in event_types
         assert "model_promoted" in event_types
 
     def test_model_promoted_not_fired_when_auto_promotion_fails(self):
-        """Auto-promotion évaluée mais critères non satisfaits → model_promoted non envoyé."""
-        with (
-            patch("asyncio.create_subprocess_exec", new=AsyncMock(side_effect=_mock_exec_success)),
-            patch(
-                "src.api.models.evaluate_auto_promotion",
-                new=AsyncMock(return_value=(False, "Précision insuffisante.")),
-            ),
-            patch("src.api.models.send_webhook", new_callable=AsyncMock) as mock_wh,
-        ):
-            r = client.post(
-                f"/models/{self.MODEL_PROMOTED}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={"start_date": "2024-06-01", "end_date": "2024-12-31", "new_version": "2.1.0"},
-            )
+        """do_retrain() auto-promotion critères non satisfaits → model_promoted non envoyé."""
+        from src.services.retrain_service import do_retrain
 
-        assert r.status_code == 200
-        assert r.json()["auto_promoted"] is False
+        async def _run():
+            with (
+                patch(
+                    "asyncio.create_subprocess_exec",
+                    new=AsyncMock(side_effect=_mock_exec_success_svc),
+                ),
+                patch(
+                    "src.services.auto_promotion_service.evaluate_auto_promotion",
+                    new=AsyncMock(return_value=(False, "Précision insuffisante.")),
+                ),
+                patch(
+                    "src.services.webhook_service.send_webhook",
+                    new_callable=AsyncMock,
+                ) as mock_wh,
+            ):
+                await do_retrain(
+                    model_name=self.MODEL_PROMOTED,
+                    source_version="1.0.0",
+                    new_version="wh_promo_2.1.0",
+                    start_date="2024-01-01",
+                    end_date="2024-12-31",
+                    source_fields=_make_source_fields(
+                        webhook_url=self.WEBHOOK_URL,
+                        promotion_policy={"auto_promote": True, "min_sample_validation": 1},
+                    ),
+                )
+                await asyncio.sleep(0)
+                return mock_wh
+
+        mock_wh = asyncio.run(_run())
         event_types = [c.kwargs.get("event_type") for c in mock_wh.call_args_list]
         assert "model_promoted" not in event_types
 

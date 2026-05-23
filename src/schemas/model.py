@@ -164,7 +164,9 @@ class ModelGetResponse(BaseModel):
     updated_at: Optional[datetime]
     deprecated_at: Optional[datetime]
 
-    model_task: Optional[str] = None  # "regression" | "classification_binary" | "classification_multiclass"
+    model_task: Optional[str] = (
+        None  # "regression" | "classification_binary" | "classification_multiclass"
+    )
 
     # Infos de chargement
     model_loaded: bool
@@ -645,9 +647,9 @@ class CalibrationResponse(BaseModel):
     overconfidence_gap: Optional[float] = None
     reliability: List[ReliabilityBin] = []
     # ── Régression ──
-    mae: Optional[float] = None   # Mean Absolute Error
+    mae: Optional[float] = None  # Mean Absolute Error
     rmse: Optional[float] = None  # Root Mean Square Error
-    r2: Optional[float] = None    # Coefficient de détermination
+    r2: Optional[float] = None  # Coefficient de détermination
     bias: Optional[float] = None  # mean(ŷ − y) : positif = sur-estimation
     scatter_data: Optional[List[dict]] = None  # [{pred, obs}, …] échantillon ≤ 300
 
@@ -786,7 +788,9 @@ class ModelVersionSummary(BaseModel):
 
     version: str
     is_production: bool
-    model_task: Optional[str] = None  # "regression" | "classification_binary" | "classification_multiclass"
+    model_task: Optional[str] = (
+        None  # "regression" | "classification_binary" | "classification_multiclass"
+    )
     accuracy: Optional[float] = None
     f1_score: Optional[float] = None
     latency_p50_ms: Optional[float] = None

@@ -215,8 +215,7 @@ class DBService:
 
         day_stats = [{"date": d, "calls": c} for d, c in sorted(by_day.items())]
         model_day_stats = [
-            {"model_name": mn, "date": d, "calls": c}
-            for (mn, d), c in sorted(by_model_day.items())
+            {"model_name": mn, "date": d, "calls": c} for (mn, d), c in sorted(by_model_day.items())
         ]
 
         return {
@@ -393,9 +392,7 @@ class DBService:
         Retourne une liste de dicts prête à être sérialisée en CSV pour le subprocess retrain.
         """
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(
-            hour=23, minute=59, second=59
-        )
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
 
         query = (
             select(Prediction, ObservedResult.observed_result)
@@ -799,8 +796,7 @@ class DBService:
                 # R² = 1 - SS_res / SS_tot
                 try:
                     numeric_pairs = [
-                        (float(p), float(o)) for p, o in items
-                        if _is_numeric(p) and _is_numeric(o)
+                        (float(p), float(o)) for p, o in items if _is_numeric(p) and _is_numeric(o)
                     ]
                     if len(numeric_pairs) > 1:
                         obs_vals = [o for _, o in numeric_pairs]
@@ -1280,7 +1276,10 @@ class DBService:
                 WHERE timestamp >= :cutoff
             """
             if model_name:
-                sql = text(_base_sql + " AND model_name = :model_name GROUP BY model_name ORDER BY model_name")
+                sql = text(
+                    _base_sql
+                    + " AND model_name = :model_name GROUP BY model_name ORDER BY model_name"
+                )
                 result = await db.execute(sql, {"cutoff": cutoff, "model_name": model_name})
             else:
                 sql = text(_base_sql + " GROUP BY model_name ORDER BY model_name")
@@ -1414,9 +1413,7 @@ class DBService:
 
         # Collect (id_obs, model_name) pairs of predictions to purge
         pairs_result = await db.execute(
-            select(Prediction.id_obs, Prediction.model_name)
-            .where(and_(*filters))
-            .distinct()
+            select(Prediction.id_obs, Prediction.model_name).where(and_(*filters)).distinct()
         )
         pairs = pairs_result.all()
 
@@ -1485,7 +1482,7 @@ class DBService:
             select(Prediction.id_obs, Prediction.model_name)
             .where(
                 and_(
-                    Prediction.model_name    == model_name,
+                    Prediction.model_name == model_name,
                     Prediction.model_version == model_version,
                 )
             )
@@ -1505,7 +1502,7 @@ class DBService:
         pred_result = await db.execute(
             delete(Prediction).where(
                 and_(
-                    Prediction.model_name    == model_name,
+                    Prediction.model_name == model_name,
                     Prediction.model_version == model_version,
                 )
             )
@@ -1513,7 +1510,7 @@ class DBService:
         deleted_preds = pred_result.rowcount or 0
 
         return {
-            "deleted_predictions":      deleted_preds,
+            "deleted_predictions": deleted_preds,
             "deleted_observed_results": deleted_obs,
         }
 
@@ -2132,7 +2129,9 @@ class DBService:
                     {
                         "version": ver,
                         "total_predictions": 0 if is_shadow_only else total,
-                        "shadow_predictions": total if is_shadow_only else (int(shadow.total) if shadow else 0),
+                        "shadow_predictions": (
+                            total if is_shadow_only else (int(shadow.total) if shadow else 0)
+                        ),
                         "error_rate": round(errors / total, 4) if total > 0 else 0.0,
                         "error_count": errors,
                         "avg_response_time_ms": (
