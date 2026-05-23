@@ -2,6 +2,7 @@
 Statistiques et graphiques d'utilisation
 """
 
+import re
 from datetime import datetime, timedelta, date
 
 import pandas as pd
@@ -759,9 +760,8 @@ with st.expander("📈 Accuracy temporelle — comparaison multi-modèles", expa
             # L'API renvoie "2026-W19" (granularité semaine) ou "2026-05-11" (jour).
             # pd.to_datetime ne reconnaît pas le format ISO semaine — on détecte et parse
             # manuellement : "YYYY-Wnn" → lundi de la semaine via strptime %G-W%V-%u.
-            import re as _re
             _sample = str(df_acc["date"].iloc[0]) if len(df_acc) else ""
-            if _re.match(r"^\d{4}-W\d{2}$", _sample):
+            if re.match(r"^\d{4}-W\d{2}$", _sample):
                 df_acc["date"] = pd.to_datetime(
                     df_acc["date"] + "-1", format="%G-W%V-%u"
                 )
@@ -871,7 +871,188 @@ with st.expander("📈 Accuracy temporelle — comparaison multi-modèles", expa
             )
 
 
-# ── Expander 4 : Drift de performance ────────────────────────────────────────
+# ── Expander 4 : Évolution multi-métriques — un modèle ───────────────────────
+with st.expander("📊 Évolution multi-métriques — un modèle", expanded=True):
+
+    # ── Contrôles ────────────────────────────────────────────────────────────
+    _pm_col_model, _pm_col_ver, _pm_col_gran = st.columns([3, 2, 1])
+
+    with _pm_col_model:
+        perf_model = st.selectbox(
+            "Modèle",
+            options=model_names,
+            key="pm_model_select",
+        )
+
+    with _pm_col_ver:
+        _pm_versions = ["(toutes)"] + sorted(
+            {m["version"] for m in models if m["name"] == perf_model},
+            key=lambda v: [int(x) for x in v.split(".")],
+            reverse=True,
+        )
+        perf_ver_sel = st.selectbox("Version", _pm_versions, key="pm_ver_select")
+        perf_ver_arg = None if perf_ver_sel == "(toutes)" else perf_ver_sel
+
+    with _pm_col_gran:
+        perf_gran = st.selectbox(
+            "Granularité",
+            options=["day", "week", "month"],
+            format_func=lambda x: {"day": "Jour", "week": "Semaine", "month": "Mois"}.get(x, x),
+            key="pm_gran_select",
+        )
+
+    # ── Chargement ───────────────────────────────────────────────────────────
+    try:
+        _pm_perf = client.get_model_performance(
+            model_name=perf_model,
+            start=start_dt.isoformat(),
+            end=end_dt.isoformat(),
+            version=perf_ver_arg,
+            granularity=perf_gran,
+        )
+        _pm_mtype = _pm_perf.get("model_type", "classification")
+        _pm_periods = _pm_perf.get("by_period") or []
+    except Exception as _pm_exc:
+        st.warning(f"Impossible de charger les métriques : {_pm_exc}")
+        _pm_mtype = "classification"
+        _pm_periods = []
+
+    # ── Catalogue des métriques disponibles selon le type ────────────────────
+    _PM_METRICS_CLASSIF: dict[str, dict] = {
+        "accuracy":      {"label": "Accuracy",         "ratio": True},
+        "f1_weighted":   {"label": "F1 pondéré",       "ratio": True},
+        "matched_count": {"label": "Paires observées", "ratio": False},
+    }
+    _PM_METRICS_REGRESS: dict[str, dict] = {
+        "mae":           {"label": "MAE",              "ratio": False},
+        "rmse":          {"label": "RMSE",             "ratio": False},
+        "matched_count": {"label": "Paires observées", "ratio": False},
+    }
+    _pm_catalog = _PM_METRICS_CLASSIF if _pm_mtype == "classification" else _PM_METRICS_REGRESS
+    _pm_defaults = ["accuracy", "f1_weighted"] if _pm_mtype == "classification" else ["mae", "rmse"]
+
+    perf_metrics = st.multiselect(
+        "Métriques à afficher",
+        options=list(_pm_catalog.keys()),
+        default=_pm_defaults,
+        format_func=lambda k: _pm_catalog[k]["label"],
+        key="pm_metrics_select",
+    )
+
+    # ── Graphique ─────────────────────────────────────────────────────────────
+    if not perf_metrics:
+        st.info("Sélectionnez au moins une métrique.")
+    elif not _pm_periods:
+        st.info(
+            "Pas de données d'observed-results pour ce modèle sur la période sélectionnée. "
+            "Soumettez des résultats via **POST /observed-results** pour activer le suivi."
+        )
+    else:
+        # Parse dates (jour / semaine ISO / mois)
+        df_pm = pd.DataFrame(_pm_periods)
+        _pm_sample = str(df_pm["period"].iloc[0])
+        if re.match(r"^\d{4}-W\d{2}$", _pm_sample):
+            df_pm["date"] = pd.to_datetime(df_pm["period"] + "-1", format="%G-W%V-%u")
+        elif re.match(r"^\d{4}-\d{2}$", _pm_sample):
+            df_pm["date"] = pd.to_datetime(df_pm["period"] + "-01", format="%Y-%m-%d")
+        else:
+            df_pm["date"] = pd.to_datetime(df_pm["period"])
+        df_pm = df_pm.sort_values("date").reset_index(drop=True)
+
+        # Métriques primaires (axe gauche) vs matched_count (axe droit, barres)
+        _primary = [m for m in perf_metrics if m != "matched_count"]
+        _show_count = "matched_count" in perf_metrics
+        _all_ratio = bool(_primary) and all(_pm_catalog[m]["ratio"] for m in _primary)
+
+        colors = px.colors.qualitative.Set2
+        fig_pm = go.Figure()
+
+        for i, metric in enumerate(_primary):
+            cfg = _pm_catalog[metric]
+            col = colors[i % len(colors)]
+            vals = df_pm[metric] if metric in df_pm.columns else pd.Series([None] * len(df_pm))
+            h_fmt = ".1%" if cfg["ratio"] else ".4f"
+            fig_pm.add_trace(
+                go.Scatter(
+                    x=df_pm["date"],
+                    y=vals,
+                    mode="lines+markers",
+                    name=cfg["label"],
+                    line=dict(width=2, color=col),
+                    marker=dict(size=7, color=col),
+                    yaxis="y1",
+                    hovertemplate=(
+                        f"<b>{cfg['label']}</b><br>"
+                        "%{x|%Y-%m-%d}<br>"
+                        f"%{{y:{h_fmt}}}<extra></extra>"
+                    ),
+                )
+            )
+
+        if _show_count:
+            fig_pm.add_trace(
+                go.Bar(
+                    x=df_pm["date"],
+                    y=df_pm["matched_count"],
+                    name="Paires observées",
+                    yaxis="y2",
+                    opacity=0.22,
+                    marker_color="#999999",
+                    hovertemplate=(
+                        "<b>Paires observées</b><br>"
+                        "%{x|%Y-%m-%d}<br>"
+                        "%{y:d}<extra></extra>"
+                    ),
+                )
+            )
+
+        y1_title = " · ".join(_pm_catalog[m]["label"] for m in _primary) or ""
+        fig_pm.update_layout(
+            xaxis_title="Date",
+            yaxis=dict(
+                title=y1_title,
+                tickformat=".0%" if _all_ratio else None,
+                range=[0, 1.05] if _all_ratio else None,
+                gridcolor="rgba(200,200,200,0.12)",
+            ),
+            yaxis2=dict(
+                title="Paires observées",
+                overlaying="y",
+                side="right",
+                showgrid=False,
+                rangemode="tozero",
+            ) if _show_count else None,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(t=55, b=20),
+            hovermode="x unified",
+            barmode="overlay",
+            plot_bgcolor="rgba(0,0,0,0)",
+            xaxis=dict(gridcolor="rgba(200,200,200,0.12)"),
+        )
+        st.plotly_chart(fig_pm, width='stretch')
+
+        # ── Résumé global de la période ───────────────────────────────────────
+        _pm_global_metrics = {
+            "accuracy": _pm_perf.get("accuracy"),
+            "f1_weighted": _pm_perf.get("f1_weighted"),
+            "mae": _pm_perf.get("mae"),
+            "rmse": _pm_perf.get("rmse"),
+            "matched_count": _pm_perf.get("matched_predictions"),
+        }
+        _summary_cols = [m for m in perf_metrics if _pm_global_metrics.get(m) is not None]
+        if _summary_cols:
+            st.caption("Valeurs agrégées sur toute la période sélectionnée :")
+            _s_cols = st.columns(len(_summary_cols))
+            for col_w, metric in zip(_s_cols, _summary_cols):
+                cfg = _pm_catalog[metric]
+                val = _pm_global_metrics[metric]
+                fmt_val = f"{val:.1%}" if cfg["ratio"] else (
+                    f"{int(val):,}" if metric == "matched_count" else f"{val:.4f}"
+                )
+                col_w.metric(cfg["label"], fmt_val)
+
+
+# ── Expander 5 : Drift de performance ────────────────────────────────────────
 with st.expander("📉 Drift de performance — accuracy rolling", expanded=True):
     drift_col_model, drift_col_threshold, drift_col_dates = st.columns([2, 2, 2])
     with drift_col_model:
