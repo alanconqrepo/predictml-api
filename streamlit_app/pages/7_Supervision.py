@@ -346,36 +346,127 @@ with _tab_global:
         },
     )
 
-    # ── Graphiques volume + erreurs ───────────────────────────────────────
-    col_vol, col_err = st.columns(2)
+    # ── Fetch timeseries par modèle (pour les graphiques d'évolution) ────
+    _ts_by_model: dict[str, list] = {}
+    with st.spinner("Chargement des séries temporelles…"):
+        for _m in models_data:
+            try:
+                _det = client.get_monitoring_model(
+                    name=_m["model_name"], start=start_iso, end=end_iso
+                )
+                _ts_by_model[_m["model_name"]] = _det.get("timeseries", [])
+            except Exception:
+                _ts_by_model[_m["model_name"]] = []
+
+    _ts_rows = []
+    for _mname, _ts in _ts_by_model.items():
+        for _pt in _ts:
+            _ts_rows.append({
+                "date":            _pt["date"],
+                "model_name":      _mname,
+                "error_rate_pct":  round(_pt["error_rate"] * 100, 2),
+                "avg_latency_ms":  _pt.get("avg_latency_ms"),
+            })
+    df_ts = pd.DataFrame(
+        _ts_rows if _ts_rows
+        else {"date": [], "model_name": [], "error_rate_pct": [], "avg_latency_ms": []}
+    )
+    if not df_ts.empty:
+        df_ts["date"] = pd.to_datetime(df_ts["date"])
+        df_ts = df_ts.sort_values("date")
+
+    # ── Graphiques ────────────────────────────────────────────────────────
     df_models = pd.DataFrame([{
-        "model_name": m["model_name"],
+        "model_name":       m["model_name"],
         "total_predictions": m["total_predictions"],
-        "error_rate_pct": round(m["error_rate"] * 100, 2),
+        "error_rate_pct":   round(m["error_rate"] * 100, 2),
     } for m in models_data])
 
-    fig_vol = px.bar(
-        df_models.sort_values("total_predictions", ascending=False),
-        x="model_name", y="total_predictions",
-        title="Volume de prédictions par modèle",
-        labels={"model_name": "Modèle", "total_predictions": "Prédictions"},
+    col_pie, col_err_ts = st.columns([1, 2])
+
+    # — Camembert : répartition des prédictions production ——————————————
+    fig_pie = px.pie(
+        df_models,
+        values="total_predictions",
+        names="model_name",
+        title="Répartition des prédictions production",
+        hole=0.45,
         color_discrete_sequence=px.colors.qualitative.Set2,
     )
-    fig_vol.update_layout(showlegend=False)
-    col_vol.plotly_chart(fig_vol, width='stretch')
-
-    fig_err = px.bar(
-        df_models.sort_values("error_rate_pct", ascending=False),
-        x="model_name", y="error_rate_pct",
-        title="Taux d'erreur par modèle (%)",
-        labels={"model_name": "Modèle", "error_rate_pct": "Erreurs (%)"},
-        color="error_rate_pct",
-        color_continuous_scale=["#27ae60", "#e67e22", "#c0392b"],
+    fig_pie.update_traces(
+        textposition="inside",
+        textinfo="percent+label",
+        hovertemplate="<b>%{label}</b><br>%{value:,} prédictions<br>%{percent}<extra></extra>",
     )
-    fig_err.add_hline(y=5,  line_dash="dash", line_color="#e67e22", annotation_text="Seuil warning 5%")
-    fig_err.add_hline(y=10, line_dash="dash", line_color="#c0392b", annotation_text="Seuil critique 10%")
-    fig_err.update_layout(showlegend=False, coloraxis_showscale=False)
-    col_err.plotly_chart(fig_err, width='stretch')
+    fig_pie.update_layout(showlegend=False, margin=dict(t=50, b=10, l=10, r=10))
+    col_pie.plotly_chart(fig_pie, use_container_width=True)
+
+    # — Évolution du taux d'erreur ——————————————————————————————————————
+    if not df_ts.empty:
+        fig_err_ts = px.line(
+            df_ts,
+            x="date", y="error_rate_pct",
+            color="model_name",
+            title="Évolution du taux d'erreur d'exécution (%)",
+            labels={"date": "Date", "error_rate_pct": "Erreurs (%)", "model_name": "Modèle"},
+            markers=True,
+        )
+        fig_err_ts.add_hline(
+            y=5, line_dash="dash", line_color="#e67e22",
+            annotation_text="Warning 5 %", annotation_position="top right",
+        )
+        fig_err_ts.add_hline(
+            y=10, line_dash="dash", line_color="#c0392b",
+            annotation_text="Critique 10 %", annotation_position="top right",
+        )
+        fig_err_ts.update_layout(
+            legend_title_text="Modèle",
+            yaxis_rangemode="tozero",
+            yaxis_title="Erreurs (%)",
+        )
+    else:
+        fig_err_ts = go.Figure()
+        fig_err_ts.update_layout(
+            title="Évolution du taux d'erreur d'exécution (%)",
+            annotations=[dict(
+                text="Pas de données temporelles disponibles",
+                showarrow=False, xref="paper", yref="paper",
+                x=0.5, y=0.5, font_size=14, font_color="#888",
+            )],
+        )
+    col_err_ts.plotly_chart(fig_err_ts, use_container_width=True)
+
+    # — Évolution de la latence moyenne ————————————————————————————————
+    df_lat = df_ts[df_ts["avg_latency_ms"].notna()].copy() if not df_ts.empty else df_ts
+    if not df_lat.empty:
+        fig_lat = px.line(
+            df_lat,
+            x="date", y="avg_latency_ms",
+            color="model_name",
+            title="Évolution de la latence moyenne de réponse (ms)",
+            labels={
+                "date": "Date",
+                "avg_latency_ms": "Latence moy. (ms)",
+                "model_name": "Modèle",
+            },
+            markers=True,
+        )
+        fig_lat.update_layout(
+            legend_title_text="Modèle",
+            yaxis_rangemode="tozero",
+            yaxis_title="Latence moy. (ms)",
+        )
+    else:
+        fig_lat = go.Figure()
+        fig_lat.update_layout(
+            title="Évolution de la latence moyenne de réponse (ms)",
+            annotations=[dict(
+                text="Pas de données de latence disponibles",
+                showarrow=False, xref="paper", yref="paper",
+                x=0.5, y=0.5, font_size=14, font_color="#888",
+            )],
+        )
+    st.plotly_chart(fig_lat, use_container_width=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
