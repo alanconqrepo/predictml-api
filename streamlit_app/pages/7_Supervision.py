@@ -242,17 +242,107 @@ with _tab_global:
         hide_index=True,
         column_config={
             "Modèle": st.column_config.TextColumn("Modèle", help="Nom du modèle ML déployé."),
-            "Versions": st.column_config.TextColumn("Versions", help="Versions actives."),
-            "Mode": st.column_config.TextColumn("Mode", help="Mode de déploiement actif."),
-            "Prédictions": st.column_config.NumberColumn("Prédictions", help="Prédictions production sur la période."),
-            "Shadow": st.column_config.NumberColumn("Shadow", help="Prédictions shadow sur la période."),
-            "Erreurs": st.column_config.TextColumn("Erreurs", help="Taux d'erreur. Seuil warning 5 %, critique 10 %."),
-            "Latence moy.": st.column_config.TextColumn("Latence moy.", help="Temps de réponse moyen (ms)."),
-            "p95": st.column_config.TextColumn("p95", help="95e percentile du temps de réponse."),
-            "Drift features": st.column_config.TextColumn("Drift features", help="Écart features prod vs baseline."),
-            "Drift perf.": st.column_config.TextColumn("Drift perf.", help="Dégradation accuracy en production."),
-            "Drift sortie": st.column_config.TextColumn("Drift sortie", help="Changement de distribution des labels."),
-            "Statut": st.column_config.TextColumn("Statut", help="🟢 ok · 🟡 warning · 🔴 critical · ⚪ no_data."),
+            "Versions": st.column_config.TextColumn("Versions", help="Versions actives (is_active=True)."),
+            "Mode": st.column_config.TextColumn(
+                "Mode",
+                help=(
+                    "Mode(s) de déploiement des versions actives :\n"
+                    "🟢 Production · 🟠 A/B · 🟣 Shadow · ⚪ — (aucun routage)"
+                ),
+            ),
+            "Prédictions": st.column_config.NumberColumn(
+                "Prédictions",
+                help=(
+                    "Prédictions production retournées aux clients (is_shadow=False) "
+                    "sur la période sélectionnée."
+                ),
+            ),
+            "Shadow": st.column_config.NumberColumn(
+                "Shadow",
+                help=(
+                    "Prédictions silencieuses (is_shadow=True) calculées en arrière-plan "
+                    "et non retournées au client.\n"
+                    "Utilisées pour comparer de nouvelles versions sans impacter le trafic réel."
+                ),
+            ),
+            "Erreurs": st.column_config.TextColumn(
+                "Erreurs",
+                help=(
+                    "Taux d'erreurs d'exécution : COUNT(status ≠ 'success') / COUNT(*)\n\n"
+                    "⚠️ Erreurs serveur uniquement (exception, modèle non chargé, timeout…). "
+                    "Ce n'est PAS un indicateur de qualité ML.\n\n"
+                    "🟡 Warning : ≥ 5 %\n"
+                    "🔴 Critical : ≥ 10 %"
+                ),
+            ),
+            "Latence moy.": st.column_config.TextColumn(
+                "Latence moy.",
+                help=(
+                    "Temps de réponse moyen (ms) calculé sur les requêtes réussies "
+                    "(status = 'success') sur la période."
+                ),
+            ),
+            "p95": st.column_config.TextColumn(
+                "p95",
+                help=(
+                    "95e percentile de latence : 95 % des requêtes réussies sont traitées "
+                    "en moins de ce temps. Indicateur clé pour détecter les pics de lenteur."
+                ),
+            ),
+            "Drift features": st.column_config.TextColumn(
+                "Drift features",
+                help=(
+                    "Détection de dérive sur chaque feature numérique. "
+                    "Statut = pire parmi 3 métriques :\n\n"
+                    "• Z-score = |moy_prod − moy_baseline| / σ_baseline\n"
+                    "  🟡 Warning : ≥ 2  ·  🔴 Critical : ≥ 3\n\n"
+                    "• PSI (Population Stability Index) sur 10 bins normaux\n"
+                    "  🟡 Warning : ≥ 0.1  ·  🔴 Critical : ≥ 0.2\n\n"
+                    "• Null rate : écart du taux de valeurs manquantes vs baseline\n"
+                    "  🟡 Warning : écart ≥ 5 pts  ·  🔴 Critical : écart ≥ 15 pts ou null > 30 %\n\n"
+                    "⚪ no_baseline = aucune baseline stockée pour ce modèle.\n"
+                    "⚪ insufficient_data = moins de 10 prédictions sur la période."
+                ),
+            ),
+            "Drift perf.": st.column_config.TextColumn(
+                "Drift perf.",
+                help=(
+                    "Détection de dégradation de performance dans le temps.\n\n"
+                    "Méthode : compare la performance moyenne entre la 1ère moitié "
+                    "et la 2ème moitié de la période sélectionnée.\n"
+                    "• Classification : utilise l'accuracy (résultats observés liés requis)\n"
+                    "• Régression : utilise le MAE (une hausse = dégradation)\n\n"
+                    "🟡 Warning : baisse ≥ 5 points\n"
+                    "🔴 Critical : baisse ≥ 10 points\n\n"
+                    "⚪ no_data = moins de 4 jours de données ou aucun résultat observé lié."
+                ),
+            ),
+            "Drift sortie": st.column_config.TextColumn(
+                "Drift sortie",
+                help=(
+                    "Dérive de la distribution des valeurs prédites par le modèle.\n\n"
+                    "Méthode : PSI (Population Stability Index) entre la distribution "
+                    "de prédictions actuelle et la baseline :\n"
+                    "• Classification : distribution des classes prédites\n"
+                    "• Régression : distribution via quartiles d'entraînement\n\n"
+                    "🟡 Warning : PSI ≥ 0.1\n"
+                    "🔴 Critical : PSI ≥ 0.2\n\n"
+                    "⚪ no_baseline = aucun label_distribution stocké pour ce modèle."
+                ),
+            ),
+            "Statut": st.column_config.TextColumn(
+                "Statut",
+                help=(
+                    "Statut de santé global = pire des 4 indicateurs :\n"
+                    "① Taux d'erreur exécution\n"
+                    "② Drift features (Z-score + PSI + null rate)\n"
+                    "③ Drift performance (baisse accuracy/MAE)\n"
+                    "④ Drift sortie (PSI distribution des prédictions)\n\n"
+                    "🟢 ok · 🟡 warning · 🔴 critical\n"
+                    "⚪ no_data / no_baseline / insufficient_data = données insuffisantes "
+                    "(ne dégrade pas le statut global)"
+                ),
+            ),
         },
     )
 
