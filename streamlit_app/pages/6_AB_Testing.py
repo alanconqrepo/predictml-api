@@ -3,7 +3,7 @@ Dashboard A/B Testing & Shadow Deployment
 """
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 import plotly.express as px
@@ -186,14 +186,12 @@ st.divider()
 # ===========================================================================
 st.subheader("📊 Comparaison des versions")
 
-period_label = st.radio(
-    "Période d'analyse",
-    ["7 jours", "14 jours", "30 jours"],
-    horizontal=True,
-    key="ab_period",
+_cmp_c1, _cmp_c2 = st.columns(2)
+_ab_start = _cmp_c1.date_input(
+    "Date début", value=date.today() - timedelta(days=30), key="ab_start_date"
 )
-days_map = {"7 jours": 7, "14 jours": 14, "30 jours": 30}
-days = days_map[period_label]
+_ab_end = _cmp_c2.date_input("Date fin", value=date.today(), key="ab_end_date")
+days = max((_ab_end - _ab_start).days, 1)
 
 try:
     ab_data = client.get_ab_comparison(selected_model, days=days)
@@ -207,29 +205,66 @@ except Exception as e:
 if not versions_stats:
     st.info("Aucune prédiction enregistrée pour ce modèle sur la période sélectionnée.")
 else:
-    # KPI cards par version
-    num_versions = len(versions_stats)
-    kpi_cols = st.columns(num_versions)
-    for i, vs in enumerate(versions_stats):
-        mode = vs.get("deployment_mode") or "legacy"
-        mode_badge = {"ab_test": "🟠 A/B", "shadow": "🟣 Shadow", "production": "🟢 Prod"}.get(
-            mode, f"⚪ {mode}"
-        )
+    # --- Tableau de comparaison ---
+    _BADGE_CMP = {"ab_test": "🟠 A/B", "shadow": "🟣 Shadow", "production": "🟢 Prod"}
+    _vfm_lookup = {v["version"]: v for v in versions_for_model}
+
+    _rows = []
+    for vs in versions_stats:
+        ver = vs["version"]
+        meta = _vfm_lookup.get(ver, {})
+        mode = vs.get("deployment_mode") or ""
         weight = vs.get("traffic_weight")
-        weight_str = f" — `{weight:.0%}`" if weight is not None else ""
-        with kpi_cols[i]:
-            st.markdown(f"**v{vs['version']}** {mode_badge}{weight_str}")
-            st.metric("Prédictions (prod)", vs["total_predictions"])
-            st.metric("Shadow", vs["shadow_predictions"])
-            err_rate = vs.get("error_rate", 0)
-            st.metric("Taux d'erreur", f"{err_rate:.1%}", help=METRIC_HELP["taux_erreur"])
-            avg_rt = vs.get("avg_response_time_ms")
-            p95_rt = vs.get("p95_response_time_ms")
-            st.metric("Latence avg (ms)", f"{avg_rt:.1f}" if avg_rt is not None else "—", help=METRIC_HELP["latence_avg"])
-            st.metric("Latence p95 (ms)", f"{p95_rt:.1f}" if p95_rt is not None else "—", help=METRIC_HELP["latence_p95"])
-            agree = vs.get("agreement_rate")
-            if agree is not None:
-                st.metric("Concordance shadow", f"{agree:.1%}", help=METRIC_HELP["concordance_shadow"])
+        created_raw = meta.get("created_at") or meta.get("upload_date")
+        try:
+            created_str = datetime.fromisoformat(
+                created_raw.replace("Z", "+00:00")
+            ).strftime("%Y-%m-%d") if created_raw else "—"
+        except Exception:
+            created_str = str(created_raw)[:10] if created_raw else "—"
+
+        _rows.append({
+            "Version":       ver,
+            "Mode":          _BADGE_CMP.get(mode, f"⚪ {mode or '—'}"),
+            "Poids":         f"{weight:.0%}" if weight is not None else "—",
+            "Algorithme":    meta.get("algorithm") or "—",
+            "Créé le":       created_str,
+            "Créateur":      meta.get("creator_username") or "—",
+            "Préd. (prod)":  vs.get("total_predictions", 0),
+            "Shadow":        vs.get("shadow_predictions", 0),
+            "Err. (%)":      round(vs.get("error_rate", 0) * 100, 2) if vs.get("error_rate") is not None else None,
+            "Lat. avg (ms)": round(vs["avg_response_time_ms"], 1) if vs.get("avg_response_time_ms") is not None else None,
+            "Lat. p95 (ms)": round(vs["p95_response_time_ms"], 1) if vs.get("p95_response_time_ms") is not None else None,
+            "Concordance":   round(vs["agreement_rate"] * 100, 1) if vs.get("agreement_rate") is not None else None,
+            "Accuracy":      meta.get("accuracy"),
+            "F1":            meta.get("f1_score"),
+            "R²":            meta.get("r2_score"),
+            "RMSE":          meta.get("rmse"),
+        })
+
+    st.dataframe(
+        pd.DataFrame(_rows),
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Version":      st.column_config.TextColumn("Version"),
+            "Mode":         st.column_config.TextColumn("Mode"),
+            "Poids":        st.column_config.TextColumn("Poids", help="Part de trafic allouée à cette version."),
+            "Algorithme":   st.column_config.TextColumn("Algorithme"),
+            "Créé le":      st.column_config.TextColumn("Créé le"),
+            "Créateur":     st.column_config.TextColumn("Créateur"),
+            "Préd. (prod)": st.column_config.NumberColumn("Préd. (prod)", help=METRIC_HELP.get("predictions_prod", "Prédictions hors shadow.")),
+            "Shadow":       st.column_config.NumberColumn("Shadow", help=METRIC_HELP.get("shadow_predictions", "Prédictions shadow (non exposées au client).")),
+            "Err. (%)":     st.column_config.NumberColumn("Err. (%)", format="%.2f %%", help=METRIC_HELP.get("taux_erreur", "Taux d'erreur API sur la période.")),
+            "Lat. avg (ms)":st.column_config.NumberColumn("Lat. avg (ms)", format="%.1f", help=METRIC_HELP.get("latence_avg", "Latence moyenne de réponse.")),
+            "Lat. p95 (ms)":st.column_config.NumberColumn("Lat. p95 (ms)", format="%.1f", help=METRIC_HELP.get("latence_p95", "95e percentile de latence.")),
+            "Concordance":  st.column_config.NumberColumn("Concordance (%)", format="%.1f %%", help=METRIC_HELP.get("concordance_shadow", "Taux d'accord entre shadow et prod.")),
+            "Accuracy":     st.column_config.NumberColumn("Accuracy", format="%.3f", help="Accuracy sur le jeu de test à l'entraînement."),
+            "F1":           st.column_config.NumberColumn("F1", format="%.3f", help="F1-score sur le jeu de test à l'entraînement."),
+            "R²":           st.column_config.NumberColumn("R²", format="%.3f", help="Coefficient de détermination (régression)."),
+            "RMSE":         st.column_config.NumberColumn("RMSE", format="%.4f", help="Root Mean Squared Error (régression)."),
+        },
+    )
 
     # ===========================================================================
     # Bloc significativité statistique
