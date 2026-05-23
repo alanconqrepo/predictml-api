@@ -92,14 +92,14 @@ if is_admin:
             row_cols[0].markdown(f"`{ver}`")
 
             # Mode actuel (badge)
-            row_cols[1].markdown(_MODE_TO_LABEL.get(mode_current, f"⚪ {mode_current or '—'}"))
+            row_cols[1].markdown(_MODE_TO_LABEL.get(mode_current, "⚪ —"))
 
             # Poids actuel
             row_cols[2].markdown(
                 f"`{weight_current:.0%}`" if weight_current is not None else "—"
             )
 
-            # Nouveau mode — badge pré-rempli ; "—" si mode inconnu (ex: uploaded)
+            # Nouveau mode — badge pré-rempli ; "—" si mode inconnu ou non défini
             _cur_label = _MODE_TO_LABEL.get(mode_current)   # None si mode inconnu
             _default_idx = _MODE_LABELS.index(_cur_label) if _cur_label else 0  # 0 = "—"
             new_mode_label = row_cols[3].selectbox(
@@ -285,7 +285,7 @@ if not versions_stats:
     st.info("Aucune prédiction enregistrée pour ce modèle sur la période sélectionnée.")
 else:
     # --- Tableau de comparaison ---
-    _BADGE_CMP = {"ab_test": "🟠 A/B", "shadow": "🟣 Shadow", "production": "🟢 Prod"}
+    _BADGE_CMP = {"ab_test": "🟠 A/B", "shadow": "🟣 Shadow", "production": "🟢 Production"}
     _vfm_lookup = {v["version"]: v for v in versions_for_model}
 
     # Détecter si le modèle sélectionné est de régression (depuis n'importe quelle version)
@@ -318,7 +318,7 @@ else:
 
         _rows.append({
             "Version":        ver,
-            "Mode":           _BADGE_CMP.get(mode, f"⚪ {mode or '—'}"),
+            "Mode":           _BADGE_CMP.get(mode, "⚪ —"),
             "Poids":          f"{weight:.0%}" if weight is not None else "—",
             "Algorithme":     meta.get("algorithm") or "—",
             "Créé le":        created_str,

@@ -7,7 +7,7 @@ Statut : uploadé uniquement — pas en production, pas en shadow.
 
 Déploiement :
   - is_production = False
-  - deployment_mode = "uploaded"
+  - deployment_mode = None  (aucun routage)
   - tag "Example"
 
 Usage :
@@ -162,7 +162,7 @@ if response.status_code not in (200, 201):
 res = response.json()
 print(f"✅  {res.get('name')} v{res.get('version')} uploadé (id={res.get('id')})")
 
-patch_body = {"is_production": False, "deployment_mode": "uploaded", "tags": ["Example"]}
+patch_body = {"tags": ["Example"]}
 if metrics.get("feature_stats"):
     patch_body["feature_baseline"] = metrics["feature_stats"]
 if metrics.get("confidence_threshold") is not None:
@@ -173,5 +173,5 @@ patch = requests.patch(
     headers={**HEADERS, "Content-Type": "application/json"},
     json=patch_body, timeout=30,
 )
-print("✅  Statut 'uploaded' configuré." if patch.status_code == 200 else f"⚠️   PATCH échoué ({patch.status_code})")
+print("✅  Tag 'Example' ajouté (is_production=False, pas de deployment_mode)." if patch.status_code == 200 else f"⚠️   PATCH échoué ({patch.status_code})")
 print(f"\n   → Dashboard : {API_URL.replace(':8000', ':8501')}/Models")

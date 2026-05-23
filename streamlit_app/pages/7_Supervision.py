@@ -14,6 +14,13 @@ import streamlit as st
 from utils.auth import get_client, require_auth
 from utils.metrics_help import METRIC_HELP
 
+# Labels de mode cohérents avec les pages Modèles et A/B Testing
+_MODE_LABEL = {
+    "production": "🟢 Production",
+    "ab_test":    "🟠 A/B",
+    "shadow":     "🟣 Shadow",
+}
+
 st.set_page_config(
     page_title="Supervision — PredictML",
     page_icon="🔍",
@@ -199,7 +206,9 @@ with _tab_global:
         rows_table.append({
             "Modèle": m["model_name"],
             "Versions": ", ".join(m.get("versions", [])),
-            "Mode": ", ".join(sorted(set(v for v in m.get("deployment_modes", {}).values() if v))) or "—",
+            "Mode": ", ".join(sorted(set(
+                _MODE_LABEL.get(v, "⚪ —") for v in m.get("deployment_modes", {}).values() if v
+            ))) or "—",
             "Prédictions": m["total_predictions"],
             "Shadow": m["shadow_predictions"],
             "Erreurs": f"{m['error_rate'] * 100:.1f} %",
@@ -326,7 +335,7 @@ with _tab_detail:
         if per_version:
             df_ver = pd.DataFrame([{
                 "Version": v["version"],
-                "Mode": v.get("deployment_mode") or "—",
+                "Mode": _MODE_LABEL.get(v.get("deployment_mode") or "", "⚪ —"),
                 "Poids trafic": f"{v['traffic_weight']:.0%}" if v.get("traffic_weight") else "—",
                 "Prédictions": v["total_predictions"],
                 "Shadow": v["shadow_predictions"],
