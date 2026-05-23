@@ -893,6 +893,12 @@ with _tab_detail:
 
         # Prédictions anomales
         st.markdown("**🚨 Prédictions anomales**")
+        st.caption(
+            "Une prédiction est marquée **anomale** lorsqu'au moins une de ses features d'entrée "
+            "présente un Z-score ≥ seuil par rapport aux données d'entraînement. "
+            "Ces prédictions ont été reçues sur des entrées inhabituelles — "
+            "le modèle a potentiellement extrapolé hors de sa zone de confiance."
+        )
         _anom_col1, _anom_col2 = st.columns([1, 2])
         _anom_days = _anom_col1.number_input(
             "Fenêtre (jours)", min_value=1, max_value=90,
@@ -901,7 +907,14 @@ with _tab_detail:
         _anom_z = _anom_col2.slider(
             "Seuil z-score", min_value=1.0, max_value=6.0, value=3.0, step=0.1,
             format="%.1f", key="anom_z_threshold",
-            help="Features dont |z| ≥ seuil sont considérées aberrantes.",
+            help=(
+                "Seuil de détection : une feature est considérée aberrante si\n\n"
+                "Z = |valeur reçue − moyenne entraînement| / écart-type entraînement ≥ seuil\n\n"
+                "• Z = 2 → valeur à 2 écarts-types de la moyenne (5 % d'occurrence si distribution normale)\n"
+                "• Z = 3 → valeur à 3 écarts-types (0.3 % d'occurrence) — anomalie forte\n\n"
+                "Abaisser le seuil remonte plus d'anomalies (moins strict). "
+                "Le remonter filtre uniquement les cas extrêmes."
+            ),
         )
         try:
             _anom_data = client.get_predictions_anomalies(
@@ -921,62 +934,205 @@ with _tab_detail:
                 _rate  = _anom_data.get("anomaly_rate", 0.0)
                 _preds = _anom_data.get("predictions", [])
                 _mc1, _mc2, _mc3 = st.columns(3)
-                _mc1.metric("Prédictions analysées", _total)
-                _mc2.metric("Prédictions anomales", _count)
-                _mc3.metric("Taux d'anomalie", f"{_rate:.1%}")
+                _mc1.metric("Prédictions analysées", _total,
+                            help=f"Prédictions récentes analysées sur les {_anom_days} derniers jours.")
+                _mc2.metric("Prédictions anomales", _count,
+                            help=f"Prédictions avec au moins une feature dont |Z| ≥ {_anom_z:.1f}.")
+                _mc3.metric("Taux d'anomalie", f"{_rate:.1%}",
+                            help="Part des prédictions anomales parmi les prédictions analysées.")
                 if not _preds:
                     st.success(f"Aucune anomalie détectée (z ≥ {_anom_z:.1f}) sur {_total} prédiction(s).")
                 else:
+                    # Trier par z-score max décroissant — ordre stable pour le sélecteur
+                    _preds_sorted = sorted(
+                        _preds,
+                        key=lambda x: -max(f["z_score"] for f in x["anomalous_features"].values()),
+                    )
                     _rows_anom = []
-                    for _p in _preds:
+                    for _p in _preds_sorted:
                         _feats = _p.get("anomalous_features", {})
                         _worst_z_val = max((_f["z_score"] for _f in _feats.values()), default=0.0)
-                        _feat_names = ", ".join(f"{_fn} (z={_fd['z_score']:.2f})" for _fn, _fd in _feats.items())
+                        _feat_names = ", ".join(
+                            f"{_fn} (z={_fd['z_score']:.2f})"
+                            for _fn, _fd in sorted(_feats.items(), key=lambda x: -x[1]["z_score"])
+                        )
                         _rows_anom.append({
                             "ID": _p["prediction_id"],
-                            "Timestamp": _p["timestamp"],
+                            "Timestamp": _p["timestamp"][:19].replace("T", " "),
                             "Résultat": str(_p.get("prediction_result", "")),
-                            "Confiance": f"{_p['max_confidence']:.2%}" if _p.get("max_confidence") is not None else "—",
+                            "Confiance": (
+                                f"{_p['max_confidence']:.2%}"
+                                if _p.get("max_confidence") is not None else "—"
+                            ),
                             "Z-score max": round(_worst_z_val, 2),
                             "Features aberrantes": _feat_names,
                         })
-                    _df_anom = pd.DataFrame(_rows_anom).sort_values("Z-score max", ascending=False)
+                    _df_anom = pd.DataFrame(_rows_anom)
                     st.dataframe(
                         _df_anom, width='stretch', hide_index=True,
                         column_config={
-                            "ID": st.column_config.NumberColumn("ID", help="Identifiant de la prédiction."),
-                            "Timestamp": st.column_config.TextColumn("Timestamp"),
-                            "Résultat": st.column_config.TextColumn("Résultat"),
-                            "Confiance": st.column_config.TextColumn("Confiance"),
-                            "Z-score max": st.column_config.NumberColumn("Z-score max", help="|Z| le plus élevé.", format="%.2f"),
-                            "Features aberrantes": st.column_config.TextColumn("Features aberrantes"),
+                            "ID": st.column_config.NumberColumn(
+                                "ID",
+                                help="Identifiant unique de la prédiction dans la base.",
+                            ),
+                            "Timestamp": st.column_config.TextColumn(
+                                "Timestamp",
+                                help="Date et heure de la prédiction.",
+                            ),
+                            "Résultat": st.column_config.TextColumn(
+                                "Résultat",
+                                help=(
+                                    "Valeur prédite par le modèle pour cette requête. "
+                                    "Peut être moins fiable si plusieurs features sont aberrantes."
+                                ),
+                            ),
+                            "Confiance": st.column_config.TextColumn(
+                                "Confiance",
+                                help=(
+                                    "Probabilité max retournée par le modèle (classifieurs uniquement). "
+                                    "— pour les modèles de régression. "
+                                    "Une confiance haute sur une prédiction anomale est un signal fort "
+                                    "de sur-confiance du modèle hors de sa zone d'entraînement."
+                                ),
+                            ),
+                            "Z-score max": st.column_config.NumberColumn(
+                                "Z-score max",
+                                format="%.2f",
+                                help=(
+                                    "Z-score le plus élevé parmi toutes les features aberrantes "
+                                    "de cette prédiction.\n\n"
+                                    "Z = |valeur reçue − μ entraînement| / σ entraînement\n\n"
+                                    "Plus Z est élevé, plus l'entrée est atypique par rapport "
+                                    "aux données vues à l'entraînement."
+                                ),
+                            ),
+                            "Features aberrantes": st.column_config.TextColumn(
+                                "Features aberrantes",
+                                help=(
+                                    "Features dont |Z| ≥ seuil, classées par Z-score décroissant. "
+                                    "Format : nom_feature (z=X.XX). "
+                                    "Sélectionnez une ligne ci-dessous pour voir le détail complet."
+                                ),
+                            ),
                         },
                     )
-                    with st.expander("Détail des features par prédiction", expanded=False):
-                        for _p in sorted(_preds, key=lambda x: -max(f["z_score"] for f in x["anomalous_features"].values())):
-                            _feats = _p.get("anomalous_features", {})
-                            st.markdown(
-                                f"**Prédiction #{_p['prediction_id']}** — {_p['timestamp'][:19]}  "
-                                f"résultat : `{_p.get('prediction_result')}`"
+
+                    # ── Sélecteur de prédiction pour le détail ──────────────
+                    st.markdown("##### 🔍 Détail d'une prédiction")
+                    _sel_labels = [
+                        f"#{_p['prediction_id']}  ·  {_p['timestamp'][:16].replace('T', ' ')}  "
+                        f"·  z_max = {max(f['z_score'] for f in _p['anomalous_features'].values()):.2f}"
+                        f"  ({', '.join(sorted(_p['anomalous_features'].keys())[:2])}"
+                        f"{'…' if len(_p['anomalous_features']) > 2 else ''})"
+                        for _p in _preds_sorted
+                    ]
+                    _pred_by_label = dict(zip(_sel_labels, _preds_sorted))
+                    _sel_label = st.selectbox(
+                        "Prédiction à inspecter",
+                        options=_sel_labels,
+                        index=0,
+                        key="anom_detail_sel",
+                        label_visibility="collapsed",
+                        placeholder="Sélectionnez une prédiction…",
+                    )
+                    if _sel_label:
+                        _sel_pred = _pred_by_label[_sel_label]
+                        _feats = _sel_pred.get("anomalous_features", {})
+                        _feats_sorted = sorted(_feats.items(), key=lambda x: -x[1]["z_score"])
+
+                        with st.container(border=True):
+                            # En-tête
+                            _hc1, _hc2, _hc3 = st.columns([3, 1, 1])
+                            _hc1.markdown(
+                                f"**Prédiction #{_sel_pred['prediction_id']}**  ·  "
+                                f"{_sel_pred['timestamp'][:19].replace('T', ' ')}"
                             )
-                            _feat_rows = [{
-                                "Feature": _fn,
-                                "Valeur": round(_fd["value"], 4),
-                                "Z-score": round(_fd["z_score"], 4),
-                                "Baseline μ": round(_fd["baseline_mean"], 4),
-                                "Baseline σ": round(_fd["baseline_std"], 4),
-                            } for _fn, _fd in sorted(_feats.items(), key=lambda x: -x[1]["z_score"])]
-                            st.dataframe(
-                                pd.DataFrame(_feat_rows), width='stretch', hide_index=True,
-                                column_config={
-                                    "Feature": st.column_config.TextColumn("Feature"),
-                                    "Valeur": st.column_config.NumberColumn("Valeur", format="%.4f"),
-                                    "Z-score": st.column_config.NumberColumn("Z-score", format="%.4f"),
-                                    "Baseline μ": st.column_config.NumberColumn("Baseline μ", format="%.4f"),
-                                    "Baseline σ": st.column_config.NumberColumn("Baseline σ", format="%.4f"),
-                                },
-                            )
-                            st.divider()
+                            _hc2.metric("Résultat", str(_sel_pred.get("prediction_result", "")))
+                            if _sel_pred.get("max_confidence") is not None:
+                                _hc3.metric("Confiance", f"{_sel_pred['max_confidence']:.2%}")
+
+                            # Graphique + tableau côte à côte
+                            _dc1, _dc2 = st.columns([1, 1])
+
+                            with _dc1:
+                                st.caption("Z-scores des features aberrantes")
+                                _z_df = pd.DataFrame([
+                                    {"Feature": fn, "Z-score": round(fd["z_score"], 2)}
+                                    for fn, fd in _feats_sorted
+                                ])
+                                _z_max_val = _z_df["Z-score"].max()
+                                _fig_z = px.bar(
+                                    _z_df, x="Z-score", y="Feature", orientation="h",
+                                    color="Z-score",
+                                    color_continuous_scale=[
+                                        [0.0, "#f39c12"], [0.5, "#e67e22"], [1.0, "#c0392b"]
+                                    ],
+                                    range_color=[_anom_z, max(_z_max_val, _anom_z + 0.1)],
+                                    height=max(160, len(_feats_sorted) * 48 + 60),
+                                    labels={"Z-score": "Z-score", "Feature": ""},
+                                )
+                                _fig_z.add_vline(
+                                    x=_anom_z, line_dash="dash", line_color="#7f8c8d",
+                                    annotation_text=f"Seuil {_anom_z:.1f}",
+                                    annotation_position="top right",
+                                )
+                                _fig_z.update_layout(
+                                    margin=dict(l=0, r=10, t=10, b=30),
+                                    yaxis=dict(autorange="reversed"),
+                                    coloraxis_showscale=False,
+                                    showlegend=False,
+                                )
+                                st.plotly_chart(_fig_z, use_container_width=True)
+
+                            with _dc2:
+                                st.caption("Valeurs reçues vs baseline d'entraînement")
+                                _feat_detail_rows = [{
+                                    "Feature": fn,
+                                    "Valeur reçue": round(fd["value"], 4),
+                                    "Moy. entraîn. (μ)": round(fd["baseline_mean"], 4),
+                                    "Écart-type (σ)": round(fd["baseline_std"], 4),
+                                    "Plage normale": (
+                                        f"[{fd['baseline_mean'] - 2*fd['baseline_std']:.3g}"
+                                        f" – {fd['baseline_mean'] + 2*fd['baseline_std']:.3g}]"
+                                    ),
+                                    "Z-score": round(fd["z_score"], 2),
+                                } for fn, fd in _feats_sorted]
+                                st.dataframe(
+                                    pd.DataFrame(_feat_detail_rows),
+                                    hide_index=True,
+                                    use_container_width=True,
+                                    column_config={
+                                        "Feature": st.column_config.TextColumn("Feature"),
+                                        "Valeur reçue": st.column_config.NumberColumn(
+                                            "Valeur reçue", format="%.4f",
+                                            help="Valeur reçue dans la requête de prédiction.",
+                                        ),
+                                        "Moy. entraîn. (μ)": st.column_config.NumberColumn(
+                                            "μ entraîn.", format="%.4f",
+                                            help="Moyenne de cette feature dans le dataset d'entraînement.",
+                                        ),
+                                        "Écart-type (σ)": st.column_config.NumberColumn(
+                                            "σ entraîn.", format="%.4f",
+                                            help="Écart-type de cette feature dans le dataset d'entraînement.",
+                                        ),
+                                        "Plage normale": st.column_config.TextColumn(
+                                            "Plage normale [μ±2σ]",
+                                            help=(
+                                                "Intervalle μ ± 2σ — 95 % des valeurs d'entraînement "
+                                                "se situaient dans cette plage. "
+                                                "Une valeur hors de cette plage est statistiquement rare."
+                                            ),
+                                        ),
+                                        "Z-score": st.column_config.NumberColumn(
+                                            "Z-score", format="%.2f",
+                                            help=(
+                                                "Z = |valeur reçue − μ| / σ\n\n"
+                                                "Nombre d'écarts-types séparant la valeur reçue "
+                                                "de la moyenne d'entraînement."
+                                            ),
+                                        ),
+                                    },
+                                )
 
     # ────────────────────────────────────────────────────────────────────
     # EXPANDER 4 — Comparaison A/B & Shadow
