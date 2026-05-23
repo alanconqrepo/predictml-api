@@ -437,10 +437,9 @@ _filter_cols = st.columns([3, 2, 2]) if _all_tags else st.columns([3, 2])
 
 with _filter_cols[0]:
     search_query = st.text_input(
-        "Rechercher",
-        placeholder="Nom ou description…",
+        "Nom ou description",
+        placeholder="Rechercher…",
         key="models_search",
-        label_visibility="collapsed",
     )
 
 with _filter_cols[1]:
