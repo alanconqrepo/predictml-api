@@ -262,7 +262,7 @@ else:
     }
 
     # Colonnes toujours visibles
-    _base_cols = ["Version", "Mode", "Poids", "Algorithme", "Créé le", "Créateur",
+    _base_cols = ["Version", "Mode", "Algorithme", "Créé le", "Créateur",
                   "Préd. (prod)", "Shadow"]
     # Colonnes de métriques : masquées si toutes les valeurs sont null
     _metric_cols = ["Err. (%)", "Lat. avg (ms)", "Lat. p95 (ms)", "Concordance",
