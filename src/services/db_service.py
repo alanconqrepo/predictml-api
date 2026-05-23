@@ -2046,7 +2046,7 @@ class DBService:
                 ORDER BY model_version, is_shadow
             """)
 
-            # 2. Distribution des labels (production uniquement)
+            # 2. Distribution des labels (production + shadow)
             dist_sql = text(f"""
                 SELECT
                     COALESCE(model_version, 'unknown') AS version,
@@ -2055,7 +2055,6 @@ class DBService:
                 FROM predictions
                 WHERE model_name     = :name
                   AND timestamp      >= :cutoff {end_filter}
-                  AND is_shadow      = false
                   AND status         = 'success'
                   AND prediction_result IS NOT NULL
                 GROUP BY model_version, prediction_result::text
@@ -2181,7 +2180,8 @@ class DBService:
             else:
                 if row.response_time_ms is not None:
                     g["times"].append(row.response_time_ms)
-                if not shadow and row.prediction_result is not None:
+                if row.prediction_result is not None:
+                    # Distribution inclut prod + shadow
                     g["dist"][str(row.prediction_result)] += 1
 
         def _p95(data: list) -> Optional[float]:
@@ -2206,7 +2206,10 @@ class DBService:
                     "error_rate": round(prod["errors"] / total_prod, 4) if total_prod > 0 else 0.0,
                     "avg_response_time_ms": round(sum(times_list) / n, 2) if n > 0 else None,
                     "p95_response_time_ms": _p95(times_list),
-                    "prediction_distribution": dict(prod["dist"]),
+                    "prediction_distribution": {
+                        k: prod["dist"].get(k, 0) + shad["dist"].get(k, 0)
+                        for k in set(prod["dist"]) | set(shad["dist"])
+                    },
                     "response_times": times_list,
                     "error_count": prod["errors"],
                 }

@@ -1241,7 +1241,7 @@ with _tab_detail:
 
                 if _is_reg_ab:
                     # ── Régression : stats pondérées depuis la distribution ──
-                    st.markdown("**📊 Distribution des sorties prédites (régression)**")
+                    st.markdown("**📊 Distribution des sorties prédites — régression (prod + shadow)**")
                     _reg_rows = []
                     for v in ab_versions:
                         _dist = {
@@ -1284,35 +1284,55 @@ with _tab_detail:
                         st.dataframe(
                             _df_reg, hide_index=True, width='stretch',
                             column_config={
-                                "Version": st.column_config.TextColumn("Version"),
+                                "Version": st.column_config.TextColumn(
+                                    "Version",
+                                    help="Numéro de version du modèle. La ligne Δ montre l'écart entre les deux versions.",
+                                ),
                                 "N": st.column_config.NumberColumn(
-                                    "N prédictions",
-                                    help="Nombre de prédictions production sur la période.",
+                                    "N (prod + shadow)",
+                                    help=(
+                                        "Nombre total de prédictions analysées pour cette version "
+                                        "(production **et** shadow confondus).\n\n"
+                                        "Inclure le shadow permet de comparer même les versions "
+                                        "qui ne reçoivent pas encore de trafic réel."
+                                    ),
                                 ),
                                 "Moyenne ŷ": st.column_config.NumberColumn(
                                     "Moyenne ŷ", format="%.3f",
                                     help=(
-                                        "Valeur prédite moyenne. "
-                                        "Un écart entre versions indique un biais systématique — "
-                                        "les deux modèles ne prédisent pas la même plage de valeurs."
+                                        "Valeur prédite moyenne sur toutes les requêtes (prod + shadow).\n\n"
+                                        "Un écart entre versions révèle un **biais systématique** : "
+                                        "les deux modèles ne ciblent pas la même plage de valeurs. "
+                                        "Exemple : l'une prédit en moyenne 6.1 et l'autre 5.8 "
+                                        "pour les mêmes entrées.\n\n"
+                                        "La ligne Δ montre directement cet écart."
                                     ),
                                 ),
                                 "Écart-type σ": st.column_config.NumberColumn(
                                     "Écart-type σ", format="%.3f",
                                     help=(
-                                        "Dispersion des prédictions autour de la moyenne. "
-                                        "Un σ très différent entre versions peut indiquer "
-                                        "un comportement divergent (une version est plus "
-                                        "« prudente » que l'autre)."
+                                        "Dispersion des prédictions autour de la moyenne.\n\n"
+                                        "Un σ faible = prédictions groupées (modèle conservateur). "
+                                        "Un σ élevé = prédictions étalées (modèle plus expressif).\n\n"
+                                        "Si σ diffère beaucoup entre versions, les deux modèles "
+                                        "n'ont pas le même comportement face aux cas extrêmes."
                                     ),
                                 ),
                                 "Min": st.column_config.NumberColumn(
                                     "Min", format="%.3f",
-                                    help="Valeur prédite minimale — utile pour détecter des extrapolations basses.",
+                                    help=(
+                                        "Valeur prédite la plus basse observée sur la période.\n\n"
+                                        "Un Min très bas par rapport à la baseline peut indiquer "
+                                        "que le modèle extrapole en dehors de sa plage d'entraînement."
+                                    ),
                                 ),
                                 "Max": st.column_config.NumberColumn(
                                     "Max", format="%.3f",
-                                    help="Valeur prédite maximale — utile pour détecter des extrapolations hautes.",
+                                    help=(
+                                        "Valeur prédite la plus haute observée sur la période.\n\n"
+                                        "Un Max très élevé peut signaler des extrapolations anormales "
+                                        "sur des entrées inhabituelles."
+                                    ),
                                 ),
                             },
                         )
@@ -1339,7 +1359,7 @@ with _tab_detail:
 
                 elif _all_dist_labels:
                     # ── Classification : barres 100 % empilées ──────────────
-                    st.markdown("**📊 Répartition des classes prédites**")
+                    st.markdown("**📊 Répartition des classes prédites (prod + shadow)**")
                     # Table % + count
                     _cls_rows_pct = []
                     for v in ab_versions:
@@ -1348,14 +1368,43 @@ with _tab_detail:
                             for k, c in v.get("prediction_distribution", {}).items()
                         }
                         _total = sum(_dist.values()) or 1
-                        _row = {"Version": v["version"], "Total": sum(_dist.values())}
+                        _row = {"Version": v["version"], "Total (prod+shadow)": sum(_dist.values())}
                         for _lbl in _all_dist_labels:
                             _cnt = _dist.get(_lbl, 0)
                             _row[f"Cl. {_lbl}"] = f"{_cnt / _total:.1%}  ({_cnt})"
                         _cls_rows_pct.append(_row)
+
+                    # column_config dynamique : une entrée par classe
+                    _cls_col_cfg = {
+                        "Version": st.column_config.TextColumn(
+                            "Version",
+                            help="Numéro de version du modèle.",
+                        ),
+                        "Total (prod+shadow)": st.column_config.NumberColumn(
+                            "Total (prod+shadow)",
+                            help=(
+                                "Nombre total de prédictions analysées (production + shadow).\n\n"
+                                "Inclure le shadow permet de comparer même les versions qui "
+                                "ne reçoivent pas encore de trafic réel."
+                            ),
+                        ),
+                    }
+                    for _lbl in _all_dist_labels:
+                        _cls_col_cfg[f"Cl. {_lbl}"] = st.column_config.TextColumn(
+                            f"Classe {_lbl}",
+                            help=(
+                                f"Part des prédictions classées **{_lbl}** sur le total "
+                                f"(prod + shadow), suivie du nombre brut entre parenthèses.\n\n"
+                                "Si la répartition diffère beaucoup entre versions, les modèles "
+                                "n'ont pas le même comportement — à investiguer avec les "
+                                "résultats observés."
+                            ),
+                        )
                     st.dataframe(
                         pd.DataFrame(_cls_rows_pct), hide_index=True, width='stretch',
+                        column_config=_cls_col_cfg,
                     )
+
                     # Graphique 100 % empilé
                     _pct_plot = []
                     for v in ab_versions:
@@ -1380,12 +1429,12 @@ with _tab_detail:
                         labels={"%": "Part (%)", "Classe": "Classe prédite"},
                         color_discrete_sequence=px.colors.qualitative.Set2,
                         custom_data=["N"],
-                        title="Répartition des classes prédites (%)",
+                        title="Répartition des classes prédites — prod + shadow (%)",
                     )
                     _fig_pct.update_traces(
                         hovertemplate=(
                             "Classe %{fullData.name}<br>"
-                            "%{y:.1f}%  (%{customdata[0]} prédictions)"
+                            "%{y:.1f}%  (%{customdata[0]} prédictions prod+shadow)"
                             "<extra></extra>"
                         ),
                     )
