@@ -59,7 +59,7 @@ st.divider()
 # SECTION 1 — Configuration du déploiement (admin seulement)
 # ===========================================================================
 if is_admin:
-    with st.expander("⚙️ Configuration A/B / Shadow", expanded=True):
+    with st.expander("⚙️ Configuration A/B / Shadow", expanded=True):  # premier expander — ouvert par défaut
         st.markdown(
             "Configurez le mode de déploiement et le poids de trafic de chaque version. "
             "La somme des poids A/B doit être **≤ 1.0**."
@@ -376,7 +376,7 @@ else:
 
     st.dataframe(_df, width="stretch", hide_index=True, column_config=_col_config)
 
-    with st.expander("🟠 A/B Test", expanded=True):
+    with st.expander("🟠 A/B Test", expanded=False):
         # ===========================================================================
         # Bloc significativité statistique
         # ===========================================================================
@@ -690,7 +690,7 @@ else:
                 else:
                     st.info("Pas de distribution disponible.")
 
-    with st.expander("🟣 Shadow Deployment", expanded=True):
+    with st.expander("🟣 Shadow Deployment", expanded=False):
         # Taux de concordance shadow
         shadow_versions = [vs for vs in versions_stats if vs.get("agreement_rate") is not None]
         if shadow_versions:
