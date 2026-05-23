@@ -1,4 +1,4 @@
-"""
+r"""
 seed_sample_data.py — Seed des données exemples au premier démarrage.
 
 $env:API_URL = "http://localhost:80"; $env:API_TOKEN = "18_YgH-4oOQjFe6Ph0FtgUzM_oMolrnz"; $env:PYTHONIOENCODING = "utf-8"; & ".venv\Scripts\python.exe" init_data\seed_sample_data.py
@@ -36,7 +36,7 @@ from pathlib import Path
 
 import requests
 
-API_URL   = os.environ.get("API_URL",   "http://api:8000")
+API_URL = os.environ.get("API_URL", "http://api:8000")
 API_TOKEN = os.environ.get("API_TOKEN", os.environ.get("ADMIN_TOKEN", ""))
 
 if not API_TOKEN:
@@ -52,53 +52,82 @@ SCRIPTS_DIR = Path(__file__).parent.parent / "documentation" / "Scripts"
 SCRIPTS = [
     # ── iris-classifier ──────────────────────────────────────────────────────
     # v1.0.0 : RandomForest — production + ab_test
-    ("iris/upload_iris_model.py",
-     {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.0.0"}),
+    ("iris/upload_iris_model.py", {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.0.0"}),
     # v1.1.0 : GradientBoosting — production + ab_test
-    ("iris/upload_iris_model_GradientBoosting.py",
-     {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.1.0"}),
+    (
+        "iris/upload_iris_model_GradientBoosting.py",
+        {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.1.0"},
+    ),
     # v1.2.0 : ExtraTrees — shadow
-    ("iris/upload_iris_ExtraTrees_shadow.py",
-     {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.2.0"}),
+    (
+        "iris/upload_iris_ExtraTrees_shadow.py",
+        {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.2.0"},
+    ),
     # v1.3.0 : LogisticRegression — uploadé uniquement
-    ("iris/upload_iris_LogisticRegression_uploaded.py",
-     {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.3.0"}),
-
+    (
+        "iris/upload_iris_LogisticRegression_uploaded.py",
+        {"MODEL_NAME": "iris-classifier", "MODEL_VERSION": "1.3.0"},
+    ),
     # ── wine-regressor ───────────────────────────────────────────────────────
     # v1.0.0 : GradientBoostingRegressor — production + ab_test
-    ("wine/upload_wine_model.py",
-     {"MODEL_NAME": "wine-regressor", "MODEL_VERSION": "1.0.0"}),
+    ("wine/upload_wine_model.py", {"MODEL_NAME": "wine-regressor", "MODEL_VERSION": "1.0.0"}),
     # v1.1.0 : RandomForestRegressor — production + ab_test
-    ("wine/upload_wine_RandomForest_abtest.py",
-     {"MODEL_NAME": "wine-regressor", "MODEL_VERSION": "1.1.0"}),
+    (
+        "wine/upload_wine_RandomForest_abtest.py",
+        {"MODEL_NAME": "wine-regressor", "MODEL_VERSION": "1.1.0"},
+    ),
     # v1.2.0 : ExtraTreesRegressor — shadow
-    ("wine/upload_wine_ExtraTrees_shadow.py",
-     {"MODEL_NAME": "wine-regressor", "MODEL_VERSION": "1.2.0"}),
+    (
+        "wine/upload_wine_ExtraTrees_shadow.py",
+        {"MODEL_NAME": "wine-regressor", "MODEL_VERSION": "1.2.0"},
+    ),
     # v1.3.0 : Ridge — uploadé uniquement
-    ("wine/upload_wine_Ridge_uploaded.py",
-     {"MODEL_NAME": "wine-regressor", "MODEL_VERSION": "1.3.0"}),
-
+    (
+        "wine/upload_wine_Ridge_uploaded.py",
+        {"MODEL_NAME": "wine-regressor", "MODEL_VERSION": "1.3.0"},
+    ),
     # ── cancer-classifier ────────────────────────────────────────────────────────
     # v1.0.0 : RandomForest — production + ab_test
-    ("cancer/upload_cancer_model.py",
-     {"MODEL_NAME": "cancer-classifier", "MODEL_VERSION": "1.0.0"}),
+    (
+        "cancer/upload_cancer_model.py",
+        {"MODEL_NAME": "cancer-classifier", "MODEL_VERSION": "1.0.0"},
+    ),
     # v1.1.0 : GradientBoosting — production + ab_test
-    ("cancer/upload_cancer_GradientBoosting_abtest.py",
-     {"MODEL_NAME": "cancer-classifier", "MODEL_VERSION": "1.1.0"}),
+    (
+        "cancer/upload_cancer_GradientBoosting_abtest.py",
+        {"MODEL_NAME": "cancer-classifier", "MODEL_VERSION": "1.1.0"},
+    ),
     # v1.2.0 : ExtraTrees — shadow
-    ("cancer/upload_cancer_ExtraTrees_shadow.py",
-     {"MODEL_NAME": "cancer-classifier", "MODEL_VERSION": "1.2.0"}),
+    (
+        "cancer/upload_cancer_ExtraTrees_shadow.py",
+        {"MODEL_NAME": "cancer-classifier", "MODEL_VERSION": "1.2.0"},
+    ),
     # v1.3.0 : LogisticRegression — uploadé uniquement
-    ("cancer/upload_cancer_LogisticRegression_uploaded.py",
-     {"MODEL_NAME": "cancer-classifier", "MODEL_VERSION": "1.3.0"}),
-
+    (
+        "cancer/upload_cancer_LogisticRegression_uploaded.py",
+        {"MODEL_NAME": "cancer-classifier", "MODEL_VERSION": "1.3.0"},
+    ),
+    # ── titanic-survival ──────────────────────────────────────────────────────
+    # v1.0.0 : GradientBoosting Pipeline (OneHotEncoder) — production + ab_test
+    (
+        "titanic/upload_titanic_model.py",
+        {"MODEL_NAME": "titanic-survival", "MODEL_VERSION": "1.0.0"},
+    ),
     # ── Prédictions et ground truth ──────────────────────────────────────────
-    ("iris/send_predictions_iris.py",    {"MODEL_NAME": "iris-classifier",   "SLEEP_BETWEEN": "1"}),
-    ("iris/send_ground_truth_iris.py",   {"MODEL_NAME": "iris-classifier"}),
-    ("wine/send_predictions_wine.py",    {"MODEL_NAME": "wine-regressor",    "SLEEP_BETWEEN": "1"}),
-    ("wine/send_ground_truth_wine.py",   {"MODEL_NAME": "wine-regressor"}),
-    ("cancer/send_predictions_cancer.py",  {"MODEL_NAME": "cancer-classifier", "SLEEP_BETWEEN": "1"}),
+    ("iris/send_predictions_iris.py", {"MODEL_NAME": "iris-classifier", "SLEEP_BETWEEN": "1"}),
+    ("iris/send_ground_truth_iris.py", {"MODEL_NAME": "iris-classifier"}),
+    ("wine/send_predictions_wine.py", {"MODEL_NAME": "wine-regressor", "SLEEP_BETWEEN": "1"}),
+    ("wine/send_ground_truth_wine.py", {"MODEL_NAME": "wine-regressor"}),
+    (
+        "cancer/send_predictions_cancer.py",
+        {"MODEL_NAME": "cancer-classifier", "SLEEP_BETWEEN": "1"},
+    ),
     ("cancer/send_ground_truth_cancer.py", {"MODEL_NAME": "cancer-classifier"}),
+    (
+        "titanic/send_predictions_titanic.py",
+        {"MODEL_NAME": "titanic-survival", "SLEEP_BETWEEN": "1"},
+    ),
+    ("titanic/send_ground_truth_titanic.py", {"MODEL_NAME": "titanic-survival"}),
 ]
 
 
@@ -145,7 +174,7 @@ def run_script(script_path_rel: str, extra_env: dict) -> bool:
 
     env = {
         **os.environ,
-        "API_URL":   API_URL,
+        "API_URL": API_URL,
         "API_TOKEN": API_TOKEN,
         **extra_env,
     }
@@ -190,6 +219,7 @@ def main():
     print("    cancer-classifier v1.1.0 GradientBoosting    → production + ab_test")
     print("    cancer-classifier v1.2.0 ExtraTrees          → shadow")
     print("    cancer-classifier v1.3.0 LogisticRegression  → uploadé")
+    print("    titanic-survival  v1.0.0 GradientBoosting+OneHotEncoder → production + ab_test")
 
     for script_path_rel, extra_env in SCRIPTS:
         ok = run_script(script_path_rel, extra_env)
