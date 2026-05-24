@@ -1,4 +1,4 @@
-﻿"""
+"""
 Page publique de demande de création de compte — accessible sans authentification
 """
 
@@ -6,48 +6,46 @@ import os
 
 import requests
 import streamlit as st
+from utils.i18n import t
 
 if st.session_state.get("api_token"):
     st.switch_page("app.py")
 
 DEFAULT_API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
-st.title("📝 Demande d'accès à PredictML")
-st.markdown(
-    "Remplissez ce formulaire pour demander un compte. "
-    "Un administrateur examinera votre demande et vous communiquera votre token d'accès."
-)
+st.title(t("access_request.title"))
+st.markdown(t("access_request.intro"))
 
 api_url = st.session_state.get("api_url", DEFAULT_API_URL)
 
 with st.form("account_request_form"):
     col1, col2 = st.columns(2)
     username = col1.text_input(
-        "Nom d'utilisateur souhaité *",
-        placeholder="jean_dupont",
-        help="Entre 3 et 50 caractères.",
+        t("access_request.username_label"),
+        placeholder=t("access_request.username_placeholder"),
+        help=t("access_request.username_help"),
     )
     email = col2.text_input(
-        "Email *",
-        placeholder="jean@example.com",
+        t("access_request.email_label"),
+        placeholder=t("access_request.email_placeholder"),
     )
     role_requested = st.selectbox(
-        "Type d'accès souhaité",
+        t("access_request.role_label"),
         ["user", "readonly"],
-        format_func=lambda r: "Utilisateur (peut faire des prédictions)" if r == "user" else "Lecture seule",
+        format_func=lambda r: t(f"access_request.role_{r}"),
     )
     message = st.text_area(
-        "Message à l'administrateur (optionnel)",
-        placeholder="Décrivez votre cas d'usage, votre équipe, etc.",
+        t("access_request.message_label"),
+        placeholder=t("access_request.message_placeholder"),
         max_chars=500,
     )
-    submitted = st.form_submit_button("Soumettre ma demande", width='stretch', type="primary")
+    submitted = st.form_submit_button(t("access_request.submit_btn"), width='stretch', type="primary")
 
 if submitted:
     if not username or not email:
-        st.error("Le nom d'utilisateur et l'email sont obligatoires.")
+        st.error(t("access_request.error_required"))
     elif len(username) < 3:
-        st.error("Le nom d'utilisateur doit contenir au moins 3 caractères.")
+        st.error(t("access_request.error_username_short"))
     else:
         try:
             resp = requests.post(
@@ -61,43 +59,24 @@ if submitted:
                 timeout=10,
             )
             if resp.status_code == 201:
-                st.success(
-                    "✅ Votre demande a bien été enregistrée. "
-                    "Un administrateur l'examinera et vous contactera directement "
-                    "pour vous transmettre votre token d'accès."
-                )
-                st.info(f"Référence de votre demande : **#{resp.json()['id']}**")
+                st.success(t("access_request.success"))
+                st.info(t("access_request.reference", id=resp.json()['id']))
             elif resp.status_code == 409:
                 detail = resp.json().get("detail", "")
                 if "en attente" in detail:
-                    st.warning(
-                        "Une demande est déjà en attente pour cet email. "
-                        "Veuillez patienter qu'un administrateur la traite."
-                    )
+                    st.warning(t("access_request.error_pending"))
                 else:
-                    st.error(
-                        "Un compte existe déjà avec cet email ou ce nom d'utilisateur. "
-                        "Si vous avez perdu votre token, contactez un administrateur."
-                    )
+                    st.error(t("access_request.error_exists"))
             elif resp.status_code == 422:
-                st.error("Données invalides : vérifiez l'email et le nom d'utilisateur.")
+                st.error(t("access_request.error_invalid"))
             elif resp.status_code == 429:
-                st.error(
-                    "Trop de demandes soumises récemment. "
-                    "Veuillez réessayer dans quelques instants."
-                )
+                st.error(t("access_request.error_rate_limit"))
             else:
-                st.error(f"Erreur inattendue ({resp.status_code}). Veuillez réessayer.")
+                st.error(t("access_request.error_unexpected", code=resp.status_code))
         except requests.exceptions.ConnectionError:
-            st.error(
-                f"Impossible de joindre l'API ({api_url}). "
-                "Vérifiez l'URL ou contactez un administrateur."
-            )
+            st.error(t("access_request.error_connection", api_url=api_url))
         except Exception as e:
-            st.error(f"Erreur : {e}")
+            st.error(t("access_request.error_generic", error=e))
 
 st.divider()
-st.markdown(
-    "Vous avez déjà un token ? [Connectez-vous sur la page d'accueil](/) ou "
-    "utilisez l'application directement via l'API."
-)
+st.markdown(t("access_request.already_have_token"))
