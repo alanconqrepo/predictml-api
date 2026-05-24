@@ -17,7 +17,12 @@ from alembic.config import Config as AlembicConfig
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, ProcessCollector, generate_latest
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    ProcessCollector,
+    generate_latest,
+)
 from prometheus_client import multiprocess as prom_multiprocess
 from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi import _rate_limit_exceeded_handler
@@ -37,14 +42,22 @@ from src.core.logging import setup_logging
 setup_logging(debug=settings.DEBUG)
 # ──────────────────────────────────────────────────────────────────────────────
 
-from src.api import account_requests, jobs, models, monitoring, observed_results, predict, users
-from src.core.rate_limit import limiter
-from src.core.security import require_admin
-from src.db.database import AsyncSessionLocal, close_db, engine, get_db, init_db
-from src.schemas.health import DependencyDetail, DependencyHealthResponse
-from src.services.db_service import db_service
-from src.services.minio_service import minio_service
-from src.services.model_service import model_service
+from src.api import (  # noqa: E402
+    account_requests,
+    jobs,
+    models,
+    monitoring,
+    observed_results,
+    predict,
+    users,
+)
+from src.core.rate_limit import limiter  # noqa: E402
+from src.core.security import require_admin  # noqa: E402
+from src.db.database import AsyncSessionLocal, close_db, engine, get_db, init_db  # noqa: E402
+from src.schemas.health import DependencyDetail, DependencyHealthResponse  # noqa: E402
+from src.services.db_service import db_service  # noqa: E402
+from src.services.minio_service import minio_service  # noqa: E402
+from src.services.model_service import model_service  # noqa: E402
 
 logger = structlog.get_logger(__name__)
 
