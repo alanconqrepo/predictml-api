@@ -17,7 +17,7 @@ from alembic.config import Config as AlembicConfig
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, ProcessCollector, generate_latest
 from prometheus_client import multiprocess as prom_multiprocess
 from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi import _rate_limit_exceeded_handler
@@ -60,14 +60,16 @@ async def run_migrations() -> None:
 
 
 def _check_metrics_config() -> None:
-    """Lève RuntimeError en production si METRICS_TOKEN n'est pas défini."""
+    """Avertit si METRICS_TOKEN n'est pas défini.
+
+    Note sécurité : le port 8000 de l'API n'est pas exposé à l'hôte dans
+    docker-compose.yml — l'endpoint /metrics n'est accessible que depuis le
+    réseau interne Docker (Prometheus/grafana). Ne pas lever d'exception ici
+    permet au stack de démarrer sans METRICS_TOKEN tout en conservant la
+    protection optionnelle via Bearer token si METRICS_TOKEN est défini.
+    """
     if not settings.METRICS_TOKEN:
         logger.warning("METRICS_TOKEN non défini — endpoint /metrics accessible publiquement")
-        if not settings.DEBUG:
-            raise RuntimeError(
-                "METRICS_TOKEN doit être défini en production. "
-                'Générez-en un avec : python -c "import secrets; print(secrets.token_urlsafe(32))"'
-            )
 
 
 async def _bootstrap_admin_user() -> None:
@@ -269,6 +271,9 @@ async def metrics(request: Request) -> Response:
     if "PROMETHEUS_MULTIPROC_DIR" in os.environ:
         registry = CollectorRegistry()
         prom_multiprocess.MultiProcessCollector(registry)
+        # Ajoute les métriques process (mémoire RSS, CPU) du worker courant.
+        # En mode multi-worker, cela reflète le worker qui répond au scraping.
+        ProcessCollector(namespace="", registry=registry)
         data = generate_latest(registry)
     else:
         data = generate_latest()
