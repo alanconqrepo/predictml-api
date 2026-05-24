@@ -7,12 +7,13 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from utils.auth import get_client, logout, require_admin, require_auth
+from utils.i18n import t
 from utils.ui_helpers import show_token_with_copy
 
 
 def show_quota_progress(used: int, limit: int) -> None:
     if limit <= 0:
-        st.info("Quota illimité.")
+        st.info(t("users.quota_unlimited"))
         return
     pct = used / limit
     pct_clamped = min(pct * 100, 100)
@@ -25,7 +26,7 @@ def show_quota_progress(used: int, limit: int) -> None:
     else:
         bar_color = "#ff3b30"
 
-    tooltip = f"{used} / {limit} prédictions utilisées aujourd'hui — reset à minuit UTC"
+    tooltip = t("users.quota_tooltip", used=used, limit=limit)
     st.markdown(
         f"""<div title="{tooltip}" style="margin-bottom:6px">
   <div style="background:rgba(255,255,255,0.15);border-radius:6px;height:18px;width:100%;overflow:hidden">
@@ -34,7 +35,7 @@ def show_quota_progress(used: int, limit: int) -> None:
 </div>""",
         unsafe_allow_html=True,
     )
-    caption = f"{used} / {limit} prédictions utilisées aujourd'hui — {remaining} restante{'s' if remaining != 1 else ''} — reset à minuit UTC"
+    caption = t("users.quota_caption", used=used, limit=limit, remaining=remaining)
     if pct >= 0.90:
         st.error(caption)
     elif pct >= 0.70:
@@ -43,53 +44,50 @@ def show_quota_progress(used: int, limit: int) -> None:
         st.success(caption)
 
 
-st.set_page_config(page_title="Users — PredictML", page_icon="👥", layout="wide")
+st.set_page_config(page_title=t("users.page_title"), page_icon="👥", layout="wide")
 
 require_auth()
 
 # ── Vue non-admin ──────────────────────────────────────────────────────────────
 if not st.session_state.get("is_admin"):
     client = get_client()
-    with st.expander("Mon profil", expanded=True):
+    with st.expander(t("users.my_profile"), expanded=True):
         try:
             me = client.get_me()
             quota = client.get_my_quota()
-            st.markdown(f"**Utilisateur :** {me['username']}  |  **Rôle :** {me['role']}")
-            st.markdown(f"**Email :** {me['email']}")
+            st.markdown(t("users.profile_username_role", username=me['username'], role=me['role']))
+            st.markdown(t("users.profile_email", email=me['email']))
 
-            st.markdown("**Token API :**")
+            st.markdown(t("users.profile_api_token"))
             show_token_with_copy(me["api_token"])
 
-            st.markdown("**Quota journalier :**")
+            st.markdown(t("users.profile_daily_quota"))
             used = quota["used_today"]
             limit = quota["rate_limit_per_day"]
             show_quota_progress(used, limit)
         except Exception as e:
-            st.error(f"Impossible de charger le profil : {e}")
+            st.error(t("users.error_load_profile", error=e))
 
     st.divider()
 
-    with st.expander("⚠️ Régénérer mon token"):
-        st.warning(
-            "Votre token actuel sera **immédiatement invalidé**. "
-            "Copiez le nouveau token avant de fermer cette page."
-        )
-        if st.button("🔄 Régénérer maintenant", key="rotate_self_token"):
+    with st.expander(t("users.regen_token_expander")):
+        st.warning(t("users.regen_token_warning"))
+        if st.button(t("users.regen_token_btn"), key="rotate_self_token"):
             try:
                 result = client.regenerate_my_token()
                 new_token = result["api_token"]
                 st.session_state["api_token"] = new_token
-                st.success("Nouveau token généré — sauvegardez-le maintenant !")
+                st.success(t("users.regen_token_success"))
                 show_token_with_copy(new_token)
             except Exception as e:
-                st.error(f"Erreur : {e}")
+                st.error(t("users.error_generic", error=e))
 
     st.stop()
 
 # ── Vue admin ──────────────────────────────────────────────────────────────────
 require_admin()
 
-st.title("👥 Gestion des utilisateurs")
+st.title(t("users.title"))
 
 client = get_client()
 
@@ -111,7 +109,7 @@ def reload():
     st.rerun()
 
 
-tab_users, tab_requests = st.tabs(["👥 Utilisateurs", "📋 Demandes d'accès"])
+tab_users, tab_requests = st.tabs([t("users.tab_users"), t("users.tab_requests")])
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Onglet 1 — Gestion des utilisateurs
@@ -122,12 +120,21 @@ with tab_users:
     try:
         users = fetch_users(st.session_state.get("api_url"), st.session_state.get("api_token"))
     except Exception as e:
-        st.error(f"Impossible de charger les utilisateurs : {e}")
+        st.error(t("users.error_load_users", error=e))
         st.stop()
 
     if not users:
-        st.info("Aucun utilisateur trouvé.")
+        st.info(t("users.no_users"))
         st.stop()
+
+    _col_id       = t("users.col.id")
+    _col_username = t("users.col.username")
+    _col_email    = t("users.col.email")
+    _col_role     = t("users.col.role")
+    _col_status   = t("users.col.status")
+    _col_quota    = t("users.col.quota")
+    _col_last_login = t("users.col.last_login")
+    _col_created  = t("users.col.created")
 
     df = pd.DataFrame(users)[[
         "id", "username", "email", "role", "is_active",
@@ -135,29 +142,33 @@ with tab_users:
     ]]
     df["last_login"] = pd.to_datetime(df["last_login"]).dt.strftime("%Y-%m-%d %H:%M").fillna("—")
     df["created_at"] = pd.to_datetime(df["created_at"]).dt.strftime("%Y-%m-%d")
-    df["is_active"]  = df["is_active"].map({True: "✅ Actif", False: "❌ Inactif"})
+    df["is_active"]  = df["is_active"].map({True: t("users.status_active"), False: t("users.status_inactive")})
     df = df.rename(columns={
-        "id": "ID", "username": "Utilisateur", "email": "Email",
-        "role": "Rôle", "is_active": "Statut",
-        "rate_limit_per_day": "Quota / jour",
-        "last_login": "Dernière connexion", "created_at": "Créé le",
+        "id": _col_id,
+        "username": _col_username,
+        "email": _col_email,
+        "role": _col_role,
+        "is_active": _col_status,
+        "rate_limit_per_day": _col_quota,
+        "last_login": _col_last_login,
+        "created_at": _col_created,
     })
 
     # 1. Liste des utilisateurs (ouvert) -------------------------------------------
-    with st.expander("👥 Liste des utilisateurs", expanded=True):
+    with st.expander(t("users.expander_list"), expanded=True):
         st.dataframe(
             df,
             width='stretch',
             hide_index=True,
             column_config={
-                "ID": st.column_config.NumberColumn("ID", help="Identifiant unique de l'utilisateur en base de données."),
-                "Utilisateur": st.column_config.TextColumn("Utilisateur", help="Nom d'utilisateur (login). Utilisé pour s'identifier dans l'API."),
-                "Email": st.column_config.TextColumn("Email", help="Adresse email de l'utilisateur."),
-                "Rôle": st.column_config.TextColumn("Rôle", help="Niveau d'accès : 'admin' peut tout faire, 'user' peut prédire, 'readonly' peut seulement consulter."),
-                "Statut": st.column_config.TextColumn("Statut", help="✅ Actif : accès autorisé. ❌ Inactif : accès révoqué."),
-                "Quota / jour": st.column_config.NumberColumn("Quota / jour", help="Nombre maximum de prédictions autorisées par jour. Reset à minuit UTC."),
-                "Dernière connexion": st.column_config.TextColumn("Dernière connexion", help="Date et heure de la dernière utilisation de l'API."),
-                "Créé le": st.column_config.TextColumn("Créé le", help="Date à laquelle le compte a été créé."),
+                _col_id: st.column_config.NumberColumn(_col_id, help=t("users.col.id_help")),
+                _col_username: st.column_config.TextColumn(_col_username, help=t("users.col.username_help")),
+                _col_email: st.column_config.TextColumn(_col_email, help=t("users.col.email_help")),
+                _col_role: st.column_config.TextColumn(_col_role, help=t("users.col.role_help")),
+                _col_status: st.column_config.TextColumn(_col_status, help=t("users.col.status_help")),
+                _col_quota: st.column_config.NumberColumn(_col_quota, help=t("users.col.quota_help")),
+                _col_last_login: st.column_config.TextColumn(_col_last_login, help=t("users.col.last_login_help")),
+                _col_created: st.column_config.TextColumn(_col_created, help=t("users.col.created_help")),
             },
         )
 
@@ -165,36 +176,36 @@ with tab_users:
     user_options = {f"{u['username']} (id:{u['id']})": u for u in users}
 
     # 2. Actions (fermé) -----------------------------------------------------------
-    with st.expander("⚙️ Actions", expanded=False):
-        selected_label = st.selectbox("Sélectionner un utilisateur", list(user_options.keys()))
+    with st.expander(t("users.expander_actions"), expanded=False):
+        selected_label = st.selectbox(t("users.select_user"), list(user_options.keys()))
         selected = user_options[selected_label]
 
         col_a, col_b, col_c, col_d = st.columns(4)
 
         current_active = selected["is_active"]
-        toggle_label = "Désactiver" if current_active else "Activer"
+        toggle_label = t("users.btn_deactivate") if current_active else t("users.btn_activate")
         if col_a.button(f"{'🔴' if current_active else '🟢'} {toggle_label}", width='stretch'):
             try:
                 client.update_user(selected["id"], {"is_active": not current_active})
-                st.toast(f"Utilisateur {'désactivé' if current_active else 'activé'}.", icon="✅")
+                st.toast(t("users.toast_deactivated") if current_active else t("users.toast_activated"), icon="✅")
                 reload()
             except Exception as e:
-                st.toast(f"Erreur : {e}", icon="❌")
+                st.toast(t("users.error_generic", error=e), icon="❌")
 
-        if col_b.button("🔄 Renouveler token", width='stretch'):
+        if col_b.button(t("users.btn_renew_token"), width='stretch'):
             try:
                 result = client.update_user(selected["id"], {"regenerate_token": True})
                 new_token = result["api_token"]
                 st.session_state[f"regen_token_{selected['id']}"] = new_token
-                st.toast("Nouveau token généré.", icon="✅")
+                st.toast(t("users.toast_token_generated"), icon="✅")
             except Exception as e:
-                st.toast(f"Erreur : {e}", icon="❌")
+                st.toast(t("users.error_generic", error=e), icon="❌")
 
         regen_key = f"regen_token_{selected['id']}"
         if st.session_state.get(regen_key):
-            st.info("Nouveau token — transmettez-le manuellement à l'utilisateur :")
+            st.info(t("users.new_token_info"))
             show_token_with_copy(st.session_state[regen_key])
-            if st.button("Effacer l'affichage du token", key="clear_regen_token"):
+            if st.button(t("users.btn_clear_token"), key="clear_regen_token"):
                 del st.session_state[regen_key]
                 st.rerun()
 
@@ -202,31 +213,36 @@ with tab_users:
         _role_val = st.session_state.get("role_select", new_roles[0] if new_roles else None)
         if _role_val not in new_roles and new_roles:
             _role_val = new_roles[0]
-        if col_c.button("✏️ Appliquer rôle", width='stretch'):
+        if col_c.button(t("users.btn_apply_role"), width='stretch'):
             try:
                 client.update_user(selected["id"], {"role": _role_val})
-                st.toast(f"Rôle mis à jour → {_role_val}", icon="✅")
+                st.toast(t("users.toast_role_updated", role=_role_val), icon="✅")
                 reload()
             except Exception as e:
-                st.toast(f"Erreur : {e}", icon="❌")
-        col_c.selectbox("Changer rôle", new_roles, key="role_select")
+                st.toast(t("users.error_generic", error=e), icon="❌")
+        col_c.selectbox(
+            t("users.select_change_role"),
+            new_roles,
+            key="role_select",
+            format_func=lambda r: t(f"users.role.{r}"),
+        )
 
         with col_d:
-            if st.button("🗑️ Supprimer", width='stretch', type="secondary"):
+            if st.button(t("users.btn_delete"), width='stretch', type="secondary"):
                 st.session_state["confirm_delete_user"] = selected["id"]
 
         if st.session_state.get("confirm_delete_user") == selected["id"]:
-            st.warning(f"Confirmer la suppression de **{selected['username']}** et toutes ses prédictions ?")
+            st.warning(t("users.confirm_delete_warning", username=selected['username']))
             c1, c2 = st.columns(2)
-            if c1.button("Oui, supprimer", type="primary"):
+            if c1.button(t("users.btn_confirm_delete"), type="primary"):
                 try:
                     client.delete_user(selected["id"])
-                    st.toast("Utilisateur supprimé.", icon="✅")
+                    st.toast(t("users.toast_deleted"), icon="✅")
                     st.session_state.pop("confirm_delete_user", None)
                     reload()
                 except Exception as e:
-                    st.toast(f"Erreur : {e}", icon="❌")
-            if c2.button("Annuler"):
+                    st.toast(t("users.error_generic", error=e), icon="❌")
+            if c2.button(t("users.btn_cancel")):
                 st.session_state.pop("confirm_delete_user", None)
                 st.rerun()
 
@@ -239,36 +255,36 @@ with tab_users:
     selected = _selected if "selected" not in vars() else selected
 
     # 3. Créer un nouvel utilisateur (fermé) ---------------------------------------
-    with st.expander("➕ Créer un nouvel utilisateur", expanded=False):
+    with st.expander(t("users.expander_create"), expanded=False):
         with st.form("create_user_form"):
             col1, col2 = st.columns(2)
-            username = col1.text_input("Nom d'utilisateur", placeholder="john_doe")
-            email    = col2.text_input("Email", placeholder="john@example.com")
+            username = col1.text_input(t("users.form_username"), placeholder="john_doe")
+            email    = col2.text_input(t("users.form_email"), placeholder="john@example.com")
             col3, col4 = st.columns(2)
-            role       = col3.selectbox("Rôle", ["user", "admin", "readonly"])
-            rate_limit = col4.number_input("Quota journalier", min_value=1, max_value=100000, value=1000)
-            submitted  = st.form_submit_button("Créer", width='stretch', type="primary")
+            role       = col3.selectbox(t("users.form_role"), ["user", "admin", "readonly"])
+            rate_limit = col4.number_input(t("users.form_quota"), min_value=1, max_value=100000, value=1000)
+            submitted  = st.form_submit_button(t("users.form_submit"), width='stretch', type="primary")
 
         if submitted:
             if not username or not email:
-                st.error("Nom d'utilisateur et email sont requis.")
+                st.error(t("users.form_error_required"))
             else:
                 try:
                     result = client.create_user({
                         "username": username, "email": email,
                         "role": role, "rate_limit": rate_limit,
                     })
-                    st.toast(f"Utilisateur {result['username']} créé.", icon="✅")
-                    st.info("Conservez ce token — il ne sera plus affiché !")
+                    st.toast(t("users.toast_created", username=result['username']), icon="✅")
+                    st.info(t("users.info_save_token"))
                     show_token_with_copy(result["api_token"])
                     reload()
                 except Exception as e:
-                    st.toast(f"Erreur : {e}", icon="❌")
+                    st.toast(t("users.error_generic", error=e), icon="❌")
 
     # 4. Analytics d'usage (fermé) -------------------------------------------------
     _default_end   = pd.Timestamp.now().date()
     _default_start = _default_end - pd.Timedelta(days=29)
-    with st.expander(f"📊 Analytics d'usage — {selected['username']}", expanded=False):
+    with st.expander(t("users.expander_analytics", username=selected['username']), expanded=False):
         daily_limit = selected["rate_limit_per_day"]
 
         try:
@@ -280,22 +296,22 @@ with tab_users:
             today_calls = 0
         pct = today_calls / daily_limit * 100 if daily_limit > 0 else 0
         st.metric(
-            label="Consommation quota (aujourd'hui)",
+            label=t("users.analytics_quota_today"),
             value=f"{pct:.1f}%",
-            delta=f"{today_calls} / {daily_limit} appels",
+            delta=t("users.analytics_quota_delta", calls=today_calls, limit=daily_limit),
             delta_color="off",
         )
 
         col_date_start, col_date_end = st.columns(2)
         usage_date_start = col_date_start.date_input(
-            "Date début", value=_default_start, key=f"usage_start_{selected['id']}"
+            t("users.analytics_date_start"), value=_default_start, key=f"usage_start_{selected['id']}"
         )
         usage_date_end = col_date_end.date_input(
-            "Date fin", value=_default_end, key=f"usage_end_{selected['id']}"
+            t("users.analytics_date_end"), value=_default_end, key=f"usage_end_{selected['id']}"
         )
 
         if usage_date_start > usage_date_end:
-            st.warning("La date de début doit être antérieure à la date de fin.")
+            st.warning(t("users.analytics_date_error"))
         else:
             try:
                 usage = client.get_user_usage(
@@ -303,6 +319,12 @@ with tab_users:
                     start_date=str(usage_date_start),
                     end_date=str(usage_date_end),
                 )
+
+                _col_model_name  = t("users.analytics.col_model")
+                _col_vol_total   = t("users.analytics.col_volume_total")
+                _col_max_day     = t("users.analytics.col_max_day")
+                _col_avg_day     = t("users.analytics.col_avg_day")
+                _col_median_day  = t("users.analytics.col_median_day")
 
                 by_model_day = usage.get("by_model_day", [])
                 if by_model_day:
@@ -312,41 +334,44 @@ with tab_users:
                     for model_name, grp in df_md.groupby("model_name"):
                         s = grp["calls"]
                         rows_table.append({
-                            "Modèle": model_name,
-                            "Volume total": int(s.sum()),
-                            "Max / jour": int(s.max()),
-                            "Moy. / jour": round(float(s.mean()), 1),
-                            "Médiane / jour": round(float(s.median()), 1),
+                            _col_model_name: model_name,
+                            _col_vol_total:  int(s.sum()),
+                            _col_max_day:    int(s.max()),
+                            _col_avg_day:    round(float(s.mean()), 1),
+                            _col_median_day: round(float(s.median()), 1),
                         })
                     by_day_data = usage.get("by_day", [])
                     if by_day_data:
                         s_all = pd.DataFrame(by_day_data)["calls"]
                         rows_table.append({
-                            "Modèle": "Total",
-                            "Volume total": int(s_all.sum()),
-                            "Max / jour": int(s_all.max()),
-                            "Moy. / jour": round(float(s_all.mean()), 1),
-                            "Médiane / jour": round(float(s_all.median()), 1),
+                            _col_model_name: t("users.analytics.col_total_label"),
+                            _col_vol_total:  int(s_all.sum()),
+                            _col_max_day:    int(s_all.max()),
+                            _col_avg_day:    round(float(s_all.mean()), 1),
+                            _col_median_day: round(float(s_all.median()), 1),
                         })
-                    st.subheader("Prédictions par modèle")
+                    st.subheader(t("users.analytics.subheader_by_model"))
                     st.dataframe(
                         pd.DataFrame(rows_table), width='stretch', hide_index=True,
                         column_config={
-                            "Modèle":         st.column_config.TextColumn("Modèle"),
-                            "Volume total":   st.column_config.NumberColumn("Volume total"),
-                            "Max / jour":     st.column_config.NumberColumn("Max / jour"),
-                            "Moy. / jour":    st.column_config.NumberColumn("Moy. / jour", format="%.1f"),
-                            "Médiane / jour": st.column_config.NumberColumn("Médiane / jour", format="%.1f"),
+                            _col_model_name: st.column_config.TextColumn(_col_model_name),
+                            _col_vol_total:  st.column_config.NumberColumn(_col_vol_total),
+                            _col_max_day:    st.column_config.NumberColumn(_col_max_day),
+                            _col_avg_day:    st.column_config.NumberColumn(_col_avg_day, format="%.1f"),
+                            _col_median_day: st.column_config.NumberColumn(_col_median_day, format="%.1f"),
                         },
                     )
                 elif usage.get("by_model"):
+                    _col_m = t("users.analytics.col_model")
+                    _col_v = t("users.analytics.col_volume_total")
+                    _col_e = t("users.analytics.col_errors")
                     df_model = pd.DataFrame(usage["by_model"]).rename(
-                        columns={"model_name": "Modèle", "calls": "Volume total", "errors": "Erreurs"}
-                    )[["Modèle", "Volume total", "Erreurs"]]
-                    st.subheader("Prédictions par modèle")
+                        columns={"model_name": _col_m, "calls": _col_v, "errors": _col_e}
+                    )[[_col_m, _col_v, _col_e]]
+                    st.subheader(t("users.analytics.subheader_by_model"))
                     st.dataframe(df_model, width='stretch', hide_index=True)
                 else:
-                    st.info("Aucune prédiction sur la période sélectionnée.")
+                    st.info(t("users.analytics.no_predictions"))
 
                 if by_model_day:
                     df_md_plot = pd.DataFrame(by_model_day)
@@ -368,18 +393,19 @@ with tab_users:
                     if daily_limit > 0 and daily_limit <= total_max * 3:
                         fig_day.add_hline(
                             y=daily_limit, line_dash="dash", line_color="red",
-                            annotation_text=f"Quota ({daily_limit:,}/jour)",
+                            annotation_text=t("users.analytics.quota_annotation", limit=daily_limit),
                             annotation_position="top right",
                         )
                     else:
                         fig_day.add_annotation(
-                            text=f"Quota : {daily_limit:,}/jour",
+                            text=t("users.analytics.quota_annotation", limit=daily_limit),
                             xref="paper", yref="paper", x=1, y=1.08,
                             showarrow=False, font=dict(color="red", size=11),
                         )
                     fig_day.update_layout(
-                        title="Volume par jour",
-                        xaxis_title="Date", yaxis_title="Appels",
+                        title=t("users.analytics.chart_title"),
+                        xaxis_title=t("users.analytics.chart_x"),
+                        yaxis_title=t("users.analytics.chart_y"),
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
                         margin={"t": 60, "r": 20},
                         yaxis=dict(rangemode="tozero"),
@@ -387,10 +413,10 @@ with tab_users:
                     )
                     st.plotly_chart(fig_day, width='stretch')
                 else:
-                    st.info("Aucune donnée journalière sur la période.")
+                    st.info(t("users.analytics.no_daily_data"))
 
             except Exception as e:
-                st.error(f"Impossible de charger les analytics : {e}")
+                st.error(t("users.analytics.error_load", error=e))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Onglet 2 — Demandes d'accès
@@ -403,17 +429,25 @@ with tab_requests:
             status_filter="pending",
         )
     except Exception as e:
-        st.error(f"Impossible de charger les demandes : {e}")
+        st.error(t("users.requests.error_load", error=e))
         pending_requests = []
 
     n_pending = len(pending_requests)
     if n_pending > 0:
-        st.warning(f"🔔 {n_pending} demande(s) en attente d'approbation")
+        st.warning(t("users.requests.pending_count", count=n_pending))
     else:
-        st.success("Aucune demande en attente.")
+        st.success(t("users.requests.none_pending"))
 
     if pending_requests:
-        st.subheader("Demandes en attente")
+        st.subheader(t("users.requests.subheader_pending"))
+
+        _req_col_id         = t("users.requests.col.id")
+        _req_col_username   = t("users.requests.col.username")
+        _req_col_email      = t("users.requests.col.email")
+        _req_col_role       = t("users.requests.col.role_requested")
+        _req_col_message    = t("users.requests.col.message")
+        _req_col_requested  = t("users.requests.col.requested_at")
+
         df_req = pd.DataFrame(pending_requests)[
             ["id", "username", "email", "role_requested", "message", "requested_at"]
         ]
@@ -421,34 +455,42 @@ with tab_requests:
             "%Y-%m-%d %H:%M"
         )
         df_req["message"] = df_req["message"].fillna("—")
+        df_req = df_req.rename(columns={
+            "id": _req_col_id,
+            "username": _req_col_username,
+            "email": _req_col_email,
+            "role_requested": _req_col_role,
+            "message": _req_col_message,
+            "requested_at": _req_col_requested,
+        })
         st.dataframe(
             df_req,
             use_container_width=True,
             hide_index=True,
             column_config={
-                "id": st.column_config.NumberColumn(
-                    "ID",
-                    help="Identifiant unique de la demande d'accès.",
+                _req_col_id: st.column_config.NumberColumn(
+                    _req_col_id,
+                    help=t("users.requests.col.id_help"),
                 ),
-                "username": st.column_config.TextColumn(
-                    "Utilisateur",
-                    help="Nom d'utilisateur souhaité par la personne qui demande l'accès.",
+                _req_col_username: st.column_config.TextColumn(
+                    _req_col_username,
+                    help=t("users.requests.col.username_help"),
                 ),
-                "email": st.column_config.TextColumn(
-                    "Email",
-                    help="Adresse email du demandeur. Utilisée pour lui envoyer ses identifiants.",
+                _req_col_email: st.column_config.TextColumn(
+                    _req_col_email,
+                    help=t("users.requests.col.email_help"),
                 ),
-                "role_requested": st.column_config.TextColumn(
-                    "Rôle demandé",
-                    help="Niveau d'accès souhaité : 'user' (prédictions), 'admin' (gestion complète), 'readonly' (consultation).",
+                _req_col_role: st.column_config.TextColumn(
+                    _req_col_role,
+                    help=t("users.requests.col.role_requested_help"),
                 ),
-                "message": st.column_config.TextColumn(
-                    "Message",
-                    help="Message optionnel laissé par le demandeur pour expliquer son besoin.",
+                _req_col_message: st.column_config.TextColumn(
+                    _req_col_message,
+                    help=t("users.requests.col.message_help"),
                 ),
-                "requested_at": st.column_config.TextColumn(
-                    "Demandé le",
-                    help="Date et heure à laquelle la demande a été soumise.",
+                _req_col_requested: st.column_config.TextColumn(
+                    _req_col_requested,
+                    help=t("users.requests.col.requested_at_help"),
                 ),
             },
         )
@@ -457,47 +499,48 @@ with tab_requests:
         req_options = {
             f"{r['username']} — {r['email']} (id:{r['id']})": r for r in pending_requests
         }
-        selected_req_label = st.selectbox("Sélectionner une demande", list(req_options.keys()))
+        selected_req_label = st.selectbox(t("users.requests.select_request"), list(req_options.keys()))
         selected_req = req_options[selected_req_label]
 
-        st.markdown(f"**Nom d'utilisateur :** `{selected_req['username']}`")
-        st.markdown(f"**Email :** {selected_req['email']}")
-        st.markdown(f"**Rôle demandé :** {selected_req['role_requested']}")
+        st.markdown(t("users.requests.detail_username", username=selected_req['username']))
+        st.markdown(t("users.requests.detail_email", email=selected_req['email']))
+        st.markdown(t("users.requests.detail_role", role=selected_req['role_requested']))
         if selected_req.get("message"):
-            st.markdown(f"**Message :** {selected_req['message']}")
+            st.markdown(t("users.requests.detail_message", message=selected_req['message']))
 
         col_approve, col_reject = st.columns(2)
 
         with col_approve:
-            if st.button("✅ Approuver", use_container_width=True, type="primary"):
+            if st.button(t("users.requests.btn_approve"), use_container_width=True, type="primary"):
                 try:
                     result = client.approve_account_request(selected_req["id"])
                     created_user = result["created_user"]
-                    st.success(
-                        f"Compte créé pour **{created_user['username']}**. "
-                        f"Transmettez ce token à {created_user['email']} :"
-                    )
+                    st.success(t(
+                        "users.requests.approve_success",
+                        username=created_user['username'],
+                        email=created_user['email'],
+                    ))
                     show_token_with_copy(created_user["api_token"])
                     reload()
                 except Exception as e:
-                    st.error(f"Erreur lors de l'approbation : {e}")
+                    st.error(t("users.requests.error_approve", error=e))
 
         with col_reject:
             reject_reason = st.text_input(
-                "Raison du refus (optionnelle)", key="reject_reason_input"
+                t("users.requests.reject_reason_label"), key="reject_reason_input"
             )
-            if st.button("❌ Rejeter", use_container_width=True, type="secondary"):
+            if st.button(t("users.requests.btn_reject"), use_container_width=True, type="secondary"):
                 try:
                     client.reject_account_request(
                         selected_req["id"], reason=reject_reason or None
                     )
-                    st.toast("Demande rejetée.", icon="✅")
+                    st.toast(t("users.requests.toast_rejected"), icon="✅")
                     reload()
                 except Exception as e:
-                    st.error(f"Erreur lors du rejet : {e}")
+                    st.error(t("users.requests.error_reject", error=e))
 
     st.divider()
-    with st.expander("📜 Historique des demandes (approuvées / rejetées)"):
+    with st.expander(t("users.requests.expander_history")):
         try:
             all_requests = fetch_account_requests(
                 st.session_state.get("api_url"),
@@ -505,6 +548,14 @@ with tab_requests:
             )
             past = [r for r in all_requests if r["status"] != "pending"]
             if past:
+                _hist_col_id     = t("users.requests.col.id")
+                _hist_col_user   = t("users.requests.col.username")
+                _hist_col_email  = t("users.requests.col.email")
+                _hist_col_role   = t("users.requests.col.role_requested")
+                _hist_col_status = t("users.requests.col.status")
+                _hist_col_review = t("users.requests.col.reviewed_at")
+                _hist_col_reason = t("users.requests.col.rejection_reason")
+
                 df_past = pd.DataFrame(past)[
                     ["id", "username", "email", "role_requested", "status", "reviewed_at", "rejection_reason"]
                 ]
@@ -513,44 +564,53 @@ with tab_requests:
                 ).fillna("—")
                 df_past["rejection_reason"] = df_past["rejection_reason"].fillna("—")
                 df_past["status"] = df_past["status"].map(
-                    {"approved": "✅ Approuvée", "rejected": "❌ Rejetée"}
+                    {"approved": t("users.requests.status_approved"), "rejected": t("users.requests.status_rejected")}
                 )
+                df_past = df_past.rename(columns={
+                    "id": _hist_col_id,
+                    "username": _hist_col_user,
+                    "email": _hist_col_email,
+                    "role_requested": _hist_col_role,
+                    "status": _hist_col_status,
+                    "reviewed_at": _hist_col_review,
+                    "rejection_reason": _hist_col_reason,
+                })
                 st.dataframe(
                     df_past,
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "id": st.column_config.NumberColumn(
-                            "ID",
-                            help="Identifiant unique de la demande d'accès.",
+                        _hist_col_id: st.column_config.NumberColumn(
+                            _hist_col_id,
+                            help=t("users.requests.col.id_help"),
                         ),
-                        "username": st.column_config.TextColumn(
-                            "Utilisateur",
-                            help="Nom d'utilisateur demandé.",
+                        _hist_col_user: st.column_config.TextColumn(
+                            _hist_col_user,
+                            help=t("users.requests.col.username_hist_help"),
                         ),
-                        "email": st.column_config.TextColumn(
-                            "Email",
-                            help="Adresse email du demandeur.",
+                        _hist_col_email: st.column_config.TextColumn(
+                            _hist_col_email,
+                            help=t("users.requests.col.email_help"),
                         ),
-                        "role_requested": st.column_config.TextColumn(
-                            "Rôle demandé",
-                            help="Niveau d'accès sollicité lors de la demande.",
+                        _hist_col_role: st.column_config.TextColumn(
+                            _hist_col_role,
+                            help=t("users.requests.col.role_hist_help"),
                         ),
-                        "status": st.column_config.TextColumn(
-                            "Statut",
-                            help="✅ Approuvée : compte créé. ❌ Rejetée : demande refusée.",
+                        _hist_col_status: st.column_config.TextColumn(
+                            _hist_col_status,
+                            help=t("users.requests.col.status_help"),
                         ),
-                        "reviewed_at": st.column_config.TextColumn(
-                            "Traitée le",
-                            help="Date et heure à laquelle un administrateur a statué sur la demande.",
+                        _hist_col_review: st.column_config.TextColumn(
+                            _hist_col_review,
+                            help=t("users.requests.col.reviewed_at_help"),
                         ),
-                        "rejection_reason": st.column_config.TextColumn(
-                            "Raison du refus",
-                            help="Motif indiqué par l'administrateur en cas de refus. '—' si non renseigné.",
+                        _hist_col_reason: st.column_config.TextColumn(
+                            _hist_col_reason,
+                            help=t("users.requests.col.rejection_reason_help"),
                         ),
                     },
                 )
             else:
-                st.info("Aucun historique.")
+                st.info(t("users.requests.no_history"))
         except Exception as e:
-            st.error(f"Erreur : {e}")
+            st.error(t("users.error_generic", error=e))

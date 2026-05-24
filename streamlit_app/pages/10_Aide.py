@@ -1,4 +1,4 @@
-﻿"""
+"""
 Page d'aide avec chatbot LLM (function calling natif) — PredictML Admin
 """
 
@@ -9,6 +9,7 @@ import anthropic
 import streamlit as st
 from utils.auth import require_auth
 from utils.docs_loader import build_system_prompt, load_all_docs, load_source_snippets
+from utils.i18n import t
 from utils.metrics_help import METRIC_HELP
 from utils.tools import (
     TOOL_DEFINITIONS,
@@ -19,7 +20,7 @@ from utils.tools import (
     tool_expander_label,
 )
 
-st.set_page_config(page_title="Aide & Assistant IA — PredictML", page_icon="💬", layout="wide")
+st.set_page_config(page_title=t("aide.page_title"), page_icon="💬", layout="wide")
 require_auth()
 
 
@@ -42,68 +43,68 @@ MODEL_ID = "claude-sonnet-4-6"
 
 QUICK_TOPICS = [
     (
-        "🔎 État des modèles en production",
+        t("aide.quick_topics.prod_status"),
         "Quels modèles sont actuellement en production ? "
         "Montre-moi leurs métriques (accuracy, F1, latence) et indique s'il y a des problèmes de drift.",
     ),
     (
-        "📈 Statistiques des prédictions",
+        t("aide.quick_topics.prediction_stats"),
         "Donne-moi un résumé des prédictions des 7 derniers jours : volume par modèle, "
         "taux d'erreur, latence moyenne et P95.",
     ),
     (
-        "🛠️ Générer un train.py sklearn",
+        t("aide.quick_topics.generate_train_py"),
         "Génère un script train.py complet et compatible PredictML pour un modèle de classification "
         "avec RandomForestClassifier. Respecte le contrat de variables d'environnement "
         "(TRAIN_START_DATE, TRAIN_END_DATE, OUTPUT_MODEL_PATH) et inclus la sortie JSON sur stdout.",
     ),
     (
-        "🌐 Appels API Python complets",
+        t("aide.quick_topics.api_calls"),
         "Montre-moi le workflow Python complet avec requests : uploader un modèle .joblib, "
         "le passer en production, faire une prédiction unitaire et batch, "
         "puis enregistrer les résultats observés.",
     ),
     (
-        "📊 Interpréter les KPIs",
+        t("aide.quick_topics.interpret_kpis"),
         "Explique les principaux indicateurs de performance du dashboard PredictML : "
         "accuracy, F1, taux d'erreur, latence P95, Brier Score, drift Z-score et PSI, p-value A/B. "
         "Donne les seuils d'alerte recommandés.",
     ),
     (
-        "🔬 Configurer un A/B test",
+        t("aide.quick_topics.configure_ab"),
         "Comment configurer un A/B test entre deux versions d'un modèle ? "
         "Explique deployment_mode, traffic_weight, l'interprétation statistique "
         "(p-value, winner, min_samples_needed) et quand promouvoir.",
     ),
     (
-        "🔄 Ré-entraînement automatique cron",
+        t("aide.quick_topics.auto_retrain"),
         "Comment planifier un ré-entraînement automatique hebdomadaire avec une expression cron ? "
         "Inclus la configuration du schedule, la politique d'auto-promotion, "
         "et le ré-entraînement déclenché par drift.",
     ),
     (
-        "🔍 Détecter la dérive des données",
+        t("aide.quick_topics.detect_drift"),
         "Comment configurer et interpréter la détection de drift dans PredictML ? "
         "Explique feature_baseline, Z-score, PSI, statuts ok/warning/critical, "
         "et le retrain automatique quand le drift est critique.",
     ),
     (
-        "👥 Gestion des utilisateurs",
+        t("aide.quick_topics.manage_users"),
         "Comment gérer les utilisateurs ? Montre-moi les utilisateurs actuellement actifs, "
         "leur rôle et quota. Explique aussi comment créer un compte et renouveler un token.",
     ),
     (
-        "🧪 Golden Tests de régression",
+        t("aide.quick_topics.golden_tests"),
         "Comment créer des golden tests et les intégrer dans la politique d'auto-promotion ? "
         "Montre les cas de test existants si disponibles.",
     ),
     (
-        "🏗️ Architecture de PredictML",
+        t("aide.quick_topics.architecture"),
         "Explique l'architecture de PredictML : les 7 services Docker, comment ils interagissent, "
         "et le flux de données complet d'une prédiction.",
     ),
     (
-        "🚀 Démarrer avec PredictML",
+        t("aide.quick_topics.get_started"),
         "Je veux démarrer avec PredictML de zéro. Guide-moi étape par étape : "
         "installation Docker, premier modèle sklearn, upload, mise en production, prédiction.",
     ),
@@ -173,7 +174,7 @@ def run_agent_turn(
                 label = tool_expander_label(block.name, block.input)
                 with st.expander(label, expanded=True):
                     render_tool_input(block.name, block.input)
-                    with st.spinner("Exécution en cours…"):
+                    with st.spinner(t("aide.tool_running")):
                         result = execute_tool(block.name, block.input, api_url, token)
                     st.divider()
                     render_tool_result(block.name, result)
@@ -209,7 +210,7 @@ def render_chat_history() -> None:
             if msg["role"] == "assistant":
                 for summary in msg.get("tool_summaries", []):
                     with st.expander(summary["label"], expanded=False):
-                        st.caption("Requête exécutée :")
+                        st.caption(t("aide.tool_summary_request"))
                         if summary["type"] == "sql":
                             st.code(summary.get("query", ""), language="sql")
                         else:
@@ -218,7 +219,7 @@ def render_chat_history() -> None:
                                 language="http",
                             )
                         if summary.get("result_preview"):
-                            st.caption("Extrait du résultat :")
+                            st.caption(t("aide.tool_summary_preview"))
                             st.code(summary["result_preview"])
             st.markdown(msg["content"])
 
@@ -267,11 +268,8 @@ _token: str = st.session_state.get("api_token", "")
 
 # ── En-tête ───────────────────────────────────────────────────────────────────
 
-st.title("💬 Aide & Assistant IA")
-st.markdown(
-    "Posez vos questions sur PredictML — l'assistant peut **interroger la base de données** "
-    "et **appeler l'API** en temps réel pour répondre avec vos données."
-)
+st.title(t("aide.title"))
+st.markdown(t("aide.subtitle"))
 
 ctx_parts = []
 if docs:
@@ -280,7 +278,7 @@ if snippets:
     ctx_parts.append(f"🔧 {len(snippets)} fichiers source")
 ctx_parts.append("🗄️ SQL" if os.environ.get("POSTGRES_HOST") else "🗄️ SQL (local)")
 ctx_parts.append("🌐 API")
-st.caption(f"Outils disponibles : {' · '.join(ctx_parts)}")
+st.caption(t("aide.tools_available", tools=" · ".join(ctx_parts)))
 
 st.divider()
 
@@ -290,12 +288,9 @@ st.divider()
 # SECTION 1 — Documentation
 # ═══════════════════════════════════════════════════════════
 
-with st.expander("📚 Documentation", expanded=True):
+with st.expander(t("aide.doc_expander"), expanded=True):
     if not docs:
-        st.warning(
-            "Les fichiers de documentation ne sont pas accessibles.\n\n"
-            "En mode Docker, vérifiez que les volumes sont bien montés dans `docker-compose.yml`."
-        )
+        st.warning(t("aide.doc_not_available"))
     else:
         labels = {
             "API_REFERENCE":      "📖 Référence API",
@@ -316,14 +311,14 @@ with st.expander("📚 Documentation", expanded=True):
         name_map = dict(zip(display_names, doc_names))
 
         col_sel, col_btn, col_dl = st.columns([6, 1, 1], vertical_alignment="bottom")
-        selected_label = col_sel.selectbox("Choisir un document", display_names, key="help_doc_select")
+        selected_label = col_sel.selectbox(t("aide.doc_select_label"), display_names, key="help_doc_select")
         selected_key = name_map[selected_label]
 
-        if col_btn.button("⛶ Agrandir", key="open_doc_popup", width='stretch'):
+        if col_btn.button(t("aide.doc_enlarge_btn"), key="open_doc_popup", width='stretch'):
             _doc_popup(docs[selected_key], selected_label)
 
         col_dl.download_button(
-            "⬇ .md",
+            t("aide.doc_download_btn"),
             data=docs[selected_key].encode("utf-8"),
             file_name=f"{selected_key.lower()}.md",
             mime="text/markdown",
@@ -339,13 +334,13 @@ with st.expander("📚 Documentation", expanded=True):
 # ═══════════════════════════════════════════════════════════
 
 if snippets:
-    with st.expander(f"🔧 Code source ({len(snippets)} fichiers)", expanded=False):
+    with st.expander(t("aide.src_expander", count=len(snippets)), expanded=False):
         col_src, col_src_btn, col_src_dl = st.columns([6, 1, 1], vertical_alignment="bottom")
-        selected_src = col_src.selectbox("Fichier", list(snippets.keys()), key="help_src_select")
-        if col_src_btn.button("⛶ Agrandir", key="open_src_popup", width='stretch'):
+        selected_src = col_src.selectbox(t("aide.src_file_label"), list(snippets.keys()), key="help_src_select")
+        if col_src_btn.button(t("aide.doc_enlarge_btn"), key="open_src_popup", width='stretch'):
             _src_popup(selected_src, snippets[selected_src])
         col_src_dl.download_button(
-            "⬇ .py",
+            t("aide.src_download_btn"),
             data=snippets[selected_src].encode("utf-8"),
             file_name=selected_src.split("/")[-1],
             mime="text/x-python",
@@ -358,16 +353,12 @@ if snippets:
 # SECTION 3 — Chatbot LLM
 # ═══════════════════════════════════════════════════════════
 
-with st.expander("💬 Assistant IA", expanded=True):
+with st.expander(t("aide.chat_expander"), expanded=True):
     if anthropic_client is None:
-        st.warning(
-            "**La clé `ANTHROPIC_API_KEY` n'est pas configurée.**\n\n"
-            "Ajoutez `ANTHROPIC_API_KEY=sk-ant-...` dans le fichier `.env` "
-            "puis relancez le container Streamlit."
-        )
+        st.warning(t("aide.no_api_key"))
 
     with st.expander(
-        "⚡ Sujets rapides",
+        t("aide.quick_topics_expander"),
         expanded=(len(st.session_state["help_messages"]) == 0),
     ):
         cols = st.columns(3)
@@ -376,14 +367,14 @@ with st.expander("💬 Assistant IA", expanded=True):
                 st.session_state["help_pending_prompt"] = prompt
 
     btn_col1, btn_col2 = st.columns([2, 5])
-    if btn_col1.button("🗑️ Nouvelle conversation", key="help_clear"):
+    if btn_col1.button(t("aide.new_conversation_btn"), key="help_clear"):
         st.session_state["help_messages"] = []
         st.session_state["help_pending_prompt"] = None
         st.rerun()
 
     n_exchanges = len(st.session_state["help_messages"]) // 2
     if n_exchanges > 0:
-        btn_col2.caption(f"{n_exchanges} échange(s)")
+        btn_col2.caption(t("aide.exchange_count", count=n_exchanges))
 
     st.divider()
 
@@ -398,7 +389,7 @@ with st.expander("💬 Assistant IA", expanded=True):
         st.session_state["help_pending_prompt"] = None
 
     typed = st.chat_input(
-        placeholder="Posez votre question… (l'assistant peut interroger la DB et l'API)",
+        placeholder=t("aide.chat_placeholder"),
         disabled=(anthropic_client is None),
         key="help_chat_input",
     )

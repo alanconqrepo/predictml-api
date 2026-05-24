@@ -6,28 +6,31 @@ import os
 
 import streamlit as st
 from utils.auth import require_auth
+from utils.i18n import t
 
-st.set_page_config(page_title="Code Example — PredictML", page_icon="💡", layout="wide")
+st.set_page_config(page_title=t("code_example.page_title"), page_icon="💡", layout="wide")
 require_auth()
 
-st.title("💡 Exemple de code : MLflow + API")
-st.markdown(
-    "Exemple complet pour entraîner un modèle, le tracker avec MLflow, puis l'uploader et l'utiliser via l'API."
-)
+st.title(t("code_example.title"))
+st.markdown(t("code_example.intro"))
 
 API_URL = st.session_state.get("api_url", "http://localhost:8000")
 TOKEN = st.session_state.get("api_token", "VOTRE_TOKEN_ICI")
 MLFLOW_URL = os.environ.get("MLFLOW_URL", "http://localhost:5000")
 
-tab_python, tab_curl, tab_js = st.tabs(["Python", "curl / bash", "JavaScript"])
+tab_python, tab_curl, tab_js = st.tabs([
+    t("code_example.tab_python"),
+    t("code_example.tab_curl"),
+    t("code_example.tab_js"),
+])
 
 # ============================================================
 # TAB PYTHON
 # ============================================================
 with tab_python:
     # SECTION 1 — Entraîner et tracker avec MLflow
-    st.subheader("1. Entraîner un modèle et le tracker avec MLflow")
-    st.markdown("Installez les dépendances : `pip install scikit-learn mlflow boto3`")
+    st.subheader(t("code_example.python.section1_title"))
+    st.markdown(t("code_example.python.section1_install"))
 
     code_mlflow = f"""\
 import joblib
@@ -82,7 +85,7 @@ print("Modèle sauvegardé.")
     st.code(code_mlflow, language="python")
 
     # SECTION 2 — Uploader via l'API
-    st.subheader("2. Uploader le modèle via l'API")
+    st.subheader(t("code_example.python.section2_title"))
 
     code_upload = f"""\
 import requests
@@ -123,7 +126,7 @@ print(f"Modèle uploadé : {{model_data['name']}} v{{model_data['version']}}")
     st.code(code_upload, language="python")
 
     # SECTION 3 — Faire une prédiction
-    st.subheader("3. Faire une prédiction")
+    st.subheader(t("code_example.python.section3_title"))
 
     code_predict = f"""\
 import requests
@@ -162,8 +165,8 @@ print("Version 1.0.0 passée en production.")
     st.code(code_predict, language="python")
 
     # SECTION 4 — Enregistrer les résultats observés
-    st.subheader("4. Enregistrer les résultats observés (optionnel)")
-    st.markdown("Permet de comparer les prédictions avec les vraies valeurs.")
+    st.subheader(t("code_example.python.section4_title"))
+    st.markdown(t("code_example.python.section4_caption"))
 
     code_observed = f"""\
 import requests
@@ -194,7 +197,7 @@ print(f"{{response.json()[\'upserted\']}} résultat(s) enregistré(s).")
 # TAB CURL / BASH
 # ============================================================
 with tab_curl:
-    st.subheader("1. Uploader le modèle")
+    st.subheader(t("code_example.curl.section1_title"))
 
     code_curl_upload = f"""\
 #!/usr/bin/env bash
@@ -215,7 +218,7 @@ curl -X POST "$API_URL/models" \\
 """
     st.code(code_curl_upload, language="bash")
 
-    st.subheader("2. Faire une prédiction")
+    st.subheader(t("code_example.curl.section2_title"))
 
     code_curl_predict = f"""\
 API_URL="{API_URL}"
@@ -237,7 +240,7 @@ curl -X POST "$API_URL/predict" \\
 """
     st.code(code_curl_predict, language="bash")
 
-    st.subheader("3. Récupérer l'historique des prédictions")
+    st.subheader(t("code_example.curl.section3_title"))
 
     code_curl_history = f"""\
 API_URL="{API_URL}"
@@ -250,7 +253,7 @@ curl -G "$API_URL/predictions" \\
 """
     st.code(code_curl_history, language="bash")
 
-    st.subheader("4. Soumettre un résultat observé")
+    st.subheader(t("code_example.curl.section4_title"))
 
     code_curl_observed = f"""\
 API_URL="{API_URL}"
@@ -276,10 +279,8 @@ curl -X POST "$API_URL/observed-results" \\
 # TAB JAVASCRIPT
 # ============================================================
 with tab_js:
-    st.subheader("1. Uploader le modèle")
-    st.markdown(
-        "_Depuis un navigateur, le fichier `.joblib` doit provenir d'un `<input type=\"file\">`._"
-    )
+    st.subheader(t("code_example.js.section1_title"))
+    st.markdown(t("code_example.js.section1_caption"))
 
     code_js_upload = f"""\
 const API_URL = "{API_URL}";
@@ -309,7 +310,7 @@ console.log(`Modèle uploadé : ${{model.name}} v${{model.version}}`);
 """
     st.code(code_js_upload, language="javascript")
 
-    st.subheader("2. Faire une prédiction")
+    st.subheader(t("code_example.js.section2_title"))
 
     code_js_predict = f"""\
 const API_URL = "{API_URL}";
@@ -338,7 +339,7 @@ console.log(`Probabilités :`, result.probability);
 """
     st.code(code_js_predict, language="javascript")
 
-    st.subheader("3. Récupérer l'historique des prédictions")
+    st.subheader(t("code_example.js.section3_title"))
 
     code_js_history = f"""\
 const API_URL = "{API_URL}";
@@ -353,7 +354,7 @@ console.log(`${{history.length}} prédiction(s) trouvée(s).`);
 """
     st.code(code_js_history, language="javascript")
 
-    st.subheader("4. Soumettre un résultat observé")
+    st.subheader(t("code_example.js.section4_title"))
 
     code_js_observed = f"""\
 const API_URL = "{API_URL}";
@@ -382,4 +383,4 @@ console.log(`${{result.upserted}} résultat(s) enregistré(s).`);
     st.code(code_js_observed, language="javascript")
 
 st.divider()
-st.caption(f"API : `{API_URL}` — MLflow : `{MLFLOW_URL}`")
+st.caption(t("code_example.footer_caption", api_url=API_URL, mlflow_url=MLFLOW_URL))
