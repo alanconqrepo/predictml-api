@@ -102,25 +102,35 @@ def test_load_model_via_minio():
     minio_mock.async_download_file_bytes.assert_called_once_with("iris/v1.0.0.joblib")
 
 
-def test_load_model_via_mlflow():
-    """load_model avec mlflow_run_id → charge depuis MLflow, MinIO non appelé"""
+def test_load_model_mlflow_run_id_uses_minio():
+    """load_model avec mlflow_run_id → charge QUAND MÊME depuis MinIO (source de vérité).
+    mlflow_run_id est conservé comme lien de traçabilité mais n'est plus utilisé pour charger.
+    Cela garantit le fonctionnement même si MLflow est inaccessible ou désactivé."""
     service = _make_service()
-    fake_model = SimpleNamespace(marker="fake_mlflow_model")
+    fake_model = SimpleNamespace(marker="fake_model_with_run_id")
+    _jbuf = io.BytesIO()
+    joblib.dump(fake_model, _jbuf)
+    fake_pkl = _jbuf.getvalue()
     run_id = "abc123def456abc123def456abc123de"
-    metadata = _fake_metadata(mlflow_run_id=run_id, minio_object_key=None, model_bytes=None)
+    metadata = _fake_metadata(
+        mlflow_run_id=run_id,
+        minio_object_key="iris/1.0.0/model.joblib",
+        model_bytes=fake_pkl,
+    )
 
     with patch(
         "src.services.db_service.DBService.get_model_metadata",
         new_callable=AsyncMock,
         return_value=metadata,
-    ), patch("mlflow.sklearn.load_model", return_value=fake_model) as mlflow_mock, \
-       patch("src.services.model_service.minio_service") as minio_mock:
-        minio_mock.async_download_file_bytes = AsyncMock()
+    ), patch("src.services.model_service.minio_service") as minio_mock:
+        minio_mock.async_download_file_bytes = AsyncMock(return_value=fake_pkl)
         result = asyncio.run(service.load_model(AsyncMock(), "test_model"))
 
-    assert result["model"].marker == "fake_mlflow_model"
-    mlflow_mock.assert_called_once_with(f"runs:/{run_id}/model")
-    minio_mock.async_download_file_bytes.assert_not_called()
+    assert result["model"].marker == "fake_model_with_run_id"
+    # MinIO est toujours utilisé, même quand mlflow_run_id est renseigné
+    minio_mock.async_download_file_bytes.assert_called_once_with("iris/1.0.0/model.joblib")
+    # mlflow_run_id reste accessible comme lien de traçabilité
+    assert result["metadata"].mlflow_run_id == run_id
 
 
 def test_load_model_cache_hit():

@@ -436,8 +436,11 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
 
     # ------------------------------------------------------------------ #
     # 5c. MLflow run (dégradation gracieuse)
+    # Le chemin MinIO est calculé ici (déterministe) pour être passé à MLflow
+    # avant l'upload effectif, sans dupliquer le binaire dans le bucket mlflow.
     # ------------------------------------------------------------------ #
     now_utc = datetime.now(timezone.utc)
+    new_object_key = f"{model_name}/{new_version}/model.joblib"
     _mlflow_run_id: Optional[str] = None
     try:
         _mlflow_run_id = mlflow_service.log_retrain_run(
@@ -461,8 +464,8 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
             ),
             auto_promoted=False,
             auto_promote_reason=None,
-            model_bytes=new_model_bytes,
-            requirements_txt=_req_txt,
+            minio_object_key=new_object_key,
+            minio_bucket="models",
         )
     except Exception as _exc:
         logger.warning("MLflow logging échoué (non bloquant)", error=str(_exc))
@@ -470,7 +473,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
     # ------------------------------------------------------------------ #
     # 6. Upload MinIO : .joblib + train.py + requirements.txt
     # ------------------------------------------------------------------ #
-    new_object_key = f"{model_name}/v{new_version}.joblib"
+    # new_object_key déjà calculé section 5c
     new_model_hmac_signature = compute_model_hmac(new_model_bytes)
     try:
         upload_info = await minio_service.async_upload_model_bytes(new_model_bytes, new_object_key)
@@ -484,7 +487,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
             "stderr": stderr_text,
         }
 
-    new_train_key = f"{model_name}/v{new_version}_train.py"
+    new_train_key = f"{model_name}/{new_version}/train.py"
     try:
         await minio_service.async_upload_file_bytes(
             script_bytes, new_train_key, content_type="text/x-python"
@@ -499,7 +502,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
             "stderr": stderr_text,
         }
 
-    _req_object_key: Optional[str] = f"{model_name}/v{new_version}_requirements.txt"
+    _req_object_key: Optional[str] = f"{model_name}/{new_version}/requirements.txt"
     try:
         await minio_service.async_upload_file_bytes(
             _req_txt.encode("utf-8"), _req_object_key, content_type="text/plain"

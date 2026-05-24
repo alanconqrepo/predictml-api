@@ -388,7 +388,7 @@ class TestCreateModelWithTrainFile:
         assert r.status_code == 201
         data = r.json()
         assert data["train_script_object_key"] is not None
-        expected_key = f"{MODEL_PREFIX}_with_script/v1.0.0_train.py"
+        expected_key = f"{MODEL_PREFIX}_with_script/1.0.0/train.py"
         assert data["train_script_object_key"] == expected_key
 
     def test_upload_without_train_file_key_is_null(self):

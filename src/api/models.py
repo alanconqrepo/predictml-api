@@ -3344,7 +3344,7 @@ async def create_model(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Script train.py invalide : {validation_error}",
             )
-        train_object_name = f"{name}/v{version}_train.py"
+        train_object_name = f"{name}/{version}/train.py"
         _t0 = time.perf_counter()
         minio_service.upload_file_bytes(
             train_bytes, train_object_name, content_type="text/x-python"
@@ -3395,7 +3395,7 @@ async def create_model(
             else:
                 req_txt = generate_requirements_txt(train_source)
 
-        req_object_name = f"{name}/v{version}_requirements.txt"
+        req_object_name = f"{name}/{version}/requirements.txt"
         _t0 = time.perf_counter()
         minio_service.upload_file_bytes(
             req_txt.encode("utf-8"), req_object_name, content_type="text/plain"
@@ -3407,6 +3407,8 @@ async def create_model(
             version=version,
             duration_ms=round((time.perf_counter() - _t0) * 1000),
         )
+        # Fix : sauvegarder la clé MinIO du requirements.txt en DB
+        requirements_object_key = req_object_name
 
     # Si local_dependencies fourni sans train_file, générer quand même requirements.txt
     if local_dependencies and train_file is None and requirements_object_key is None:
@@ -3415,7 +3417,7 @@ async def create_model(
             from src.services.env_snapshot_service import dependencies_to_requirements_txt
 
             req_txt = dependencies_to_requirements_txt(local_deps_dict)
-            req_object_name = f"{name}/v{version}_requirements.txt"
+            req_object_name = f"{name}/{version}/requirements.txt"
             minio_service.upload_file_bytes(
                 req_txt.encode("utf-8"), req_object_name, content_type="text/plain"
             )
@@ -3440,7 +3442,7 @@ async def create_model(
 
     # Uploader le modèle final vers MinIO
     if model_bytes_to_store is not None:
-        object_name = f"{name}/v{version}.joblib"
+        object_name = f"{name}/{version}/model.joblib"
         logger.info(
             "Début upload modèle MinIO",
             model=name,
