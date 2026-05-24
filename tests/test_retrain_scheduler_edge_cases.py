@@ -15,7 +15,8 @@ Couvre les branches non couvertes par test_scheduled_retraining.py :
 """
 
 import asyncio
-from datetime import datetime, timezone
+import sys
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -57,7 +58,6 @@ class TestComputeNextRunAt:
 class TestRunRetrainJobRedisLock:
     def test_job_skips_when_lock_already_acquired(self):
         """Redis lock déjà pris → _do_retrain non appelé, warning loggé."""
-        from src.tasks.retrain_scheduler import _run_retrain_job
 
         mock_redis = AsyncMock()
         mock_redis.set.return_value = False  # verrou déjà acquis
@@ -327,6 +327,7 @@ class TestComputeNextRunAtNoneReturn:
     def test_returns_none_when_trigger_has_no_next_fire_time(self):
         """CronTrigger.get_next_fire_time retourne None → _compute_next_run_at retourne None."""
         from unittest.mock import MagicMock
+
         from src.tasks.retrain_scheduler import _compute_next_run_at
 
         mock_trigger = MagicMock()
@@ -339,15 +340,16 @@ class TestComputeNextRunAtNoneReturn:
         assert result is None
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="module resource non disponible sur Windows")
 class TestSetSubprocessLimits:
     def test_set_subprocess_limits_calls_setrlimit_once(self):
         """_set_subprocess_limits appelle resource.setrlimit exactement une fois (RLIMIT_NOFILE uniquement)."""
-        import resource
-        from src.tasks.retrain_scheduler import _set_subprocess_limits
+        from src.core.platform_limits import set_subprocess_limits
 
-        with patch.object(resource, "setrlimit") as mock_setrlimit:
-            _set_subprocess_limits()
-            assert mock_setrlimit.call_count == 1  # Only RLIMIT_NOFILE (RLIMIT_AS removed — Docker cgroups handle memory)
+        with patch("src.core.platform_limits._resource") as mock_resource:
+            mock_resource.getrlimit.return_value = (1024, 4096)
+            set_subprocess_limits()
+            assert mock_resource.setrlimit.call_count == 1  # Only RLIMIT_NOFILE (RLIMIT_AS removed — Docker cgroups handle memory)
 
 
 class TestRunRetrainJobErrorHandling:

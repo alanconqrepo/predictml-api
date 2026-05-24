@@ -19,7 +19,6 @@ import asyncio
 import csv
 import json
 import os
-import resource
 import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -27,6 +26,8 @@ from typing import Optional
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+
+from src.core.platform_limits import SUBPROCESS_PREEXEC_KWARGS
 
 logger = structlog.get_logger(__name__)
 
@@ -51,23 +52,6 @@ _SAFE_ENV_KEYS = {
     "PYTHONDONTWRITEBYTECODE",
     "VIRTUAL_ENV",
 }
-
-
-def _set_subprocess_limits() -> None:
-    """Appelé dans le processus enfant après fork — réduit la surface d'attaque.
-
-    RLIMIT_AS : on ne limite pas la mémoire virtuelle — mlflow + numpy + sklearn + boto3
-    nécessitent plus de 2 GB d'espace d'adressage virtuel (shared libs + compilations regex
-    de email._header_value_parser en Python 3.13). Un plafond trop bas provoque MemoryError
-    à l'import, bien avant que le script d'entraînement lui-même s'exécute.
-    La protection mémoire est assurée par les cgroups Docker du container.
-
-    RLIMIT_NOFILE : 1024 minimum requis — importlib_metadata ouvre les métadonnées de
-    tous les paquets installés à l'import de mlflow (200+ fd simultanément).
-    """
-    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-    _fd_limit = min(1024, _hard)
-    resource.setrlimit(resource.RLIMIT_NOFILE, (_fd_limit, _fd_limit))
 
 
 def _compute_next_run_at(cron: str) -> Optional[datetime]:
@@ -313,7 +297,7 @@ async def _do_retrain(name: str, version: str) -> None:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=tmpdir,
-                preexec_fn=_set_subprocess_limits,
+                **SUBPROCESS_PREEXEC_KWARGS,
             )
             try:
                 raw_stdout, raw_stderr = await asyncio.wait_for(proc.communicate(), timeout=600.0)

@@ -15,12 +15,13 @@ import asyncio
 import csv
 import json
 import os
-import resource
 import tempfile
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import structlog
+
+from src.core.platform_limits import SUBPROCESS_PREEXEC_KWARGS
 
 logger = structlog.get_logger(__name__)
 
@@ -43,16 +44,6 @@ _SAFE_ENV_KEYS = {
 }
 
 _SUBPROCESS_TIMEOUT = 600.0  # secondes
-
-
-def _set_subprocess_limits() -> None:
-    """Appelé dans le processus enfant (preexec_fn) — réduit la surface d'attaque.
-
-    RLIMIT_NOFILE : 1024 minimum requis (importlib_metadata ouvre 200+ fd à l'import mlflow).
-    """
-    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-    _fd_limit = min(1024, _hard)
-    resource.setrlimit(resource.RLIMIT_NOFILE, (_fd_limit, _fd_limit))
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +300,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=tmpdir,
-                preexec_fn=_set_subprocess_limits,
+                **SUBPROCESS_PREEXEC_KWARGS,
             )
 
             try:
