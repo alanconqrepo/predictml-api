@@ -1,4 +1,4 @@
-﻿"""
+"""
 Page d'accueil et login — PredictML Admin Dashboard
 """
 
@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 import streamlit as st
 from utils.api_client import APIClient
 from utils.auth import logout
+from utils.i18n import init_lang, language_switcher, t
 from utils.ui_helpers import show_token_with_copy
 
 # Sessions stockées dans /tmp — survive aux hot-reloads Streamlit.
@@ -86,29 +87,33 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+init_lang()
+
 DEFAULT_API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
 
 def show_login():
-    st.title("🤖 PredictML Admin Dashboard")
-    st.markdown("Connectez-vous avec votre API token pour accéder au dashboard.")
+    st.title(t("login.title"))
+    st.markdown(t("login.subtitle"))
 
     with st.form("login_form"):
-        api_url = st.text_input("URL de l'API", value=DEFAULT_API_URL)
-        token = st.text_input("API Token", type="password", placeholder="Votre token Bearer")
-        submitted = st.form_submit_button("Se connecter", width="stretch")
+        api_url = st.text_input(t("login.api_url_label"), value=DEFAULT_API_URL)
+        token = st.text_input(
+            t("login.token_label"), type="password", placeholder=t("login.token_placeholder")
+        )
+        submitted = st.form_submit_button(t("login.submit_btn"), width="stretch")
 
     if submitted:
         if not token:
-            st.error("Veuillez saisir un token.")
+            st.error(t("login.error_no_token"))
         elif not _is_valid_api_url(api_url):
-            st.error("URL invalide. Elle doit commencer par http:// ou https://")
+            st.error(t("login.error_invalid_url"))
         else:
             client = APIClient(base_url=api_url, token=token)
             is_valid, is_admin = client.check_auth()
 
             if not is_valid:
-                st.error("Token invalide ou API inaccessible.")
+                st.error(t("login.error_invalid_token"))
             else:
                 try:
                     me = client.get_me()
@@ -126,29 +131,18 @@ def show_login():
 
     st.divider()
 
-    with st.expander("Vous n'avez pas encore de token ?"):
-        st.markdown("""
-**Premier accès admin**
-
-Le token admin est défini par la variable d'environnement **`ADMIN_TOKEN`**.
-
----
-
-**Nouvel utilisateur**
-
-Soumettez une demande via la page **"Demande d'accès"** dans le menu — un admin vous
-communiquera votre token une fois approuvé.
-""")
-        st.markdown("📝 [Soumettre une demande d'accès](/Demande_Acces)")
+    with st.expander(t("login.no_token_expander")):
+        st.markdown(t("login.no_token_body"))
+        st.markdown(t("login.no_token_link"))
 
 
 def show_home():  # noqa: C901
     import pandas as pd
 
-    st.title("🤖 PredictML Admin Dashboard")
+    st.title(t("home.title"))
 
-    role_badge = "👑 Admin" if st.session_state.get("is_admin") else "👤 Utilisateur"
-    st.caption(f"Connecté — {role_badge}  |  API: `{st.session_state.get('api_url')}`")
+    role_badge = t("home.role_admin") if st.session_state.get("is_admin") else t("home.role_user")
+    st.caption(t("home.caption", role=role_badge, api_url=st.session_state.get("api_url")))
 
     client = APIClient(
         base_url=st.session_state["api_url"],
@@ -209,26 +203,29 @@ def show_home():  # noqa: C901
 
     col_s, col_db, col_cache, col_alerts = st.columns(4)
     col_s.metric(
-        "Statut API",
+        t("home.status.api_label"),
         (
-            "✅ En ligne"
+            t("home.status.api_online")
             if api_status == "healthy"
-            else ("⚠️ Dégradé" if api_status == "degraded" else "❓ Inconnu")
+            else (t("home.status.api_degraded") if api_status == "degraded" else t("home.status.api_unknown"))
         ),
     )
     col_db.metric(
-        "Base de données",
-        "✅ Connectée" if db_status == "connected" else f"⚠️ {db_status}",
+        t("home.status.db_label"),
+        t("home.status.db_connected") if db_status == "connected" else f"⚠️ {db_status}",
     )
-    col_cache.metric("En cache", f"{cached} modèle(s)" if cached else "—")
+    col_cache.metric(
+        t("home.status.cache_label"),
+        t("home.status.cache_value", count=cached) if cached else "—",
+    )
     col_alerts.metric(
-        "Modèles en alerte",
-        f"🔴 {models_alert_count}" if models_alert_count > 0 else "✅ Aucune",
+        t("home.status.alerts_label"),
+        t("home.status.alerts_count", count=models_alert_count) if models_alert_count > 0 else t("home.status.alerts_none"),
     )
 
     # ── 2. KPIs globaux — 30 derniers jours ─────────────────────────────────
     st.divider()
-    st.subheader("📊 Activité — 30 derniers jours")
+    st.subheader(t("home.kpis.subheader"))
 
     total_preds = sum(s.get("total_predictions", 0) for s in pred_stats)
     total_err = sum(s.get("error_count", 0) for s in pred_stats)
@@ -241,19 +238,19 @@ def show_home():  # noqa: C901
     coverage_pct = f"{cov_rate * 100:.1f}%" if cov_rate is not None else "—"
 
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("📈 Prédictions", f"{total_preds:,}" if total_preds else "—")
+    k1.metric(t("home.kpis.predictions"), f"{total_preds:,}" if total_preds else "—")
     k2.metric(
-        "✅ Taux de succès",
+        t("home.kpis.success_rate"),
         f"{success_rate}%" if success_rate is not None else "—",
     )
     k3.metric(
-        "⚡ Latence P95",
+        t("home.kpis.latency_p95"),
         f"{int(latency_p95)} ms" if latency_p95 is not None else "—",
     )
     k4.metric(
-        "🔖 Couverture terrain",
+        t("home.kpis.coverage"),
         coverage_pct,
-        help="Pourcentage de prédictions avec un résultat observé (ground truth)",
+        help=t("home.kpis.coverage_help"),
     )
 
     # ── 3. Alertes actives (conditionnel) ────────────────────────────────────
@@ -264,18 +261,18 @@ def show_home():  # noqa: C901
         st.divider()
         if critical:
             names_c = ", ".join(f"**{m.get('model_name', '?')}**" for m in critical)
-            st.error(f"🔴 {len(critical)} modèle(s) en état critique : {names_c}")
+            st.error(t("home.alerts.critical", count=len(critical), names=names_c))
         if warning:
             names_w = ", ".join(f"**{m.get('model_name', '?')}**" for m in warning)
-            st.warning(f"⚠️ {len(warning)} modèle(s) en alerte : {names_w}")
-        st.page_link("pages/7_Supervision.py", label="→ Voir la supervision complète")
+            st.warning(t("home.alerts.warning", count=len(warning), names=names_w))
+        st.page_link("pages/7_Supervision.py", label=t("home.alerts.supervision_link"))
 
     # ── 4. Leaderboard + Grille santé côte à côte ────────────────────────────
     st.divider()
     col_lb, col_health = st.columns([3, 2])
 
     with col_lb:
-        st.subheader("🏆 Classement des modèles")
+        st.subheader(t("home.leaderboard.subheader"))
         if leaderboard:
             rows = []
             for item in leaderboard[:5]:
@@ -284,26 +281,26 @@ def show_home():  # noqa: C901
                 rows.append(
                     {
                         "#": item.get("rank", "—"),
-                        "Modèle": item.get("model_name", "—"),
-                        "Version": item.get("version", "—"),
-                        "Accuracy": f"{acc:.1%}" if acc is not None else "—",
-                        "Prédictions": f"{item.get('predictions_count', 0):,}",
-                        "Drift": drift,
+                        t("home.leaderboard.col_model"): item.get("model_name", "—"),
+                        t("home.leaderboard.col_version"): item.get("version", "—"),
+                        t("home.leaderboard.col_accuracy"): f"{acc:.1%}" if acc is not None else "—",
+                        t("home.leaderboard.col_predictions"): f"{item.get('predictions_count', 0):,}",
+                        t("home.leaderboard.col_drift"): drift,
                     }
                 )
             st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
-            st.page_link("pages/4_Stats.py", label="📊 Leaderboard complet →")
+            st.page_link("pages/4_Stats.py", label=t("home.leaderboard.full_link"))
         else:
             n_prod = sum(1 for m in all_models if m.get("is_production"))
             if all_models:
-                st.metric("Modèles actifs", len(all_models))
-                st.metric("Versions en production", n_prod)
+                st.metric(t("home.leaderboard.active_models"), len(all_models))
+                st.metric(t("home.leaderboard.prod_versions"), n_prod)
             else:
-                st.info("Aucun modèle enregistré. Commencez par uploader un modèle.")
-                st.page_link("pages/2_Models.py", label="🤖 Uploader un modèle →")
+                st.info(t("home.leaderboard.no_models"))
+                st.page_link("pages/2_Models.py", label=t("home.leaderboard.upload_link"))
 
     with col_health:
-        st.subheader("🛡️ État des modèles")
+        st.subheader(t("home.health.subheader"))
         if mon_models:
             for m in mon_models:
                 status = m.get("health_status", "unknown")
@@ -314,22 +311,22 @@ def show_home():  # noqa: C901
                 preds = m.get("predictions_count") or m.get("total_predictions", 0)
                 details = []
                 if err is not None:
-                    details.append(f"erreur : {err:.1%}")
+                    details.append(t("home.health.detail_error", rate=f"{err:.1%}"))
                 if p95 is not None:
-                    details.append(f"P95 : {int(p95)} ms")
+                    details.append(t("home.health.detail_p95", ms=int(p95)))
                 if preds:
-                    details.append(f"{preds:,} pred.")
+                    details.append(t("home.health.detail_preds", count=f"{preds:,}"))
                 detail_str = f" — {' · '.join(details)}" if details else ""
                 st.markdown(f"{badge} **{name}**{detail_str}")
-            st.page_link("pages/7_Supervision.py", label="🛡️ Supervision complète →")
+            st.page_link("pages/7_Supervision.py", label=t("home.health.supervision_link"))
         elif all_models:
             for m in all_models[:8]:
                 badge = "🟢" if m.get("is_production") else "⚪"
                 st.markdown(f"{badge} **{m.get('name')}** v{m.get('version')}")
             if len(all_models) > 8:
-                st.caption(f"… et {len(all_models) - 8} autre(s) version(s)")
+                st.caption(t("home.health.more_versions", count=len(all_models) - 8))
         else:
-            st.info("Aucun modèle disponible.")
+            st.info(t("home.health.no_models"))
 
     # ── 5. Tests A/B et Shadow actifs (conditionnel) ──────────────────────────
     ab_versions = [m for m in all_models if m.get("deployment_mode") == "ab"]
@@ -340,63 +337,63 @@ def show_home():  # noqa: C901
         c1, c2 = st.columns(2)
         if ab_versions:
             ab_names = ", ".join({m.get("name", "?") for m in ab_versions})
-            c1.info(f"🧪 **{len(ab_versions)} version(s) en test A/B** — {ab_names}")
+            c1.info(t("home.ab_shadow.ab_info", count=len(ab_versions), names=ab_names))
         if shadow_versions:
             sh_names = ", ".join({m.get("name", "?") for m in shadow_versions})
-            c2.info(f"👻 **{len(shadow_versions)} version(s) en shadow** — {sh_names}")
-        st.page_link("pages/6_AB_Testing.py", label="→ Gérer les tests A/B et shadow")
+            c2.info(t("home.ab_shadow.shadow_info", count=len(shadow_versions), names=sh_names))
+        st.page_link("pages/6_AB_Testing.py", label=t("home.ab_shadow.manage_link"))
 
     # ── 6. Cartes de navigation ───────────────────────────────────────────────
     st.divider()
-    st.subheader("🗺️ Naviguer dans le dashboard")
+    st.subheader(t("home.nav.subheader"))
 
     nav_items = [
         (
             "🤖",
-            "Modèles",
-            "Uploader, versionner, déployer et comparer des modèles ML",
+            t("home.nav.models_title"),
+            t("home.nav.models_desc"),
             "pages/2_Models.py",
         ),
         (
             "🔮",
-            "Prédictions",
-            "Historique, export CSV, prédiction batch et résultats observés",
+            t("home.nav.predictions_title"),
+            t("home.nav.predictions_desc"),
             "pages/3_Predictions.py",
         ),
         (
             "📊",
-            "Statistiques",
-            "Leaderboard, évolution temporelle et comparaison de versions",
+            t("home.nav.stats_title"),
+            t("home.nav.stats_desc"),
             "pages/4_Stats.py",
         ),
         (
             "🛡️",
-            "Supervision",
-            "Vue de santé globale, détection de drift et alertes en temps réel",
+            t("home.nav.supervision_title"),
+            t("home.nav.supervision_desc"),
             "pages/7_Supervision.py",
         ),
         (
             "🧪",
-            "A/B Testing",
-            "Configurer les déploiements progressifs et comparer les variantes",
+            t("home.nav.ab_title"),
+            t("home.nav.ab_desc"),
             "pages/6_AB_Testing.py",
         ),
         (
             "🔄",
-            "Réentraînement",
-            "Scheduler cron, retrain manuel, upload de scripts train.py",
+            t("home.nav.retrain_title"),
+            t("home.nav.retrain_desc"),
             "pages/8_Retrain.py",
         ),
         (
             "🏆",
-            "Golden Tests",
-            "Suites de tests de non-régression avec assertions sur les prédictions",
+            t("home.nav.golden_title"),
+            t("home.nav.golden_desc"),
             "pages/9_Golden_Tests.py",
         ),
         (
             "📚",
-            "Aide",
-            "Documentation, exemples de code et guide d'intégration API",
+            t("home.nav.help_title"),
+            t("home.nav.help_desc"),
             "pages/10_Aide.py",
         ),
     ]
@@ -405,8 +402,8 @@ def show_home():  # noqa: C901
             0,
             (
                 "👥",
-                "Utilisateurs",
-                "Gérer les comptes, quotas et demandes d'accès",
+                t("home.nav.users_title"),
+                t("home.nav.users_desc"),
                 "pages/1_Users.py",
             ),
         )
@@ -419,7 +416,7 @@ def show_home():  # noqa: C901
                 with st.container(border=True):
                     st.markdown(f"**{ico} {title}**")
                     st.caption(desc)
-                    st.page_link(page_path, label="Ouvrir →")
+                    st.page_link(page_path, label=t("home.nav.open_btn"))
 
 
 # Router principal — navigation conditionnelle selon l'état de connexion
@@ -518,27 +515,27 @@ if _logged_in:
         token=st.session_state["api_token"],
     )
     with st.sidebar:
-        st.subheader("Mon compte")
+        st.subheader(t("sidebar.account_title"))
         try:
             quota = _client.get_my_quota()
             used = quota["used_today"]
             limit = quota["rate_limit_per_day"]
             remaining = quota["remaining_today"]
             st.progress(used / limit if limit > 0 else 0)
-            st.caption(f"{used} / {limit} aujourd'hui")
+            st.caption(t("sidebar.quota_caption", used=used, limit=limit))
             if remaining == 0:
-                st.warning("Quota épuisé pour aujourd'hui.")
+                st.warning(t("sidebar.quota_exhausted"))
         except Exception:
             pass
 
-        with st.expander("🔑 Mon token API"):
+        with st.expander(t("sidebar.token_expander")):
             try:
                 me = _client.get_me()
                 show_token_with_copy(me["api_token"])
             except Exception:
-                st.error("Impossible de charger le token.")
+                st.error(t("sidebar.token_load_error"))
 
-        if st.button("Se déconnecter", type="secondary", width="stretch"):
+        if st.button(t("sidebar.logout_btn"), type="secondary", width="stretch"):
             _clear_session()
             logout()
 
@@ -546,8 +543,8 @@ if _logged_in:
             try:
                 n_pending = _client.get_pending_account_requests_count()
                 if n_pending > 0:
-                    st.warning(f"🔔 {n_pending} demande(s) d'accès en attente")
-                    st.page_link("pages/1_Users.py", label="Gérer les demandes →")
+                    st.warning(t("sidebar.pending_requests", count=n_pending))
+                    st.page_link("pages/1_Users.py", label=t("sidebar.manage_requests_link"))
             except Exception:
                 pass
 
@@ -556,7 +553,7 @@ if _logged_in:
             _grafana_url = os.environ.get("GRAFANA_PUBLIC_URL", "http://localhost:3000")
             _minio_url = os.environ.get("MINIO_CONSOLE_PUBLIC_URL", "http://localhost:9011")
             _mlflow_url = os.environ.get("MLFLOW_PUBLIC_URL", "http://localhost:5000")
-            st.subheader("Services")
+            st.subheader(t("sidebar.services_title"))
             st.markdown(
                 f"🔗 [Swagger](http://localhost/docs)  \n"
                 f"📊 [Grafana]({_grafana_url}/dashboards)  \n"
@@ -564,7 +561,7 @@ if _logged_in:
                 f"🧪 [MLflow]({_mlflow_url}/)"
             )
             if st.session_state.get("is_admin"):
-                st.page_link("pages/11_Services.py", label="🔑 Accès & credentials →")
+                st.page_link("pages/11_Services.py", label=t("sidebar.credentials_link"))
             st.divider()
 
     _base_pages = [
@@ -591,8 +588,11 @@ else:
         ]
     )
 
+# Language switcher — visible on all pages (login and logged-in)
+language_switcher()
+
 # Dark mode toggle — visible sur toutes les pages
-if st.sidebar.toggle("Mode sombre", key="dark_mode"):
+if st.sidebar.toggle(t("sidebar.dark_mode_toggle"), key="dark_mode"):
     st.markdown(_DARK_CSS, unsafe_allow_html=True)
 
 _pg.run()

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Gestion centralisée des ré-entraînements et plannings cron
 """
 
@@ -8,16 +8,17 @@ import pandas as pd
 import streamlit as st
 from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
+from utils.i18n import t
 
-st.set_page_config(page_title="Retrain — PredictML", page_icon="🔄", layout="wide")
+st.set_page_config(page_title=t("retrain.page_title"), page_icon="🔄", layout="wide")
 require_auth()
 
 is_admin = st.session_state.get("is_admin", False)
 if not is_admin:
-    st.error("⛔ Accès réservé aux administrateurs.")
+    st.error(t("retrain.admin_only"))
     st.stop()
 
-st.title("🔄 Gestion des ré-entraînements")
+st.title(t("retrain.title"))
 
 client = get_client()
 
@@ -34,11 +35,11 @@ def reload():
 try:
     models = fetch_models(st.session_state.get("api_url"), st.session_state.get("api_token"))
 except Exception as e:
-    st.error(f"Impossible de charger les modèles : {e}")
+    st.error(t("retrain.error_load_models", error=e))
     st.stop()
 
 if not models:
-    st.info("Aucun modèle disponible.")
+    st.info(t("retrain.no_models"))
     st.stop()
 
 # Pre-select model from navigation link or ?model= query param
@@ -50,13 +51,19 @@ if _nav:
         st.session_state["retrain_select"] = _match
 
 tab_overview, tab_manual, tab_schedule, tab_policy, tab_history = st.tabs(
-    ["📅 Schedules", "🚀 Retrain manuel", "⏰ Planning cron", "🏆 Auto-promotion", "📜 Historique"]
+    [
+        t("retrain.tab_overview"),
+        t("retrain.tab_manual"),
+        t("retrain.tab_schedule"),
+        t("retrain.tab_policy"),
+        t("retrain.tab_history"),
+    ]
 )
 
 # ─── Onglet 1 — Vue d'ensemble des schedules ──────────────────────────────
 
 with tab_overview:
-    st.subheader("Vue d'ensemble des schedules")
+    st.subheader(t("retrain.overview.subheader"))
 
     rows = []
     for m in models:
@@ -68,61 +75,69 @@ with tab_overview:
             last_run = sched.get("last_run_at")
             next_run = sched.get("next_run_at")
             enabled = sched.get("enabled", True)
-            badge = "🟢 Actif" if enabled else "🔴 Désactivé"
+            badge = t("retrain.overview.badge_active") if enabled else t("retrain.overview.badge_disabled")
         else:
             cron = "—"
             last_run = None
             next_run = None
-            badge = "⚫ Aucun schedule"
+            badge = t("retrain.overview.badge_none")
 
         rows.append(
             {
-                "Modèle": m.get("name", ""),
-                "Version": m.get("version", ""),
-                "Script train.py": "✅" if has_script else "❌",
-                "Cron": cron,
-                "Dernier retrain": (
+                t("retrain.overview.col_model"): m.get("name", ""),
+                t("retrain.overview.col_version"): m.get("version", ""),
+                t("retrain.overview.col_script"): "✅" if has_script else "❌",
+                t("retrain.overview.col_cron"): cron,
+                t("retrain.overview.col_last_retrain"): (
                     pd.to_datetime(last_run).strftime("%Y-%m-%d %H:%M") if last_run else "—"
                 ),
-                "Prochain retrain": (
+                t("retrain.overview.col_next_retrain"): (
                     pd.to_datetime(next_run).strftime("%Y-%m-%d %H:%M") if next_run else "—"
                 ),
-                "Statut": badge,
+                t("retrain.overview.col_status"): badge,
             }
         )
+
+    col_model = t("retrain.overview.col_model")
+    col_version = t("retrain.overview.col_version")
+    col_script = t("retrain.overview.col_script")
+    col_cron = t("retrain.overview.col_cron")
+    col_last_retrain = t("retrain.overview.col_last_retrain")
+    col_next_retrain = t("retrain.overview.col_next_retrain")
+    col_status = t("retrain.overview.col_status")
 
     st.dataframe(
         pd.DataFrame(rows),
         width='stretch',
         hide_index=True,
         column_config={
-            "Modèle": st.column_config.TextColumn(
-                "Modèle",
-                help="Nom du modèle ML concerné par ce planning de ré-entraînement.",
+            col_model: st.column_config.TextColumn(
+                col_model,
+                help=t("retrain.overview.help_model"),
             ),
-            "Version": st.column_config.TextColumn(
-                "Version",
-                help="Version du modèle sur laquelle le planning est configuré.",
+            col_version: st.column_config.TextColumn(
+                col_version,
+                help=t("retrain.overview.help_version"),
             ),
-            "Script train.py": st.column_config.TextColumn(
-                "Script train.py",
-                help="✅ Un script d'entraînement est disponible — le ré-entraînement automatique est possible. ❌ Aucun script — uploadez-en un via POST /models avec train_file.",
+            col_script: st.column_config.TextColumn(
+                col_script,
+                help=t("retrain.overview.help_script"),
             ),
-            "Cron": st.column_config.TextColumn(
-                "Cron",
-                help="Expression cron (5 champs, UTC) définissant le déclenchement automatique. Ex : '0 3 * * 1' = chaque lundi à 3h UTC.",
+            col_cron: st.column_config.TextColumn(
+                col_cron,
+                help=t("retrain.overview.help_cron"),
             ),
-            "Dernier retrain": st.column_config.TextColumn(
-                "Dernier retrain",
-                help="Date et heure du dernier ré-entraînement déclenché par ce planning.",
+            col_last_retrain: st.column_config.TextColumn(
+                col_last_retrain,
+                help=t("retrain.overview.help_last_retrain"),
             ),
-            "Prochain retrain": st.column_config.TextColumn(
-                "Prochain retrain",
-                help="Date et heure prévue pour le prochain déclenchement automatique.",
+            col_next_retrain: st.column_config.TextColumn(
+                col_next_retrain,
+                help=t("retrain.overview.help_next_retrain"),
             ),
-            "Statut": st.column_config.TextColumn(
-                "Statut",
-                help="🟢 Actif : le planning est activé et s'exécutera automatiquement. 🔴 Désactivé : suspendu. ⚫ Aucun schedule : pas de planning configuré.",
+            col_status: st.column_config.TextColumn(
+                col_status,
+                help=t("retrain.overview.help_status"),
             ),
         },
     )
@@ -136,25 +151,22 @@ with tab_overview:
     trainable_count = sum(1 for m in models if m.get("train_script_object_key"))
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("Schedules actifs", active)
-    col2.metric("Modèles avec train.py", trainable_count)
-    col3.metric("Total modèles", len(models))
+    col1.metric(t("retrain.overview.metric_active_schedules"), active)
+    col2.metric(t("retrain.overview.metric_trainable_models"), trainable_count)
+    col3.metric(t("retrain.overview.metric_total_models"), len(models))
 
 # ─── Onglet 2 — Retrain manuel ────────────────────────────────────────────
 
 with tab_manual:
-    st.subheader("Déclencher un ré-entraînement manuel")
+    st.subheader(t("retrain.manual.subheader"))
 
     trainable = [m for m in models if m.get("train_script_object_key")]
     if not trainable:
-        st.warning(
-            "Aucun modèle ne possède de script `train.py`. "
-            "Uploadez-en un via `POST /models` avec le paramètre `train_file`."
-        )
+        st.warning(t("retrain.manual.no_trainable"))
     else:
         model_opts = {f"{m['name']} v{m['version']}": m for m in trainable}
         retrain_search = st.text_input(
-            "Filtrer par nom", key="retrain_search", placeholder="Rechercher un modèle…"
+            t("retrain.filter_by_name"), key="retrain_search", placeholder=t("retrain.search_placeholder")
         )
         retrain_keys = (
             [k for k in model_opts if retrain_search.lower() in k.lower()]
@@ -162,7 +174,7 @@ with tab_manual:
             else list(model_opts.keys())
         )
         selected_label = st.selectbox(
-            "Modèle à ré-entraîner", retrain_keys or list(model_opts.keys()), key="retrain_select"
+            t("retrain.manual.select_model"), retrain_keys or list(model_opts.keys()), key="retrain_select"
         )
         sel = model_opts[selected_label]
 
@@ -170,34 +182,34 @@ with tab_manual:
             col_s, col_e = st.columns(2)
             with col_s:
                 start_date = st.date_input(
-                    "Date de début",
+                    t("retrain.manual.start_date"),
                     value=date.today() - timedelta(days=30),
                     key="manual_start",
                 )
             with col_e:
                 end_date = st.date_input(
-                    "Date de fin",
+                    t("retrain.manual.end_date"),
                     value=date.today(),
                     key="manual_end",
                 )
             new_version_input = st.text_input(
-                "Nouvelle version (laisser vide = auto-généré)",
+                t("retrain.manual.new_version_label"),
                 value="",
                 placeholder=f"{sel['version']}-retrain-YYYYMMDDHHMMSS",
                 key="manual_new_version",
             )
             set_prod = st.checkbox(
-                "Mettre en production après entraînement",
+                t("retrain.manual.set_production"),
                 value=False,
                 key="manual_set_prod",
             )
-            submitted = st.form_submit_button("🚀 Lancer le ré-entraînement", type="primary")
+            submitted = st.form_submit_button(t("retrain.manual.submit_btn"), type="primary")
 
         if submitted:
             if start_date > end_date:
-                st.error("La date de début doit être antérieure à la date de fin.")
+                st.error(t("retrain.manual.error_date_order"))
             else:
-                with st.spinner("Ré-entraînement en cours… (peut prendre jusqu'à 10 minutes)"):
+                with st.spinner(t("retrain.manual.spinner")):
                     try:
                         result = client.retrain_model(
                             name=sel["name"],
@@ -209,63 +221,51 @@ with tab_manual:
                         )
                         if result.get("success"):
                             st.toast(
-                                f"Ré-entraînement réussi ! "
-                                f"Nouvelle version : {result['new_version']}",
+                                t("retrain.manual.toast_success", new_version=result['new_version']),
                                 icon="✅",
                             )
                             auto_promoted = result.get("auto_promoted")
                             if auto_promoted is True:
-                                st.info(
-                                    "✅ Auto-promotion effectuée — "
-                                    "la nouvelle version est en production."
-                                )
+                                st.info(t("retrain.manual.auto_promoted_yes"))
                             elif auto_promoted is False:
                                 st.warning(
-                                    f"⚠️ Auto-promotion évaluée mais non effectuée : "
-                                    f"{result.get('auto_promote_reason') or '—'}"
+                                    t(
+                                        "retrain.manual.auto_promoted_no",
+                                        reason=result.get('auto_promote_reason') or '—',
+                                    )
                                 )
                         else:
                             st.toast(
-                                f"Échec du ré-entraînement : "
-                                f"{result.get('error', 'Erreur inconnue')}",
+                                t(
+                                    "retrain.manual.toast_failure",
+                                    error=result.get('error', t("retrain.manual.unknown_error")),
+                                ),
                                 icon="❌",
                             )
-                        with st.expander("📋 Logs stdout", expanded=not result.get("success")):
-                            st.code(result.get("stdout", "(vide)"), language="text")
-                        with st.expander("⚠️ Logs stderr", expanded=not result.get("success")):
-                            st.code(result.get("stderr", "(vide)"), language="text")
+                        with st.expander(t("retrain.manual.logs_stdout"), expanded=not result.get("success")):
+                            st.code(result.get("stdout", t("retrain.manual.logs_empty")), language="text")
+                        with st.expander(t("retrain.manual.logs_stderr"), expanded=not result.get("success")):
+                            st.code(result.get("stderr", t("retrain.manual.logs_empty")), language="text")
                         if result.get("success"):
                             reload()
                     except Exception as e:
-                        st.toast(f"Erreur lors du ré-entraînement : {e}", icon="❌")
+                        st.toast(t("retrain.manual.toast_error", error=e), icon="❌")
 
 # ─── Onglet 3 — Planning cron ─────────────────────────────────────────────
 
 with tab_schedule:
-    st.subheader("Configurer un planning cron")
+    st.subheader(t("retrain.schedule.subheader"))
 
     trainable_sched = [m for m in models if m.get("train_script_object_key")]
     if not trainable_sched:
-        st.warning(
-            "Aucun modèle ne possède de script `train.py`. "
-            "Uploadez-en un via `POST /models` avec le paramètre `train_file`."
-        )
+        st.warning(t("retrain.manual.no_trainable"))
     else:
-        with st.expander("ℹ️ Aide — expressions cron (UTC)", expanded=False):
-            st.markdown("""
-| Expression | Déclenchement |
-|---|---|
-| `0 3 * * 1` | Chaque lundi à 03h00 |
-| `0 2 * * *` | Chaque jour à 02h00 |
-| `0 4 1 * *` | Le 1er de chaque mois à 04h00 |
-| `0 6 * * 1,3,5` | Lundi, mercredi, vendredi à 06h00 |
-
-Format : `minute heure jour-du-mois mois jour-de-la-semaine`
-""")
+        with st.expander(t("retrain.schedule.help_expander"), expanded=False):
+            st.markdown(t("retrain.schedule.help_table"))
 
         sched_opts = {f"{m['name']} v{m['version']}": m for m in trainable_sched}
         sched_search = st.text_input(
-            "Filtrer par nom", key="sched_search", placeholder="Rechercher un modèle…"
+            t("retrain.filter_by_name"), key="sched_search", placeholder=t("retrain.search_placeholder")
         )
         sched_keys = (
             [k for k in sched_opts if sched_search.lower() in k.lower()]
@@ -273,45 +273,45 @@ Format : `minute heure jour-du-mois mois jour-de-la-semaine`
             else list(sched_opts.keys())
         )
         sched_label = st.selectbox(
-            "Modèle à planifier", sched_keys or list(sched_opts.keys()), key="sched_select"
+            t("retrain.schedule.select_model"), sched_keys or list(sched_opts.keys()), key="sched_select"
         )
         sched_sel = sched_opts[sched_label]
         existing_sched = sched_sel.get("retrain_schedule") or {}
 
         if existing_sched:
-            st.markdown("**Planning actuel :**")
+            st.markdown(t("retrain.schedule.current_schedule"))
             st.json(existing_sched)
 
         with st.form("schedule_form"):
             cron_val = st.text_input(
-                "Expression cron (5 champs, UTC)",
+                t("retrain.schedule.cron_label"),
                 value=existing_sched.get("cron") or "",
                 placeholder="0 3 * * 1",
-                help="Laisser vide pour désactiver sans effacer l'expression",
+                help=t("retrain.schedule.cron_help"),
             )
             lookback = st.slider(
-                "Fenêtre d'historique lookback_days",
+                t("retrain.schedule.lookback_label"),
                 min_value=1,
                 max_value=365,
                 value=int(existing_sched.get("lookback_days") or 30),
-                help="Nombre de jours transmis via TRAIN_START_DATE / TRAIN_END_DATE",
+                help=t("retrain.schedule.lookback_help"),
             )
             col_ap, col_en = st.columns(2)
             with col_ap:
                 auto_promote_sched = st.checkbox(
-                    "Auto-promotion après retrain",
+                    t("retrain.schedule.auto_promote_label"),
                     value=bool(existing_sched.get("auto_promote", False)),
                     key="sched_auto_promote",
-                    help="Évalue la promotion_policy après chaque exécution planifiée",
+                    help=t("retrain.schedule.auto_promote_help"),
                 )
             with col_en:
                 enabled_sched = st.checkbox(
-                    "Activer le planning",
+                    t("retrain.schedule.enabled_label"),
                     value=bool(existing_sched.get("enabled", True)),
                     key="sched_enabled",
-                    help="Décocher pour suspendre sans effacer la configuration",
+                    help=t("retrain.schedule.enabled_help"),
                 )
-            save_sched = st.form_submit_button("💾 Sauvegarder le planning", type="primary")
+            save_sched = st.form_submit_button(t("retrain.schedule.save_btn"), type="primary")
 
         if save_sched:
             try:
@@ -324,32 +324,32 @@ Format : `minute heure jour-du-mois mois jour-de-la-semaine`
                     enabled=enabled_sched,
                 )
                 st.toast(
-                    f"Planning sauvegardé pour {sched_sel['name']} v{sched_sel['version']}.",
+                    t("retrain.schedule.toast_saved", name=sched_sel['name'], version=sched_sel['version']),
                     icon="✅",
                 )
                 saved_sched = result.get("retrain_schedule") or {}
                 if saved_sched.get("next_run_at"):
-                    st.info(f"Prochain déclenchement prévu : `{saved_sched['next_run_at']}`")
+                    st.info(t("retrain.schedule.next_run_info", next_run=saved_sched['next_run_at']))
                 reload()
             except Exception as e:
-                st.toast(f"Erreur lors de la sauvegarde du planning : {e}", icon="❌")
+                st.toast(t("retrain.schedule.toast_error", error=e), icon="❌")
 
 # ─── Onglet 4 — Politique d'auto-promotion ───────────────────────────────
 
 with tab_policy:
-    st.subheader("Politique d'auto-promotion post-retrain")
-    st.caption("La politique s'applique à toutes les versions actives du modèle sélectionné.")
+    st.subheader(t("retrain.policy.subheader"))
+    st.caption(t("retrain.policy.caption"))
 
     model_names = sorted({m["name"] for m in models})
     policy_search = st.text_input(
-        "Filtrer par nom", key="policy_model_search", placeholder="Rechercher un modèle…"
+        t("retrain.filter_by_name"), key="policy_model_search", placeholder=t("retrain.search_placeholder")
     )
     policy_filtered = (
         [n for n in model_names if policy_search.lower() in n.lower()]
         if policy_search
         else model_names
     )
-    policy_name = st.selectbox("Modèle", policy_filtered or model_names, key="policy_model_select")
+    policy_name = st.selectbox(t("retrain.policy.model_label"), policy_filtered or model_names, key="policy_model_select")
 
     matching = [m for m in models if m["name"] == policy_name]
     current_policy: dict = {}
@@ -359,17 +359,17 @@ with tab_policy:
             break
 
     if current_policy:
-        st.markdown("**Politique actuelle :**")
+        st.markdown(t("retrain.policy.current_policy"))
         st.json(current_policy)
     else:
-        st.info("Aucune politique d'auto-promotion définie pour ce modèle.")
+        st.info(t("retrain.policy.no_policy"))
 
     with st.form("policy_form"):
         col_l, col_r = st.columns(2)
 
         with col_l:
             min_acc_enabled = st.checkbox(
-                "Activer min_accuracy",
+                t("retrain.policy.enable_min_accuracy"),
                 value=current_policy.get("min_accuracy") is not None,
             )
             min_acc = st.slider(
@@ -378,11 +378,11 @@ with tab_policy:
                 max_value=1.0,
                 value=float(current_policy.get("min_accuracy") or 0.9),
                 step=0.01,
-                help="Précision minimale requise sur les paires (prédiction, résultat observé)",
+                help=t("retrain.policy.help_min_accuracy"),
             )
 
             max_latency_enabled = st.checkbox(
-                "Activer max_latency_p95_ms",
+                t("retrain.policy.enable_max_latency"),
                 value=current_policy.get("max_latency_p95_ms") is not None,
             )
             max_latency = st.number_input(
@@ -390,12 +390,12 @@ with tab_policy:
                 min_value=1.0,
                 value=float(current_policy.get("max_latency_p95_ms") or 200.0),
                 step=10.0,
-                help="Latence P95 maximale autorisée en ms",
+                help=t("retrain.policy.help_max_latency"),
             )
 
         with col_r:
             max_mae_enabled = st.checkbox(
-                "Activer max_mae",
+                t("retrain.policy.enable_max_mae"),
                 value=current_policy.get("max_mae") is not None,
             )
             max_mae = st.number_input(
@@ -404,7 +404,7 @@ with tab_policy:
                 value=float(current_policy.get("max_mae") or 0.1),
                 step=0.01,
                 format="%.3f",
-                help="Erreur absolue moyenne maximale autorisée (modèles de régression)",
+                help=t("retrain.policy.help_max_mae"),
             )
 
             min_samples = st.number_input(
@@ -412,15 +412,15 @@ with tab_policy:
                 min_value=1,
                 value=int(current_policy.get("min_sample_validation") or 10),
                 step=1,
-                help="Nombre minimal de paires (prédiction, résultat observé) pour évaluer la politique",
+                help=t("retrain.policy.help_min_samples"),
             )
             auto_promote_policy = st.checkbox(
-                "Activer auto_promote",
+                t("retrain.policy.enable_auto_promote"),
                 value=bool(current_policy.get("auto_promote", False)),
-                help="Si désactivé, la politique est stockée mais jamais évaluée automatiquement",
+                help=t("retrain.policy.help_auto_promote"),
             )
 
-        save_policy = st.form_submit_button("💾 Enregistrer la politique", type="primary")
+        save_policy = st.form_submit_button(t("retrain.policy.save_btn"), type="primary")
 
     if save_policy:
         try:
@@ -434,22 +434,21 @@ with tab_policy:
             )
             updated = result.get("updated_versions", 0)
             st.toast(
-                f"Politique enregistrée pour {policy_name} "
-                f"({updated} version(s) mise(s) à jour).",
+                t("retrain.policy.toast_saved", name=policy_name, updated=updated),
                 icon="✅",
             )
             reload()
         except Exception as e:
-            st.toast(f"Erreur lors de la sauvegarde de la politique : {e}", icon="❌")
+            st.toast(t("retrain.policy.toast_error", error=e), icon="❌")
 
 # ─── Onglet 5 — Historique des retrains ──────────────────────────────────
 
 with tab_history:
-    st.subheader("Historique des ré-entraînements")
+    st.subheader(t("retrain.history.subheader"))
 
     model_names_hist = sorted({m["name"] for m in models})
     hist_search = st.text_input(
-        "Filtrer par nom", key="hist_model_search", placeholder="Rechercher un modèle…"
+        t("retrain.filter_by_name"), key="hist_model_search", placeholder=t("retrain.search_placeholder")
     )
     hist_filtered = (
         [n for n in model_names_hist if hist_search.lower() in n.lower()]
@@ -457,23 +456,20 @@ with tab_history:
         else model_names_hist
     )
     hist_model_name = st.selectbox(
-        "Modèle", hist_filtered or model_names_hist, key="hist_model_select"
+        t("retrain.history.model_label"), hist_filtered or model_names_hist, key="hist_model_select"
     )
 
     try:
         retrain_data = client.get_retrain_history(name=hist_model_name, limit=100)
     except Exception as e:
-        st.error(f"Impossible de charger l'historique : {e}")
+        st.error(t("retrain.history.error_load", error=e))
         retrain_data = {"history": [], "total": 0}
 
     retrain_entries = retrain_data.get("history", [])
     total_retrains = retrain_data.get("total", 0)
 
     if not retrain_entries:
-        st.info(
-            "Aucun ré-entraînement enregistré pour ce modèle. "
-            "Les retrains apparaissent ici après leur première exécution."
-        )
+        st.info(t("retrain.history.no_entries"))
     else:
         rows = []
         for e in retrain_entries:
@@ -482,27 +478,39 @@ with tab_history:
             f1 = e.get("f1_score")
             auto_promoted = e.get("auto_promoted")
             if auto_promoted is True:
-                promo_badge = "✅ Auto"
+                promo_badge = t("retrain.history.promo_auto")
             elif e.get("trained_by") and auto_promoted is None:
                 promo_badge = "—"
             else:
-                promo_badge = "❌"
+                promo_badge = t("retrain.history.promo_failed")
             rows.append(
                 {
-                    "Date": pd.to_datetime(e["timestamp"]).strftime("%Y-%m-%d %H:%M"),
-                    "Version créée": e.get("new_version", "—"),
-                    "Trained by": e.get("trained_by") or "—",
-                    "Version source": e.get("source_version") or "—",
-                    "Accuracy": round(accuracy, 4) if accuracy is not None else None,
-                    "AUC-ROC": round(auc, 4) if auc is not None else None,
-                    "F1 Score": round(f1, 4) if f1 is not None else None,
-                    "Auto-promotion": promo_badge,
-                    "Raison": e.get("auto_promote_reason") or "—",
+                    t("retrain.history.col_date"): pd.to_datetime(e["timestamp"]).strftime("%Y-%m-%d %H:%M"),
+                    t("retrain.history.col_new_version"): e.get("new_version", "—"),
+                    t("retrain.history.col_trained_by"): e.get("trained_by") or "—",
+                    t("retrain.history.col_source_version"): e.get("source_version") or "—",
+                    t("retrain.history.col_accuracy"): round(accuracy, 4) if accuracy is not None else None,
+                    t("retrain.history.col_auc"): round(auc, 4) if auc is not None else None,
+                    t("retrain.history.col_f1"): round(f1, 4) if f1 is not None else None,
+                    t("retrain.history.col_auto_promotion"): promo_badge,
+                    t("retrain.history.col_reason"): e.get("auto_promote_reason") or "—",
                     "n_rows": e.get("n_rows"),
-                    "Train start": e.get("train_start_date") or "—",
-                    "Train end": e.get("train_end_date") or "—",
+                    t("retrain.history.col_train_start"): e.get("train_start_date") or "—",
+                    t("retrain.history.col_train_end"): e.get("train_end_date") or "—",
                 }
             )
+
+        col_date = t("retrain.history.col_date")
+        col_new_version = t("retrain.history.col_new_version")
+        col_trained_by = t("retrain.history.col_trained_by")
+        col_source_version = t("retrain.history.col_source_version")
+        col_accuracy = t("retrain.history.col_accuracy")
+        col_auc = t("retrain.history.col_auc")
+        col_f1 = t("retrain.history.col_f1")
+        col_auto_promotion = t("retrain.history.col_auto_promotion")
+        col_reason = t("retrain.history.col_reason")
+        col_train_start = t("retrain.history.col_train_start")
+        col_train_end = t("retrain.history.col_train_end")
 
         df_hist = pd.DataFrame(rows)
         st.dataframe(
@@ -510,76 +518,73 @@ with tab_history:
             width='stretch',
             hide_index=True,
             column_config={
-                "Date": st.column_config.TextColumn(
-                    "Date",
-                    help="Date et heure à laquelle le ré-entraînement a été déclenché.",
+                col_date: st.column_config.TextColumn(
+                    col_date,
+                    help=t("retrain.history.help_date"),
                 ),
-                "Version créée": st.column_config.TextColumn(
-                    "Version créée",
-                    help="Numéro de la nouvelle version du modèle créée par ce ré-entraînement.",
+                col_new_version: st.column_config.TextColumn(
+                    col_new_version,
+                    help=t("retrain.history.help_new_version"),
                 ),
-                "Trained by": st.column_config.TextColumn(
-                    "Trained by",
-                    help="Qui a déclenché le ré-entraînement : nom d'un utilisateur ou 'scheduler' si automatique.",
+                col_trained_by: st.column_config.TextColumn(
+                    col_trained_by,
+                    help=t("retrain.history.help_trained_by"),
                 ),
-                "Version source": st.column_config.TextColumn(
-                    "Version source",
-                    help="Version du modèle utilisée comme base avant ce ré-entraînement.",
+                col_source_version: st.column_config.TextColumn(
+                    col_source_version,
+                    help=t("retrain.history.help_source_version"),
                 ),
-                "Accuracy": st.column_config.NumberColumn(
-                    "Accuracy",
-                    help="Précision du modèle ré-entraîné sur le jeu de test. Entre 0 et 1 — plus c'est proche de 1, meilleur est le modèle.",
+                col_accuracy: st.column_config.NumberColumn(
+                    col_accuracy,
+                    help=t("retrain.history.help_accuracy"),
                     format="%.4f",
                 ),
-                "AUC-ROC": st.column_config.NumberColumn(
-                    "AUC-ROC",
-                    help="AUC-ROC du modèle ré-entraîné. 1.0 = parfait, 0.5 = aléatoire. Requiert des probabilités prédites (classification).",
+                col_auc: st.column_config.NumberColumn(
+                    col_auc,
+                    help=t("retrain.history.help_auc"),
                     format="%.4f",
                 ),
-                "F1 Score": st.column_config.NumberColumn(
-                    "F1 Score",
-                    help="F1-score du modèle ré-entraîné. Moyenne harmonique précision/rappel, robuste aux classes déséquilibrées.",
+                col_f1: st.column_config.NumberColumn(
+                    col_f1,
+                    help=t("retrain.history.help_f1"),
                     format="%.4f",
                 ),
-                "Auto-promotion": st.column_config.TextColumn(
-                    "Auto-promotion",
-                    help="✅ Auto : la nouvelle version a été automatiquement mise en production selon la politique configurée. ❌ : critères non satisfaits. — : pas de politique ou promotion manuelle.",
+                col_auto_promotion: st.column_config.TextColumn(
+                    col_auto_promotion,
+                    help=t("retrain.history.help_auto_promotion"),
                 ),
-                "Raison": st.column_config.TextColumn(
-                    "Raison",
-                    help="Explication fournie par le système si l'auto-promotion n'a pas eu lieu.",
+                col_reason: st.column_config.TextColumn(
+                    col_reason,
+                    help=t("retrain.history.help_reason"),
                 ),
                 "n_rows": st.column_config.NumberColumn(
                     "n_rows",
-                    help="Nombre de lignes d'entraînement utilisées lors de ce ré-entraînement (si renseigné dans le script train.py).",
+                    help=t("retrain.history.help_n_rows"),
                 ),
-                "Train start": st.column_config.TextColumn(
-                    "Train start",
-                    help="Date de début de la fenêtre de données utilisée pour ce ré-entraînement.",
+                col_train_start: st.column_config.TextColumn(
+                    col_train_start,
+                    help=t("retrain.history.help_train_start"),
                 ),
-                "Train end": st.column_config.TextColumn(
-                    "Train end",
-                    help="Date de fin de la fenêtre de données utilisée pour ce ré-entraînement.",
+                col_train_end: st.column_config.TextColumn(
+                    col_train_end,
+                    help=t("retrain.history.help_train_end"),
                 ),
             },
         )
-        st.caption(f"{total_retrains} ré-entraînement(s) au total.")
+        st.caption(t("retrain.history.total_caption", total=total_retrains))
 
         # Graphique de progression de l'accuracy
-        chart_df = df_hist[df_hist["Accuracy"].notna()].copy()
+        chart_df = df_hist[df_hist[col_accuracy].notna()].copy()
         if not chart_df.empty:
-            st.markdown("#### Progression de l'accuracy")
-            chart_df = chart_df.sort_values("Date")
-            chart_df = chart_df.rename(columns={"Date": "index"}).set_index("index")
-            st.line_chart(chart_df[["Accuracy", "F1 Score"]].dropna(how="all"))
+            st.markdown(t("retrain.history.accuracy_chart_title"))
+            chart_df = chart_df.sort_values(col_date)
+            chart_df = chart_df.rename(columns={col_date: "index"}).set_index("index")
+            st.line_chart(chart_df[[col_accuracy, col_f1]].dropna(how="all"))
 
         # ─── Delta d'importance des features ─────────────────────────────
         st.markdown("---")
-        st.markdown("#### Delta d'importance des features")
-        st.caption(
-            "Comparez l'importance SHAP des features avant et après un retrain. "
-            "Les barres 🟠 orange (>15%) et 🔴 rouge (>30%) signalent des changements significatifs."
-        )
+        st.markdown(t("retrain.history.fi_delta_title"))
+        st.caption(t("retrain.history.fi_delta_caption"))
 
         retrain_options = {
             f"{e.get('new_version', '—')} ← {e.get('source_version', '—')} "
@@ -588,7 +593,7 @@ with tab_history:
         }
 
         selected_retrain_label = st.selectbox(
-            "Événement de retrain à analyser",
+            t("retrain.history.fi_select_label"),
             list(retrain_options.keys()),
             key="hist_fi_select",
         )
@@ -601,7 +606,7 @@ with tab_history:
         fi_error_baseline = None
         fi_error_new = None
 
-        with st.spinner("Chargement des importances de features…"):
+        with st.spinner(t("retrain.history.fi_spinner")):
             try:
                 fi_baseline = client.get_feature_importance(hist_model_name, version=source_version)
             except Exception as exc:
@@ -613,13 +618,11 @@ with tab_history:
 
         if fi_error_baseline:
             st.warning(
-                f"Impossible de charger l'importance pour la version source "
-                f"({source_version}) : {fi_error_baseline}"
+                t("retrain.history.fi_error_baseline", version=source_version, error=fi_error_baseline)
             )
         if fi_error_new:
             st.warning(
-                f"Impossible de charger l'importance pour la nouvelle version "
-                f"({new_version}) : {fi_error_new}"
+                t("retrain.history.fi_error_new", version=new_version, error=fi_error_new)
             )
 
         if fi_baseline and fi_new:
@@ -633,10 +636,7 @@ with tab_history:
             all_features = set(baseline_fi.keys()) | set(new_fi.keys())
 
             if not all_features:
-                st.info(
-                    "Aucune importance de feature disponible pour ces versions "
-                    "(aucune prédiction dans la fenêtre d'analyse, ou modèle non compatible SHAP)."
-                )
+                st.info(t("retrain.history.fi_no_data"))
             else:
                 comparison = []
                 for feature in all_features:
@@ -668,12 +668,12 @@ with tab_history:
 
                 col_m1, col_m2, col_m3 = st.columns(3)
                 col_m1.metric(
-                    "Stabilité de l'importance",
+                    t("retrain.history.fi_stability_metric"),
                     f"{stability_pct}%",
-                    help="% de features ayant varié de moins de 10% en valeur absolue SHAP",
+                    help=t("retrain.history.fi_stability_help"),
                 )
-                col_m2.metric(f"Échantillon v{source_version}", baseline_sample)
-                col_m3.metric(f"Échantillon v{new_version}", new_sample)
+                col_m2.metric(t("retrain.history.fi_sample_baseline", version=source_version), baseline_sample)
+                col_m3.metric(t("retrain.history.fi_sample_new", version=new_version), new_sample)
 
                 features_names = [c["feature"] for c in top10]
                 baseline_vals = [c["baseline"] for c in top10]
@@ -688,7 +688,7 @@ with tab_history:
                 fig = go.Figure()
                 fig.add_trace(
                     go.Bar(
-                        name=f"v{source_version} (baseline)",
+                        name=t("retrain.history.fi_trace_baseline", version=source_version),
                         x=features_names,
                         y=baseline_vals,
                         marker_color="#636EFA",
@@ -696,7 +696,7 @@ with tab_history:
                 )
                 fig.add_trace(
                     go.Bar(
-                        name=f"v{new_version} (après retrain)",
+                        name=t("retrain.history.fi_trace_new", version=new_version),
                         x=features_names,
                         y=new_vals,
                         marker_color=bar_colors_new,
@@ -704,26 +704,30 @@ with tab_history:
                 )
                 fig.update_layout(
                     barmode="group",
-                    title=f"Top-10 features — importance avant/après retrain ({hist_model_name})",
-                    xaxis_title="Feature",
-                    yaxis_title="Importance SHAP moyenne (|valeur|)",
+                    title=t("retrain.history.fi_chart_title", model=hist_model_name),
+                    xaxis_title=t("retrain.history.fi_xaxis"),
+                    yaxis_title=t("retrain.history.fi_yaxis"),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     height=420,
                 )
                 st.plotly_chart(fig, width='stretch')
 
-                with st.expander("Voir le détail par feature"):
+                with st.expander(t("retrain.history.fi_detail_expander")):
                     detail_rows = sorted(comparison, key=lambda x: x["delta_pct"], reverse=True)
+                    col_feat = t("retrain.history.fi_col_feature")
+                    col_delta = t("retrain.history.fi_col_delta")
+                    col_delta_pct = t("retrain.history.fi_col_delta_pct")
+                    col_alert = t("retrain.history.fi_col_alert")
                     st.dataframe(
                         pd.DataFrame(
                             [
                                 {
-                                    "Feature": c["feature"],
+                                    col_feat: c["feature"],
                                     f"v{source_version}": round(c["baseline"], 5),
                                     f"v{new_version}": round(c["new"], 5),
-                                    "Δ": round(c["delta"], 5),
-                                    "Δ%": f"{c['delta_pct']:.1f}%",
-                                    "Alerte": (
+                                    col_delta: round(c["delta"], 5),
+                                    col_delta_pct: f"{c['delta_pct']:.1f}%",
+                                    col_alert: (
                                         "🔴 >30%"
                                         if c["delta_pct"] > 30
                                         else ("🟠 >15%" if c["delta_pct"] > 15 else "✅ <15%")
@@ -735,32 +739,32 @@ with tab_history:
                         width='stretch',
                         hide_index=True,
                         column_config={
-                            "Feature": st.column_config.TextColumn(
-                                "Feature",
-                                help="Nom de la variable d'entrée du modèle.",
+                            col_feat: st.column_config.TextColumn(
+                                col_feat,
+                                help=t("retrain.history.fi_help_feature"),
                             ),
                             f"v{source_version}": st.column_config.NumberColumn(
                                 f"v{source_version}",
-                                help=f"Importance SHAP moyenne (|valeur|) de cette feature dans la version {source_version} avant le retrain.",
+                                help=t("retrain.history.fi_help_baseline_col", version=source_version),
                                 format="%.5f",
                             ),
                             f"v{new_version}": st.column_config.NumberColumn(
                                 f"v{new_version}",
-                                help=f"Importance SHAP moyenne (|valeur|) de cette feature dans la nouvelle version {new_version} après le retrain.",
+                                help=t("retrain.history.fi_help_new_col", version=new_version),
                                 format="%.5f",
                             ),
-                            "Δ": st.column_config.NumberColumn(
-                                "Δ",
-                                help="Différence d'importance SHAP entre la nouvelle version et l'ancienne (positif = la feature est devenue plus importante).",
+                            col_delta: st.column_config.NumberColumn(
+                                col_delta,
+                                help=t("retrain.history.fi_help_delta"),
                                 format="%.5f",
                             ),
-                            "Δ%": st.column_config.TextColumn(
-                                "Δ%",
-                                help="Variation en pourcentage de l'importance SHAP. > 30 % = changement majeur (🔴), > 15 % = modéré (🟠), < 15 % = stable (✅).",
+                            col_delta_pct: st.column_config.TextColumn(
+                                col_delta_pct,
+                                help=t("retrain.history.fi_help_delta_pct"),
                             ),
-                            "Alerte": st.column_config.TextColumn(
-                                "Alerte",
-                                help="Niveau d'alerte basé sur la variation d'importance. 🔴 >30% = majeur, 🟠 >15% = modéré, ✅ <15% = stable.",
+                            col_alert: st.column_config.TextColumn(
+                                col_alert,
+                                help=t("retrain.history.fi_help_alert"),
                             ),
                         },
                     )

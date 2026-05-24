@@ -12,17 +12,18 @@ import plotly.graph_objects as go
 import streamlit as st
 from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
+from utils.i18n import t
 
 _SCRIPTS_DIR = Path(__file__).parent.parent / "documentation" / "Scripts"
 
 _EXAMPLE_SCRIPTS = [
     (
         "send_predictions_iris.py",
-        "Envoie 5 observations Iris en mode unitaire puis en lot (`POST /predict` + `POST /predict-batch`)",
+        t("predictions.scripts.iris_desc"),
     ),
     (
         "send_ground_truth.py",
-        "Envoie les labels réels (ground truth) pour calculer la performance réelle du modèle (`POST /observed-results`)",
+        t("predictions.scripts.ground_truth_desc"),
     ),
 ]
 
@@ -31,14 +32,14 @@ def _read_script(filename: str) -> str:
     try:
         return (_SCRIPTS_DIR / filename).read_text(encoding="utf-8")
     except Exception:
-        return f"# Fichier introuvable : {filename}"
+        return t("predictions.scripts.not_found", filename=filename)
 
 
-@st.dialog("Aperçu du script", width="large")
+@st.dialog(t("predictions.scripts.dialog_title"), width="large")
 def _view_script_dialog(filename: str) -> None:
     st.code(_read_script(filename), language="python", line_numbers=True)
     st.download_button(
-        "⬇️ Télécharger",
+        t("predictions.scripts.download_btn"),
         data=_read_script(filename),
         file_name=filename,
         mime="text/x-python",
@@ -51,25 +52,22 @@ st.set_page_config(page_title="Predictions — PredictML", page_icon="📊", lay
 require_auth()
 
 col_title, col_refresh = st.columns([8, 1])
-col_title.title("📊 Prédictions")
-if col_refresh.button("🔄 Rafraîchir", key="pred_refresh", width='stretch'):
+col_title.title(t("predictions.page_title"))
+if col_refresh.button(t("predictions.refresh_btn"), key="pred_refresh", width='stretch'):
     st.cache_data.clear()
     st.rerun()
 
 client = get_client()
 
-with st.expander("📋 Scripts d'exemple — Iris", expanded=False):
-    st.caption(
-        "Scripts de référence pour envoyer des prédictions et des résultats observés "
-        "vers votre modèle Iris. À exécuter localement après avoir uploadé le modèle."
-    )
+with st.expander(t("predictions.scripts.expander_title"), expanded=False):
+    st.caption(t("predictions.scripts.expander_caption"))
     for _script_name, _script_desc in _EXAMPLE_SCRIPTS:
         _col_desc, _col_view, _col_dl = st.columns([5, 1.5, 1.5])
         _col_desc.markdown(f"**`{_script_name}`**  \n{_script_desc}")
-        if _col_view.button("👁 Visualiser", key=f"view_{_script_name}", width='stretch'):
+        if _col_view.button(t("predictions.scripts.view_btn"), key=f"view_{_script_name}", width='stretch'):
             _view_script_dialog(_script_name)
         _col_dl.download_button(
-            "⬇️ Télécharger",
+            t("predictions.scripts.download_btn"),
             data=_read_script(_script_name),
             file_name=_script_name,
             mime="text/x-python",
@@ -77,14 +75,14 @@ with st.expander("📋 Scripts d'exemple — Iris", expanded=False):
             width='stretch',
         )
 
-tab_history, tab_batch = st.tabs(["📋 Historique", "📦 Prédictions batch"])
+tab_history, tab_batch = st.tabs([t("predictions.tab_history"), t("predictions.tab_batch")])
 
 # ───────────────────────────────────────────────────────────────────────────────
 # TAB 1 — Historique
 # ───────────────────────────────────────────────────────────────────────────────
 with tab_history:
     # --- Couverture du ground truth ---
-    with st.expander("🏷️ Couverture du ground truth", expanded=True):
+    with st.expander(t("predictions.coverage.expander_title"), expanded=True):
         try:
             coverage_data = client.get_observed_results_stats()
             total_pred = coverage_data.get("total_predictions", 0)
@@ -92,13 +90,13 @@ with tab_history:
             rate = coverage_data.get("coverage_rate", 0.0)
 
             col_a, col_b, col_c = st.columns(3)
-            col_a.metric("Prédictions totales", f"{total_pred:,}")
-            col_b.metric("Labellisées", f"{labeled:,}")
-            col_c.metric("Couverture", f"{rate * 100:.1f} %")
+            col_a.metric(t("predictions.coverage.total_predictions"), f"{total_pred:,}")
+            col_b.metric(t("predictions.coverage.labeled"), f"{labeled:,}")
+            col_c.metric(t("predictions.coverage.coverage_rate"), f"{rate * 100:.1f} %")
 
             by_model = coverage_data.get("by_model") or []
             if by_model:
-                st.markdown("**Par modèle :**")
+                st.markdown(t("predictions.coverage.by_model"))
                 for m in by_model:
                     cov = m.get("coverage", 0.0)
                     st.progress(
@@ -106,11 +104,10 @@ with tab_history:
                         text=f"{m['model_name']} — {m['labeled']}/{m['predictions']} ({cov * 100:.1f} %)",
                     )
         except Exception:
-            st.caption("Données de couverture non disponibles.")
+            st.caption(t("predictions.coverage.unavailable"))
 
     # --- Filtres ---
-    with st.expander("🔍 Filtres", expanded=False):
-        # Recherche + Modèle sur la même ligne, puis date/statut/limite
+    with st.expander(t("predictions.filters.expander_title"), expanded=False):
         col_search, col_model, col2, col3, col4, col5 = st.columns([1.2, 1.8, 1.2, 1.2, 1.2, 1.2])
 
         # Liste des modèles disponibles
@@ -124,27 +121,26 @@ with tab_history:
             model_names = []
 
         hist_search = col_search.text_input(
-            "Filtrer par nom", key="hist_model_search", placeholder="Rechercher…"
+            t("predictions.filters.search_label"), key="hist_model_search", placeholder=t("predictions.filters.search_placeholder")
         )
         hist_filtered = (
             [n for n in model_names if hist_search.lower() in n.lower()]
             if hist_search
             else model_names
         )
-        model_name = col_model.selectbox("Modèle", ["(tous)"] + (hist_filtered or model_names))
-        if model_name == "(tous)":
+        model_name = col_model.selectbox(t("predictions.filters.model_label"), [t("predictions.filters.all_models")] + (hist_filtered or model_names))
+        if model_name == t("predictions.filters.all_models"):
             model_name = model_names[0] if model_names else None
 
         today = date.today()
-        start_date = col2.date_input("Date début", value=today - timedelta(days=7))
-        end_date = col3.date_input("Date fin", value=today)
-        status_filter = col4.selectbox("Statut", ["Tous", "success", "error"])
-        _LIMIT_LABELS = ["50", "100", "500", "Tout afficher"]
+        start_date = col2.date_input(t("predictions.filters.start_date"), value=today - timedelta(days=7))
+        end_date = col3.date_input(t("predictions.filters.end_date"), value=today)
+        status_filter = col4.selectbox(t("predictions.filters.status_label"), [t("predictions.filters.status_all"), "success", "error"])
+        _LIMIT_LABELS = ["50", "100", "500", t("predictions.filters.limit_all")]
         _LIMIT_VALUES = [50, 100, 500, None]
-        _limit_label = col5.selectbox("Limite", _LIMIT_LABELS, index=1)
+        _limit_label = col5.selectbox(t("predictions.filters.limit_label"), _LIMIT_LABELS, index=1)
         limit = _LIMIT_VALUES[_LIMIT_LABELS.index(_limit_label)]
 
-        # Confidence sliders — désactivés pour les régresseurs (pas de classes)
         is_classifier = any(
             m.get("name") == model_name and m.get("classes")
             for m in models
@@ -152,7 +148,7 @@ with tab_history:
 
         col_conf1, col_conf2, col_conf3 = st.columns(3)
         conf_min = col_conf1.slider(
-            "Confiance min",
+            t("predictions.filters.conf_min_label"),
             min_value=0.0,
             max_value=1.0,
             value=0.0,
@@ -160,10 +156,10 @@ with tab_history:
             format="%.2f",
             key="hist_conf_min",
             disabled=not is_classifier,
-            help="Filtrer les prédictions avec une confiance ≥ à ce seuil (classifieurs uniquement)",
+            help=t("predictions.filters.conf_min_help"),
         )
         conf_max = col_conf2.slider(
-            "Confiance max",
+            t("predictions.filters.conf_max_label"),
             min_value=0.0,
             max_value=1.0,
             value=1.0,
@@ -171,30 +167,27 @@ with tab_history:
             format="%.2f",
             key="hist_conf_max",
             disabled=not is_classifier,
-            help="Filtrer les prédictions avec une confiance ≤ à ce seuil (classifieurs uniquement)",
+            help=t("predictions.filters.conf_max_help"),
         )
         filter_mismatch_only = col_conf3.checkbox(
-            "Prédictions incorrectes uniquement",
+            t("predictions.filters.mismatch_only_label"),
             key="hist_mismatch_only",
-            help="N'afficher que les lignes où la prédiction diffère du ground truth",
+            help=t("predictions.filters.mismatch_only_help"),
         )
-        # N'envoyer les filtres que si le modèle est un classifieur et les valeurs non-défaut
         filter_min_conf = conf_min if (is_classifier and conf_min > 0.0) else None
         filter_max_conf = conf_max if (is_classifier and conf_max < 1.0) else None
 
     if not model_name:
-        st.warning("Aucun modèle disponible. Créez d'abord un modèle via l'API.")
+        st.warning(t("predictions.warnings.no_model"))
     elif start_date > end_date:
-        st.error("La date de début doit être avant la date de fin.")
+        st.error(t("predictions.warnings.date_order"))
     else:
         start_iso = datetime.combine(start_date, datetime.min.time()).isoformat()
         end_iso = datetime.combine(end_date, datetime.max.time()).isoformat()
 
-        # Fetch — "Tout afficher" pagine par chunks de _API_MAX (plafond API = 1000)
         _API_MAX = 1000
         try:
             if limit is None:
-                # Sonde : récupère le total sans charger les données
                 _probe = client.get_predictions(
                     model_name=model_name,
                     start=start_iso,
@@ -207,7 +200,7 @@ with tab_history:
                 _total_count = _probe.get("total", 0)
                 _all_preds: list = []
                 _offset = 0
-                _bar = st.progress(0, text=f"Chargement… 0 / {_total_count}")
+                _bar = st.progress(0, text=t("predictions.loading.progress", loaded=0, total=_total_count))
                 while _offset < max(_total_count, 1):
                     _chunk = client.get_predictions(
                         model_name=model_name,
@@ -222,8 +215,8 @@ with tab_history:
                     _all_preds.extend(_preds)
                     _offset += _API_MAX
                     _pct = min(len(_all_preds) / _total_count, 1.0) if _total_count else 1.0
-                    _bar.progress(_pct, text=f"Chargement… {len(_all_preds)} / {_total_count}")
-                    if not _preds:  # plus rien à charger
+                    _bar.progress(_pct, text=t("predictions.loading.progress", loaded=len(_all_preds), total=_total_count))
+                    if not _preds:
                         break
                 _bar.empty()
                 data = {"total": _total_count, "predictions": _all_preds}
@@ -238,24 +231,21 @@ with tab_history:
                     max_confidence=filter_max_conf,
                 )
         except Exception as e:
-            st.error(f"Erreur lors du chargement : {e}")
+            st.error(t("predictions.errors.load_error", error=e))
             st.stop()
 
         total = data.get("total", 0)
         predictions = data.get("predictions", [])
 
-        # Filtre statut côté client (l'API ne supporte pas le filtre statut)
-        if status_filter != "Tous":
+        if status_filter != t("predictions.filters.status_all"):
             predictions = [p for p in predictions if p.get("status") == status_filter]
 
-        with st.expander("📋 Résultats", expanded=False):
-            st.caption(
-                "Les résultats ci-dessous dépendent des filtres appliqués dans l’expander « Filtres » ci-dessus."
-            )
-            st.caption(f"**{total}** prédictions trouvées — {len(predictions)} affichées")
+        with st.expander(t("predictions.results.expander_title"), expanded=False):
+            st.caption(t("predictions.results.filter_note"))
+            st.caption(t("predictions.results.count_caption", total=total, shown=len(predictions)))
 
             if not predictions:
-                st.info("Aucune prédiction pour ces critères.")
+                st.info(t("predictions.results.no_predictions"))
             else:
                 # Fetch ground truth for visible id_obs values
                 gt_lookup: dict = {}
@@ -281,26 +271,26 @@ with tab_history:
                     mismatch = gt_val != "—" and pred_val != gt_val
                     rows.append(
                         {
-                            "ID": p.get("id"),
+                            t("predictions.table.col_id"): p.get("id"),
                             "id_obs": id_obs_val or "—",
-                            "Timestamp": (
+                            t("predictions.table.col_timestamp"): (
                                 pd.to_datetime(p.get("timestamp")).strftime("%Y-%m-%d %H:%M:%S")
                                 if p.get("timestamp")
                                 else "—"
                             ),
-                            "Modèle": p.get("model_name", ""),
-                            "Version": p.get("model_version") or "—",
-                            "Résultat": pred_val,
-                            "Ground Truth": gt_val,
-                            "Confiance": f"{mc:.2%}" if mc is not None else "—",
-                            "Temps (ms)": (
+                            t("predictions.table.col_model"): p.get("model_name", ""),
+                            t("predictions.table.col_version"): p.get("model_version") or "—",
+                            t("predictions.table.col_result"): pred_val,
+                            t("predictions.table.col_ground_truth"): gt_val,
+                            t("predictions.table.col_confidence"): f"{mc:.2%}" if mc is not None else "—",
+                            t("predictions.table.col_time_ms"): (
                                 f"{p['response_time_ms']:.1f}"
                                 if p.get("response_time_ms") is not None
                                 else "—"
                             ),
-                            "Statut": "✅" if p.get("status") == "success" else "❌",
-                            "Shadow": "🔮" if p.get("is_shadow") else "—",
-                            "Utilisateur": p.get("username") or "—",
+                            t("predictions.table.col_status"): "✅" if p.get("status") == "success" else "❌",
+                            t("predictions.table.col_shadow"): "🔮" if p.get("is_shadow") else "—",
+                            t("predictions.table.col_user"): p.get("username") or "—",
                             "_mismatch": mismatch,
                         }
                     )
@@ -310,7 +300,7 @@ with tab_history:
                 if filter_mismatch_only:
                     df = df[df["_mismatch"]].reset_index(drop=True)
                     if df.empty:
-                        st.info("Aucune prédiction incorrecte sur cette page.")
+                        st.info(t("predictions.results.no_mismatch"))
 
                 mismatch_flags = df["_mismatch"].to_numpy()
                 df_display = df.drop(columns=["_mismatch"])
@@ -330,109 +320,53 @@ with tab_history:
                     on_select="rerun",
                     selection_mode="single-row",
                     column_config={
-                        "ID": st.column_config.NumberColumn(
-                            "ID",
-                            help=(
-                                "Numéro d'identifiant interne attribué automatiquement à chaque "
-                                "prédiction enregistrée en base de données. Sert à retrouver une "
-                                "prédiction précise dans les logs ou via l'API."
-                            ),
+                        t("predictions.table.col_id"): st.column_config.NumberColumn(
+                            t("predictions.table.col_id"),
+                            help=t("predictions.table.help_id"),
                         ),
                         "id_obs": st.column_config.TextColumn(
                             "id_obs",
-                            help=(
-                                "Identifiant de l'observation fourni par l'appelant au moment de "
-                                "la requête (champ optionnel). Permet de faire le lien entre une "
-                                "prédiction et une ligne de votre système métier (ex : ID client, "
-                                "ID commande). Vaut '—' si l'appelant n'en a pas fourni."
-                            ),
+                            help=t("predictions.table.help_id_obs"),
                         ),
-                        "Timestamp": st.column_config.TextColumn(
-                            "Timestamp",
-                            help=(
-                                "Date et heure exactes auxquelles la prédiction a été effectuée "
-                                "(heure UTC). Utile pour corréler une prédiction avec un événement "
-                                "métier ou un incident."
-                            ),
+                        t("predictions.table.col_timestamp"): st.column_config.TextColumn(
+                            t("predictions.table.col_timestamp"),
+                            help=t("predictions.table.help_timestamp"),
                         ),
-                        "Modèle": st.column_config.TextColumn(
-                            "Modèle",
-                            help="Nom du modèle ML qui a répondu à cette requête de prédiction.",
+                        t("predictions.table.col_model"): st.column_config.TextColumn(
+                            t("predictions.table.col_model"),
+                            help=t("predictions.table.help_model"),
                         ),
-                        "Version": st.column_config.TextColumn(
-                            "Version",
-                            help=(
-                                "Version du modèle utilisée au format X.Y.Z. Un même modèle peut "
-                                "exister en plusieurs versions — la version en production est "
-                                "utilisée par défaut sauf si l'appelant en précise une autre."
-                            ),
+                        t("predictions.table.col_version"): st.column_config.TextColumn(
+                            t("predictions.table.col_version"),
+                            help=t("predictions.table.help_version"),
                         ),
-                        "Résultat": st.column_config.TextColumn(
-                            "Résultat",
-                            help=(
-                                "La prédiction retournée par le modèle. Pour un modèle de "
-                                "classification (ex : iris), c'est le nom de la classe prédite. "
-                                "Pour un modèle de régression, c'est une valeur numérique. "
-                                "Les lignes surlignées en rouge indiquent que le résultat ne "
-                                "correspond pas au Ground Truth connu."
-                            ),
+                        t("predictions.table.col_result"): st.column_config.TextColumn(
+                            t("predictions.table.col_result"),
+                            help=t("predictions.table.help_result"),
                         ),
-                        "Ground Truth": st.column_config.TextColumn(
-                            "Ground Truth",
-                            help=(
-                                "Résultat réellement observé dans la réalité, renseigné "
-                                "après coup via l'endpoint /observed-results. Permet de mesurer "
-                                "si le modèle s'est trompé. Vaut '—' si personne n'a encore "
-                                "enregistré la vraie valeur pour cette observation."
-                            ),
+                        t("predictions.table.col_ground_truth"): st.column_config.TextColumn(
+                            t("predictions.table.col_ground_truth"),
+                            help=t("predictions.table.help_ground_truth"),
                         ),
-                        "Confiance": st.column_config.TextColumn(
-                            "Confiance",
-                            help=(
-                                "Niveau de certitude du modèle dans sa prédiction, exprimé en "
-                                "pourcentage. Calculé à partir de la probabilité maximale parmi "
-                                "toutes les classes (predict_proba). Ex : 97 % signifie que le "
-                                "modèle est très sûr de lui. En dessous du seuil configuré sur "
-                                "le modèle, la prédiction est marquée 'low confidence'. Vaut '—' "
-                                "si le modèle ne supporte pas les probabilités (ex : régression)."
-                            ),
+                        t("predictions.table.col_confidence"): st.column_config.TextColumn(
+                            t("predictions.table.col_confidence"),
+                            help=t("predictions.table.help_confidence"),
                         ),
-                        "Temps (ms)": st.column_config.TextColumn(
-                            "Temps (ms)",
-                            help=(
-                                "Temps de traitement de la requête côté API, en millisecondes. "
-                                "Inclut le chargement du modèle en mémoire (si pas en cache), "
-                                "le calcul de la prédiction et l'écriture en base. "
-                                "Une valeur élevée peut signaler un cold start (modèle non "
-                                "chargé) ou une surcharge du serveur."
-                            ),
+                        t("predictions.table.col_time_ms"): st.column_config.TextColumn(
+                            t("predictions.table.col_time_ms"),
+                            help=t("predictions.table.help_time_ms"),
                         ),
-                        "Statut": st.column_config.TextColumn(
-                            "Statut",
-                            help=(
-                                "✅ Succès : la prédiction s'est déroulée sans erreur.\n"
-                                "❌ Échec : une erreur s'est produite pendant le traitement "
-                                "(ex : feature manquante, modèle indisponible). "
-                                "La prédiction a quand même été enregistrée pour traçabilité."
-                            ),
+                        t("predictions.table.col_status"): st.column_config.TextColumn(
+                            t("predictions.table.col_status"),
+                            help=t("predictions.table.help_status"),
                         ),
-                        "Shadow": st.column_config.TextColumn(
-                            "Shadow",
-                            help=(
-                                "🔮 Mode shadow : cette prédiction a été calculée en arrière-plan "
-                                "par une version candidate du modèle, mais le résultat n'a PAS "
-                                "été renvoyé au client — l'utilisateur final a reçu la réponse "
-                                "de la version en production. Permet de tester une nouvelle "
-                                "version sans risque. '—' = prédiction normale, visible par le client."
-                            ),
+                        t("predictions.table.col_shadow"): st.column_config.TextColumn(
+                            t("predictions.table.col_shadow"),
+                            help=t("predictions.table.help_shadow"),
                         ),
-                        "Utilisateur": st.column_config.TextColumn(
-                            "Utilisateur",
-                            help=(
-                                "Identifiant de l'utilisateur ou de l'application qui a effectué "
-                                "cette prédiction (authentifié via son token Bearer). Utile pour "
-                                "auditer qui consomme le modèle et en quelle quantité."
-                            ),
+                        t("predictions.table.col_user"): st.column_config.TextColumn(
+                            t("predictions.table.col_user"),
+                            help=t("predictions.table.help_user"),
                         ),
                     },
                 )
@@ -443,34 +377,34 @@ with tab_history:
                     import plotly.graph_objects as go
 
                     row_idx = selected_rows[0]
-                    pred_id_at_row = df_display.iloc[row_idx]["ID"]
+                    pred_id_at_row = df_display.iloc[row_idx][t("predictions.table.col_id")]
                     p = next((x for x in predictions if x.get("id") == pred_id_at_row), None)
                     if p is None:
-                        st.info("Prédiction introuvable.")
+                        st.info(t("predictions.detail.not_found"))
                         st.stop()
                     pred_id = pred_id_at_row
                     st.divider()
-                    st.markdown(f"#### 🔍 Prédiction #{pred_id}")
+                    st.markdown(t("predictions.detail.title", pred_id=pred_id))
 
                     col_l, col_r = st.columns(2)
                     with col_l:
-                        st.markdown("**Features d'entrée :**")
+                        st.markdown(t("predictions.detail.input_features"))
                         st.json(p.get("input_features", {}))
                     with col_r:
-                        st.markdown("**Résultat :**")
+                        st.markdown(t("predictions.detail.result_label"))
                         st.json({
                             "prediction": p.get("prediction_result"),
                             "probabilities": p.get("probabilities"),
                         })
                         if p.get("error_message"):
-                            st.error(f"Erreur : {p['error_message']}")
+                            st.error(t("predictions.detail.error_msg", msg=p['error_message']))
 
                     # Ground truth
                     st.divider()
-                    st.markdown("**── Résultat observé ──**")
+                    st.markdown(t("predictions.detail.observed_section"))
                     id_obs_val = p.get("id_obs")
                     if not id_obs_val:
-                        st.caption("Pas d'`id_obs` — impossible de soumettre un résultat observé.")
+                        st.caption(t("predictions.detail.no_id_obs"))
                     else:
                         obs_cache_key = f"obs_result_{pred_id}"
                         if obs_cache_key not in st.session_state:
@@ -485,16 +419,16 @@ with tab_history:
 
                         existing = st.session_state.get(obs_cache_key)
                         if existing is not None:
-                            st.success(f"✅ Résultat enregistré : **{existing['observed_result']}**")
+                            st.success(t("predictions.detail.obs_recorded", value=existing['observed_result']))
                         else:
                             obs_input_val = st.text_input(
-                                "Valeur observée",
+                                t("predictions.detail.obs_input_label"),
                                 key=f"obs_input_{pred_id}",
-                                placeholder="Ex: 0, 1.5, setosa…",
+                                placeholder=t("predictions.detail.obs_input_placeholder"),
                             )
-                            if st.button("Enregistrer le résultat réel", key=f"obs_btn_{pred_id}"):
+                            if st.button(t("predictions.detail.obs_submit_btn"), key=f"obs_btn_{pred_id}"):
                                 if not obs_input_val.strip():
-                                    st.warning("Veuillez saisir une valeur.")
+                                    st.warning(t("predictions.detail.obs_empty_warning"))
                                 else:
                                     try:
                                         parsed_val = int(obs_input_val)
@@ -512,18 +446,18 @@ with tab_history:
                                         st.session_state[obs_cache_key] = {"observed_result": parsed_val}
                                         st.rerun()
                                     except Exception as exc:
-                                        st.error(f"Erreur : {exc}")
+                                        st.error(t("predictions.errors.generic", error=exc))
 
                     # SHAP
                     if p.get("status") == "success":
                         st.divider()
-                        st.markdown("**── Explication SHAP ──**")
-                        if st.button("🧠 Calculer l'explication SHAP", key=f"shap_btn_{pred_id}"):
-                            with st.spinner("Calcul SHAP en cours…"):
+                        st.markdown(t("predictions.detail.shap_section"))
+                        if st.button(t("predictions.detail.shap_btn"), key=f"shap_btn_{pred_id}"):
+                            with st.spinner(t("predictions.detail.shap_spinner")):
                                 try:
                                     st.session_state[f"shap_{pred_id}"] = client.explain_prediction(pred_id)
                                 except Exception as exc:
-                                    st.error(f"Impossible de calculer : {exc}")
+                                    st.error(t("predictions.detail.shap_error", error=exc))
 
                         shap_data = st.session_state.get(f"shap_{pred_id}")
                         if shap_data:
@@ -532,8 +466,8 @@ with tab_history:
                             model_type: str = shap_data.get("model_type", "")
                             col_s1, col_s2, col_s3 = st.columns(3)
                             col_s1.metric("E[f(X)]", f"{base_value:.4f}")
-                            col_s2.metric("Prédiction", str(shap_data.get("prediction")))
-                            col_s3.metric("Type", model_type)
+                            col_s2.metric(t("predictions.detail.shap_prediction_metric"), str(shap_data.get("prediction")))
+                            col_s3.metric(t("predictions.detail.shap_type_metric"), model_type)
                             if shap_values:
                                 sorted_features = sorted(
                                     shap_values.items(), key=lambda x: abs(x[1]), reverse=True
@@ -547,8 +481,8 @@ with tab_history:
                                     textposition="outside",
                                 ))
                                 fig.update_layout(
-                                    title="Contributions SHAP (top 10)",
-                                    xaxis_title="Contribution SHAP",
+                                    title=t("predictions.detail.shap_chart_title"),
+                                    xaxis_title=t("predictions.detail.shap_chart_xaxis"),
                                     yaxis={"autorange": "reversed"},
                                     height=max(300, len(sorted_features) * 40 + 100),
                                     margin={"l": 20, "r": 60, "t": 50, "b": 40},
@@ -556,7 +490,7 @@ with tab_history:
                                 )
                                 st.plotly_chart(fig, width='stretch')
                                 if len(shap_values) > 10:
-                                    with st.expander("Voir toutes les features"):
+                                    with st.expander(t("predictions.detail.shap_all_features_expander")):
                                         st.dataframe(
                                             pd.DataFrame(
                                                 sorted(shap_values.items(), key=lambda x: abs(x[1]), reverse=True),
@@ -565,44 +499,41 @@ with tab_history:
                                             width='stretch', hide_index=True,
                                         )
                             else:
-                                st.info("Aucune valeur SHAP retournée.")
+                                st.info(t("predictions.detail.shap_no_values"))
 
                     # Suppression
                     if st.session_state.get("is_admin", False):
                         st.divider()
                         if st.button(
-                            f"🗑️ Supprimer la prédiction #{pred_id}",
+                            t("predictions.detail.delete_btn", pred_id=pred_id),
                             key=f"del_pred_{pred_id}",
                             type="primary",
                         ):
                             try:
                                 client.delete_prediction(pred_id)
-                                st.toast(f"Prédiction #{pred_id} supprimée.", icon="✅")
+                                st.toast(t("predictions.detail.delete_toast", pred_id=pred_id), icon="✅")
                                 st.rerun()
                             except Exception as exc:
-                                st.error(f"Erreur : {exc}")
+                                st.error(t("predictions.errors.generic", error=exc))
 
-                with st.expander("⬇️ Exporter toutes les prédictions (serveur)", expanded=False):
-                    st.caption(
-                        "L'export serveur inclut **toutes** les prédictions correspondant aux filtres, "
-                        "pas seulement la page courante."
-                    )
+                with st.expander(t("predictions.export.expander_title"), expanded=False):
+                    st.caption(t("predictions.export.caption"))
                     col_exp1, col_exp2 = st.columns(2)
                     export_fmt = col_exp1.selectbox(
-                        "Format", ["csv", "jsonl", "parquet"], key="pred_export_fmt"
+                        t("predictions.export.format_label"), ["csv", "jsonl", "parquet"], key="pred_export_fmt"
                     )
                     export_status = col_exp2.selectbox(
-                        "Statut", ["(tous)", "success", "error"], key="pred_export_status"
+                        t("predictions.export.status_label"), [t("predictions.filters.all_models_export"), "success", "error"], key="pred_export_status"
                     )
-                    if st.button("Préparer l'export", key="pred_export_btn"):
-                        with st.spinner("Préparation de l'export en cours…"):
+                    if st.button(t("predictions.export.prepare_btn"), key="pred_export_btn"):
+                        with st.spinner(t("predictions.export.spinner")):
                             try:
                                 content = client.export_predictions(
                                     start=start_iso,
                                     end=end_iso,
                                     model_name=model_name,
                                     export_format=export_fmt,
-                                    status=None if export_status == "(tous)" else export_status,
+                                    status=None if export_status == t("predictions.filters.all_models_export") else export_status,
                                 )
                                 mime_map = {
                                     "csv": "text/csv",
@@ -610,39 +541,35 @@ with tab_history:
                                     "parquet": "application/octet-stream",
                                 }
                                 st.download_button(
-                                    label=f"⬇️ Télécharger predictions_export.{export_fmt}",
+                                    label=t("predictions.export.download_btn", fmt=export_fmt),
                                     data=content,
                                     file_name=f"predictions_export.{export_fmt}",
                                     mime=mime_map[export_fmt],
                                     key="pred_export_download",
                                 )
                             except Exception as exc:
-                                st.error(f"Erreur lors de l'export : {exc}")
+                                st.error(t("predictions.export.error", error=exc))
 
 
         # --- Activité par utilisateur & modèle (admin uniquement) ---
         if st.session_state.get("is_admin", False):
-            with st.expander("👥 Activité par utilisateur & modèle", expanded=False):
-                st.caption(
-                    "Identifiez les utilisateurs les plus actifs, les modèles les plus sollicités "
-                    "et les pics d'usage susceptibles d'impacter la production."
-                )
+            with st.expander(t("predictions.activity.expander_title"), expanded=False):
+                st.caption(t("predictions.activity.caption"))
 
-                # Chargement des utilisateurs
                 try:
                     _all_users = client.list_users()
                 except Exception as _e:
-                    st.error(f"Impossible de charger les utilisateurs : {_e}")
+                    st.error(t("predictions.activity.load_users_error", error=_e))
                     _all_users = []
 
                 if not _all_users:
-                    st.info("Aucun utilisateur disponible.")
+                    st.info(t("predictions.activity.no_users"))
                 else:
-                    _usage_summary: list[dict] = []   # 1 ligne par user actif
-                    _by_model_rows: list[dict] = []   # 1 ligne par (user, model)
-                    _by_day_rows:   list[dict] = []   # 1 ligne par (user, jour)
+                    _usage_summary: list[dict] = []
+                    _by_model_rows: list[dict] = []
+                    _by_day_rows:   list[dict] = []
 
-                    with st.spinner("Chargement des statistiques d'activité…"):
+                    with st.spinner(t("predictions.activity.spinner")):
                         for _u in _all_users:
                             try:
                                 _udata = client.get_user_usage(
@@ -655,7 +582,7 @@ with tab_history:
 
                             _total = _udata.get("total_calls", 0)
                             if _total == 0:
-                                continue  # inactif sur la période
+                                continue
 
                             _uname  = _udata.get("username", _u.get("username", f"user_{_u['id']}"))
                             _bm     = _udata.get("by_model", [])
@@ -686,7 +613,7 @@ with tab_history:
                                 })
 
                     if not _usage_summary:
-                        st.info("Aucune activité enregistrée sur la période sélectionnée.")
+                        st.info(t("predictions.activity.no_activity"))
                     else:
                         df_usumm = pd.DataFrame(_usage_summary).sort_values(
                             "total_calls", ascending=False
@@ -695,75 +622,76 @@ with tab_history:
 
                         # ── KPIs ──────────────────────────────────────────────────────
                         _ku1, _ku2, _ku3, _ku4 = st.columns(4)
-                        _ku1.metric("Appels totaux", f"{_total_all:,}")
+                        _ku1.metric(t("predictions.activity.kpi_total_calls"), f"{_total_all:,}")
                         _ku2.metric(
-                            "Utilisateurs actifs", len(df_usumm),
-                            help="Utilisateurs ayant émis au moins 1 prédiction sur la période."
+                            t("predictions.activity.kpi_active_users"), len(df_usumm),
+                            help=t("predictions.activity.kpi_active_users_help")
                         )
                         _top = df_usumm.iloc[0]
                         _top_pct = _top["total_calls"] / _total_all * 100
                         _ku3.metric(
-                            "Top utilisateur",
+                            t("predictions.activity.kpi_top_user"),
                             _top["username"],
-                            delta=f"{_top['total_calls']:,} appels ({_top_pct:.0f} % du trafic)",
+                            delta=t("predictions.activity.kpi_top_user_delta", calls=_top['total_calls'], pct=_top_pct),
                             delta_color="off",
                         )
                         _top3_pct = df_usumm.head(3)["total_calls"].sum() / _total_all * 100
                         _ku4.metric(
-                            "Concentration top 3",
+                            t("predictions.activity.kpi_top3_concentration"),
                             f"{_top3_pct:.0f} %",
-                            help=(
-                                "Part du trafic total générée par les 3 utilisateurs les plus actifs. "
-                                "Une valeur élevée indique un risque de dépendance forte envers quelques appelants."
-                            ),
+                            help=t("predictions.activity.kpi_top3_help"),
                         )
 
                         st.divider()
 
                         # ── Tableau synthèse par utilisateur ─────────────────────────
-                        st.markdown("#### 📋 Synthèse par utilisateur")
+                        st.markdown(t("predictions.activity.summary_header"))
                         _df_disp = df_usumm.copy()
-                        _df_disp["Part trafic"] = _df_disp["total_calls"].apply(
+                        _df_disp[t("predictions.activity.col_traffic_share")] = _df_disp["total_calls"].apply(
                             lambda v: f"{v / _total_all * 100:.1f} %"
                         )
-                        _df_disp["Taux erreur"] = _df_disp.apply(
+                        _df_disp[t("predictions.activity.col_error_rate")] = _df_disp.apply(
                             lambda r: f"{r['errors'] / r['total_calls'] * 100:.1f} %"
                             if r["total_calls"] > 0 else "—",
                             axis=1,
                         )
-                        _df_disp["Latence moy."] = _df_disp["avg_latency_ms"].apply(
+                        _df_disp[t("predictions.activity.col_avg_latency")] = _df_disp["avg_latency_ms"].apply(
                             lambda v: f"{v} ms" if v is not None else "—"
                         )
                         st.dataframe(
                             _df_disp.rename(columns={
-                                "username":    "Utilisateur",
-                                "total_calls": "Appels",
-                                "nb_modeles":  "Modèles utilisés",
-                                "errors":      "Erreurs",
-                            })[["Utilisateur", "Appels", "Part trafic",
-                                "Modèles utilisés", "Erreurs", "Taux erreur", "Latence moy."]],
+                                "username":    t("predictions.activity.col_user"),
+                                "total_calls": t("predictions.activity.col_calls"),
+                                "nb_modeles":  t("predictions.activity.col_models_used"),
+                                "errors":      t("predictions.activity.col_errors"),
+                            })[[t("predictions.activity.col_user"), t("predictions.activity.col_calls"),
+                                t("predictions.activity.col_traffic_share"),
+                                t("predictions.activity.col_models_used"),
+                                t("predictions.activity.col_errors"),
+                                t("predictions.activity.col_error_rate"),
+                                t("predictions.activity.col_avg_latency")]],
                             hide_index=True,
                             width='stretch',
                             column_config={
-                                "Appels": st.column_config.NumberColumn(
-                                    "Appels",
-                                    help="Nombre total de prédictions (hors shadow) sur la période.",
+                                t("predictions.activity.col_calls"): st.column_config.NumberColumn(
+                                    t("predictions.activity.col_calls"),
+                                    help=t("predictions.activity.col_calls_help"),
                                 ),
-                                "Part trafic": st.column_config.TextColumn(
-                                    "Part trafic",
-                                    help="Part de cet utilisateur dans le volume total de prédictions.",
+                                t("predictions.activity.col_traffic_share"): st.column_config.TextColumn(
+                                    t("predictions.activity.col_traffic_share"),
+                                    help=t("predictions.activity.col_traffic_share_help"),
                                 ),
-                                "Modèles utilisés": st.column_config.NumberColumn(
-                                    "Modèles utilisés",
-                                    help="Nombre de modèles distincts appelés par cet utilisateur.",
+                                t("predictions.activity.col_models_used"): st.column_config.NumberColumn(
+                                    t("predictions.activity.col_models_used"),
+                                    help=t("predictions.activity.col_models_used_help"),
                                 ),
-                                "Taux erreur": st.column_config.TextColumn(
-                                    "Taux erreur",
-                                    help="Erreurs d'exécution (status ≠ 'success') / total appels.",
+                                t("predictions.activity.col_error_rate"): st.column_config.TextColumn(
+                                    t("predictions.activity.col_error_rate"),
+                                    help=t("predictions.activity.col_error_rate_help"),
                                 ),
-                                "Latence moy.": st.column_config.TextColumn(
-                                    "Latence moy.",
-                                    help="Latence moyenne en ms sur les requêtes réussies.",
+                                t("predictions.activity.col_avg_latency"): st.column_config.TextColumn(
+                                    t("predictions.activity.col_avg_latency"),
+                                    help=t("predictions.activity.col_avg_latency_help"),
                                 ),
                             },
                         )
@@ -773,13 +701,12 @@ with tab_history:
                         # ── Graphiques ────────────────────────────────────────────────
                         _gc1, _gc2 = st.columns([1, 2])
 
-                        # Barres horizontales — top utilisateurs
                         _fig_top = px.bar(
                             df_usumm.head(10).sort_values("total_calls"),
                             y="username", x="total_calls",
                             orientation="h",
-                            title="Top utilisateurs par volume d'appels",
-                            labels={"username": "", "total_calls": "Appels"},
+                            title=t("predictions.activity.chart_top_users_title"),
+                            labels={"username": "", "total_calls": t("predictions.activity.col_calls")},
                             color="total_calls",
                             color_continuous_scale=["#74b9ff", "#0984e3", "#2d3436"],
                             text="total_calls",
@@ -791,7 +718,6 @@ with tab_history:
                         )
                         _gc1.plotly_chart(_fig_top, use_container_width=True)
 
-                        # Évolution quotidienne par utilisateur
                         if _by_day_rows:
                             _df_day = pd.DataFrame(_by_day_rows)
                             _df_day["date"] = pd.to_datetime(_df_day["date"])
@@ -799,59 +725,60 @@ with tab_history:
                             _fig_day = px.line(
                                 _df_day,
                                 x="date", y="calls", color="username",
-                                title="Évolution quotidienne des appels par utilisateur",
-                                labels={"date": "Date", "calls": "Appels", "username": "Utilisateur"},
+                                title=t("predictions.activity.chart_daily_title"),
+                                labels={"date": t("predictions.activity.chart_date_label"), "calls": t("predictions.activity.col_calls"), "username": t("predictions.activity.col_user")},
                                 markers=True,
                             )
-                            _fig_day.update_layout(legend_title_text="Utilisateur")
+                            _fig_day.update_layout(legend_title_text=t("predictions.activity.col_user"))
                             _gc2.plotly_chart(_fig_day, use_container_width=True)
 
-                        # Répartition user × modèle (stacked bar)
                         if _by_model_rows:
-                            st.markdown("#### 🔍 Détail par utilisateur × modèle")
+                            st.markdown(t("predictions.activity.detail_by_user_model_header"))
                             _df_bm = pd.DataFrame(_by_model_rows)
 
                             _col_tbl, _col_chart = st.columns([1, 1])
 
-                            # Table détail
                             _df_bm_disp = _df_bm.copy()
-                            _df_bm_disp["Taux erreur"] = _df_bm_disp.apply(
+                            _df_bm_disp[t("predictions.activity.col_error_rate")] = _df_bm_disp.apply(
                                 lambda r: f"{r['errors'] / r['calls'] * 100:.1f} %"
                                 if r["calls"] > 0 else "—",
                                 axis=1,
                             )
-                            _df_bm_disp["Latence moy."] = _df_bm_disp["avg_latency_ms"].apply(
+                            _df_bm_disp[t("predictions.activity.col_avg_latency")] = _df_bm_disp["avg_latency_ms"].apply(
                                 lambda v: f"{v} ms" if v is not None else "—"
                             )
                             _col_tbl.dataframe(
                                 _df_bm_disp.sort_values(
                                     ["username", "calls"], ascending=[True, False]
                                 ).rename(columns={
-                                    "username":   "Utilisateur",
-                                    "model_name": "Modèle",
-                                    "calls":      "Appels",
-                                    "errors":     "Erreurs",
-                                })[["Utilisateur", "Modèle", "Appels",
-                                    "Erreurs", "Taux erreur", "Latence moy."]],
+                                    "username":   t("predictions.activity.col_user"),
+                                    "model_name": t("predictions.activity.col_model"),
+                                    "calls":      t("predictions.activity.col_calls"),
+                                    "errors":     t("predictions.activity.col_errors"),
+                                })[[t("predictions.activity.col_user"),
+                                    t("predictions.activity.col_model"),
+                                    t("predictions.activity.col_calls"),
+                                    t("predictions.activity.col_errors"),
+                                    t("predictions.activity.col_error_rate"),
+                                    t("predictions.activity.col_avg_latency")]],
                                 hide_index=True,
                                 use_container_width=True,
                             )
 
-                            # Stacked bar user × modèle
                             _fig_stack = px.bar(
                                 _df_bm.sort_values("calls", ascending=False),
                                 x="username", y="calls", color="model_name",
-                                title="Appels par utilisateur × modèle",
+                                title=t("predictions.activity.chart_stack_title"),
                                 labels={
-                                    "username":   "Utilisateur",
-                                    "calls":      "Appels",
-                                    "model_name": "Modèle",
+                                    "username":   t("predictions.activity.col_user"),
+                                    "calls":      t("predictions.activity.col_calls"),
+                                    "model_name": t("predictions.activity.col_model"),
                                 },
                                 barmode="stack",
                             )
                             _fig_stack.update_layout(
-                                legend_title_text="Modèle",
-                                xaxis_title="Utilisateur",
+                                legend_title_text=t("predictions.activity.col_model"),
+                                xaxis_title=t("predictions.activity.col_user"),
                             )
                             _col_chart.plotly_chart(_fig_stack, use_container_width=True)
 
@@ -863,14 +790,10 @@ with tab_history:
             "obs-003,wine-regressor,13.5,2026-05-20\n"
         )
 
-        with st.expander("📤 Importer des résultats observés (CSV)", expanded=False):
-            st.markdown(
-                "Enregistrez la **vraie valeur** observée pour chaque prédiction afin de "
-                "mesurer la précision du modèle en production (Ground Truth)."
-            )
+        with st.expander(t("predictions.csv_import.expander_title"), expanded=False):
+            st.markdown(t("predictions.csv_import.intro"))
 
-            # Format du CSV
-            st.markdown("**Format attendu**")
+            st.markdown(t("predictions.csv_import.format_header"))
             st.code(
                 "id_obs,model_name,observed_result,date_time\n"
                 "obs-001,iris-classifier,2,2026-05-20 14:32:00\n"
@@ -878,37 +801,24 @@ with tab_history:
                 "obs-003,wine-regressor,13.5,2026-05-20T09:15:00",
                 language="text",
             )
-            st.markdown(
-                "| Colonne | Obligatoire | Description |\n"
-                "|---|---|---|\n"
-                "| `id_obs` | ✅ | Identifiant de l'observation — doit correspondre à l'`id_obs` envoyé lors de la prédiction |\n"
-                "| `model_name` | ✅ *(ou override)* | Nom du modèle concerné |\n"
-                "| `observed_result` | ✅ | La vraie valeur (entier, décimal ou texte) |\n"
-                "| `date_time` | ✅ | Date de l'observation — formats acceptés : `YYYY-MM-DD`, `YYYY-MM-DD HH:MM:SS`, `YYYY-MM-DDTHH:MM:SS` |"
-            )
-            st.caption("Séparateur : virgule  •  Encodage : UTF-8  •  Taille max : 10 MB")
+            st.markdown(t("predictions.csv_import.columns_table"))
+            st.caption(t("predictions.csv_import.format_note"))
 
             st.download_button(
-                "⬇️ Télécharger un template CSV avec exemples",
+                t("predictions.csv_import.template_download_btn"),
                 data=CSV_TEMPLATE,
                 file_name="template_observed_results.csv",
                 mime="text/csv",
             )
 
-            uploaded_file = st.file_uploader("Fichier CSV à importer", type=["csv"], key="csv_obs_upload")
+            uploaded_file = st.file_uploader(t("predictions.csv_import.file_uploader_label"), type=["csv"], key="csv_obs_upload")
 
             model_name_override = st.text_input(
-                "Forcer le modèle pour toutes les lignes (optionnel)",
+                t("predictions.csv_import.model_override_label"),
                 key="csv_obs_model_override",
-                help=(
-                    "Laissez vide si votre CSV contient déjà une colonne 'model_name'.\n\n"
-                    "Remplissez ce champ si :\n"
-                    "• votre CSV n'a pas de colonne 'model_name' (toutes les lignes concernent le même modèle)\n"
-                    "• vous voulez forcer un modèle spécifique et ignorer la colonne CSV\n\n"
-                    "Exemple : iris-classifier"
-                ),
+                help=t("predictions.csv_import.model_override_help"),
             )
-            if uploaded_file is not None and st.button("Importer", key="csv_obs_submit"):
+            if uploaded_file is not None and st.button(t("predictions.csv_import.import_btn"), key="csv_obs_submit"):
                 try:
                     result = client.upload_observed_results_csv(
                         file_bytes=uploaded_file.read(),
@@ -916,11 +826,11 @@ with tab_history:
                         model_name=model_name_override.strip() or None,
                     )
                     st.toast(
-                        f"{result['upserted']} résultats importés depuis {result['filename']}.",
+                        t("predictions.csv_import.import_success", count=result['upserted'], filename=result['filename']),
                         icon="✅",
                     )
                     if result.get("skipped_rows", 0) > 0:
-                        st.warning(f"{result['skipped_rows']} ligne(s) ignorée(s)")
+                        st.warning(t("predictions.csv_import.skipped_rows", count=result['skipped_rows']))
                         errors = result.get("parse_errors", [])
                         if errors:
                             st.dataframe(
@@ -929,19 +839,16 @@ with tab_history:
                                 hide_index=True,
                             )
                 except Exception as exc:
-                    st.error(f"Erreur lors de l'import : {exc}")
+                    st.error(t("predictions.csv_import.import_error", error=exc))
 
         # --- Maintenance RGPD (admin uniquement) ---
         if st.session_state.get("is_admin", False):
-            with st.expander("🗑️ Maintenance RGPD — Purge des prédictions", expanded=False):
-                st.caption(
-                    "Supprime définitivement les prédictions anciennes. "
-                    "Utilisez **Simuler** avant de confirmer."
-                )
+            with st.expander(t("predictions.purge.expander_title"), expanded=False):
+                st.caption(t("predictions.purge.caption"))
 
                 col_m1, col_m2 = st.columns(2)
                 purge_days = col_m1.slider(
-                    "Purger les prédictions antérieures à",
+                    t("predictions.purge.days_slider_label"),
                     min_value=7,
                     max_value=365,
                     value=90,
@@ -949,16 +856,16 @@ with tab_history:
                     key="purge_days_slider",
                 )
                 purge_model_sel = col_m2.selectbox(
-                    "Filtrer par modèle (optionnel)",
-                    ["(tous)"] + (model_names if model_names else []),
+                    t("predictions.purge.model_filter_label"),
+                    [t("predictions.filters.all_models")] + (model_names if model_names else []),
                     key="purge_model_sel",
                 )
-                purge_model_name = None if purge_model_sel == "(tous)" else purge_model_sel
+                purge_model_name = None if purge_model_sel == t("predictions.filters.all_models") else purge_model_sel
 
                 col_sim, col_purge = st.columns(2)
 
                 if col_sim.button(
-                    "🔍 Simuler (dry_run)", key="purge_simulate", width='stretch'
+                    t("predictions.purge.simulate_btn"), key="purge_simulate", width='stretch'
                 ):
                     try:
                         result = client.purge_predictions(
@@ -967,35 +874,33 @@ with tab_history:
                             dry_run=True,
                         )
                         st.info(
-                            f"Simulation : **{result['deleted_count']}** prédiction(s) seraient supprimées."
+                            t("predictions.purge.simulate_result", count=result['deleted_count'])
                         )
                         if result.get("oldest_remaining"):
                             st.caption(
-                                f"Prédiction la plus ancienne restante : {result['oldest_remaining']}"
+                                t("predictions.purge.oldest_remaining", ts=result['oldest_remaining'])
                             )
                         if result.get("models_affected"):
-                            st.caption(f"Modèles affectés : {', '.join(result['models_affected'])}")
+                            st.caption(t("predictions.purge.models_affected", models=', '.join(result['models_affected'])))
                         if result.get("linked_observed_results_count", 0) > 0:
                             st.warning(
-                                f"⚠️ {result['linked_observed_results_count']} résultat(s) observé(s) "
-                                "lié(s) seraient perdus (perte de données de performance historiques)."
+                                t("predictions.purge.linked_obs_warning", count=result['linked_observed_results_count'])
                             )
                     except Exception as exc:
-                        st.error(f"Erreur lors de la simulation : {exc}")
+                        st.error(t("predictions.purge.simulate_error", error=exc))
 
-                @st.dialog("⚠️ Confirmer la purge définitive")
+                @st.dialog(t("predictions.purge.dialog_title"))
                 def _confirm_purge_dialog():
                     st.warning(
-                        f"Vous allez **supprimer définitivement** toutes les prédictions "
-                        f"antérieures à **{purge_days} jours**."
+                        t("predictions.purge.dialog_warning", days=purge_days)
                     )
                     if purge_model_name:
-                        st.info(f"Modèle ciblé : **{purge_model_name}**")
+                        st.info(t("predictions.purge.dialog_target_model", model=purge_model_name))
                     else:
-                        st.info("Tous les modèles sont ciblés.")
-                    st.markdown("Cette action est **irréversible**.")
+                        st.info(t("predictions.purge.dialog_all_models"))
+                    st.markdown(t("predictions.purge.dialog_irreversible"))
                     if st.button(
-                        "Confirmer la suppression", type="primary", key="purge_dialog_confirm"
+                        t("predictions.purge.dialog_confirm_btn"), type="primary", key="purge_dialog_confirm"
                     ):
                         try:
                             result = client.purge_predictions(
@@ -1004,19 +909,18 @@ with tab_history:
                                 dry_run=False,
                             )
                             st.toast(
-                                f"{result['deleted_count']} prédiction(s) supprimée(s).", icon="✅"
+                                t("predictions.purge.purge_toast", count=result['deleted_count']), icon="✅"
                             )
                             if result.get("linked_observed_results_count", 0) > 0:
                                 st.warning(
-                                    f"{result['linked_observed_results_count']} résultat(s) observé(s) "
-                                    "liés ont été perdus."
+                                    t("predictions.purge.linked_obs_lost", count=result['linked_observed_results_count'])
                                 )
                             st.rerun()
                         except Exception as exc:
-                            st.toast(f"Erreur lors de la purge : {exc}", icon="❌")
+                            st.toast(t("predictions.purge.purge_error", error=exc), icon="❌")
 
                 if col_purge.button(
-                    "⚠️ Confirmer la purge",
+                    t("predictions.purge.confirm_btn"),
                     key="purge_open_dialog",
                     type="primary",
                     width='stretch',
@@ -1028,22 +932,11 @@ with tab_history:
 # TAB 2 — Prédictions batch
 # ───────────────────────────────────────────────────────────────────────────────
 with tab_batch:
-    st.subheader("📦 Scoring en lot — CSV ou Parquet")
-    st.caption(
-        "Importez un fichier contenant vos observations, sélectionnez un modèle "
-        "et téléchargez le CSV enrichi avec les prédictions."
-    )
+    st.subheader(t("predictions.batch.subheader"))
+    st.caption(t("predictions.batch.caption"))
 
-    # --- Format attendu ---
-    with st.expander("ℹ️ Format attendu du fichier", expanded=False):
-        st.markdown("""
-Le fichier doit contenir **une colonne par feature** attendue par le modèle.
-Les colonnes doivent correspondre exactement aux noms des features du modèle (casse incluse).
-
-Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique.
-
-**Exemple pour un modèle Iris :**
-""")
+    with st.expander(t("predictions.batch.format_expander_title"), expanded=False):
+        st.markdown(t("predictions.batch.format_description"))
         example_df = pd.DataFrame(
             {
                 "id_obs": ["obs-001", "obs-002", "obs-003"],
@@ -1055,7 +948,7 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
         )
         st.dataframe(example_df, width='stretch', hide_index=True)
         st.download_button(
-            "⬇️ Télécharger cet exemple (CSV)",
+            t("predictions.batch.example_download_btn"),
             data=example_df.to_csv(index=False),
             file_name="exemple_batch_iris.csv",
             mime="text/csv",
@@ -1073,13 +966,13 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
         model_names_batch = []
 
     if not model_names_batch:
-        st.warning("Aucun modèle disponible. Créez d'abord un modèle via l'API.")
+        st.warning(t("predictions.warnings.no_model"))
         st.stop()
 
     col_b1, col_b2 = st.columns(2)
     with col_b1:
         batch_search = st.text_input(
-            "Filtrer par nom", key="batch_model_search", placeholder="Rechercher…"
+            t("predictions.filters.search_label"), key="batch_model_search", placeholder=t("predictions.filters.search_placeholder")
         )
         batch_filtered = (
             [n for n in model_names_batch if batch_search.lower() in n.lower()]
@@ -1087,27 +980,24 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
             else model_names_batch
         )
         batch_model = st.selectbox(
-            "Modèle cible", batch_filtered or model_names_batch, key="batch_model_sel"
+            t("predictions.batch.target_model_label"), batch_filtered or model_names_batch, key="batch_model_sel"
         )
 
-    # Versions disponibles pour le modèle sélectionné
-    batch_versions = ["(production / auto)"] + sorted(
+    batch_versions = [t("predictions.batch.production_auto")] + sorted(
         {m["version"] for m in all_models if m["name"] == batch_model},
         reverse=True,
     )
-    batch_version_sel = col_b2.selectbox("Version", batch_versions, key="batch_version_sel")
-    batch_version = None if batch_version_sel == "(production / auto)" else batch_version_sel
+    batch_version_sel = col_b2.selectbox(t("predictions.batch.version_label"), batch_versions, key="batch_version_sel")
+    batch_version = None if batch_version_sel == t("predictions.batch.production_auto") else batch_version_sel
 
-    # --- Upload fichier ---
     batch_file = st.file_uploader(
-        "Fichier CSV ou Parquet",
+        t("predictions.batch.file_uploader_label"),
         type=["csv", "parquet"],
         key="batch_file_uploader",
-        help="CSV (.csv) ou Parquet (.parquet). La première ligne du CSV doit être l'en-tête.",
+        help=t("predictions.batch.file_uploader_help"),
     )
 
     if batch_file is not None:
-        # Lire le fichier selon son extension
         try:
             fname = batch_file.name.lower()
             if fname.endswith(".parquet"):
@@ -1115,16 +1005,15 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
             else:
                 df_input = pd.read_csv(io.BytesIO(batch_file.read()))
         except Exception as exc:
-            st.error(f"Impossible de lire le fichier : {exc}")
+            st.error(t("predictions.batch.file_read_error", error=exc))
             st.stop()
 
         st.caption(
-            f"Fichier chargé : **{batch_file.name}** — {len(df_input):,} lignes, {len(df_input.columns)} colonnes"
+            t("predictions.batch.file_loaded_caption", filename=batch_file.name, rows=len(df_input), cols=len(df_input.columns))
         )
         st.dataframe(df_input.head(10), width='stretch', hide_index=True)
 
-        if st.button("🚀 Lancer le scoring", type="primary", key="batch_run"):
-            # Extraire id_obs si présente, puis construire les features
+        if st.button(t("predictions.batch.run_btn"), type="primary", key="batch_run"):
             id_obs_col = None
             if "id_obs" in df_input.columns:
                 id_obs_col = df_input["id_obs"].astype(str).tolist()
@@ -1134,7 +1023,6 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
 
             rows_payload = feature_df.to_dict(orient="records")
 
-            # Enrichir avec id_obs si disponible
             if id_obs_col is not None:
                 inputs = [
                     {"features": row, "id_obs": obs_id}
@@ -1143,7 +1031,7 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
             else:
                 inputs = [{"features": row} for row in rows_payload]
 
-            with st.spinner(f"Scoring de {len(rows_payload):,} observations en cours…"):
+            with st.spinner(t("predictions.batch.scoring_spinner", count=len(rows_payload))):
                 try:
                     import requests as _requests
 
@@ -1153,10 +1041,7 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
                         model_version=batch_version,
                     )
                 except _requests.exceptions.Timeout:
-                    st.error(
-                        "Le scoring a dépassé le délai de 120 secondes. "
-                        "Essayez avec un fichier plus petit ou contactez l'administrateur."
-                    )
+                    st.error(t("predictions.batch.timeout_error"))
                     st.stop()
                 except Exception as exc:
                     detail = str(exc)
@@ -1167,23 +1052,20 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
                         detail = body.get("detail", detail)
                     except Exception:
                         pass
-                    st.error(f"Erreur lors du scoring : {detail}")
+                    st.error(t("predictions.batch.scoring_error", detail=detail))
                     st.stop()
 
             predictions_out = result.get("predictions", [])
             used_version = result.get("model_version", "—")
 
             st.toast(
-                f"{len(predictions_out):,} prédictions générées — "
-                f"modèle {batch_model} v{used_version}",
+                t("predictions.batch.scoring_toast", count=len(predictions_out), model=batch_model, version=used_version),
                 icon="✅",
             )
 
-            # Construire le DataFrame résultat : colonnes originales + prediction + probabilities
             df_result = df_input.copy()
             df_result["prediction"] = [p.get("prediction") for p in predictions_out]
 
-            # Déplier les probabilités par classe si disponibles
             first_proba = next(
                 (p.get("probability") for p in predictions_out if p.get("probability")), None
             )
@@ -1194,40 +1076,35 @@ Une colonne `id_obs` optionnelle permet de tracer chaque ligne dans l'historique
                         (p.get("probability") or [None] * n_classes)[i] for p in predictions_out
                     ]
 
-            # Colonne low_confidence si disponible
             if any(p.get("low_confidence") is not None for p in predictions_out):
                 df_result["low_confidence"] = [p.get("low_confidence") for p in predictions_out]
 
-            # Prévisualisation (50 premières lignes)
-            st.markdown("**Prévisualisation des résultats (50 premières lignes) :**")
+            st.markdown(t("predictions.batch.preview_header"))
             st.dataframe(df_result.head(50), width='stretch', hide_index=True)
 
-            # Téléchargement CSV complet
             csv_out = df_result.to_csv(index=False)
             st.download_button(
-                label=f"⬇️ Télécharger le CSV complet ({len(df_result):,} lignes)",
+                label=t("predictions.batch.download_full_btn", count=len(df_result)),
                 data=csv_out,
                 file_name=f"predictions_batch_{batch_model}.csv",
                 mime="text/csv",
                 key="batch_download_btn",
             )
 
-            # Résumé statistique
-            with st.expander("📊 Résumé des prédictions"):
+            with st.expander(t("predictions.batch.summary_expander_title")):
                 pred_series = df_result["prediction"]
-                st.markdown(f"- **Nombre de prédictions :** {len(pred_series):,}")
+                st.markdown(t("predictions.batch.summary_count", count=len(pred_series)))
                 try:
                     numeric_preds = pred_series.astype(float)
                     col_s1, col_s2, col_s3, col_s4 = st.columns(4)
-                    col_s1.metric("Moyenne", f"{numeric_preds.mean():.4f}")
-                    col_s2.metric("Médiane", f"{numeric_preds.median():.4f}")
-                    col_s3.metric("Min", f"{numeric_preds.min():.4f}")
-                    col_s4.metric("Max", f"{numeric_preds.max():.4f}")
+                    col_s1.metric(t("predictions.batch.stat_mean"), f"{numeric_preds.mean():.4f}")
+                    col_s2.metric(t("predictions.batch.stat_median"), f"{numeric_preds.median():.4f}")
+                    col_s3.metric(t("predictions.batch.stat_min"), f"{numeric_preds.min():.4f}")
+                    col_s4.metric(t("predictions.batch.stat_max"), f"{numeric_preds.max():.4f}")
                 except (ValueError, TypeError):
-                    # Classification — afficher la distribution des classes
                     dist = pred_series.value_counts()
                     st.dataframe(
-                        dist.rename_axis("Classe").reset_index(name="Count"),
+                        dist.rename_axis(t("predictions.batch.class_col")).reset_index(name="Count"),
                         width='stretch',
                         hide_index=True,
                     )

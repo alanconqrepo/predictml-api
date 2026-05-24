@@ -1,4 +1,4 @@
-﻿"""
+"""
 Validation des cas de référence (Golden Test Set) pour les modèles ML
 """
 
@@ -9,17 +9,15 @@ import streamlit as st
 from utils.api_client import get_golden_tests as get_golden_tests_cached
 from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
+from utils.i18n import t
 
-st.set_page_config(page_title="Golden Tests — PredictML", page_icon="🧪", layout="wide")
+st.set_page_config(page_title=t("golden_tests.page_title"), page_icon="🧪", layout="wide")
 require_auth()
 
 is_admin = st.session_state.get("is_admin", False)
 
-st.title("🧪 Golden Tests")
-st.caption(
-    "Validez qu'un modèle produit toujours les sorties attendues sur des cas de référence. "
-    "Particulièrement utile après un ré-entraînement."
-)
+st.title(t("golden_tests.title"))
+st.caption(t("golden_tests.caption"))
 
 client = get_client()
 
@@ -30,37 +28,34 @@ def reload():
 
 
 # ─── Chargement des modèles ───────────────────────────────────────────────────
-
 try:
     models = get_models_cached(
         st.session_state.get("api_url"), st.session_state.get("api_token")
     )
 except Exception as e:
-    st.error(f"Impossible de charger les modèles : {e}")
+    st.error(t("golden_tests.error_load_models", error=e))
     st.stop()
 
 if not models:
-    st.info("Aucun modèle disponible.")
+    st.info(t("golden_tests.no_models"))
     st.stop()
 
 # ─── Section 1 — Sélection du modèle ─────────────────────────────────────────
-
-st.subheader("1. Sélection du modèle")
+st.subheader(t("golden_tests.section_select_model"))
 
 model_names = sorted({m["name"] for m in models})
 col_name, col_version = st.columns([2, 1])
 
 with col_name:
-    selected_name = st.selectbox("Modèle", model_names, key="gt_model_name")
+    selected_name = st.selectbox(t("golden_tests.model_label"), model_names, key="gt_model_name")
 
 versions = [m["version"] for m in models if m["name"] == selected_name]
 with col_version:
-    selected_version = st.selectbox("Version à tester", versions, key="gt_model_version")
+    selected_version = st.selectbox(t("golden_tests.version_label"), versions, key="gt_model_version")
 
 # ─── Section 2 — Cas de tests existants ──────────────────────────────────────
-
 st.markdown("---")
-st.subheader("2. Cas de tests enregistrés")
+st.subheader(t("golden_tests.section_existing_tests"))
 
 try:
     golden_tests = get_golden_tests_cached(
@@ -69,26 +64,29 @@ try:
         selected_name,
     )
 except Exception as e:
-    st.error(f"Impossible de charger les golden tests : {e}")
+    st.error(t("golden_tests.error_load_tests", error=e))
     golden_tests = []
 
 if not golden_tests:
-    st.info(
-        f"Aucun cas de test enregistré pour **{selected_name}**. "
-        "Utilisez le formulaire ci-dessous pour en ajouter."
-    )
+    st.info(t("golden_tests.no_tests", name=selected_name))
 else:
+    _col_id = t("golden_tests.col_id")
+    _col_desc = t("golden_tests.col_description")
+    _col_input = t("golden_tests.col_input_features")
+    _col_expected = t("golden_tests.col_expected_output")
+    _col_date = t("golden_tests.col_date")
+
     rows = []
-    for t in golden_tests:
+    for test in golden_tests:
         rows.append(
             {
-                "ID": t.get("id"),
-                "Description": t.get("description") or "—",
-                "Input features": json.dumps(t.get("input_features", {})),
-                "Expected output": str(t.get("expected_output", "—")),
-                "Date": (
-                    pd.to_datetime(t["created_at"]).strftime("%Y-%m-%d %H:%M")
-                    if t.get("created_at")
+                _col_id: test.get("id"),
+                _col_desc: test.get("description") or "—",
+                _col_input: json.dumps(test.get("input_features", {})),
+                _col_expected: str(test.get("expected_output", "—")),
+                _col_date: (
+                    pd.to_datetime(test["created_at"]).strftime("%Y-%m-%d %H:%M")
+                    if test.get("created_at")
                     else "—"
                 ),
             }
@@ -99,60 +97,43 @@ else:
         width='stretch',
         hide_index=True,
         column_config={
-            "ID": st.column_config.NumberColumn(
-                "ID",
-                help="Identifiant unique du cas de test en base de données.",
-            ),
-            "Description": st.column_config.TextColumn(
-                "Description",
-                help="Libellé libre décrivant ce cas de test. Ex : 'iris setosa typique — valeurs nominales'.",
-            ),
-            "Input features": st.column_config.TextColumn(
-                "Input features",
-                help="Objet JSON contenant les valeurs des features envoyées au modèle lors du test.",
-            ),
-            "Expected output": st.column_config.TextColumn(
-                "Expected output",
-                help="Valeur de sortie attendue du modèle pour ces features. Le test échoue si le modèle retourne autre chose.",
-            ),
-            "Date": st.column_config.TextColumn(
-                "Date",
-                help="Date et heure à laquelle ce cas de test a été enregistré.",
-            ),
+            _col_id: st.column_config.NumberColumn(_col_id, help=t("golden_tests.col_id_help")),
+            _col_desc: st.column_config.TextColumn(_col_desc, help=t("golden_tests.col_description_help")),
+            _col_input: st.column_config.TextColumn(_col_input, help=t("golden_tests.col_input_features_help")),
+            _col_expected: st.column_config.TextColumn(_col_expected, help=t("golden_tests.col_expected_output_help")),
+            _col_date: st.column_config.TextColumn(_col_date, help=t("golden_tests.col_date_help")),
         },
     )
-    st.caption(f"{len(golden_tests)} cas de test(s) enregistré(s).")
+    st.caption(t("golden_tests.tests_count", count=len(golden_tests)))
 
     col_run, col_spacer = st.columns([1, 3])
     with col_run:
         run_clicked = st.button(
-            f"▶ Lancer tous les tests sur v{selected_version}",
+            t("golden_tests.run_all_btn", version=selected_version),
             type="primary",
             key="run_tests_btn",
         )
 
     if is_admin:
-        with st.expander("🗑️ Supprimer un cas de test", expanded=False):
+        with st.expander(t("golden_tests.delete_expander"), expanded=False):
             test_opts = {
-                f"#{t['id']} — {t.get('description') or t.get('expected_output', '')}": t["id"]
-                for t in golden_tests
+                f"#{test['id']} — {test.get('description') or test.get('expected_output', '')}": test["id"]
+                for test in golden_tests
             }
             to_delete_label = st.selectbox(
-                "Cas de test à supprimer", list(test_opts.keys()), key="gt_delete_select"
+                t("golden_tests.delete_select_label"), list(test_opts.keys()), key="gt_delete_select"
             )
-            if st.button("Supprimer", type="secondary", key="gt_delete_btn"):
+            if st.button(t("golden_tests.delete_btn"), type="secondary", key="gt_delete_btn"):
                 test_id = test_opts[to_delete_label]
                 try:
                     client.delete_golden_test(selected_name, test_id)
-                    st.toast(f"Cas de test #{test_id} supprimé.", icon="✅")
+                    st.toast(t("golden_tests.delete_success", id=test_id), icon="✅")
                     reload()
                 except Exception as e:
-                    st.toast(f"Erreur lors de la suppression : {e}", icon="❌")
+                    st.toast(t("golden_tests.delete_error", error=e), icon="❌")
 
     if run_clicked:
-        with st.spinner(
-            f"Exécution de {len(golden_tests)} test(s) sur {selected_name} v{selected_version}…"
-        ):
+        with st.spinner(t("golden_tests.run_spinner", count=len(golden_tests), name=selected_name, version=selected_version)):
             try:
                 run_result = client.run_golden_tests(selected_name, selected_version)
 
@@ -163,33 +144,33 @@ else:
                 details = run_result.get("details", [])
 
                 col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-                col_m1.metric("Total", total)
-                col_m2.metric("✅ Passés", passed)
+                col_m1.metric(t("golden_tests.metric_total"), total)
+                col_m2.metric(t("golden_tests.metric_passed"), passed)
                 col_m3.metric(
-                    "❌ Échoués",
+                    t("golden_tests.metric_failed"),
                     failed,
                     delta=f"-{failed}" if failed else None,
                     delta_color="inverse",
                 )
-                col_m4.metric("Taux de réussite", f"{pass_rate * 100:.1f}%")
+                col_m4.metric(t("golden_tests.metric_pass_rate"), f"{pass_rate * 100:.1f}%")
 
                 if not details:
-                    st.info("Aucun détail retourné par l'API.")
+                    st.info(t("golden_tests.no_details"))
                 else:
-                    st.markdown("#### Résultats détaillés")
+                    st.markdown(t("golden_tests.detailed_results_header"))
                     for r in details:
                         test_passed = r.get("passed", False)
                         icon = "✅" if test_passed else "❌"
-                        desc = r.get("description") or f"Test #{r.get('test_id')}"
+                        desc = r.get("description") or t("golden_tests.test_id_label", id=r.get('test_id'))
                         label = f"{icon} {desc}"
 
                         with st.expander(label, expanded=not test_passed):
                             col_exp, col_rec = st.columns(2)
                             with col_exp:
-                                st.markdown("**Attendu**")
+                                st.markdown(t("golden_tests.expected_label"))
                                 st.code(str(r.get("expected", "—")))
                             with col_rec:
-                                st.markdown("**Reçu**")
+                                st.markdown(t("golden_tests.received_label"))
                                 actual = str(r.get("actual", "—"))
                                 if not test_passed:
                                     st.error(actual)
@@ -200,61 +181,57 @@ else:
                                 expected_val = str(r.get("expected", ""))
                                 actual_val = str(r.get("actual", ""))
                                 if expected_val != actual_val:
-                                    st.markdown("**Diff**")
+                                    st.markdown(t("golden_tests.diff_label"))
                                     st.markdown(
-                                        f"`attendu` → **{expected_val}** | "
-                                        f"`reçu` → **{actual_val}**"
+                                        t("golden_tests.diff_content",
+                                          expected=expected_val, actual=actual_val)
                                     )
 
-                            st.markdown("**Input utilisé**")
+                            st.markdown(t("golden_tests.input_used_label"))
                             st.json(r.get("input", {}))
 
             except Exception as e:
-                st.error(f"Erreur lors de l'exécution des tests : {e}")
+                st.error(t("golden_tests.run_error", error=e))
 
 # ─── Section 3 — Ajouter un cas de test (admin uniquement) ───────────────────
-
 st.markdown("---")
-st.subheader("3. Ajouter un cas de test")
+st.subheader(t("golden_tests.section_add_test"))
 
 if not is_admin:
-    st.info("Section réservée aux administrateurs.")
+    st.info(t("golden_tests.admin_only"))
 else:
-    with st.expander("➕ Nouveau cas de test", expanded=False):
+    with st.expander(t("golden_tests.add_expander"), expanded=False):
         with st.form("add_golden_test_form"):
             description = st.text_input(
-                "Description",
-                placeholder="ex: iris setosa typique — toutes features nominales",
+                t("golden_tests.form_description_label"),
+                placeholder=t("golden_tests.form_description_placeholder"),
                 key="gt_description",
             )
-
             features_json = st.text_area(
-                "Features d'entrée (JSON)",
+                t("golden_tests.form_features_label"),
                 value='{\n  "feature1": 1.0,\n  "feature2": 2.0\n}',
                 height=130,
                 key="gt_features",
-                help="Objet JSON clé/valeur des features du modèle",
+                help=t("golden_tests.form_features_help"),
             )
-
             expected_output = st.text_input(
-                "Sortie attendue",
-                placeholder="ex: setosa  |  0  |  1.23",
+                t("golden_tests.form_expected_label"),
+                placeholder=t("golden_tests.form_expected_placeholder"),
                 key="gt_expected",
-                help="Valeur de sortie attendue du modèle pour ces features (texte libre)",
+                help=t("golden_tests.form_expected_help"),
             )
-
-            submitted = st.form_submit_button("💾 Enregistrer", type="primary")
+            submitted = st.form_submit_button(t("golden_tests.form_save_btn"), type="primary")
 
         if submitted:
             try:
                 features = json.loads(features_json)
             except json.JSONDecodeError as e:
-                st.error(f"JSON invalide dans les features : {e}")
+                st.error(t("golden_tests.error_invalid_json", error=e))
             else:
                 if not expected_output.strip():
-                    st.error("La sortie attendue est obligatoire.")
+                    st.error(t("golden_tests.error_expected_required"))
                 elif not features:
-                    st.error("Les features d'entrée ne peuvent pas être vides.")
+                    st.error(t("golden_tests.error_features_empty"))
                 else:
                     try:
                         payload = {
@@ -263,28 +240,18 @@ else:
                             "description": description.strip() or None,
                         }
                         client.create_golden_test(selected_name, payload)
-                        st.toast("Cas de test enregistré avec succès.", icon="✅")
+                        st.toast(t("golden_tests.save_success"), icon="✅")
                         reload()
                     except Exception as e:
-                        st.toast(f"Erreur lors de l'enregistrement : {e}", icon="❌")
+                        st.toast(t("golden_tests.save_error", error=e), icon="❌")
 
-    with st.expander("📥 Import CSV (lot de tests)", expanded=False):
-        st.markdown("""
-Importez plusieurs cas de test à la fois depuis un fichier CSV.
-
-**Format attendu :**
-```
-description,input_features,expected_output
-"iris setosa","{""sepal_length"": 5.1, ""sepal_width"": 3.5, ""petal_length"": 1.4, ""petal_width"": 0.2}",setosa
-```
-
-Colonnes : `description` (optionnel), `input_features` (JSON stringifié), `expected_output`.
-""")
+    with st.expander(t("golden_tests.csv_expander"), expanded=False):
+        st.markdown(t("golden_tests.csv_format_desc"))
         uploaded_csv = st.file_uploader(
-            "Fichier CSV", type=["csv"], key="gt_csv_upload"
+            t("golden_tests.csv_uploader_label"), type=["csv"], key="gt_csv_upload"
         )
         if uploaded_csv is not None:
-            if st.button("📤 Importer", type="primary", key="gt_csv_import_btn"):
+            if st.button(t("golden_tests.csv_import_btn"), type="primary", key="gt_csv_import_btn"):
                 try:
                     result = client.upload_golden_tests_csv(
                         selected_name,
@@ -292,7 +259,7 @@ Colonnes : `description` (optionnel), `input_features` (JSON stringifié), `expe
                         uploaded_csv.name,
                     )
                     imported = result.get("imported", result.get("count", "?"))
-                    st.toast(f"{imported} cas de test importé(s).", icon="✅")
+                    st.toast(t("golden_tests.csv_import_success", count=imported), icon="✅")
                     reload()
                 except Exception as e:
-                    st.toast(f"Erreur lors de l'import : {e}", icon="❌")
+                    st.toast(t("golden_tests.csv_import_error", error=e), icon="❌")

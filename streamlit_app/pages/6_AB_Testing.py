@@ -11,19 +11,17 @@ import plotly.graph_objects as go
 import streamlit as st
 from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
-from utils.metrics_help import METRIC_HELP
+from utils.i18n import t
 
-st.set_page_config(page_title="A/B Testing — PredictML", page_icon="🧪", layout="wide")
+st.set_page_config(page_title=t("ab_testing.page_title"), page_icon="🧪", layout="wide")
 require_auth()
 
 col_title, col_refresh = st.columns([8, 1])
-col_title.title("🧪 A/B Testing & Shadow Deployment")
-if col_refresh.button("🔄 Rafraîchir", key="ab_refresh", width='stretch'):
+col_title.title(t("ab_testing.title"))
+if col_refresh.button(t("ab_testing.btn_refresh"), key="ab_refresh", width='stretch'):
     st.cache_data.clear()
     st.rerun()
-st.caption(
-    "Configurez des splits de trafic entre versions d'un même modèle et comparez leurs métriques en temps réel."
-)
+st.caption(t("ab_testing.caption"))
 
 client = get_client()
 is_admin = st.session_state.get("is_admin", False)
@@ -34,11 +32,11 @@ try:
         st.session_state.get("api_url"), st.session_state.get("api_token")
     )
 except Exception as e:
-    st.error(f"Impossible de charger les modèles : {e}")
+    st.error(t("ab_testing.load_error", error=e))
     st.stop()
 
 if not all_models:
-    st.info("Aucun modèle disponible.")
+    st.info(t("ab_testing.no_models"))
     st.stop()
 
 # Grouper les versions par nom de modèle
@@ -48,9 +46,9 @@ for m in all_models:
 
 model_names = sorted(model_groups.keys())
 _ab_col1, _ab_col2 = st.columns([2, 3])
-ab_search = _ab_col1.text_input("Filtrer par nom", key="ab_model_search", placeholder="Rechercher un modèle…")
+ab_search = _ab_col1.text_input(t("ab_testing.filter_name"), key="ab_model_search", placeholder=t("ab_testing.filter_placeholder"))
 ab_filtered = [n for n in model_names if ab_search.lower() in n.lower()] if ab_search else model_names
-selected_model = _ab_col2.selectbox("🔍 Modèle", ab_filtered or model_names, key="ab_model_select")
+selected_model = _ab_col2.selectbox(t("ab_testing.model_select"), ab_filtered or model_names, key="ab_model_select")
 versions_for_model = model_groups[selected_model]
 
 st.divider()
@@ -59,11 +57,8 @@ st.divider()
 # SECTION 1 — Configuration du déploiement (admin seulement)
 # ===========================================================================
 if is_admin:
-    with st.expander("⚙️ Configuration A/B / Shadow", expanded=True):  # premier expander — ouvert par défaut
-        st.markdown(
-            "Configurez le mode de déploiement et le poids de trafic de chaque version. "
-            "La somme des poids A/B doit être **≤ 1.0**."
-        )
+    with st.expander(t("ab_testing.config.expander"), expanded=True):  # premier expander — ouvert par défaut
+        st.markdown(t("ab_testing.config.description"))
 
         # Mapping label ↔ valeur API
         # "—" = aucun changement (utilisé quand le mode courant n'est pas dans la liste)
@@ -73,15 +68,15 @@ if is_admin:
             "production": "🟢 Prod",
         }
         _LABEL_TO_MODE = {v: k for k, v in _MODE_TO_LABEL.items()}
-        _MODE_LABELS = ["—"] + list(_MODE_TO_LABEL.values())  # ["—", "🟠 A/B", "🟣 Shadow", "🟢 Prod"]
+        _MODE_LABELS = [t("ab_testing.config.mode_no_change")] + list(_MODE_TO_LABEL.values())
         configs: dict = {}
 
         cols_header = st.columns([2, 2, 1, 2, 1])
-        cols_header[0].markdown("**Version**")
-        cols_header[1].markdown("**Mode actuel**")
-        cols_header[2].markdown("**Poids actuel**")
-        cols_header[3].markdown("**Nouveau mode**")
-        cols_header[4].markdown("**Nouveau poids**")
+        cols_header[0].markdown(t("ab_testing.config.col_version"))
+        cols_header[1].markdown(t("ab_testing.config.col_mode_current"))
+        cols_header[2].markdown(t("ab_testing.config.col_weight_current"))
+        cols_header[3].markdown(t("ab_testing.config.col_mode_new"))
+        cols_header[4].markdown(t("ab_testing.config.col_weight_new"))
 
         for v in versions_for_model:
             ver = v["version"]
@@ -96,7 +91,7 @@ if is_admin:
 
             # Poids actuel
             row_cols[2].markdown(
-                f"`{weight_current:.0%}`" if weight_current is not None else "—"
+                f"`{weight_current:.0%}`" if weight_current is not None else t("ab_testing.config.weight_no_change")
             )
 
             # Nouveau mode — badge pré-rempli ; "—" si mode inconnu ou non défini
@@ -127,7 +122,7 @@ if is_admin:
                     label_visibility="collapsed",
                 )
             else:
-                row_cols[4].markdown("—")
+                row_cols[4].markdown(t("ab_testing.config.weight_no_change"))
 
             configs[ver] = {"mode": new_mode, "weight": new_weight, "current": v}
 
@@ -142,11 +137,11 @@ if is_admin:
                 total_weight += cfg["current"].get("traffic_weight") or 0.0
 
         weight_color = "🟢" if total_weight <= 1.0 else "🔴"
-        st.markdown(f"**Somme des poids A/B :** {weight_color} `{total_weight:.2f}` / 1.0")
+        st.markdown(t("ab_testing.config.weight_sum", badge=weight_color, value=f"{total_weight:.2f}"))
         if total_weight > 1.0:
-            st.warning("⚠️ La somme des poids dépasse 1.0 — corrigez avant d'appliquer.")
+            st.warning(t("ab_testing.config.weight_overflow"))
 
-        if st.button("✅ Appliquer la configuration", type="primary", disabled=total_weight > 1.0):
+        if st.button(t("ab_testing.config.apply_btn"), type="primary", disabled=total_weight > 1.0):
             errors = []
             updated = 0
             for ver, cfg in configs.items():
@@ -175,36 +170,36 @@ if is_admin:
                 for err in errors:
                     st.toast(err, icon="❌")
             if updated:
-                st.toast(f"{updated} version(s) mise(s) à jour.", icon="✅")
+                st.toast(t("ab_testing.config.updated", count=updated), icon="✅")
                 st.cache_data.clear()
                 st.rerun()
 
 else:
-    st.info("🔒 La configuration A/B est réservée aux administrateurs.")
+    st.info(t("ab_testing.config.admin_only"))
 
 st.divider()
 
 # ===========================================================================
 # SECTION 2 — Dashboard de comparaison
 # ===========================================================================
-st.subheader("📊 Comparaison des versions")
+st.subheader(t("ab_testing.comparison.subheader"))
 
 _cmp_c1, _cmp_c2 = st.columns(2)
 _ab_start = _cmp_c1.date_input(
-    "Date début", value=date.today() - timedelta(days=30), key="ab_start_date"
+    t("ab_testing.comparison.date_start"), value=date.today() - timedelta(days=30), key="ab_start_date"
 )
-_ab_end = _cmp_c2.date_input("Date fin", value=date.today(), key="ab_end_date")
+_ab_end = _cmp_c2.date_input(t("ab_testing.comparison.date_end"), value=date.today(), key="ab_end_date")
 days = max((_ab_end - _ab_start).days, 1)
 
 # Lire la métrique depuis session_state AVANT l'appel API
 # (Streamlit y stocke la nouvelle valeur du widget avant le rerun)
 _METRIC_OPTIONS = {
-    "Auto (sélection intelligente)": None,
-    "Taux d'erreur — Chi-²":         "error_rate",
-    "MAE prédiction — Mann-Whitney":  "mae",
-    "Latence réponse — Mann-Whitney": "response_time_ms",
+    t("ab_testing.ab_test.metric_auto"):          None,
+    t("ab_testing.ab_test.metric_error_rate"):    "error_rate",
+    t("ab_testing.ab_test.metric_mae"):           "mae",
+    t("ab_testing.ab_test.metric_response_time"): "response_time_ms",
 }
-_sig_metric_label = st.session_state.get("ab_sig_metric", "Auto (sélection intelligente)")
+_sig_metric_label = st.session_state.get("ab_sig_metric", t("ab_testing.ab_test.metric_auto"))
 _sig_metric = _METRIC_OPTIONS.get(_sig_metric_label)
 
 try:
@@ -212,7 +207,7 @@ try:
     versions_stats = ab_data.get("versions", [])
     ab_significance = ab_data.get("ab_significance")
 except Exception as e:
-    st.error(f"Impossible de charger les données de comparaison : {e}")
+    st.error(t("ab_testing.comparison.load_error", error=e))
     versions_stats = []
     ab_significance = None
 
@@ -282,7 +277,7 @@ def _output_summary(dist: dict, meta: dict) -> "str | None":
 
 
 if not versions_stats:
-    st.info("Aucune prédiction enregistrée pour ce modèle sur la période sélectionnée.")
+    st.info(t("ab_testing.comparison.no_predictions"))
 else:
     # --- Tableau de comparaison ---
     _BADGE_CMP = {"ab_test": "🟠 A/B", "shadow": "🟣 Shadow", "production": "🟢 Production"}
@@ -302,6 +297,25 @@ else:
 
     _is_regression = _model_is_regression(_vfm_lookup)
 
+    # Resolve column name strings once
+    _col_version = t("ab_testing.comparison.col_version")
+    _col_mode = t("ab_testing.comparison.col_mode")
+    _col_weight = t("ab_testing.comparison.col_weight")
+    _col_algorithm = t("ab_testing.comparison.col_algorithm")
+    _col_created = t("ab_testing.comparison.col_created")
+    _col_creator = t("ab_testing.comparison.col_creator")
+    _col_pred_prod = t("ab_testing.comparison.col_pred_prod")
+    _col_shadow = t("ab_testing.comparison.col_shadow")
+    _col_output = t("ab_testing.comparison.col_output")
+    _col_err_pct = t("ab_testing.comparison.col_err_pct")
+    _col_lat_avg = t("ab_testing.comparison.col_lat_avg")
+    _col_lat_p95 = t("ab_testing.comparison.col_lat_p95")
+    _col_concordance = t("ab_testing.comparison.col_concordance")
+    _col_accuracy = t("ab_testing.comparison.col_accuracy")
+    _col_f1 = t("ab_testing.comparison.col_f1")
+    _col_r2 = t("ab_testing.comparison.col_r2")
+    _col_rmse = t("ab_testing.comparison.col_rmse")
+
     _rows = []
     for vs in versions_stats:
         ver = vs["version"]
@@ -317,57 +331,54 @@ else:
             created_str = str(created_raw)[:10] if created_raw else "—"
 
         _rows.append({
-            "Version":        ver,
-            "Mode":           _BADGE_CMP.get(mode, "⚪ —"),
-            "Poids":          f"{weight:.0%}" if weight is not None else "—",
-            "Algorithme":     meta.get("algorithm") or "—",
-            "Créé le":        created_str,
-            "Créateur":       meta.get("creator_username") or "—",
-            "Préd. (prod)":   vs.get("total_predictions", 0),
-            "Shadow":         vs.get("shadow_predictions", 0),
-            "Sortie prédite": _output_summary(vs.get("prediction_distribution", {}), meta),
-            "Err. (%)":       round(vs.get("error_rate", 0) * 100, 2) if vs.get("error_rate") is not None else None,
-            "Lat. avg (ms)":  round(vs["avg_response_time_ms"], 1) if vs.get("avg_response_time_ms") is not None else None,
-            "Lat. p95 (ms)":  round(vs["p95_response_time_ms"], 1) if vs.get("p95_response_time_ms") is not None else None,
-            "Concordance":    round(vs["agreement_rate"] * 100, 1) if vs.get("agreement_rate") is not None else None,
-            "Accuracy":       meta.get("accuracy"),
-            "F1":             meta.get("f1_score"),
-            "R²":             meta.get("r2_score"),
-            "RMSE":           meta.get("rmse"),
+            _col_version:     ver,
+            _col_mode:        _BADGE_CMP.get(mode, "⚪ —"),
+            _col_weight:      f"{weight:.0%}" if weight is not None else "—",
+            _col_algorithm:   meta.get("algorithm") or "—",
+            _col_created:     created_str,
+            _col_creator:     meta.get("creator_username") or "—",
+            _col_pred_prod:   vs.get("total_predictions", 0),
+            _col_shadow:      vs.get("shadow_predictions", 0),
+            _col_output:      _output_summary(vs.get("prediction_distribution", {}), meta),
+            _col_err_pct:     round(vs.get("error_rate", 0) * 100, 2) if vs.get("error_rate") is not None else None,
+            _col_lat_avg:     round(vs["avg_response_time_ms"], 1) if vs.get("avg_response_time_ms") is not None else None,
+            _col_lat_p95:     round(vs["p95_response_time_ms"], 1) if vs.get("p95_response_time_ms") is not None else None,
+            _col_concordance: round(vs["agreement_rate"] * 100, 1) if vs.get("agreement_rate") is not None else None,
+            _col_accuracy:    meta.get("accuracy"),
+            _col_f1:          meta.get("f1_score"),
+            _col_r2:          meta.get("r2_score"),
+            _col_rmse:        meta.get("rmse"),
         })
 
     _all_col_config = {
-        "Version":        st.column_config.TextColumn("Version"),
-        "Mode":           st.column_config.TextColumn("Mode"),
-        "Poids":          st.column_config.TextColumn("Poids", help="Part de trafic allouée à cette version."),
-        "Algorithme":     st.column_config.TextColumn("Algorithme"),
-        "Créé le":        st.column_config.TextColumn("Créé le"),
-        "Créateur":       st.column_config.TextColumn("Créateur"),
-        "Préd. (prod)":   st.column_config.NumberColumn("Préd. (prod)", help=METRIC_HELP.get("predictions_prod", "Prédictions hors shadow.")),
-        "Shadow":         st.column_config.NumberColumn("Shadow", help=METRIC_HELP.get("shadow_predictions", "Prédictions shadow (non exposées au client).")),
-        "Sortie prédite": st.column_config.TextColumn(
-            "Sortie prédite",
-            help=(
-                "Régression : moyenne pondérée des valeurs prédites (µ). "
-                "Classification : répartition des classes prédites sur la période (top 3)."
-            ),
+        _col_version:     st.column_config.TextColumn(_col_version),
+        _col_mode:        st.column_config.TextColumn(_col_mode),
+        _col_weight:      st.column_config.TextColumn(_col_weight, help=t("ab_testing.comparison.col_weight_help")),
+        _col_algorithm:   st.column_config.TextColumn(_col_algorithm),
+        _col_created:     st.column_config.TextColumn(_col_created),
+        _col_creator:     st.column_config.TextColumn(_col_creator),
+        _col_pred_prod:   st.column_config.NumberColumn(_col_pred_prod, help=t("metrics.predictions_prod")),
+        _col_shadow:      st.column_config.NumberColumn(_col_shadow, help=t("metrics.shadow_predictions")),
+        _col_output:      st.column_config.TextColumn(
+            _col_output,
+            help=t("ab_testing.comparison.col_output_help"),
         ),
-        "Err. (%)":       st.column_config.NumberColumn("Err. (%)", format="%.2f %%", help=METRIC_HELP.get("taux_erreur", "Taux d'erreur API sur la période.")),
-        "Lat. avg (ms)":  st.column_config.NumberColumn("Lat. avg (ms)", format="%.1f", help=METRIC_HELP.get("latence_avg", "Latence moyenne de réponse.")),
-        "Lat. p95 (ms)":  st.column_config.NumberColumn("Lat. p95 (ms)", format="%.1f", help=METRIC_HELP.get("latence_p95", "95e percentile de latence.")),
-        "Concordance":    st.column_config.NumberColumn("Concordance (%)", format="%.1f %%", help=METRIC_HELP.get("concordance_shadow", "Taux d'accord entre shadow et prod.")),
-        "Accuracy":       st.column_config.NumberColumn("Accuracy", format="%.3f", help="Accuracy sur le jeu de test à l'entraînement."),
-        "F1":             st.column_config.NumberColumn("F1", format="%.3f", help="F1-score sur le jeu de test à l'entraînement."),
-        "R²":             st.column_config.NumberColumn("R²", format="%.3f", help="Coefficient de détermination (régression)."),
-        "RMSE":           st.column_config.NumberColumn("RMSE", format="%.4f", help="Root Mean Squared Error (régression)."),
+        _col_err_pct:     st.column_config.NumberColumn(_col_err_pct, format="%.2f %%", help=t("metrics.taux_erreur")),
+        _col_lat_avg:     st.column_config.NumberColumn(_col_lat_avg, format="%.1f", help=t("metrics.latence_avg")),
+        _col_lat_p95:     st.column_config.NumberColumn(_col_lat_p95, format="%.1f", help=t("metrics.latence_p95")),
+        _col_concordance: st.column_config.NumberColumn(_col_concordance, format="%.1f %%", help=t("metrics.concordance_shadow")),
+        _col_accuracy:    st.column_config.NumberColumn(_col_accuracy, format="%.3f", help=t("ab_testing.comparison.col_accuracy_help")),
+        _col_f1:          st.column_config.NumberColumn(_col_f1, format="%.3f", help=t("ab_testing.comparison.col_f1_help")),
+        _col_r2:          st.column_config.NumberColumn(_col_r2, format="%.3f", help=t("ab_testing.comparison.col_r2_help")),
+        _col_rmse:        st.column_config.NumberColumn(_col_rmse, format="%.4f", help=t("ab_testing.comparison.col_rmse_help")),
     }
 
     # Colonnes toujours visibles
-    _base_cols = ["Version", "Mode", "Algorithme", "Créé le", "Créateur",
-                  "Préd. (prod)", "Shadow"]
+    _base_cols = [_col_version, _col_mode, _col_algorithm, _col_created, _col_creator,
+                  _col_pred_prod, _col_shadow]
     # Colonnes de métriques : masquées si toutes les valeurs sont null/None
-    _metric_cols = ["Sortie prédite", "Err. (%)", "Lat. avg (ms)", "Lat. p95 (ms)", "Concordance",
-                    "Accuracy", "F1", "R²", "RMSE"]
+    _metric_cols = [_col_output, _col_err_pct, _col_lat_avg, _col_lat_p95, _col_concordance,
+                    _col_accuracy, _col_f1, _col_r2, _col_rmse]
 
     _df = pd.DataFrame(_rows)
     _visible_metrics = [c for c in _metric_cols if _df[c].notna().any()]
@@ -376,15 +387,15 @@ else:
 
     st.dataframe(_df, width="stretch", hide_index=True, column_config=_col_config)
 
-    with st.expander("🟠 A/B Test", expanded=False):
+    with st.expander(t("ab_testing.ab_test.expander"), expanded=False):
         # ===========================================================================
         # Bloc significativité statistique
         # ===========================================================================
         st.divider()
         _sig_col_title, _sig_col_select = st.columns([3, 2])
-        _sig_col_title.subheader("🔬 Significativité statistique")
+        _sig_col_title.subheader(t("ab_testing.ab_test.sig_title"))
         _sig_metric_label = _sig_col_select.selectbox(
-            "Métrique du test",
+            t("ab_testing.ab_test.metric_select_label"),
             list(_METRIC_OPTIONS.keys()),
             key="ab_sig_metric",
             label_visibility="collapsed",
@@ -392,20 +403,16 @@ else:
 
         if ab_significance is None:
             _no_data_reasons = {
-                "error_rate":       "le Chi-² requiert au moins une erreur observée dans l'un des groupes",
-                "mae":              "Mann-Whitney sur MAE requiert des résidus de prédiction (modèle de régression avec observed-results)",
-                "response_time_ms": "Mann-Whitney sur la latence requiert au moins 2 prédictions par version",
+                "error_rate":       t("ab_testing.ab_test.no_data_reason_error_rate"),
+                "mae":              t("ab_testing.ab_test.no_data_reason_mae"),
+                "response_time_ms": t("ab_testing.ab_test.no_data_reason_response_time"),
             }
             if _sig_metric:
                 st.warning(
-                    f"⚠️ Pas assez de données pour la métrique **{_sig_metric_label}** "
-                    f"sur cette période ({_no_data_reasons.get(_sig_metric, '')})."
+                    t("ab_testing.ab_test.no_data_metric", metric=_sig_metric_label, reason=_no_data_reasons.get(_sig_metric, ""))
                 )
             else:
-                st.info(
-                    "💡 Le test de significativité sera disponible dès que deux versions "
-                    "auront accumulé des prédictions sur la période sélectionnée."
-                )
+                st.info(t("ab_testing.ab_test.no_data_auto"))
         else:
             sig = ab_significance
             is_significant = sig.get("significant", False)
@@ -417,8 +424,7 @@ else:
             # Avertir si la métrique réellement utilisée diffère de celle demandée
             if _sig_metric and metric != _sig_metric:
                 st.warning(
-                    f"⚠️ La métrique **{_sig_metric_label}** n'était pas disponible — "
-                    f"test effectué sur : **{metric}**."
+                    t("ab_testing.ab_test.metric_fallback_warning", requested=_sig_metric_label, actual=metric)
                 )
             min_needed = sig.get("min_samples_needed", 0)
             current_samples: dict = sig.get("current_samples", {})
@@ -426,19 +432,12 @@ else:
             # --- Bannière verdict ---
             if is_significant:
                 if winner:
-                    st.success(
-                        f"✅ **Différence statistiquement significative** — "
-                        f"la version **{winner}** est meilleure sur la métrique *{metric}*"
-                    )
+                    st.success(t("ab_testing.ab_test.significant_with_winner", winner=winner, metric=metric))
                 else:
-                    st.success(
-                        "✅ **Différence statistiquement significative** entre les deux versions."
-                    )
+                    st.success(t("ab_testing.ab_test.significant_no_winner"))
             else:
                 st.warning(
-                    f"⚠️ **Différence non significative** — "
-                    f"impossible de conclure avec les données actuelles "
-                    f"(p = {p_value:.4f}, seuil = {1 - confidence:.2f})"
+                    t("ab_testing.ab_test.not_significant", p_value=f"{p_value:.4f}", threshold=f"{1 - confidence:.2f}")
                 )
 
             # --- Bandeau de promotion du gagnant (admin uniquement) ---
@@ -446,11 +445,10 @@ else:
                 with st.container(border=True):
                     promo_col1, promo_col2 = st.columns([3, 1])
                     promo_col1.markdown(
-                        f"🟢 **Gagnant identifié : `{winner}`** — "
-                        f"p-value = **{p_value:.4f}** · confiance {confidence:.0%}"
+                        t("ab_testing.ab_test.winner_banner", winner=winner, p_value=f"{p_value:.4f}", confidence=f"{confidence:.0%}")
                     )
                     if promo_col2.button(
-                        "🏆 Promouvoir en production",
+                        t("ab_testing.ab_test.promote_btn"),
                         type="primary",
                         key="ab_promote_winner",
                         width='stretch',
@@ -475,7 +473,7 @@ else:
                             for err in errors_promo:
                                 st.error(err)
                         else:
-                            st.success(f"✅ `{winner}` promu en production avec succès.")
+                            st.success(t("ab_testing.ab_test.promote_success", winner=winner))
                             st.cache_data.clear()
                             st.rerun()
 
@@ -487,16 +485,16 @@ else:
                 metric, metric
             )
 
-            sig_cols[0].metric("Test statistique", test_label, help=METRIC_HELP["test_statistique"])
-            sig_cols[1].metric("Métrique analysée", metric_label, help=METRIC_HELP["metrique_analysee"])
+            sig_cols[0].metric(t("ab_testing.ab_test.kpi_test"), test_label, help=t("metrics.test_statistique"))
+            sig_cols[1].metric(t("ab_testing.ab_test.kpi_metric"), metric_label, help=t("metrics.metrique_analysee"))
             sig_cols[2].metric(
-                "p-value",
+                t("ab_testing.ab_test.kpi_pvalue"),
                 f"{p_value:.4f}",
-                delta=f"seuil {1 - confidence:.2f}",
+                delta=t("ab_testing.ab_test.kpi_pvalue_delta", threshold=f"{1 - confidence:.2f}"),
                 delta_color="off",
-                help=METRIC_HELP["p_value"],
+                help=t("metrics.p_value"),
             )
-            sig_cols[3].metric("Niveau de confiance", f"{confidence:.0%}", help=METRIC_HELP["niveau_confiance"])
+            sig_cols[3].metric(t("ab_testing.ab_test.kpi_confidence"), f"{confidence:.0%}", help=t("metrics.niveau_confiance"))
 
             # --- Jauge p-value ---
             threshold = 1.0 - confidence
@@ -518,7 +516,7 @@ else:
                             "value": threshold,
                         },
                     },
-                    title={"text": f"p-value (seuil α = {threshold:.2f})"},
+                    title={"text": t("ab_testing.ab_test.gauge_pvalue_title", threshold=f"{threshold:.2f}")},
                 )
             )
             fig_gauge.update_layout(height=240, margin=dict(t=40, b=10, l=20, r=20))
@@ -548,7 +546,7 @@ else:
                             {"range": [80, 100], "color": "#dcfce7"},
                         ],
                     },
-                    title={"text": "Puissance statistique (données actuelles vs requises)"},
+                    title={"text": t("ab_testing.ab_test.gauge_power_title")},
                 )
             )
             fig_power.update_layout(height=240, margin=dict(t=40, b=10, l=20, r=20))
@@ -561,17 +559,23 @@ else:
 
             # --- Tableau des échantillons ---
             if current_samples:
-                st.markdown("**Observations disponibles par version**")
+                st.markdown(t("ab_testing.ab_test.samples_title"))
+                _col_samp_version = t("ab_testing.ab_test.col_samples_version")
+                _col_samp_current = t("ab_testing.ab_test.col_samples_current")
+                _col_samp_min = t("ab_testing.ab_test.col_samples_min")
+                _col_samp_ok = t("ab_testing.ab_test.col_samples_ok")
                 sample_rows = []
                 for ver, n in current_samples.items():
                     enough = n >= min_needed if min_needed > 0 else True
                     sample_rows.append(
                         {
-                            "Version": ver,
-                            "Observations actuelles": n,
-                            "Minimum recommandé": min_needed if min_needed > 0 else "—",
-                            "Suffisant ?": (
-                                "✅ Oui" if enough else f"❌ Non ({min_needed - n} manquantes)"
+                            _col_samp_version: ver,
+                            _col_samp_current: n,
+                            _col_samp_min:     min_needed if min_needed > 0 else "—",
+                            _col_samp_ok:      (
+                                t("ab_testing.ab_test.samples_enough")
+                                if enough
+                                else t("ab_testing.ab_test.samples_not_enough", missing=min_needed - n)
                             ),
                         }
                     )
@@ -580,71 +584,79 @@ else:
                     width='stretch',
                     hide_index=True,
                     column_config={
-                        "Version": st.column_config.TextColumn(
-                            "Version",
-                            help="Numéro de version du modèle participant au test A/B.",
+                        _col_samp_version: st.column_config.TextColumn(
+                            _col_samp_version,
+                            help=t("ab_testing.ab_test.col_samples_version_help"),
                         ),
-                        "Observations actuelles": st.column_config.NumberColumn(
-                            "Observations actuelles",
-                            help="Nombre de prédictions enregistrées pour cette version sur la période sélectionnée.",
+                        _col_samp_current: st.column_config.NumberColumn(
+                            _col_samp_current,
+                            help=t("ab_testing.ab_test.col_samples_current_help"),
                         ),
-                        "Minimum recommandé": st.column_config.TextColumn(
-                            "Minimum recommandé",
-                            help="Nombre minimal d'observations nécessaires pour que le test soit statistiquement fiable (puissance 80 %).",
+                        _col_samp_min: st.column_config.TextColumn(
+                            _col_samp_min,
+                            help=t("ab_testing.ab_test.col_samples_min_help"),
                         ),
-                        "Suffisant ?": st.column_config.TextColumn(
-                            "Suffisant ?",
-                            help="✅ Oui : assez de données pour conclure. ❌ Non : continuez à accumuler des prédictions.",
+                        _col_samp_ok: st.column_config.TextColumn(
+                            _col_samp_ok,
+                            help=t("ab_testing.ab_test.col_samples_ok_help"),
                         ),
                     },
                 )
 
             # --- Recommandation finale ---
-            with st.expander("💡 Comment interpréter ce résultat ?"):
-                st.markdown(f"""
-    **Test utilisé :** {test_label}
-    - **Chi-²** : compare les taux d'erreur entre deux versions via un tableau de contingence succès/erreur.
-    - **Mann-Whitney U** : compare les distributions de latence (utilisé en fallback si aucune erreur n'est observée).
-
-    **p-value = {p_value:.4f}**
-    - Si `p < {threshold:.2f}` → la différence observée a moins de {(1 - confidence):.0%} de chances d'être due au hasard.
-    - Si `p ≥ {threshold:.2f}` → pas assez de données ou pas de différence réelle.
-
-    **Minimum recommandé : {min_needed} observations/version** (pour une puissance statistique de 80 %)
-    - Calculé via l'effet de taille de Cohen h (taux d'erreur) ou Cohen d (latence).
-
-    {"✅ **Conclusion : vous pouvez promouvoir** `" + winner + "` **en production en toute confiance.**" if is_significant and winner else "⚠️ **Conclusion : continuez à accumuler des données** avant de prendre une décision de promotion."}
-    """)
+            with st.expander(t("ab_testing.ab_test.interp_expander")):
+                st.markdown(
+                    t(
+                        "ab_testing.ab_test.interp_body",
+                        test_label=test_label,
+                        p_value=f"{p_value:.4f}",
+                        threshold=f"{threshold:.2f}",
+                        risk=f"{(1 - confidence):.0%}",
+                        min_needed=min_needed,
+                    )
+                )
+                if is_significant and winner:
+                    st.markdown(t("ab_testing.ab_test.interp_conclusion_promote", winner=winner))
+                else:
+                    st.markdown(t("ab_testing.ab_test.interp_conclusion_wait"))
 
         st.divider()
 
         # Graphique : distribution du trafic par version
         col_chart1, col_chart2 = st.columns(2)
 
+        _col_traffic_version = t("ab_testing.ab_test.traffic_col_version")
+        _col_traffic_pred = t("ab_testing.ab_test.traffic_col_pred")
+
         with col_chart1:
-            st.markdown("**Répartition du trafic (prédictions production)**")
+            st.markdown(t("ab_testing.ab_test.traffic_title"))
             traffic_df = pd.DataFrame(
                 [
-                    {"Version": vs["version"], "Prédictions": vs["total_predictions"]}
+                    {_col_traffic_version: vs["version"], _col_traffic_pred: vs["total_predictions"]}
                     for vs in versions_stats
                 ]
             )
-            if traffic_df["Prédictions"].sum() > 0:
+            if traffic_df[_col_traffic_pred].sum() > 0:
                 fig_traffic = px.bar(
                     traffic_df,
-                    x="Version",
-                    y="Prédictions",
-                    color="Version",
+                    x=_col_traffic_version,
+                    y=_col_traffic_pred,
+                    color=_col_traffic_version,
                     text_auto=True,
                 )
                 fig_traffic.update_layout(showlegend=False, height=300)
                 st.plotly_chart(fig_traffic, width='stretch')
             else:
-                st.info("Pas de prédictions production enregistrées.")
+                st.info(t("ab_testing.ab_test.traffic_no_prod"))
+
+        _col_dist_version = t("ab_testing.ab_test.traffic_col_version")
+        _col_dist_predicted = t("ab_testing.ab_test.dist_predicted_value")
+        _col_dist_label = t("ab_testing.ab_test.dist_label")
+        _col_dist_count = t("ab_testing.ab_test.dist_count")
 
         with col_chart2:
             if _is_regression:
-                st.markdown("**Distribution des valeurs prédites par version (production)**")
+                st.markdown(t("ab_testing.ab_test.dist_regression_title"))
                 # Régression : histogramme des valeurs prédites (expand chaque valeur × count)
                 hist_rows = []
                 for vs in versions_stats:
@@ -654,13 +666,13 @@ else:
                         except (ValueError, TypeError):
                             continue
                         for _ in range(count):
-                            hist_rows.append({"Version": vs["version"], "Valeur prédite": val})
+                            hist_rows.append({_col_dist_version: vs["version"], _col_dist_predicted: val})
                 if hist_rows:
                     hist_df = pd.DataFrame(hist_rows)
                     fig_dist = px.histogram(
                         hist_df,
-                        x="Valeur prédite",
-                        color="Version",
+                        x=_col_dist_predicted,
+                        color=_col_dist_version,
                         barmode="overlay",
                         opacity=0.6,
                         nbins=30,
@@ -668,72 +680,66 @@ else:
                     fig_dist.update_layout(height=300)
                     st.plotly_chart(fig_dist, width='stretch')
                 else:
-                    st.info("Pas de distribution disponible.")
+                    st.info(t("ab_testing.ab_test.dist_no_data"))
             else:
-                st.markdown("**Distribution des labels par version (production)**")
+                st.markdown(t("ab_testing.ab_test.dist_classification_title"))
                 dist_rows = []
                 for vs in versions_stats:
                     for label, count in vs.get("prediction_distribution", {}).items():
-                        dist_rows.append({"Version": vs["version"], "Label": str(label), "Count": count})
+                        dist_rows.append({_col_dist_version: vs["version"], _col_dist_label: str(label), _col_dist_count: count})
 
                 if dist_rows:
                     dist_df = pd.DataFrame(dist_rows)
                     fig_dist = px.bar(
                         dist_df,
-                        x="Label",
-                        y="Count",
-                        color="Version",
+                        x=_col_dist_label,
+                        y=_col_dist_count,
+                        color=_col_dist_version,
                         barmode="group",
                     )
                     fig_dist.update_layout(height=300)
                     st.plotly_chart(fig_dist, width='stretch')
                 else:
-                    st.info("Pas de distribution disponible.")
+                    st.info(t("ab_testing.ab_test.dist_no_data"))
 
-    with st.expander("🟣 Shadow Deployment", expanded=False):
+    with st.expander(t("ab_testing.shadow.expander"), expanded=False):
         # Taux de concordance shadow
         shadow_versions = [vs for vs in versions_stats if vs.get("agreement_rate") is not None]
         if shadow_versions:
             st.divider()
-            st.markdown("**🔮 Concordance shadow vs production**")
-            st.caption(
-                "Fraction des prédictions shadow qui correspondent à la prédiction production "
-                "pour le même `id_obs`. Nécessite que `id_obs` soit renseigné dans les requêtes."
-            )
+            st.markdown(t("ab_testing.shadow.concordance_title"))
+            st.caption(t("ab_testing.shadow.concordance_caption"))
+            _col_conc_version = t("ab_testing.shadow.concordance_col_version")
+            _col_conc_rate = t("ab_testing.shadow.concordance_col_rate")
+            _col_conc_score = t("ab_testing.shadow.concordance_col_score")
             agree_data = [
                 {
-                    "Version shadow": vs["version"],
-                    "Concordance": f"{vs['agreement_rate']:.1%}",
-                    "Score": vs["agreement_rate"],
+                    _col_conc_version: vs["version"],
+                    _col_conc_rate:    f"{vs['agreement_rate']:.1%}",
+                    _col_conc_score:   vs["agreement_rate"],
                 }
                 for vs in shadow_versions
             ]
             agree_df = pd.DataFrame(agree_data)
             fig_agree = px.bar(
                 agree_df,
-                x="Version shadow",
-                y="Score",
-                text="Concordance",
+                x=_col_conc_version,
+                y=_col_conc_score,
+                text=_col_conc_rate,
                 color_discrete_sequence=["#7c3aed"],
                 range_y=[0, 1],
             )
             fig_agree.update_layout(height=250, yaxis_tickformat=".0%")
             st.plotly_chart(fig_agree, width='stretch')
         else:
-            st.info(
-                "💡 Le taux de concordance shadow/production sera calculé automatiquement "
-                "dès que des prédictions avec `id_obs` seront enregistrées pour les deux versions."
-            )
+            st.info(t("ab_testing.shadow.concordance_no_data"))
 
         # ── Analyse shadow enrichie ──────────────────────────────────────────
         # ===========================================================================
         # SECTION 3 — Analyse shadow enrichie
         # ===========================================================================
-        st.subheader("🔮 Analyse shadow enrichie")
-        st.caption(
-            "Métriques différentielles entre la version shadow et la version production "
-            "sur les prédictions avec `id_obs` commun."
-        )
+        st.subheader(t("ab_testing.shadow.enriched_title"))
+        st.caption(t("ab_testing.shadow.enriched_caption"))
 
         try:
             shadow_data = client.get_shadow_comparison(selected_model, period_days=days)
@@ -743,9 +749,9 @@ else:
             shadow_available = False
 
         if not shadow_available or shadow_data is None:
-            st.info("Impossible de charger les données shadow.")
+            st.info(t("ab_testing.shadow.load_error"))
         elif shadow_data.get("shadow_version") is None:
-            st.info("Aucune version en mode shadow pour ce modèle.")
+            st.info(t("ab_testing.shadow.no_shadow_version"))
         else:
             sv = shadow_data["shadow_version"]
             pv = shadow_data["production_version"]
@@ -759,50 +765,49 @@ else:
             recommendation = shadow_data.get("recommendation", "insufficient_data")
 
             _rec_badge = {
-                "shadow_better": ("🟢", "Le shadow semble meilleur"),
-                "production_better": ("🔴", "La production reste meilleure"),
-                "equivalent": ("🟡", "Performances équivalentes"),
-                "insufficient_data": ("⚪", "Données insuffisantes pour conclure"),
+                "shadow_better":    ("🟢", t("ab_testing.shadow.rec_shadow_better")),
+                "production_better": ("🔴", t("ab_testing.shadow.rec_prod_better")),
+                "equivalent":       ("🟡", t("ab_testing.shadow.rec_equivalent")),
+                "insufficient_data": ("⚪", t("ab_testing.shadow.rec_insufficient")),
             }.get(recommendation, ("⚪", recommendation))
 
             st.markdown(
-                f"**Shadow `{sv}`** vs **Production `{pv}`** — "
-                f"{_rec_badge[0]} *{_rec_badge[1]}*"
+                t("ab_testing.shadow.vs_banner", sv=sv, pv=pv, badge=_rec_badge[0], recommendation=_rec_badge[1])
             )
 
             _cols = st.columns(5)
-            _cols[0].metric("Paires comparables", n_comparable)
+            _cols[0].metric(t("ab_testing.shadow.kpi_pairs"), n_comparable)
             _cols[1].metric(
-                "Accord des prédictions",
+                t("ab_testing.shadow.kpi_agreement"),
                 f"{agreement_rate:.1%}" if agreement_rate is not None else "—",
-                help="Fraction des id_obs où shadow et production prédisent la même valeur.",
+                help=t("ab_testing.shadow.kpi_agreement_help"),
             )
             _cols[2].metric(
-                "Δ Confiance",
+                t("ab_testing.shadow.kpi_conf_delta"),
                 f"{conf_delta:+.3f}" if conf_delta is not None else "—",
                 delta_color="normal" if conf_delta is not None else "off",
                 delta=f"{conf_delta:+.3f}" if conf_delta is not None else None,
-                help="max_confidence shadow − max_confidence production (positif = shadow plus confiant).",
+                help=t("ab_testing.shadow.kpi_conf_delta_help"),
             )
             _cols[3].metric(
-                "Δ Latence (ms)",
+                t("ab_testing.shadow.kpi_lat_delta"),
                 f"{lat_delta:+.1f}" if lat_delta is not None else "—",
                 delta=f"{lat_delta:+.1f}" if lat_delta is not None else None,
                 delta_color="inverse" if lat_delta is not None else "off",
-                help="Latence moyenne shadow − latence moyenne production (négatif = shadow plus rapide).",
+                help=t("ab_testing.shadow.kpi_lat_delta_help"),
             )
 
             if accuracy_available and shadow_acc is not None and prod_acc is not None:
                 _cols[4].metric(
-                    "Accuracy shadow vs prod",
+                    t("ab_testing.shadow.kpi_accuracy"),
                     f"{shadow_acc:.1%} / {prod_acc:.1%}",
-                    help="Accuracy calculée sur les paires ayant un observed_result.",
+                    help=t("ab_testing.shadow.kpi_accuracy_help"),
                 )
             else:
                 _cols[4].metric(
-                    "Accuracy",
+                    t("ab_testing.shadow.kpi_accuracy_na"),
                     "—",
-                    help="Non disponible : aucun observed_result pour les id_obs comparés.",
+                    help=t("ab_testing.shadow.kpi_accuracy_na_help"),
                 )
 
             if agreement_rate is not None and n_comparable > 0:
@@ -831,7 +836,7 @@ else:
                                 "value": 90,
                             },
                         },
-                        title={"text": "Accord shadow / production (%)"},
+                        title={"text": t("ab_testing.shadow.gauge_title")},
                     )
                 )
                 fig_agree_gauge.update_layout(height=240, margin=dict(t=40, b=10, l=20, r=20))
@@ -841,11 +846,10 @@ else:
                 with st.container(border=True):
                     promo_col1, promo_col2 = st.columns([3, 1])
                     promo_col1.markdown(
-                        f"🟢 **Le shadow `{sv}` semble meilleur que la production `{pv}`** — "
-                        "promouvoir pour qu'il devienne la version active ?"
+                        t("ab_testing.shadow.promote_banner", sv=sv, pv=pv)
                     )
                     if promo_col2.button(
-                        "🚀 Promouvoir le shadow",
+                        t("ab_testing.shadow.promote_btn"),
                         type="primary",
                         key="shadow_promote_btn",
                         width='stretch',
@@ -859,7 +863,7 @@ else:
                             for err in errors_shadow_promo:
                                 st.error(err)
                         else:
-                            st.success(f"✅ `{sv}` promu en production avec succès.")
+                            st.success(t("ab_testing.shadow.promote_success", sv=sv))
                             st.cache_data.clear()
                             st.rerun()
 
@@ -869,7 +873,7 @@ else:
         # ===========================================================================
         # SECTION 4 — Log des prédictions shadow récentes
         # ===========================================================================
-        st.subheader("📋 Prédictions shadow récentes")
+        st.subheader(t("ab_testing.shadow.recent_title"))
 
         end_dt = datetime.utcnow()
         start_dt = end_dt - timedelta(days=days)
@@ -884,65 +888,73 @@ else:
             all_preds = pred_data.get("predictions", [])
             shadow_preds = [p for p in all_preds if p.get("is_shadow")]
         except Exception as e:
-            st.warning(f"Impossible de charger les prédictions : {e}")
+            st.warning(t("ab_testing.shadow.recent_load_error", error=e))
             shadow_preds = []
 
         if not shadow_preds:
-            st.info("Aucune prédiction shadow enregistrée sur cette période.")
+            st.info(t("ab_testing.shadow.recent_no_data"))
         else:
+            _col_sh_id = t("ab_testing.shadow.col_id")
+            _col_sh_ts = t("ab_testing.shadow.col_timestamp")
+            _col_sh_ver = t("ab_testing.shadow.col_version")
+            _col_sh_idobs = t("ab_testing.shadow.col_id_obs")
+            _col_sh_result = t("ab_testing.shadow.col_result")
+            _col_sh_latency = t("ab_testing.shadow.col_latency")
+            _col_sh_status = t("ab_testing.shadow.col_status")
+
             shadow_rows = []
             for p in shadow_preds:
                 shadow_rows.append(
                     {
-                        "ID": p.get("id"),
-                        "Timestamp": (
+                        _col_sh_id:      p.get("id"),
+                        _col_sh_ts:      (
                             pd.to_datetime(p.get("timestamp")).strftime("%Y-%m-%d %H:%M:%S")
                             if p.get("timestamp")
                             else "—"
                         ),
-                        "Version": p.get("model_version") or "—",
-                        "id_obs": p.get("id_obs") or "—",
-                        "Résultat": str(p.get("prediction_result", "")),
-                        "Latence (ms)": (
+                        _col_sh_ver:     p.get("model_version") or "—",
+                        _col_sh_idobs:   p.get("id_obs") or "—",
+                        _col_sh_result:  str(p.get("prediction_result", "")),
+                        _col_sh_latency: (
                             f"{p['response_time_ms']:.1f}" if p.get("response_time_ms") is not None else "—"
                         ),
-                        "Statut": "✅" if p.get("status") == "success" else "❌",
+                        _col_sh_status:  "✅" if p.get("status") == "success" else "❌",
                     }
                 )
 
-            st.caption(f"{len(shadow_preds)} prédiction(s) shadow")
+            st.caption(t("ab_testing.shadow.recent_count", count=len(shadow_preds)))
             st.dataframe(
                 pd.DataFrame(shadow_rows),
                 width='stretch',
                 hide_index=True,
                 column_config={
-                    "ID": st.column_config.NumberColumn(
-                        "ID",
-                        help="Identifiant unique de la prédiction en base de données.",
+                    _col_sh_id: st.column_config.NumberColumn(
+                        _col_sh_id,
+                        help=t("ab_testing.shadow.col_id_help"),
                     ),
-                    "Timestamp": st.column_config.TextColumn(
-                        "Timestamp",
-                        help="Date et heure à laquelle la prédiction shadow a été effectuée.",
+                    _col_sh_ts: st.column_config.TextColumn(
+                        _col_sh_ts,
+                        help=t("ab_testing.shadow.col_timestamp_help"),
                     ),
-                    "Version": st.column_config.TextColumn(
-                        "Version",
-                        help="Version du modèle qui a produit cette prédiction shadow.",
+                    _col_sh_ver: st.column_config.TextColumn(
+                        _col_sh_ver,
+                        help=t("ab_testing.shadow.col_version_help"),
                     ),
-                    "id_obs": st.column_config.TextColumn(
-                        "id_obs",
-                        help="Identifiant de l'observation, fourni par le client appelant. Permet d'apparier une prédiction shadow à sa contrepartie production.",
+                    _col_sh_idobs: st.column_config.TextColumn(
+                        _col_sh_idobs,
+                        help=t("ab_testing.shadow.col_id_obs_help"),
                     ),
-                    "Résultat": st.column_config.TextColumn(
-                        "Résultat",
-                        help="Valeur prédite par la version shadow. Non retournée au client — sert uniquement à la comparaison interne.",
+                    _col_sh_result: st.column_config.TextColumn(
+                        _col_sh_result,
+                        help=t("ab_testing.shadow.col_result_help"),
                     ),
-                    "Latence (ms)": st.column_config.TextColumn(
-                        "Latence (ms)",
-                        help="Temps de calcul de la prédiction shadow en millisecondes.",
+                    _col_sh_latency: st.column_config.TextColumn(
+                        _col_sh_latency,
+                        help=t("ab_testing.shadow.col_latency_help"),
                     ),
-                    "Statut": st.column_config.TextColumn(
-                        "Statut",
-                        help="✅ Succès ou ❌ Erreur lors du calcul de la prédiction.",
+                    _col_sh_status: st.column_config.TextColumn(
+                        _col_sh_status,
+                        help=t("ab_testing.shadow.col_status_help"),
                     ),
                 },
             )

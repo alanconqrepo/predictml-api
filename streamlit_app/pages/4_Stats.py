@@ -1,4 +1,4 @@
-﻿"""
+"""
 Statistiques et graphiques d'utilisation
 """
 
@@ -11,14 +11,14 @@ import plotly.graph_objects as go
 import streamlit as st
 from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
-from utils.metrics_help import METRIC_HELP
+from utils.i18n import t
 
-st.set_page_config(page_title="Stats — PredictML", page_icon="📈", layout="wide")
+st.set_page_config(page_title=t("stats.page_title"), page_icon="📈", layout="wide")
 require_auth()
 
 col_title, col_refresh = st.columns([8, 1])
-col_title.title("📈 Statistiques")
-if col_refresh.button("🔄 Rafraîchir", key="stats_refresh", width='stretch'):
+col_title.title(t("stats.title"))
+if col_refresh.button(t("stats.btn_refresh"), key="stats_refresh", width='stretch'):
     st.cache_data.clear()
     st.rerun()
 
@@ -28,13 +28,13 @@ client = get_client()
 col_d1, col_d2 = st.columns([1, 1])
 
 date_start = col_d1.date_input(
-    "Date début",
+    t("stats.date_start"),
     value=date.today() - timedelta(days=7),
     max_value=date.today(),
     key="stats_date_start",
 )
 date_end = col_d2.date_input(
-    "Date fin",
+    t("stats.date_end"),
     value=date.today(),
     min_value=date_start,
     max_value=date.today(),
@@ -42,7 +42,7 @@ date_end = col_d2.date_input(
 )
 
 if date_end < date_start:
-    st.error("La date de fin doit être après la date de début.")
+    st.error(t("stats.error_date_range"))
     st.stop()
 
 days = max(1, (date_end - date_start).days)
@@ -58,18 +58,18 @@ except Exception:
     model_names = []
 
 if not model_names:
-    st.warning("Aucun modèle disponible.")
+    st.warning(t("stats.no_models"))
     st.stop()
 
 # --- Helpers Leaderboard ---
 _DRIFT_EMOJI = {
-    "ok": "🟢 ok",
-    "warning": "🟡 warning",
-    "critical": "🔴 critique",
-    "no_baseline": "⚪ pas de baseline",
-    "no_data": "⚪ pas de données",
-    "insufficient_data": "⚪ données insuffisantes",
-    "unknown": "⚪ inconnu",
+    "ok":               t("stats.drift.ok"),
+    "warning":          t("stats.drift.warning"),
+    "critical":         t("stats.drift.critical"),
+    "no_baseline":      t("stats.drift.no_baseline"),
+    "no_data":          t("stats.drift.no_data"),
+    "insufficient_data": t("stats.drift.insufficient_data"),
+    "unknown":          t("stats.drift.unknown"),
 }
 
 
@@ -151,20 +151,23 @@ _DRIFT_COLOR = {
 
 
 # ── Expander 1 : Leaderboard ─────────────────────────────────────────────────
-with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
+with st.expander(t("stats.leaderboard.expander"), expanded=True):
     lb_col_metric, _ = st.columns([2, 3])
+
+    _lb_sort_options = {
+        "accuracy":         t("stats.leaderboard.sort_options.accuracy"),
+        "auc":              t("stats.leaderboard.sort_options.auc"),
+        "f1_score":         t("stats.leaderboard.sort_options.f1_score"),
+        "r2":               t("stats.leaderboard.sort_options.r2"),
+        "rmse":             t("stats.leaderboard.sort_options.rmse"),
+        "latency_p95_ms":   t("stats.leaderboard.sort_options.latency_p95_ms"),
+        "predictions_count": t("stats.leaderboard.sort_options.predictions_count"),
+    }
+
     lb_metric = lb_col_metric.selectbox(
-        "Trier par",
-        options=["accuracy", "auc", "f1_score", "r2", "rmse", "latency_p95_ms", "predictions_count"],
-        format_func=lambda x: {
-            "accuracy": "Accuracy",
-            "auc": "AUC-ROC",
-            "f1_score": "F1 Score",
-            "r2": "R² (régression)",
-            "rmse": "RMSE (régression)",
-            "latency_p95_ms": "Latence p95",
-            "predictions_count": "Volume de prédictions",
-        }.get(x, x),
+        t("stats.leaderboard.sort_by"),
+        options=list(_lb_sort_options.keys()),
+        format_func=lambda x: _lb_sort_options.get(x, x),
         key="lb_metric",
     )
 
@@ -180,104 +183,113 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
         except Exception:
             leaderboard = []
 
-    tab_table, tab_scatter = st.tabs(["Tableau", "Comparaison"])
+    tab_table, tab_scatter = st.tabs([t("stats.leaderboard.tab_table"), t("stats.leaderboard.tab_scatter")])
 
     with tab_table:
         if leaderboard:
+            # Column names used both for rename and column_config — define once
+            _col_rank       = t("stats.leaderboard.col_rank")
+            _col_model      = t("stats.leaderboard.col_model")
+            _col_version    = t("stats.leaderboard.col_version")
+            _col_accuracy   = t("stats.leaderboard.col_accuracy")
+            _col_auc        = t("stats.leaderboard.col_auc")
+            _col_f1         = t("stats.leaderboard.col_f1")
+            _col_r2         = t("stats.leaderboard.col_r2")
+            _col_rmse       = t("stats.leaderboard.col_rmse")
+            _col_latency    = t("stats.leaderboard.col_latency")
+            _col_drift      = t("stats.leaderboard.col_drift")
+            _col_preds      = t("stats.leaderboard.col_predictions", days=days)
+
             df_lb = pd.DataFrame(leaderboard)
             df_display = df_lb.rename(
                 columns={
-                    "rank": "Rang",
-                    "name": "Modèle",
-                    "version": "Version",
-                    "accuracy": "Accuracy",
-                    "auc": "AUC-ROC",
-                    "f1_score": "F1 Score",
-                    "r2": "R²",
-                    "rmse": "RMSE",
-                    "latency_p95_ms": "Latence p95 (ms)",
-                    "drift_status": "Drift",
-                    "predictions_count": f"Prédictions ({days}j)",
+                    "rank":              _col_rank,
+                    "name":              _col_model,
+                    "version":           _col_version,
+                    "accuracy":          _col_accuracy,
+                    "auc":               _col_auc,
+                    "f1_score":          _col_f1,
+                    "r2":                _col_r2,
+                    "rmse":              _col_rmse,
+                    "latency_p95_ms":    _col_latency,
+                    "drift_status":      _col_drift,
+                    "predictions_count": _col_preds,
                 }
             )
-            df_display["Drift"] = df_display["Drift"].map(lambda x: _DRIFT_EMOJI.get(x, x))
-            df_display["Accuracy"] = df_display["Accuracy"].apply(
+            df_display[_col_drift] = df_display[_col_drift].map(lambda x: _DRIFT_EMOJI.get(x, x))
+            df_display[_col_accuracy] = df_display[_col_accuracy].apply(
                 lambda x: round(x, 4) if pd.notna(x) and x is not None else None
             )
-            if "AUC-ROC" in df_display.columns:
-                df_display["AUC-ROC"] = df_display["AUC-ROC"].apply(
+            if _col_auc in df_display.columns:
+                df_display[_col_auc] = df_display[_col_auc].apply(
                     lambda x: round(x, 4) if pd.notna(x) and x is not None else None
                 )
-            df_display["F1 Score"] = df_display["F1 Score"].apply(
+            df_display[_col_f1] = df_display[_col_f1].apply(
                 lambda x: round(x, 4) if pd.notna(x) and x is not None else None
             )
-            df_display["R²"] = df_display["R²"].apply(
+            df_display[_col_r2] = df_display[_col_r2].apply(
                 lambda x: round(x, 4) if pd.notna(x) and x is not None else None
             )
-            df_display["RMSE"] = df_display["RMSE"].apply(
+            df_display[_col_rmse] = df_display[_col_rmse].apply(
                 lambda x: round(x, 4) if pd.notna(x) and x is not None else None
             )
-            df_display["Latence p95 (ms)"] = df_display["Latence p95 (ms)"].apply(
+            df_display[_col_latency] = df_display[_col_latency].apply(
                 lambda x: f"{x:.0f} ms" if pd.notna(x) and x is not None else "—"
             )
 
-            _style_map = df_display.style.map(_bg_accuracy, subset=["Accuracy"])
-            if "AUC-ROC" in df_display.columns and df_display["AUC-ROC"].notna().any():
-                _style_map = _style_map.map(_bg_accuracy, subset=["AUC-ROC"])
-            if "R²" in df_display.columns and df_display["R²"].notna().any():
-                _style_map = _style_map.map(_bg_r2, subset=["R²"])
+            _style_map = df_display.style.map(_bg_accuracy, subset=[_col_accuracy])
+            if _col_auc in df_display.columns and df_display[_col_auc].notna().any():
+                _style_map = _style_map.map(_bg_accuracy, subset=[_col_auc])
+            if _col_r2 in df_display.columns and df_display[_col_r2].notna().any():
+                _style_map = _style_map.map(_bg_r2, subset=[_col_r2])
             styled = _style_map.hide(axis="index")
 
             _col_config = {
-                    "Accuracy": st.column_config.NumberColumn(
-                        "Accuracy",
-                        help="Proportion de prédictions correctes sur le jeu de test (classification). Entre 0 et 1 — plus c'est proche de 1, meilleur est le modèle.",
-                        format="%.4f",
-                    ),
-                    "AUC-ROC": st.column_config.NumberColumn(
-                        "AUC-ROC",
-                        help=(
-                            "Aire sous la courbe ROC — mesure la capacité discriminatoire du modèle "
-                            "indépendamment du seuil (classification). 1.0 = parfait, 0.5 = aléatoire. "
-                            "Requiert des probabilités prédites."
-                        ),
-                        format="%.4f",
-                    ),
-                    "F1 Score": st.column_config.NumberColumn(
-                        "F1 Score",
-                        help="Moyenne harmonique précision/rappel sur le jeu de test (classification). Robuste aux classes déséquilibrées. Entre 0 et 1.",
-                        format="%.4f",
-                    ),
-                    "R²": st.column_config.NumberColumn(
-                        "R²",
-                        help="Coefficient de détermination R² (régression). Mesure la part de variance expliquée par le modèle : 1.0 = parfait, 0.0 = modèle nul, < 0 = pire que la moyenne. '—' pour les modèles de classification.",
-                        format="%.4f",
-                    ),
-                    "RMSE": st.column_config.NumberColumn(
-                        "RMSE",
-                        help="Root Mean Square Error (régression). Erreur moyenne en unité de la variable cible — plus c'est faible, meilleur est le modèle. Trié croissant quand sélectionné. '—' pour les modèles de classification.",
-                        format="%.4f",
-                    ),
-                    "Latence p95 (ms)": st.column_config.TextColumn(
-                        "Latence p95 (ms)",
-                        help="95e percentile du temps de réponse sur la période sélectionnée. 95 % des requêtes ont été traitées en moins de cette durée.",
-                    ),
-                    "Drift": st.column_config.TextColumn(
-                        "Drift",
-                        help="Écart entre la distribution des features en production et la baseline d'entraînement. 🔴 critique = dérive significative, le modèle voit des données différentes de celles sur lesquelles il a été entraîné.",
-                    ),
-                    f"Prédictions ({days}j)": st.column_config.NumberColumn(
-                        f"Prédictions ({days}j)",
-                        help=f"Nombre total de prédictions servies sur les {days} derniers jours.",
-                    ),
-                }
+                _col_accuracy: st.column_config.NumberColumn(
+                    _col_accuracy,
+                    help=t("stats.leaderboard.col_accuracy_help"),
+                    format="%.4f",
+                ),
+                _col_auc: st.column_config.NumberColumn(
+                    _col_auc,
+                    help=t("stats.leaderboard.col_auc_help"),
+                    format="%.4f",
+                ),
+                _col_f1: st.column_config.NumberColumn(
+                    _col_f1,
+                    help=t("stats.leaderboard.col_f1_help"),
+                    format="%.4f",
+                ),
+                _col_r2: st.column_config.NumberColumn(
+                    _col_r2,
+                    help=t("stats.leaderboard.col_r2_help"),
+                    format="%.4f",
+                ),
+                _col_rmse: st.column_config.NumberColumn(
+                    _col_rmse,
+                    help=t("stats.leaderboard.col_rmse_help"),
+                    format="%.4f",
+                ),
+                _col_latency: st.column_config.TextColumn(
+                    _col_latency,
+                    help=t("stats.leaderboard.col_latency_help"),
+                ),
+                _col_drift: st.column_config.TextColumn(
+                    _col_drift,
+                    help=t("stats.leaderboard.col_drift_help"),
+                ),
+                _col_preds: st.column_config.NumberColumn(
+                    _col_preds,
+                    help=t("stats.leaderboard.col_predictions_help", days=days),
+                ),
+            }
             st.dataframe(styled, width='stretch', column_config=_col_config)
         else:
-            st.info("Aucun modèle en production trouvé.")
+            st.info(t("stats.leaderboard.no_models_prod"))
 
     with tab_scatter:
         if not leaderboard:
-            st.info("Aucun modèle en production trouvé.")
+            st.info(t("stats.leaderboard.no_models_prod"))
         else:
             df_scatter = pd.DataFrame([
                 {
@@ -296,12 +308,12 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
 
             # Config de chaque métrique : label, ratio [0-1] ou non, step et max pour le seuil
             _METRIC_CFG = {
-                "latency_p95_ms":   {"label": "Latence p95 (ms)",    "is_ratio": False, "step": 10.0,  "max": None, "fmt_hover": lambda v: f"{v:.0f} ms"},
-                "accuracy":         {"label": "Accuracy",            "is_ratio": True,  "step": 0.05,  "max": 1.0,  "fmt_hover": lambda v: f"{v:.4f}"},
-                "f1_score":         {"label": "F1 Score",            "is_ratio": True,  "step": 0.05,  "max": 1.0,  "fmt_hover": lambda v: f"{v:.4f}"},
-                "r2":               {"label": "R²",                  "is_ratio": True,  "step": 0.05,  "max": 1.0,  "fmt_hover": lambda v: f"{v:.4f}"},
-                "rmse":             {"label": "RMSE",                "is_ratio": False, "step": 0.1,   "max": None, "fmt_hover": lambda v: f"{v:.4f}"},
-                "predictions_count":{"label": "Volume prédictions",  "is_ratio": False, "step": 100.0, "max": None, "fmt_hover": lambda v: f"{int(v):,}"},
+                "latency_p95_ms":    {"label": t("stats.leaderboard.scatter_label_latency"),  "is_ratio": False, "step": 10.0,  "max": None, "fmt_hover": lambda v: f"{v:.0f} ms"},
+                "accuracy":          {"label": t("stats.leaderboard.scatter_label_accuracy"), "is_ratio": True,  "step": 0.05,  "max": 1.0,  "fmt_hover": lambda v: f"{v:.4f}"},
+                "f1_score":          {"label": t("stats.leaderboard.scatter_label_f1"),       "is_ratio": True,  "step": 0.05,  "max": 1.0,  "fmt_hover": lambda v: f"{v:.4f}"},
+                "r2":                {"label": t("stats.leaderboard.scatter_label_r2"),       "is_ratio": True,  "step": 0.05,  "max": 1.0,  "fmt_hover": lambda v: f"{v:.4f}"},
+                "rmse":              {"label": t("stats.leaderboard.scatter_label_rmse"),     "is_ratio": False, "step": 0.1,   "max": None, "fmt_hover": lambda v: f"{v:.4f}"},
+                "predictions_count": {"label": t("stats.leaderboard.scatter_label_volume"),  "is_ratio": False, "step": 100.0, "max": None, "fmt_hover": lambda v: f"{int(v):,}"},
             }
 
             # Axe Y = métrique sélectionnée dans "Trier par" (latency/count → fallback accuracy)
@@ -315,7 +327,7 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
 
             sc_col_x, sc_col_seuil_x, sc_col_seuil_y = st.columns([2, 2, 2])
             scatter_x_metric = sc_col_x.selectbox(
-                "Axe X",
+                t("stats.leaderboard.scatter_x_axis"),
                 options=_x_options,
                 index=_x_default_idx,
                 format_func=lambda k: _METRIC_CFG[k]["label"],
@@ -329,7 +341,11 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
 
             # Seuil X (ligne verticale)
             _sx_is_lower_better = scatter_x_metric == "rmse"
-            _sx_label = f"Seuil {x_label} (max)" if _sx_is_lower_better else f"Seuil {x_label} (min)"
+            _sx_label = (
+                t("stats.leaderboard.scatter_threshold_max", label=x_label)
+                if _sx_is_lower_better
+                else t("stats.leaderboard.scatter_threshold_min", label=x_label)
+            )
             x_threshold = sc_col_seuil_x.number_input(
                 _sx_label,
                 min_value=0.0,
@@ -337,13 +353,17 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
                 value=0.0,
                 step=float(cfg_x["step"]),
                 format="%.2f",
-                help=f"Affiche une ligne verticale sur l'axe X ({x_label}). 0 = désactivé.",
+                help=t("stats.leaderboard.scatter_threshold_x_help", label=x_label),
                 key="scatter_x_threshold",
             )
 
             # Seuil Y (ligne horizontale)
             _sy_is_lower_better = scatter_y_metric == "rmse"
-            _sy_label = f"Seuil {y_label} (max)" if _sy_is_lower_better else f"Seuil {y_label} (min)"
+            _sy_label = (
+                t("stats.leaderboard.scatter_threshold_max", label=y_label)
+                if _sy_is_lower_better
+                else t("stats.leaderboard.scatter_threshold_min", label=y_label)
+            )
             y_threshold = sc_col_seuil_y.number_input(
                 _sy_label,
                 min_value=0.0,
@@ -351,7 +371,7 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
                 value=0.0,
                 step=float(cfg_y["step"]),
                 format="%.2f",
-                help=f"Affiche une ligne horizontale sur l'axe Y ({y_label}). 0 = désactivé.",
+                help=t("stats.leaderboard.scatter_threshold_y_help", label=y_label),
                 key="scatter_y_threshold",
             )
 
@@ -365,9 +385,7 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
             df_plot["label"] = df_plot["name"] + " v" + df_plot["version"]
 
             if df_plot.empty:
-                st.info(
-                    f"Données insuffisantes : les modèles doivent avoir {x_label} et {y_label} renseignés."
-                )
+                st.info(t("stats.leaderboard.scatter_no_data", x_label=x_label, y_label=y_label))
             else:
                 fig = go.Figure()
 
@@ -390,8 +408,8 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
                         if v is not None and not (isinstance(v, float) and v != v):
                             hover_lines.append(f"{cfg['label']} : {cfg['fmt_hover'](v)}")
                     hover_lines += [
-                        f"Prédictions : {count:,}",
-                        f"Drift : {row['drift_label']}",
+                        t("stats.leaderboard.scatter_hover_predictions", count=f"{count:,}"),
+                        t("stats.leaderboard.scatter_hover_drift", label=row["drift_label"]),
                     ]
                     hover_text = "<br>".join(hover_lines)
 
@@ -416,9 +434,11 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
                 # Ligne verticale (seuil X)
                 if x_threshold > 0:
                     _vline_label = (
-                        f"Max {x_label} {x_threshold:.2f}" if _sx_is_lower_better
-                        else f"Min {x_label} {x_threshold:.0%}" if cfg_x["is_ratio"]
-                        else f"Seuil {x_label} {x_threshold:.0f}"
+                        t("stats.leaderboard.scatter_vline_max", label=x_label, value=f"{x_threshold:.2f}")
+                        if _sx_is_lower_better
+                        else t("stats.leaderboard.scatter_vline_min", label=x_label, value=f"{x_threshold:.0%}")
+                        if cfg_x["is_ratio"]
+                        else t("stats.leaderboard.scatter_vline_threshold", label=x_label, value=f"{x_threshold:.0f}")
                     )
                     fig.add_vline(
                         x=x_threshold,
@@ -432,9 +452,11 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
                 # Ligne horizontale (seuil Y)
                 if y_threshold > 0:
                     _hline_label = (
-                        f"Max {y_label} {y_threshold:.2f}" if _sy_is_lower_better
-                        else f"Min {y_label} {y_threshold:.0%}" if cfg_y["is_ratio"]
-                        else f"Seuil {y_label} {y_threshold:.2f}"
+                        t("stats.leaderboard.scatter_hline_max", label=y_label, value=f"{y_threshold:.2f}")
+                        if _sy_is_lower_better
+                        else t("stats.leaderboard.scatter_hline_min", label=y_label, value=f"{y_threshold:.0%}")
+                        if cfg_y["is_ratio"]
+                        else t("stats.leaderboard.scatter_hline_threshold", label=y_label, value=f"{y_threshold:.2f}")
                     )
                     fig.add_hline(
                         y=y_threshold,
@@ -466,21 +488,30 @@ with st.expander("🏆 Leaderboard — Modèles en production", expanded=True):
 
 
 # ── Expander 2 : Statistiques agrégées par modèle ────────────────────────────
-with st.expander("📊 Statistiques agrégées par modèle", expanded=False):
+with st.expander(t("stats.aggregated.expander"), expanded=False):
     # Filtre modèle local à cet expander
     _s2_col_search, _s2_col_model = st.columns([2, 2])
     with _s2_col_search:
-        stats_search = st.text_input("Filtrer par nom", key="stats_model_search", placeholder="Rechercher…")
+        stats_search = st.text_input(
+            t("stats.aggregated.filter_name"),
+            key="stats_model_search",
+            placeholder=t("stats.aggregated.filter_placeholder"),
+        )
         stats_filtered = [n for n in model_names if stats_search.lower() in n.lower()] if stats_search else model_names
     with _s2_col_model:
-        model_filter = st.selectbox("Modèle", ["(tous)"] + (stats_filtered or model_names), key="stats_model_filter")
-    selected_model = None if model_filter == "(tous)" else model_filter
+        _model_all_label = t("stats.aggregated.model_all")
+        model_filter = st.selectbox(
+            t("stats.aggregated.model_select"),
+            [_model_all_label] + (stats_filtered or model_names),
+            key="stats_model_filter",
+        )
+    selected_model = None if model_filter == _model_all_label else model_filter
 
     # Charger les prédictions pour chaque modèle (ou le modèle sélectionné)
     all_preds = []
     fetch_models_list = [selected_model] if selected_model else model_names
 
-    with st.spinner("Chargement des statistiques..."):
+    with st.spinner(t("stats.aggregated.loading")):
         for mname in fetch_models_list:
             try:
                 data = client.get_predictions(
@@ -496,67 +527,75 @@ with st.expander("📊 Statistiques agrégées par modèle", expanded=False):
                 pass
 
     # Statistiques agrégées (endpoint /predictions/stats)
+    _agg_col_model    = t("stats.aggregated.col_model")
+    _agg_col_total    = t("stats.aggregated.col_total")
+    _agg_col_errors   = t("stats.aggregated.col_errors")
+    _agg_col_err_rate = t("stats.aggregated.col_error_rate")
+    _agg_col_avg_rt   = t("stats.aggregated.col_avg_rt")
+    _agg_col_p50_rt   = t("stats.aggregated.col_p50_rt")
+    _agg_col_p95_rt   = t("stats.aggregated.col_p95_rt")
+
     try:
         raw_stats = client.get_prediction_stats(days=days, model_name=selected_model)
         if raw_stats:
             df_stats = pd.DataFrame(raw_stats)
             df_stats = df_stats.rename(
                 columns={
-                    "model_name": "Modèle",
-                    "total_predictions": "Total",
-                    "error_count": "Erreurs",
-                    "error_rate": "Taux d'erreur",
-                    "avg_response_time_ms": "Moy. RT (ms)",
-                    "p50_response_time_ms": "p50 RT (ms)",
-                    "p95_response_time_ms": "p95 RT (ms)",
+                    "model_name":           _agg_col_model,
+                    "total_predictions":    _agg_col_total,
+                    "error_count":          _agg_col_errors,
+                    "error_rate":           _agg_col_err_rate,
+                    "avg_response_time_ms": _agg_col_avg_rt,
+                    "p50_response_time_ms": _agg_col_p50_rt,
+                    "p95_response_time_ms": _agg_col_p95_rt,
                 }
             )
-            df_stats["Taux d'erreur"] = (df_stats["Taux d'erreur"] * 100).round(2).astype(str) + " %"
+            df_stats[_agg_col_err_rate] = (df_stats[_agg_col_err_rate] * 100).round(2).astype(str) + " %"
             st.dataframe(
                 df_stats,
                 width='stretch',
                 hide_index=True,
                 column_config={
-                    "Modèle": st.column_config.TextColumn(
-                        "Modèle",
-                        help="Nom du modèle ML pour lequel les statistiques sont calculées.",
+                    _agg_col_model: st.column_config.TextColumn(
+                        _agg_col_model,
+                        help=t("stats.aggregated.col_model_help"),
                     ),
-                    "Total": st.column_config.NumberColumn(
-                        "Total",
-                        help="Nombre total de prédictions servies par ce modèle sur la période sélectionnée.",
+                    _agg_col_total: st.column_config.NumberColumn(
+                        _agg_col_total,
+                        help=t("stats.aggregated.col_total_help"),
                     ),
-                    "Erreurs": st.column_config.NumberColumn(
-                        "Erreurs",
-                        help="Nombre de prédictions ayant renvoyé une erreur (statut 'error') sur la période.",
+                    _agg_col_errors: st.column_config.NumberColumn(
+                        _agg_col_errors,
+                        help=t("stats.aggregated.col_errors_help"),
                     ),
-                    "Taux d'erreur": st.column_config.TextColumn(
-                        "Taux d'erreur",
-                        help="Pourcentage de prédictions en erreur. Un taux > 5 % mérite attention, > 10 % est critique.",
+                    _agg_col_err_rate: st.column_config.TextColumn(
+                        _agg_col_err_rate,
+                        help=t("stats.aggregated.col_error_rate_help"),
                     ),
-                    "Moy. RT (ms)": st.column_config.NumberColumn(
-                        "Moy. RT (ms)",
-                        help="Temps de réponse moyen en millisecondes. Inclut le chargement du modèle et le calcul.",
+                    _agg_col_avg_rt: st.column_config.NumberColumn(
+                        _agg_col_avg_rt,
+                        help=t("stats.aggregated.col_avg_rt_help"),
                         format="%.1f",
                     ),
-                    "p50 RT (ms)": st.column_config.NumberColumn(
-                        "p50 RT (ms)",
-                        help="Médiane du temps de réponse : 50 % des requêtes sont traitées en moins de cette durée.",
+                    _agg_col_p50_rt: st.column_config.NumberColumn(
+                        _agg_col_p50_rt,
+                        help=t("stats.aggregated.col_p50_rt_help"),
                         format="%.1f",
                     ),
-                    "p95 RT (ms)": st.column_config.NumberColumn(
-                        "p95 RT (ms)",
-                        help="95e percentile du temps de réponse : 95 % des requêtes sont traitées en moins de cette durée. Indicateur clé pour les SLA.",
+                    _agg_col_p95_rt: st.column_config.NumberColumn(
+                        _agg_col_p95_rt,
+                        help=t("stats.aggregated.col_p95_rt_help"),
                         format="%.1f",
                     ),
                 },
             )
         else:
-            st.info("Aucune donnée pour cette période.")
+            st.info(t("stats.aggregated.no_data"))
     except Exception as e:
-        st.warning(f"Impossible de charger les statistiques agrégées : {e}")
+        st.warning(t("stats.aggregated.load_error", error=e))
 
     if not all_preds:
-        st.info("Aucune prédiction dans la période sélectionnée.")
+        st.info(t("stats.aggregated.no_predictions"))
         st.stop()
 
     df = pd.DataFrame(all_preds)
@@ -572,19 +611,24 @@ with st.expander("📊 Statistiques agrégées par modèle", expanded=False):
     n_models_used = df["model_name"].nunique()
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total prédictions", f"{total:,}")
-    col2.metric("Taux d'erreur", f"{error_rate:.1f}%", help=METRIC_HELP["taux_erreur"])
-    col3.metric("Temps de réponse médian", f"{median_rt:.1f} ms", help=METRIC_HELP["latence_mediane"])
-    col4.metric("Modèles utilisés", n_models_used)
+    col1.metric(t("stats.aggregated.kpi_total"), f"{total:,}")
+    col2.metric(t("stats.aggregated.kpi_error_rate"), f"{error_rate:.1f}%", help=t("metrics.taux_erreur"))
+    col3.metric(t("stats.aggregated.kpi_median_rt"), f"{median_rt:.1f} ms", help=t("metrics.latence_mediane"))
+    col4.metric(t("stats.aggregated.kpi_models_used"), n_models_used)
 
     st.divider()
 
     # --- Graphiques ---
+    _chart_model  = t("stats.aggregated.chart_label_model")
+    _chart_nb_pred = t("stats.aggregated.chart_label_nb_pred")
+    _chart_time_ms = t("stats.aggregated.chart_label_time_ms")
+    _chart_date   = t("stats.aggregated.chart_label_date")
+
     row1_l, row1_r = st.columns(2)
 
     # Distribution par modèle
     with row1_l:
-        st.subheader("Distribution par modèle")
+        st.subheader(t("stats.aggregated.chart_by_model"))
         model_counts = (
             df.groupby("model_name")
             .size()
@@ -596,7 +640,7 @@ with st.expander("📊 Statistiques agrégées par modèle", expanded=False):
             x="model_name",
             y="count",
             color="model_name",
-            labels={"model_name": "Modèle", "count": "Nb prédictions"},
+            labels={"model_name": _chart_model, "count": _chart_nb_pred},
             color_discrete_sequence=px.colors.qualitative.Set2,
         )
         fig.update_layout(showlegend=False, margin=dict(t=20))
@@ -604,7 +648,7 @@ with st.expander("📊 Statistiques agrégées par modèle", expanded=False):
 
     # Temps de réponse — courbe de densité (KDE) par modèle
     with row1_r:
-        st.subheader("Distribution des temps de réponse")
+        st.subheader(t("stats.aggregated.chart_rt_dist"))
         if "response_time_ms" in df.columns:
             import numpy as np
 
@@ -641,28 +685,28 @@ with st.expander("📊 Statistiques agrégées par modèle", expanded=False):
                 ))
 
             fig.update_layout(
-                xaxis_title="Temps (ms)",
-                yaxis_title="Densité",
+                xaxis_title=_chart_time_ms,
+                yaxis_title=t("stats.aggregated.chart_label_density"),
                 margin=dict(t=20),
                 legend=dict(orientation="h", y=-0.25),
                 hovermode="x unified",
             )
             st.plotly_chart(fig, width='stretch')
         else:
-            st.info("Données de temps de réponse non disponibles.")
+            st.info(t("stats.aggregated.chart_rt_no_data"))
 
     row2_l, row2_r = st.columns(2)
 
     # Série temporelle — prédictions par jour
     with row2_l:
-        st.subheader("Prédictions par jour")
+        st.subheader(t("stats.aggregated.chart_daily"))
         daily = df.groupby(["date", "model_name"]).size().reset_index(name="count")
         fig = px.line(
             daily,
             x="date",
             y="count",
             color="model_name",
-            labels={"date": "Date", "count": "Nb prédictions", "model_name": "Modèle"},
+            labels={"date": _chart_date, "count": _chart_nb_pred, "model_name": _chart_model},
             markers=True,
         )
         fig.update_layout(margin=dict(t=20))
@@ -670,37 +714,39 @@ with st.expander("📊 Statistiques agrégées par modèle", expanded=False):
 
     # Erreurs par jour par modèle
     with row2_r:
-        st.subheader("Erreurs par jour — par modèle")
+        st.subheader(t("stats.aggregated.chart_errors_daily"))
+        _err_label   = t("stats.aggregated.col_errors")
+        _model_label = _chart_model
         errors_daily = (
             df[df["is_error"]]
             .groupby(["date", "model_name"])
             .size()
-            .reset_index(name="Erreurs")
-            .rename(columns={"date": "Date", "model_name": "Modèle"})
+            .reset_index(name=_err_label)
+            .rename(columns={"date": _chart_date, "model_name": _model_label})
         )
         if errors_daily.empty:
-            st.success("✅ Aucune erreur sur la période sélectionnée.")
+            st.success(t("stats.aggregated.chart_no_errors"))
         else:
             fig = px.line(
                 errors_daily,
-                x="Date",
-                y="Erreurs",
-                color="Modèle",
+                x=_chart_date,
+                y=_err_label,
+                color=_model_label,
                 markers=True,
-                labels={"Date": "Date", "Erreurs": "Nb erreurs", "Modèle": "Modèle"},
+                labels={_chart_date: _chart_date, _err_label: t("stats.aggregated.chart_label_nb_errors"), _model_label: _model_label},
             )
             fig.update_layout(margin=dict(t=20), legend=dict(orientation="h", y=-0.25))
             st.plotly_chart(fig, width='stretch')
 
     # Boîte à moustaches temps de réponse par modèle
     if "response_time_ms" in df.columns and df["response_time_ms"].notna().any():
-        st.subheader("Temps de réponse par modèle (boîte à moustaches)")
+        st.subheader(t("stats.aggregated.chart_boxplot"))
         fig = px.box(
             df[~df["is_error"]],
             x="model_name",
             y="response_time_ms",
             color="model_name",
-            labels={"model_name": "Modèle", "response_time_ms": "Temps (ms)"},
+            labels={"model_name": _chart_model, "response_time_ms": _chart_time_ms},
             color_discrete_sequence=px.colors.qualitative.Set2,
         )
         fig.update_layout(showlegend=False, margin=dict(t=20))
@@ -708,32 +754,33 @@ with st.expander("📊 Statistiques agrégées par modèle", expanded=False):
 
 
 # ── Expander 3 : Accuracy temporelle multi-modèles ───────────────────────────
-with st.expander("📈 Accuracy temporelle — comparaison multi-modèles", expanded=False):
+with st.expander(t("stats.accuracy_timeline.expander"), expanded=False):
     acc_col_models, acc_col_gran = st.columns([4, 1])
 
     with acc_col_models:
         _default_acc = model_names[:6] if len(model_names) > 6 else model_names
         acc_models = st.multiselect(
-            "Modèles à comparer",
+            t("stats.accuracy_timeline.models_label"),
             options=model_names,
             default=_default_acc,
             key="acc_models_multiselect",
         )
 
     with acc_col_gran:
+        _acc_gran_options = {"day": t("stats.accuracy_timeline.gran_day"), "week": t("stats.accuracy_timeline.gran_week")}
         acc_gran = st.selectbox(
-            "Granularité",
-            options=["day", "week"],
-            format_func=lambda x: {"day": "Jour", "week": "Semaine"}.get(x, x),
+            t("stats.accuracy_timeline.granularity"),
+            options=list(_acc_gran_options.keys()),
+            format_func=lambda x: _acc_gran_options.get(x, x),
             key="acc_granularity",
         )
 
     if not acc_models:
-        st.info("Sélectionnez au moins un modèle.")
+        st.info(t("stats.accuracy_timeline.no_model_selected"))
     else:
         acc_rows: list[dict] = []
         acc_errors: list[str] = []
-        with st.spinner("Chargement des métriques de performance…"):
+        with st.spinner(t("stats.accuracy_timeline.loading")):
             for mname in acc_models:
                 try:
                     perf = client.get_model_performance(
@@ -750,7 +797,7 @@ with st.expander("📈 Accuracy temporelle — comparaison multi-modèles", expa
                             acc_rows.append(
                                 {
                                     "date": period["period"],
-                                    "Modèle": mname,
+                                    t("stats.accuracy_timeline.col_model"): mname,
                                     "metric": float(v),
                                     "model_type": mtype,
                                     "matched_count": int(period.get("matched_count") or 0),
@@ -760,18 +807,14 @@ with st.expander("📈 Accuracy temporelle — comparaison multi-modèles", expa
                     acc_errors.append(mname)
 
         if acc_errors:
-            st.caption(f"⚠️ Données indisponibles pour : {', '.join(acc_errors)}")
+            st.caption(t("stats.accuracy_timeline.unavailable", models=", ".join(acc_errors)))
 
         if not acc_rows:
-            st.info(
-                "Aucune donnée d'accuracy sur la période sélectionnée. "
-                "Soumettez des résultats via **POST /observed-results** pour activer le suivi."
-            )
+            st.info(t("stats.accuracy_timeline.no_data"))
         else:
+            _acc_col_model = t("stats.accuracy_timeline.col_model")
             df_acc = pd.DataFrame(acc_rows)
             # L'API renvoie "2026-W19" (granularité semaine) ou "2026-05-11" (jour).
-            # pd.to_datetime ne reconnaît pas le format ISO semaine — on détecte et parse
-            # manuellement : "YYYY-Wnn" → lundi de la semaine via strptime %G-W%V-%u.
             _sample = str(df_acc["date"].iloc[0]) if len(df_acc) else ""
             if re.match(r"^\d{4}-W\d{2}$", _sample):
                 df_acc["date"] = pd.to_datetime(
@@ -783,33 +826,34 @@ with st.expander("📈 Accuracy temporelle — comparaison multi-modèles", expa
 
             # Détecter si tous les modèles sont du même type
             _types = df_acc["model_type"].unique().tolist()
-            _all_classif = all(t == "classification" for t in _types)
-            _all_regress = all(t == "regression" for t in _types)
+            _all_classif = all(tp == "classification" for tp in _types)
+            _all_regress = all(tp == "regression" for tp in _types)
             if _all_classif:
-                metric_label = "Accuracy"
+                metric_label = t("stats.accuracy_timeline.metric_label_accuracy")
                 y_fmt = ".0%"
                 y_range = [0, 1.05]
                 hover_fmt = ".1%"
             elif _all_regress:
-                metric_label = "MAE"
+                metric_label = t("stats.accuracy_timeline.metric_label_mae")
                 y_fmt = None
                 y_range = None
                 hover_fmt = ".4f"
             else:
-                metric_label = "Accuracy / MAE"
+                metric_label = t("stats.accuracy_timeline.metric_label_mixed")
                 y_fmt = None
                 y_range = None
                 hover_fmt = ".4f"
 
             colors = px.colors.qualitative.Set2
             fig_acc = go.Figure()
-            for i, (model, grp) in enumerate(df_acc.groupby("Modèle", sort=False)):
+            _mae_suffix = t("stats.accuracy_timeline.legend_mae_suffix")
+            for i, (model, grp) in enumerate(df_acc.groupby(_acc_col_model, sort=False)):
                 grp = grp.sort_values("date")
                 color = colors[i % len(colors)]
                 mtype_grp = grp["model_type"].iloc[0]
                 # suffixe "(MAE)" si types mixtes
                 legend_label = model if len(_types) == 1 else (
-                    f"{model} (MAE)" if mtype_grp == "regression" else model
+                    f"{model} {_mae_suffix}" if mtype_grp == "regression" else model
                 )
                 h_fmt = ".1%" if mtype_grp == "classification" else ".4f"
                 fig_acc.add_trace(
@@ -825,13 +869,13 @@ with st.expander("📈 Accuracy temporelle — comparaison multi-modèles", expa
                             f"<b>{model}</b><br>"
                             "%{x|%Y-%m-%d}<br>"
                             f"{metric_label} : %{{y:{h_fmt}}}<br>"
-                            "Paires obs. : %{customdata[0]}<extra></extra>"
+                            f"{t('stats.accuracy_timeline.hover_pairs')}<extra></extra>"
                         ),
                     )
                 )
 
             fig_acc.update_layout(
-                xaxis_title="Date",
+                xaxis_title=t("stats.aggregated.chart_label_date"),
                 yaxis_title=metric_label,
                 yaxis_tickformat=y_fmt,
                 yaxis_range=y_range,
@@ -845,15 +889,15 @@ with st.expander("📈 Accuracy temporelle — comparaison multi-modèles", expa
             st.plotly_chart(fig_acc, width='stretch')
 
             # Tableau résumé
+            _col_obs_pairs = t("stats.accuracy_timeline.col_observed_pairs")
             _summary = []
-            for model, grp in df_acc.groupby("Modèle", sort=False):
+            for model, grp in df_acc.groupby(_acc_col_model, sort=False):
                 last = grp.sort_values("date").iloc[-1]
-                mtype_grp = grp["model_type"].iloc[0]
                 _summary.append(
                     {
-                        "Modèle": model,
+                        _acc_col_model: model,
                         metric_label: round(last["metric"], 4),
-                        "Paires observées": int(grp["matched_count"].sum()),
+                        _col_obs_pairs: int(grp["matched_count"].sum()),
                     }
                 )
             df_summary = (
@@ -868,48 +912,50 @@ with st.expander("📈 Accuracy temporelle — comparaison multi-modèles", expa
                 column_config={
                     metric_label: st.column_config.NumberColumn(
                         metric_label,
-                        help=(
-                            "Dernière valeur connue sur la période. "
-                            "Accuracy = proportion de prédictions correctes (classification). "
-                            "MAE = erreur absolue moyenne (régression)."
-                        ),
+                        help=t("stats.accuracy_timeline.col_metric_help"),
                         format="%.4f",
                     ),
-                    "Paires observées": st.column_config.NumberColumn(
-                        "Paires observées",
-                        help="Nombre de prédictions pour lesquelles un résultat observé a été soumis.",
+                    _col_obs_pairs: st.column_config.NumberColumn(
+                        _col_obs_pairs,
+                        help=t("stats.accuracy_timeline.col_observed_pairs_help"),
                     ),
                 },
             )
 
 
 # ── Expander 4 : Évolution multi-métriques — un modèle ───────────────────────
-with st.expander("📊 Évolution multi-métriques — un modèle", expanded=False):
+with st.expander(t("stats.multi_metric.expander"), expanded=False):
 
     # ── Contrôles ────────────────────────────────────────────────────────────
     _pm_col_model, _pm_col_ver, _pm_col_gran = st.columns([3, 2, 1])
 
     with _pm_col_model:
         perf_model = st.selectbox(
-            "Modèle",
+            t("stats.multi_metric.model_label"),
             options=model_names,
             key="pm_model_select",
         )
 
     with _pm_col_ver:
-        _pm_versions = ["(toutes)"] + sorted(
+        _pm_ver_all = t("stats.multi_metric.version_all")
+        _pm_versions = [_pm_ver_all] + sorted(
             {m["version"] for m in models if m["name"] == perf_model},
             key=lambda v: [int(x) for x in v.split(".")],
             reverse=True,
         )
-        perf_ver_sel = st.selectbox("Version", _pm_versions, key="pm_ver_select")
-        perf_ver_arg = None if perf_ver_sel == "(toutes)" else perf_ver_sel
+        perf_ver_sel = st.selectbox(t("stats.multi_metric.version_label"), _pm_versions, key="pm_ver_select")
+        perf_ver_arg = None if perf_ver_sel == _pm_ver_all else perf_ver_sel
 
     with _pm_col_gran:
+        _pm_gran_options = {
+            "day":   t("stats.multi_metric.gran_day"),
+            "week":  t("stats.multi_metric.gran_week"),
+            "month": t("stats.multi_metric.gran_month"),
+        }
         perf_gran = st.selectbox(
-            "Granularité",
-            options=["day", "week", "month"],
-            format_func=lambda x: {"day": "Jour", "week": "Semaine", "month": "Mois"}.get(x, x),
+            t("stats.multi_metric.granularity"),
+            options=list(_pm_gran_options.keys()),
+            format_func=lambda x: _pm_gran_options.get(x, x),
             key="pm_gran_select",
         )
 
@@ -925,26 +971,26 @@ with st.expander("📊 Évolution multi-métriques — un modèle", expanded=Fal
         _pm_mtype = _pm_perf.get("model_type", "classification")
         _pm_periods = _pm_perf.get("by_period") or []
     except Exception as _pm_exc:
-        st.warning(f"Impossible de charger les métriques : {_pm_exc}")
+        st.warning(t("stats.multi_metric.load_error", error=_pm_exc))
         _pm_mtype = "classification"
         _pm_periods = []
 
     # ── Catalogue des métriques disponibles selon le type ────────────────────
     _PM_METRICS_CLASSIF: dict[str, dict] = {
-        "accuracy":      {"label": "Accuracy",         "ratio": True},
-        "f1_weighted":   {"label": "F1 pondéré",       "ratio": True},
-        "matched_count": {"label": "Paires observées", "ratio": False},
+        "accuracy":      {"label": t("stats.multi_metric.metric_accuracy"), "ratio": True},
+        "f1_weighted":   {"label": t("stats.multi_metric.metric_f1"),       "ratio": True},
+        "matched_count": {"label": t("stats.multi_metric.metric_pairs"),    "ratio": False},
     }
     _PM_METRICS_REGRESS: dict[str, dict] = {
-        "mae":           {"label": "MAE",              "ratio": False},
-        "rmse":          {"label": "RMSE",             "ratio": False},
-        "matched_count": {"label": "Paires observées", "ratio": False},
+        "mae":           {"label": t("stats.multi_metric.metric_mae"),   "ratio": False},
+        "rmse":          {"label": t("stats.multi_metric.metric_rmse"),  "ratio": False},
+        "matched_count": {"label": t("stats.multi_metric.metric_pairs"), "ratio": False},
     }
     _pm_catalog = _PM_METRICS_CLASSIF if _pm_mtype == "classification" else _PM_METRICS_REGRESS
     _pm_defaults = ["accuracy", "f1_weighted"] if _pm_mtype == "classification" else ["mae", "rmse"]
 
     perf_metrics = st.multiselect(
-        "Métriques à afficher",
+        t("stats.multi_metric.metrics_label"),
         options=list(_pm_catalog.keys()),
         default=_pm_defaults,
         format_func=lambda k: _pm_catalog[k]["label"],
@@ -953,12 +999,9 @@ with st.expander("📊 Évolution multi-métriques — un modèle", expanded=Fal
 
     # ── Graphique ─────────────────────────────────────────────────────────────
     if not perf_metrics:
-        st.info("Sélectionnez au moins une métrique.")
+        st.info(t("stats.multi_metric.no_metric_selected"))
     elif not _pm_periods:
-        st.info(
-            "Pas de données d'observed-results pour ce modèle sur la période sélectionnée. "
-            "Soumettez des résultats via **POST /observed-results** pour activer le suivi."
-        )
+        st.info(t("stats.multi_metric.no_data"))
     else:
         # Parse dates (jour / semaine ISO / mois)
         df_pm = pd.DataFrame(_pm_periods)
@@ -1001,17 +1044,18 @@ with st.expander("📊 Évolution multi-métriques — un modèle", expanded=Fal
                 )
             )
 
+        _pairs_label = t("stats.multi_metric.bar_pairs")
         if _show_count:
             fig_pm.add_trace(
                 go.Bar(
                     x=df_pm["date"],
                     y=df_pm["matched_count"],
-                    name="Paires observées",
+                    name=_pairs_label,
                     yaxis="y2",
                     opacity=0.22,
                     marker_color="#999999",
                     hovertemplate=(
-                        "<b>Paires observées</b><br>"
+                        f"<b>{_pairs_label}</b><br>"
                         "%{x|%Y-%m-%d}<br>"
                         "%{y:d}<extra></extra>"
                     ),
@@ -1020,7 +1064,7 @@ with st.expander("📊 Évolution multi-métriques — un modèle", expanded=Fal
 
         y1_title = " · ".join(_pm_catalog[m]["label"] for m in _primary) or ""
         fig_pm.update_layout(
-            xaxis_title="Date",
+            xaxis_title=t("stats.multi_metric.axis_date"),
             yaxis=dict(
                 title=y1_title,
                 tickformat=".0%" if _all_ratio else None,
@@ -1028,7 +1072,7 @@ with st.expander("📊 Évolution multi-métriques — un modèle", expanded=Fal
                 gridcolor="rgba(200,200,200,0.12)",
             ),
             yaxis2=dict(
-                title="Paires observées",
+                title=t("stats.multi_metric.axis_pairs"),
                 overlaying="y",
                 side="right",
                 showgrid=False,
@@ -1053,7 +1097,7 @@ with st.expander("📊 Évolution multi-métriques — un modèle", expanded=Fal
         }
         _summary_cols = [m for m in perf_metrics if _pm_global_metrics.get(m) is not None]
         if _summary_cols:
-            st.caption("Valeurs agrégées sur toute la période sélectionnée :")
+            st.caption(t("stats.multi_metric.summary_caption"))
             _s_cols = st.columns(len(_summary_cols))
             for col_w, metric in zip(_s_cols, _summary_cols):
                 cfg = _pm_catalog[metric]
@@ -1064,27 +1108,34 @@ with st.expander("📊 Évolution multi-métriques — un modèle", expanded=Fal
                 col_w.metric(cfg["label"], fmt_val)
 
 
-
 # ── Expander 5 : Drift de performance ────────────────────────────────────────
 # Catalogue des métriques supportées par l'expander drift
 _DRIFT_METRIC_CFG: dict[str, dict] = {
-    "accuracy":    {"label": "Accuracy",   "ratio": True,  "higher_better": True,  "help_key": "accuracy"},
-    "f1_weighted": {"label": "F1 pondéré", "ratio": True,  "higher_better": True,  "help_key": "f1"},
-    "mae":         {"label": "MAE",        "ratio": False, "higher_better": False, "help_key": "mae"},
-    "rmse":        {"label": "RMSE",       "ratio": False, "higher_better": False, "help_key": "rmse"},
+    "accuracy":    {"label": t("stats.multi_metric.metric_accuracy"), "ratio": True,  "higher_better": True,  "help_key": "accuracy"},
+    "f1_weighted": {"label": t("stats.multi_metric.metric_f1"),       "ratio": True,  "higher_better": True,  "help_key": "f1"},
+    "mae":         {"label": t("stats.multi_metric.metric_mae"),      "ratio": False, "higher_better": False, "help_key": "mae"},
+    "rmse":        {"label": t("stats.multi_metric.metric_rmse"),     "ratio": False, "higher_better": False, "help_key": "rmse"},
 }
 
-with st.expander("📉 Drift de performance — métrique rolling", expanded=False):
+with st.expander(t("stats.drift_performance.expander"), expanded=False):
     drift_col_model, drift_col_metric, drift_col_threshold, drift_col_dates = st.columns([2, 2, 2, 2])
 
     with drift_col_model:
-        drift_search = st.text_input("Filtrer par nom", key="drift_model_search", placeholder="Rechercher…")
+        drift_search = st.text_input(
+            t("stats.drift_performance.filter_name"),
+            key="drift_model_search",
+            placeholder=t("stats.drift_performance.filter_placeholder"),
+        )
         drift_filtered = [n for n in model_names if drift_search.lower() in n.lower()] if drift_search else model_names
-        drift_model = st.selectbox("Modèle (drift)", drift_filtered or model_names, key="drift_model")
+        drift_model = st.selectbox(
+            t("stats.drift_performance.model_label"),
+            drift_filtered or model_names,
+            key="drift_model",
+        )
 
     with drift_col_metric:
         drift_metric_key = st.selectbox(
-            "Métrique",
+            t("stats.drift_performance.metric_label"),
             options=list(_DRIFT_METRIC_CFG.keys()),
             format_func=lambda k: _DRIFT_METRIC_CFG[k]["label"],
             key="drift_metric_select",
@@ -1095,34 +1146,34 @@ with st.expander("📉 Drift de performance — métrique rolling", expanded=Fal
         _higher_better = _dcfg["higher_better"]
 
     with drift_col_threshold:
-        alert_enabled = st.checkbox("Activer alerte seuil", value=True)
+        alert_enabled = st.checkbox(t("stats.drift_performance.alert_checkbox"), value=True)
         if _is_ratio:
             threshold = st.slider(
-                f"Seuil {metric_label} (min)",
+                t("stats.drift_performance.slider_min", label=metric_label),
                 min_value=0.0, max_value=1.0, value=0.7, step=0.05,
                 disabled=not alert_enabled,
-                help="Alerte si la moyenne mobile passe en dessous de ce seuil.",
+                help=t("stats.drift_performance.slider_help_min"),
             )
         else:
             threshold = st.number_input(
-                f"Seuil {metric_label} (max)",
+                t("stats.drift_performance.input_max", label=metric_label),
                 min_value=0.0, value=0.5, step=0.05, format="%.3f",
                 disabled=not alert_enabled,
-                help="Alerte si la moyenne mobile dépasse ce seuil.",
+                help=t("stats.drift_performance.input_help_max"),
             )
 
     with drift_col_dates:
         _default_end = datetime.utcnow().date()
         _default_start = _default_end - timedelta(days=45)
-        drift_date_start = st.date_input("Date début", value=_default_start, key="drift_date_start")
-        drift_date_end = st.date_input("Date fin", value=_default_end, key="drift_date_end")
+        drift_date_start = st.date_input(t("stats.drift_performance.date_start"), value=_default_start, key="drift_date_start")
+        drift_date_end = st.date_input(t("stats.drift_performance.date_end"), value=_default_end, key="drift_date_end")
 
     drift_end = datetime.combine(drift_date_end, datetime.max.time())
     drift_start = datetime.combine(drift_date_start, datetime.min.time())
     _n_drift_days = (drift_date_end - drift_date_start).days
 
     if drift_start >= drift_end:
-        st.warning("⚠️ La date de début doit être antérieure à la date de fin.")
+        st.warning(t("stats.drift_performance.date_error"))
         st.stop()
 
     try:
@@ -1135,16 +1186,16 @@ with st.expander("📉 Drift de performance — métrique rolling", expanded=Fal
         by_period = perf_data.get("by_period") or []
         model_type = perf_data.get("model_type", "classification")
     except Exception as e:
-        st.warning(f"Impossible de charger les métriques de performance : {e}")
+        st.warning(t("stats.drift_performance.load_error", error=e))
         by_period = []
         model_type = "classification"
 
     if not by_period:
-        st.info(
-            f"Pas assez de données observées pour ce modèle sur la période sélectionnée "
-            f"({drift_date_start} → {drift_date_end}). "
-            "Soumettez des résultats via POST /observed-results pour activer le suivi."
-        )
+        st.info(t(
+            "stats.drift_performance.no_data",
+            date_start=drift_date_start,
+            date_end=drift_date_end,
+        ))
     else:
         drift_df = pd.DataFrame(by_period)
         drift_df["date"] = pd.to_datetime(drift_df["period"])
@@ -1158,19 +1209,24 @@ with st.expander("📉 Drift de performance — métrique rolling", expanded=Fal
             (drift_metric_key in _regress_metrics and model_type == "classification")
         )
         if _wrong_type or drift_metric_key not in drift_df.columns or drift_df[drift_metric_key].isna().all():
-            _expected = "classification" if drift_metric_key in _classif_metrics else "régression"
-            st.warning(
-                f"La métrique **{metric_label}** n'est pas disponible pour ce modèle "
-                f"(type détecté : **{model_type}**). "
-                f"Elle s'applique aux modèles de **{_expected}**."
+            _expected = (
+                t("stats.drift_performance.expected_classif")
+                if drift_metric_key in _classif_metrics
+                else t("stats.drift_performance.expected_regress")
             )
+            st.warning(t(
+                "stats.drift_performance.wrong_type",
+                metric=metric_label,
+                model_type=model_type,
+                expected=_expected,
+            ))
         else:
             win_short = min(7, max(1, _n_drift_days // 6))
             win_long  = min(30, max(3, _n_drift_days // 2))
             drift_df["rolling_short"] = drift_df[drift_metric_key].rolling(win_short, min_periods=1).mean().round(4)
             drift_df["rolling_long"]  = drift_df[drift_metric_key].rolling(win_long,  min_periods=1).mean().round(4)
-            roll_short_label = f"Moy. mobile {win_short}j"
-            roll_long_label  = f"Moy. mobile {win_long}j"
+            roll_short_label = t("stats.drift_performance.rolling_short_label", n=win_short)
+            roll_long_label  = t("stats.drift_performance.rolling_long_label",  n=win_long)
 
             last_val    = drift_df[drift_metric_key].iloc[-1]
             prev_val    = drift_df[drift_metric_key].iloc[-8] if len(drift_df) >= 8 else drift_df[drift_metric_key].iloc[0]
@@ -1182,37 +1238,48 @@ with st.expander("📉 Drift de performance — métrique rolling", expanded=Fal
 
             m1, m2, m3 = st.columns(3)
             m1.metric(
-                f"{metric_label} (dernier jour)",
+                t("stats.drift_performance.kpi_last_day", metric=metric_label),
                 _fmt(last_val),
                 delta=f"{delta:+.1%}" if _is_ratio else f"{delta:+.4f}",
                 delta_color="normal" if _higher_better else "inverse",
-                help=METRIC_HELP.get(_dcfg["help_key"], ""),
+                help=t(f"metrics.{_dcfg['help_key']}"),
             )
             m2.metric(
                 roll_short_label,
                 _fmt(drift_df["rolling_short"].iloc[-1]),
-                help=METRIC_HELP.get(_dcfg["help_key"], ""),
+                help=t(f"metrics.{_dcfg['help_key']}"),
             )
-            m3.metric(f"Prédictions avec résultat observé ({_n_drift_days}j)", f"{matched_total:,}")
+            m3.metric(
+                t("stats.drift_performance.kpi_matched", days=_n_drift_days),
+                f"{matched_total:,}",
+            )
 
             # Alerte seuil
             if alert_enabled:
                 last_rolling = drift_df["rolling_short"].iloc[-1]
                 _breach = (last_rolling < threshold) if _higher_better else (last_rolling > threshold)
                 if _breach:
-                    _direction = "en dessous" if _higher_better else "au-dessus"
-                    _seuil_fmt = f"{threshold:.0%}" if _is_ratio else f"{threshold:.3f}"
-                    st.warning(
-                        f"⚠️ Drift détecté : la moyenne mobile {win_short}j de **{metric_label}** "
-                        f"({_fmt(last_rolling)}) est {_direction} du seuil configuré ({_seuil_fmt})."
+                    _direction = (
+                        t("stats.drift_performance.direction_below")
+                        if _higher_better
+                        else t("stats.drift_performance.direction_above")
                     )
+                    _seuil_fmt = f"{threshold:.0%}" if _is_ratio else f"{threshold:.3f}"
+                    st.warning(t(
+                        "stats.drift_performance.alert_breach",
+                        n=win_short,
+                        metric=metric_label,
+                        current=_fmt(last_rolling),
+                        direction=_direction,
+                        threshold=_seuil_fmt,
+                    ))
 
             _h_fmt = ".1%" if _is_ratio else ".4f"
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=drift_df["date"], y=drift_df[drift_metric_key],
                 mode="lines+markers",
-                name=f"{metric_label} journalier",
+                name=t("stats.drift_performance.daily_label", metric=metric_label),
                 line=dict(color="#AAAAAA", width=1, dash="dot"),
                 marker=dict(size=5), opacity=0.6,
                 hovertemplate=f"%{{x|%Y-%m-%d}}<br>{metric_label} : %{{y:{_h_fmt}}}<extra></extra>",
@@ -1231,9 +1298,11 @@ with st.expander("📉 Drift de performance — métrique rolling", expanded=Fal
             ))
             if alert_enabled and threshold > 0:
                 _seuil_annotation = (
-                    f"Seuil min {threshold:.0%}" if _is_ratio and _higher_better
-                    else f"Seuil max {threshold:.0%}" if _is_ratio
-                    else f"Seuil max {threshold:.3f}"
+                    t("stats.drift_performance.seuil_min", value=f"{threshold:.0%}")
+                    if _is_ratio and _higher_better
+                    else t("stats.drift_performance.seuil_max", value=f"{threshold:.0%}")
+                    if _is_ratio
+                    else t("stats.drift_performance.seuil_max", value=f"{threshold:.3f}")
                 )
                 fig.add_hline(
                     y=threshold,
@@ -1243,7 +1312,7 @@ with st.expander("📉 Drift de performance — métrique rolling", expanded=Fal
                     annotation_font_color="#E74C3C",
                 )
             fig.update_layout(
-                xaxis_title="Date",
+                xaxis_title=t("stats.aggregated.chart_label_date"),
                 yaxis_title=metric_label,
                 yaxis_tickformat=".0%" if _is_ratio else None,
                 yaxis_range=[0, 1.05] if _is_ratio else None,

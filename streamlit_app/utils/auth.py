@@ -5,12 +5,13 @@ Helpers d'authentification pour les pages Streamlit
 import streamlit as st
 
 from utils.api_client import APIClient
+from utils.i18n import t
 
 
 def require_auth():
     """Vérifie que l'utilisateur est connecté. Arrête l'exécution sinon."""
     if "api_token" not in st.session_state or not st.session_state["api_token"]:
-        st.error("Vous devez vous connecter d'abord. Retournez à la page d'accueil.")
+        st.error(t("auth.require_auth_error"))
         st.stop()
 
 
@@ -18,7 +19,7 @@ def require_admin():
     """Vérifie que l'utilisateur est admin. Arrête l'exécution sinon."""
     require_auth()
     if not st.session_state.get("is_admin", False):
-        st.error("Accès réservé aux administrateurs.")
+        st.error(t("auth.require_admin_error"))
         st.stop()
 
 

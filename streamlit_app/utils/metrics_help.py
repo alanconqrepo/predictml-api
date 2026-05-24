@@ -1,3 +1,11 @@
+# NOTE: This file is kept for backward compatibility with 10_Aide.py, which uses
+# METRIC_HELP to build a KPIs section for the AI assistant system prompt (sent to
+# an LLM — intentionally in French regardless of UI language).
+#
+# Pages 4_Stats, 6_AB_Testing and 7_Supervision should use t("metrics.<key>")
+# directly instead of METRIC_HELP["<key>"], as those values now live in
+# translations/fr.yaml and translations/en.yaml.
+
 METRIC_HELP = {
     # Supervision globale — KPIs
     "predictions_prod": (
@@ -13,9 +21,9 @@ METRIC_HELP = {
     "modeles_actifs": (
         "Nombre de modèles distincts ayant au moins une version active (is_active=True) "
         "avec des prédictions sur la période sélectionnée.\n\n"
-        "Un modèle est « actif » dès qu'une version est chargeable, "
+        "Un modèle est « actif » dès qu'une version est chargeable, "
         "quel que soit son mode de déploiement (Production, A/B, Shadow ou aucun routage).\n\n"
-        "À ne pas confondre avec « en production » : un modèle actif peut n'être "
+        "À ne pas confondre avec « en production » : un modèle actif peut n'être "
         "qu'en shadow ou uploadé sans être exposé au trafic."
     ),
     "alertes_sante": (
