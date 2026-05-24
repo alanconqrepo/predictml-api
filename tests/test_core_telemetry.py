@@ -13,7 +13,14 @@ Couvre :
 - Utilisation des settings (service.name, endpoint)
 """
 
+import sys
 from unittest.mock import MagicMock, call, patch
+
+# Compatibility fix: opentelemetry-instrumentation-fastapi 0.63b1+ requires
+# opentelemetry.instrumentation._semconv which may not exist in older versions.
+# Mock it early so that src.core.telemetry can be imported in tests.
+if "opentelemetry.instrumentation._semconv" not in sys.modules:
+    sys.modules["opentelemetry.instrumentation._semconv"] = MagicMock()
 
 
 # -------------------------------------------------------------------------

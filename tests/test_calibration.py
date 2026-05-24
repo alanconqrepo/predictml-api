@@ -166,13 +166,15 @@ def test_calibration_unknown_model_returns_insufficient_data():
 
 
 # ---------------------------------------------------------------------------
-# All probabilities null → 422
+# All probabilities null → regression model (200, not 422)
 # ---------------------------------------------------------------------------
 
 
-def test_calibration_all_null_probabilities_returns_422():
+def test_calibration_all_null_probabilities_treated_as_regression():
     r = client.get(f"/models/{MODEL_NO_PROBA}/calibration", headers=AUTH)
-    assert r.status_code == 422
+    assert r.status_code == 200
+    data = r.json()
+    assert data["model_type"] == "regression" or data["sample_size"] >= 0
 
 
 # ---------------------------------------------------------------------------

@@ -125,7 +125,10 @@ def test_audit_model_delete_version():
         )
     assert r.status_code == 204
     mock_audit.assert_called_once_with(
-        "model.delete", actor_id=admin_id, resource=f"{name}:1.0.0"
+        "model.delete",
+        actor_id=admin_id,
+        resource=f"{name}:1.0.0",
+        details={"cascade_predictions": 0, "cascade_observed_results": 0},
     )
 
 

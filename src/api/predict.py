@@ -429,7 +429,7 @@ async def export_predictions(
 
             if len(rows) < _EXPORT_PAGE_SIZE:
                 break
-            cursor = rows[-1].id
+            cursor = rows[-1][0].id
 
     if fmt == "parquet":
         all_rows = []
@@ -455,7 +455,9 @@ async def export_predictions(
                     "username": row.user.username if row.user else None,
                     "id_obs": row.id_obs,
                     "prediction_result": json.dumps(row.prediction_result),
-                    "observed_result": obs_result,
+                    # observed_result peut être float (régression) ou str (classification) ;
+                    # on sérialise en JSON pour éviter les colonnes à type mixte dans Parquet.
+                    "observed_result": json.dumps(obs_result) if obs_result is not None else None,
                     "probabilities": json.dumps(row.probabilities),
                     "response_time_ms": row.response_time_ms,
                     "status": row.status,
@@ -467,7 +469,7 @@ async def export_predictions(
                 all_rows.append(record)
             if len(rows) < _EXPORT_PAGE_SIZE:
                 break
-            cursor = rows[-1].id
+            cursor = rows[-1][0].id
 
         buf = io.BytesIO()
         pd.DataFrame(all_rows, columns=csv_cols).to_parquet(buf, index=False, engine="pyarrow")

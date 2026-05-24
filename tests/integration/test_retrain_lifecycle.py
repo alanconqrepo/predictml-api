@@ -132,25 +132,22 @@ class TestRetrainLifecycle:
         assert v1["train_script_object_key"] is not None
 
     def test_retrain_creates_new_version(self):
-        """POST /retrain → nouvelle version créée avec succès."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_success),
-        ):
-            r = client.post(
-                f"/models/{RT_MODEL}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2025-01-01",
-                    "end_date": "2025-12-31",
-                    "new_version": "2.0.0",
-                },
-            )
-        assert r.status_code == 200
+        """POST /retrain → 202 Accepted avec job_id (ARQ async)."""
+        r = client.post(
+            f"/models/{RT_MODEL}/1.0.0/retrain",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={
+                "start_date": "2025-01-01",
+                "end_date": "2025-12-31",
+                "new_version": "2.0.0",
+            },
+        )
+        assert r.status_code == 202
         data = r.json()
-        assert data["success"] is True
+        assert "job_id" in data
+        assert data["status"] == "queued"
         assert data["new_version"] == "2.0.0"
-        assert data["new_model_metadata"] is not None
+        assert data["model_name"] == RT_MODEL
 
     def test_retrain_new_version_visible_in_models_list(self):
         """Après retrain, le modèle est toujours dans la liste des modèles."""
@@ -164,25 +161,22 @@ class TestRetrainLifecycle:
         assert RT_MODEL in model_names
 
     def test_retrain_set_production_promotes_new_version(self):
-        """set_production=True → nouvelle version est_production=True."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_success),
-        ):
-            r = client.post(
-                f"/models/{RT_MODEL}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2024-01-01",
-                    "end_date": "2024-12-31",
-                    "new_version": "3.0.0",
-                    "set_production": True,
-                },
-            )
-        assert r.status_code == 200
+        """set_production=True → 202 Accepted, le worker promotera après exécution."""
+        r = client.post(
+            f"/models/{RT_MODEL}/1.0.0/retrain",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={
+                "start_date": "2024-01-01",
+                "end_date": "2024-12-31",
+                "new_version": "3.0.0",
+                "set_production": True,
+            },
+        )
+        assert r.status_code == 202
         data = r.json()
-        assert data["success"] is True
-        assert data["new_model_metadata"]["is_production"] is True
+        assert "job_id" in data
+        assert data["status"] == "queued"
+        assert data["new_version"] == "3.0.0"
 
     def test_retrain_without_script_returns_400(self):
         """Modèle sans train_script → POST /retrain → 400."""

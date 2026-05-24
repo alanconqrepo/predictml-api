@@ -78,6 +78,7 @@ patch("src.api.models.arq_pool_module", _arq_pool_module).start()
 
 # Remplacer le client Redis du singleton par un FakeRedis en mémoire
 # (aucun serveur Redis requis pour les tests)
+import fakeredis  # noqa: E402
 import fakeredis.aioredis  # noqa: E402
 from src.services.model_service import model_service, _sign_for_cache  # noqa: E402
 
@@ -90,10 +91,27 @@ class _SigningFakeRedis:
     enveloppée avec un HMAC-SHA256 avant le stockage, de la même façon que le fait
     model_service.load_model() en production. Cela permet aux fonctions _inject_cache()
     des tests de continuer à écrire des données non-signées (elles sont signées ici).
+
+    Utilise un FakeServer partagé entre toutes les instances FakeRedis, ce qui permet
+    de créer un client distinct par event loop (évite l'erreur "bound to a different
+    event loop" quand plusieurs asyncio.run() sont appelés depuis différents modules
+    de test).
     """
 
-    def __init__(self, redis):
-        self._r = redis
+    def __init__(self, server: "fakeredis.FakeServer"):
+        self._server = server
+        self._clients: dict = {}  # id(event_loop) -> FakeRedis instance
+
+    def _get_client(self) -> "fakeredis.aioredis.FakeRedis":
+        """Retourne (ou crée) un client FakeRedis lié à l'event loop courant."""
+        try:
+            loop = asyncio.get_running_loop()
+            loop_id = id(loop)
+        except RuntimeError:
+            loop_id = -1
+        if loop_id not in self._clients:
+            self._clients[loop_id] = fakeredis.aioredis.FakeRedis(server=self._server)
+        return self._clients[loop_id]
 
     def _maybe_sign(self, key: object, value: bytes) -> bytes:
         if isinstance(key, (str, bytes)):
@@ -104,26 +122,32 @@ class _SigningFakeRedis:
 
     async def set(self, key, value, *args, **kwargs):
         value = self._maybe_sign(key, value)
-        return await self._r.set(key, value, *args, **kwargs)
+        return await self._get_client().set(key, value, *args, **kwargs)
 
     async def setex(self, key, ttl, value):
         value = self._maybe_sign(key, value)
-        return await self._r.setex(key, ttl, value)
+        return await self._get_client().setex(key, ttl, value)
 
     async def get(self, key):
-        return await self._r.get(key)
+        return await self._get_client().get(key)
 
     async def keys(self, pattern):
-        return await self._r.keys(pattern)
+        return await self._get_client().keys(pattern)
 
     async def delete(self, *keys):
-        return await self._r.delete(*keys)
+        return await self._get_client().delete(*keys)
 
     def __getattr__(self, name):
-        return getattr(self._r, name)
+        # Délègue au client de la boucle courante via un wrapper async.
+        # N'utilise PAS un client d'une autre boucle (évite "bound to a different event loop").
+        async def method(*args, **kwargs):
+            return await getattr(self._get_client(), name)(*args, **kwargs)
+
+        return method
 
 
-model_service._redis = _SigningFakeRedis(fakeredis.aioredis.FakeRedis())
+_fake_server = fakeredis.FakeServer()
+model_service._redis = _SigningFakeRedis(_fake_server)
 
 import tempfile
 

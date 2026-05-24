@@ -198,8 +198,8 @@ class TestScheduleEndpointInteg:
 
 class TestRetrainWithAutoPromotion:
     def test_retrain_with_auto_promote_policy_satisfied(self):
-        """Retrain avec accuracy > min_accuracy + min_sample=1 → auto_promoted=True."""
-        # Configurer la policy (low threshold, min_sample=1 pour que ça passe sans observed results)
+        """Retrain avec auto-promotion policy → 202 Accepted, promotion gérée par le worker."""
+        # Configurer la policy
         client.patch(
             f"/models/{SP_MODEL}/policy",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -210,30 +210,26 @@ class TestRetrainWithAutoPromotion:
             },
         )
 
-        with patch(
-            "asyncio.create_subprocess_exec",
-            side_effect=_mock_exec_success,
-        ):
-            resp = client.post(
-                f"/models/{SP_MODEL}/{MODEL_VERSION}/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2025-01-01",
-                    "end_date": "2025-12-31",
-                    "new_version": "2.0.0-sp-integ",
-                    "set_production": False,
-                },
-            )
+        resp = client.post(
+            f"/models/{SP_MODEL}/{MODEL_VERSION}/retrain",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={
+                "start_date": "2025-01-01",
+                "end_date": "2025-12-31",
+                "new_version": "2.0.0-sp-integ",
+                "set_production": False,
+            },
+        )
 
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
         assert data["new_version"] == "2.0.0-sp-integ"
-        # auto_promoted peut être True ou False selon les observed results disponibles
-        assert "auto_promoted" in data
+        assert data["status"] == "queued"
+        assert "job_id" in data
 
     def test_retrain_high_accuracy_threshold_not_met(self):
-        """Retrain avec accuracy < min_accuracy → auto_promoted=False."""
-        # Policy avec seuil élevé impossible à atteindre
+        """Retrain avec policy à seuil élevé → 202 Accepted, le worker gérera la policy."""
+        # Policy avec seuil élevé
         client.patch(
             f"/models/{SP_MODEL}/policy",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -244,44 +240,36 @@ class TestRetrainWithAutoPromotion:
             },
         )
 
-        with patch(
-            "asyncio.create_subprocess_exec",
-            side_effect=_mock_exec_success,
-        ):
-            resp = client.post(
-                f"/models/{SP_MODEL}/{MODEL_VERSION}/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2025-01-01",
-                    "end_date": "2025-12-31",
-                    "new_version": "2.1.0-sp-integ",
-                    "set_production": False,
-                },
-            )
+        resp = client.post(
+            f"/models/{SP_MODEL}/{MODEL_VERSION}/retrain",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={
+                "start_date": "2025-01-01",
+                "end_date": "2025-12-31",
+                "new_version": "2.1.0-sp-integ",
+                "set_production": False,
+            },
+        )
 
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
-        # Avec min_sample_validation=1 et 0 observed_results → not promoted (pas assez d'échantillons)
-        # OU accuracy trop basse → not promoted
-        assert "auto_promoted" in data
+        assert data["new_version"] == "2.1.0-sp-integ"
+        assert data["status"] == "queued"
 
     def test_retrain_set_production_true_skips_auto_promote(self):
-        """set_production=True → auto_promoted=None (promotion manuelle)."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            side_effect=_mock_exec_success,
-        ):
-            resp = client.post(
-                f"/models/{SP_MODEL}/{MODEL_VERSION}/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2025-01-01",
-                    "end_date": "2025-12-31",
-                    "new_version": "2.2.0-sp-integ",
-                    "set_production": True,
-                },
-            )
+        """set_production=True → 202 Accepted, le worker promotera manuellement."""
+        resp = client.post(
+            f"/models/{SP_MODEL}/{MODEL_VERSION}/retrain",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={
+                "start_date": "2025-01-01",
+                "end_date": "2025-12-31",
+                "new_version": "2.2.0-sp-integ",
+                "set_production": True,
+            },
+        )
 
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
-        assert data["auto_promoted"] is None
+        assert data["status"] == "queued"
+        assert "job_id" in data

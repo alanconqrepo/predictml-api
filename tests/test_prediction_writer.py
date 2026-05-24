@@ -11,6 +11,7 @@ import json
 import os
 import tempfile
 
+import fakeredis
 import fakeredis.aioredis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -73,15 +74,51 @@ _SAMPLE_FIELDS = {
 }
 
 
-def _make_redis():
-    """Retourne un FakeRedis frais avec consumer group initialisé."""
+class _LoopAwareFakeRedis:
+    """
+    FakeRedis wrapper qui crée un client par event loop avec initialisation lazy du consumer group.
 
-    async def _init():
-        redis = fakeredis.aioredis.FakeRedis()
-        await _ensure_consumer_group(redis)
-        return redis
+    Chaque appel à asyncio.run() crée une nouvelle boucle. FakeRedis se lie à la boucle qui
+    l'utilise en premier. Ce wrapper crée un client frais par boucle (données partagées via
+    FakeServer) et initialise le consumer group à la première opération async de chaque boucle.
+    """
 
-    return asyncio.run(_init())
+    def __init__(self):
+        self._server = fakeredis.FakeServer()
+        self._clients: dict = {}
+        self._initialized_loops: set = set()
+
+    def _get_client(self) -> "fakeredis.aioredis.FakeRedis":
+        try:
+            loop_id = id(asyncio.get_running_loop())
+        except RuntimeError:
+            loop_id = -1
+        if loop_id not in self._clients:
+            self._clients[loop_id] = fakeredis.aioredis.FakeRedis(server=self._server)
+        return self._clients[loop_id]
+
+    async def _lazy_init(self) -> None:
+        """Initialise le consumer group pour la boucle courante si pas encore fait."""
+        try:
+            loop_id = id(asyncio.get_running_loop())
+        except RuntimeError:
+            loop_id = -1
+        if loop_id not in self._initialized_loops:
+            self._initialized_loops.add(loop_id)
+            await _ensure_consumer_group(self._get_client())
+
+    def __getattr__(self, name: str):
+        # Wrapper async qui lazy-init le consumer group puis délègue au bon client
+        async def method(*args, **kwargs):
+            await self._lazy_init()
+            return await getattr(self._get_client(), name)(*args, **kwargs)
+
+        return method
+
+
+def _make_redis() -> _LoopAwareFakeRedis:
+    """Retourne un FakeRedis frais avec consumer group initialisé (lazy, par event loop)."""
+    return _LoopAwareFakeRedis()
 
 
 # ---------------------------------------------------------------------------

@@ -340,14 +340,14 @@ class TestComputeNextRunAtNoneReturn:
 
 
 class TestSetSubprocessLimits:
-    def test_set_subprocess_limits_calls_setrlimit_twice(self):
-        """_set_subprocess_limits appelle resource.setrlimit exactement deux fois."""
+    def test_set_subprocess_limits_calls_setrlimit_once(self):
+        """_set_subprocess_limits appelle resource.setrlimit exactement une fois (RLIMIT_NOFILE uniquement)."""
         import resource
         from src.tasks.retrain_scheduler import _set_subprocess_limits
 
         with patch.object(resource, "setrlimit") as mock_setrlimit:
             _set_subprocess_limits()
-            assert mock_setrlimit.call_count == 2
+            assert mock_setrlimit.call_count == 1  # Only RLIMIT_NOFILE (RLIMIT_AS removed — Docker cgroups handle memory)
 
 
 class TestRunRetrainJobErrorHandling:

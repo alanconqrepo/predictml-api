@@ -13,6 +13,7 @@ Stratégie :
   - Filtrage par fenêtre temporelle (days)
   - Probabilités stockées en dict → max extrait correctement
 """
+import joblib
 
 import asyncio
 from datetime import datetime, timedelta, timezone

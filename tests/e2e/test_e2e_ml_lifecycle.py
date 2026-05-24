@@ -232,56 +232,50 @@ class TestMLLifecycleE2E:
         assert data["total"] >= 1
 
     def test_07_admin_retrains_model(self):
-        """Retrain → nouvelle version 2.0.0 créée."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_success),
-        ):
-            r = client.post(
-                f"/models/{E2E_MODEL}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2025-01-01",
-                    "end_date": "2025-12-31",
-                    "new_version": "2.0.0",
-                },
-            )
-        assert r.status_code == 200
+        """Retrain → 202 Accepted avec job_id (ARQ async)."""
+        r = client.post(
+            f"/models/{E2E_MODEL}/1.0.0/retrain",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={
+                "start_date": "2025-01-01",
+                "end_date": "2025-12-31",
+                "new_version": "2.0.0",
+            },
+        )
+        assert r.status_code == 202
         data = r.json()
-        assert data["success"] is True
+        assert "job_id" in data
+        assert data["status"] == "queued"
         assert data["new_version"] == "2.0.0"
 
     def test_08_new_version_visible_in_models_list(self):
-        """Après retrain, version 2.0.0 visible dans GET /models."""
+        """Après retrain enqueued, la version de base est toujours visible dans GET /models."""
+        # Le worker ARQ est mocké : la nouvelle version (2.0.0) ne sera pas créée
+        # immédiatement. On vérifie que le modèle de base reste accessible.
         r = client.get(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
         )
         assert r.status_code == 200
-        versions = [
-            m["version"] for m in r.json() if m.get("name") == E2E_MODEL
-        ]
-        assert "2.0.0" in versions
+        model_names = [m.get("name") for m in r.json()]
+        assert E2E_MODEL in model_names
 
     def test_09_admin_sets_new_version_as_production(self):
-        """Retrain avec set_production=True → nouvelle version est en production."""
-        with patch(
-            "asyncio.create_subprocess_exec",
-            new=AsyncMock(side_effect=_mock_exec_success),
-        ):
-            r = client.post(
-                f"/models/{E2E_MODEL}/1.0.0/retrain",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={
-                    "start_date": "2024-01-01",
-                    "end_date": "2024-12-31",
-                    "new_version": "3.0.0",
-                    "set_production": True,
-                },
-            )
-        assert r.status_code == 200
+        """Retrain avec set_production=True → 202 Accepted, promotion gérée par le worker."""
+        r = client.post(
+            f"/models/{E2E_MODEL}/1.0.0/retrain",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={
+                "start_date": "2024-01-01",
+                "end_date": "2024-12-31",
+                "new_version": "3.0.0",
+                "set_production": True,
+            },
+        )
+        assert r.status_code == 202
         data = r.json()
-        assert data["new_model_metadata"]["is_production"] is True
+        assert "job_id" in data
+        assert data["status"] == "queued"
 
     def test_10_monitoring_overview_includes_model(self):
         """Le monitoring global inclut le modèle E2E après prédictions."""
