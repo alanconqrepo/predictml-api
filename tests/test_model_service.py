@@ -7,16 +7,49 @@ import joblib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import fakeredis
 import fakeredis.aioredis
 import pytest
 
 from src.services.model_service import ModelService, compute_model_hmac, _sign_for_cache
 
 
+class _PerLoopFakeRedis:
+    """
+    FakeRedis wrapper qui crée un client par event loop en partageant un FakeServer commun.
+
+    Résout le problème de binding event loop : FakeRedis se lie à la première boucle qui
+    l'utilise. Avec asyncio.run() appelé plusieurs fois (boucles différentes), le même
+    FakeRedis lève RuntimeError. Ce wrapper crée un nouveau client par boucle tout en
+    partageant les données via FakeServer.
+    """
+
+    def __init__(self):
+        self._server = fakeredis.FakeServer()
+        self._clients: dict = {}
+
+    def _get_client(self) -> "fakeredis.aioredis.FakeRedis":
+        try:
+            loop_id = id(asyncio.get_running_loop())
+        except RuntimeError:
+            loop_id = -1
+        if loop_id not in self._clients:
+            self._clients[loop_id] = fakeredis.aioredis.FakeRedis(server=self._server)
+        return self._clients[loop_id]
+
+    def __getattr__(self, name: str):
+        # Retourne un wrapper async qui résout le client au moment de l'appel
+        # (à l'intérieur de l'event loop, pas au moment de l'accès à l'attribut)
+        async def method(*args, **kwargs):
+            return await getattr(self._get_client(), name)(*args, **kwargs)
+
+        return method
+
+
 def _make_service() -> ModelService:
     """Crée un ModelService avec un FakeRedis en mémoire (pas de serveur Redis requis)."""
     service = ModelService()
-    service._redis = fakeredis.aioredis.FakeRedis()
+    service._redis = _PerLoopFakeRedis()
     return service
 
 

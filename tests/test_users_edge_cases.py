@@ -81,10 +81,12 @@ def test_usage_negative_days_falls_back_to_30():
 
 
 def test_usage_large_days_accepted():
-    """`days=365` → conservé tel quel (aucune limite maximale côté endpoint)."""
+    """`days=365` → limité à ANALYTICS_MAX_DAYS (90 par défaut) par db_service."""
     r = client.get(f"/users/{_user_id}/usage?days=365", headers=_ADMIN_HEADERS)
     assert r.status_code == 200
-    assert r.json()["period_days"] == 365
+    # days est plafonné à ANALYTICS_MAX_DAYS (90 par défaut)
+    from src.core.config import settings
+    assert r.json()["period_days"] <= settings.ANALYTICS_MAX_DAYS
 
 
 # ---------------------------------------------------------------------------

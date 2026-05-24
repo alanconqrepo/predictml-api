@@ -99,6 +99,7 @@ def _make_prediction(
         probabilities=probabilities,
         timestamp=ts,
         status="success",
+        id_obs=None,
     )
 
 
@@ -188,7 +189,7 @@ def test_anomalies_empty_result():
         patch("src.api.predict.DBService.get_model_metadata", AsyncMock(return_value=meta)),
         patch(
             "src.api.predict.DBService.get_predictions_with_features",
-            AsyncMock(return_value=[normal_pred]),
+            AsyncMock(return_value=[(normal_pred, None)]),
         ),
     ):
         response = client.get(
@@ -215,7 +216,7 @@ def test_anomalies_detects_outlier():
         patch("src.api.predict.DBService.get_model_metadata", AsyncMock(return_value=meta)),
         patch(
             "src.api.predict.DBService.get_predictions_with_features",
-            AsyncMock(return_value=[outlier_pred]),
+            AsyncMock(return_value=[(outlier_pred, None)]),
         ),
     ):
         response = client.get(
@@ -250,7 +251,7 @@ def test_anomalies_only_anomalous_feature_included():
         patch("src.api.predict.DBService.get_model_metadata", AsyncMock(return_value=meta)),
         patch(
             "src.api.predict.DBService.get_predictions_with_features",
-            AsyncMock(return_value=[pred]),
+            AsyncMock(return_value=[(pred, None)]),
         ),
     ):
         response = client.get(
@@ -275,7 +276,7 @@ def test_anomalies_max_confidence_populated():
         patch("src.api.predict.DBService.get_model_metadata", AsyncMock(return_value=meta)),
         patch(
             "src.api.predict.DBService.get_predictions_with_features",
-            AsyncMock(return_value=[pred]),
+            AsyncMock(return_value=[(pred, None)]),
         ),
     ):
         response = client.get(
@@ -298,7 +299,7 @@ def test_anomalies_no_probabilities_max_confidence_null():
         patch("src.api.predict.DBService.get_model_metadata", AsyncMock(return_value=meta)),
         patch(
             "src.api.predict.DBService.get_predictions_with_features",
-            AsyncMock(return_value=[pred]),
+            AsyncMock(return_value=[(pred, None)]),
         ),
     ):
         response = client.get(
@@ -318,7 +319,7 @@ def test_anomalies_lower_z_threshold_catches_more():
     pred1 = _make_prediction(1, {"sepal_length": 5.9, "sepal_width": 4.0})
     pred2 = _make_prediction(2, {"sepal_length": 5.8, "sepal_width": 3.1})
 
-    preds = [pred1, pred2]
+    preds = [(pred1, None), (pred2, None)]
     with (
         _patch_auth(),
         patch("src.api.predict.DBService.get_model_metadata", AsyncMock(return_value=meta)),
@@ -349,7 +350,7 @@ def test_anomalies_feature_not_in_baseline_skipped():
         patch("src.api.predict.DBService.get_model_metadata", AsyncMock(return_value=meta)),
         patch(
             "src.api.predict.DBService.get_predictions_with_features",
-            AsyncMock(return_value=[pred]),
+            AsyncMock(return_value=[(pred, None)]),
         ),
     ):
         response = client.get(
@@ -372,7 +373,7 @@ def test_anomalies_non_numeric_feature_skipped():
         patch("src.api.predict.DBService.get_model_metadata", AsyncMock(return_value=meta)),
         patch(
             "src.api.predict.DBService.get_predictions_with_features",
-            AsyncMock(return_value=[pred]),
+            AsyncMock(return_value=[(pred, None)]),
         ),
     ):
         response = client.get(
@@ -416,7 +417,7 @@ def test_anomalies_response_structure():
         patch("src.api.predict.DBService.get_model_metadata", AsyncMock(return_value=meta)),
         patch(
             "src.api.predict.DBService.get_predictions_with_features",
-            AsyncMock(return_value=[pred]),
+            AsyncMock(return_value=[(pred, None)]),
         ),
     ):
         response = client.get(
@@ -506,7 +507,7 @@ def test_anomalies_multiple_anomalous_features():
         patch("src.api.predict.DBService.get_model_metadata", AsyncMock(return_value=meta)),
         patch(
             "src.api.predict.DBService.get_predictions_with_features",
-            AsyncMock(return_value=[pred]),
+            AsyncMock(return_value=[(pred, None)]),
         ),
     ):
         response = client.get(
@@ -535,7 +536,7 @@ def test_anomalies_anomaly_rate_calculation():
         patch("src.api.predict.DBService.get_model_metadata", AsyncMock(return_value=meta)),
         patch(
             "src.api.predict.DBService.get_predictions_with_features",
-            AsyncMock(return_value=[outlier, normal, normal2]),
+            AsyncMock(return_value=[(outlier, None), (normal, None), (normal2, None)]),
         ),
     ):
         response = client.get(
