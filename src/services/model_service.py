@@ -297,34 +297,22 @@ class ModelService:
                     model = _extract_model_from_payload(payload)
                     return {"model": model, "metadata": metadata}
 
-            # 4. Charger le modèle depuis la source
+            # 4. Charger le modèle depuis MinIO (source de vérité opérationnelle).
+            #    mlflow_run_id reste en DB comme lien de traçabilité (UI MLflow) mais
+            #    n'est plus utilisé pour le chargement — garantit le fonctionnement même
+            #    si MLflow est désactivé, inaccessible ou absent lors de l'upload initial.
             try:
-                if metadata.mlflow_run_id:
-                    logger.info(
-                        "Chargement du modèle depuis MLflow",
-                        model_name=model_name,
-                        version=str(metadata.version),
-                        mlflow_run_id=metadata.mlflow_run_id,
-                    )
-                    import mlflow.sklearn
-
-                    model = mlflow.sklearn.load_model(f"runs:/{metadata.mlflow_run_id}/model")
-                    buf = io.BytesIO()
-                    joblib.dump(model, buf)
-                    cache_payload = buf.getvalue()
-                else:
-                    logger.info(
-                        "Téléchargement du modèle depuis MinIO",
-                        model_name=model_name,
-                        version=str(metadata.version),
-                    )
-                    # Download raw bytes — do NOT call joblib.load() until HMAC is verified
-                    raw_bytes = await minio_service.async_download_file_bytes(
-                        metadata.minio_object_key
-                    )
-                    _verify_minio_hmac(raw_bytes, metadata, model_name)
-                    model = joblib.load(io.BytesIO(raw_bytes))  # HMAC verified above
-                    cache_payload = raw_bytes
+                logger.info(
+                    "Téléchargement du modèle depuis MinIO",
+                    model_name=model_name,
+                    version=str(metadata.version),
+                    minio_object_key=metadata.minio_object_key,
+                )
+                # Download raw bytes — do NOT call joblib.load() until HMAC is verified
+                raw_bytes = await minio_service.async_download_file_bytes(metadata.minio_object_key)
+                _verify_minio_hmac(raw_bytes, metadata, model_name)
+                model = joblib.load(io.BytesIO(raw_bytes))  # HMAC verified above
+                cache_payload = raw_bytes
 
                 # 5. Stocker en cache Redis avec enveloppe HMAC (TTL configurable)
                 signed = _sign_for_cache(cache_payload)

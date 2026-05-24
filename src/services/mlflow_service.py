@@ -4,16 +4,18 @@ Service d'intégration MLflow.
 Toutes les méthodes publiques encapsulent les appels MLflow dans un try/except et
 retournent None au lieu de lever une exception, de façon à ne jamais bloquer un
 ré-entraînement si le serveur MLflow est indisponible (dégradation gracieuse).
+
+Principe de stockage :
+  - MinIO (bucket «models») est la source de vérité opérationnelle pour les binaires.
+  - MLflow stocke uniquement les métadonnées (métriques, params, lignée) et un lien
+    vers le chemin MinIO — jamais une copie du binaire.
 """
 
-import io
 import os
-import tempfile
+from datetime import datetime, timezone
 from typing import Optional
 
-import joblib
 import mlflow
-import mlflow.sklearn
 import structlog
 from mlflow.tracking import MlflowClient
 
@@ -59,26 +61,32 @@ class MLflowService:
         label_distribution: Optional[dict],
         algorithm: Optional[str],
         training_params: Optional[dict],
-        auto_promoted: bool,
-        auto_promote_reason: Optional[str],
-        model_bytes: Optional[bytes] = None,
+        hyperparameters: Optional[dict] = None,
+        auto_promoted: bool = False,
+        auto_promote_reason: Optional[str] = None,
+        minio_object_key: Optional[str] = None,
+        minio_bucket: str = "models",
         lookback_days: Optional[int] = None,
-        requirements_txt: Optional[str] = None,
     ) -> Optional[str]:
         """
-        Crée un run MLflow complet pour un ré-entraînement.
+        Crée un run MLflow pour un ré-entraînement.
+
+        MinIO est la source de vérité pour le binaire ; MLflow stocke uniquement
+        les métriques, paramètres et la lignée (+ un lien vers le chemin MinIO).
 
         Retourne le run_id si succès, None si MLflow est indisponible.
-        Le modèle sklearn est loggué comme artifact si model_bytes est fourni.
-        La version est enregistrée dans le Model Registry si MLFLOW_REGISTER_MODELS=true.
         """
         if not self._configure():
             return None
         try:
             mlflow.set_experiment(self._experiment_name(model_name))
 
-            with mlflow.start_run(run_name=f"{model_name}_v{new_version}") as run:
-                # Params
+            # Nom du run enrichi : modèle + version + date + trigger
+            _date = datetime.now(timezone.utc).strftime("%Y%m%d")
+            run_name = f"{model_name}_v{new_version}_{_date}_{trigger}"
+
+            with mlflow.start_run(run_name=run_name) as run:
+                # Params — informations de lignée et de configuration
                 params: dict = {
                     "model_name": model_name,
                     "new_version": new_version,
@@ -92,9 +100,16 @@ class MLflowService:
                     params["algorithm"] = algorithm
                 if lookback_days is not None:
                     params["lookback_days"] = str(lookback_days)
+                # Lien MinIO — source de vérité du binaire
+                if minio_object_key:
+                    params["minio_bucket"] = minio_bucket
+                    params["minio_object_key"] = minio_object_key
                 if training_params:
                     for k, v in training_params.items():
                         params[f"param_{k}"] = str(v)
+                if hyperparameters:
+                    for k, v in hyperparameters.items():
+                        params[f"hparam_{k}"] = str(v)
                 mlflow.log_params(params)
 
                 # Metrics scalaires
@@ -134,57 +149,24 @@ class MLflowService:
                         except Exception:
                             pass
 
-                # Tags
+                # Tags — pour filtrage dans l'UI MLflow
                 mlflow.set_tags(
                     {
-                        "model_name": model_name,
-                        "new_version": new_version,
-                        "source_version": source_version,
+                        "run_type": "training",
                         "trigger": trigger,
                         "auto_promoted": str(auto_promoted),
                         "auto_promote_reason": auto_promote_reason or "",
                     }
                 )
 
-                # Artifact : log du modèle sklearn
-                if model_bytes:
-                    try:
-                        model_obj = joblib.load(io.BytesIO(model_bytes))
-                        mlflow.sklearn.log_model(model_obj, artifact_path="model")
-                    except Exception as exc:
-                        logger.warning("MLflow log_model échoué — artifact ignoré", error=str(exc))
-
-                # Artifact : requirements.txt (snapshot des versions de librairies)
-                if requirements_txt:
-                    try:
-                        with tempfile.NamedTemporaryFile(
-                            mode="w", suffix="_requirements.txt", delete=False, encoding="utf-8"
-                        ) as tmp:
-                            tmp.write(requirements_txt)
-                            _tmp_path = tmp.name
-                        try:
-                            mlflow.log_artifact(_tmp_path, artifact_path="environment")
-                        finally:
-                            os.unlink(_tmp_path)
-                    except Exception as exc:
-                        logger.warning(
-                            "MLflow log requirements.txt échoué — artifact ignoré", error=str(exc)
-                        )
-
                 run_id = run.info.run_id
-
-            # Enregistrement dans le Model Registry
-            if settings.MLFLOW_REGISTER_MODELS:
-                try:
-                    mlflow.register_model(f"runs:/{run_id}/model", model_name)
-                except Exception as exc:
-                    logger.warning("MLflow register_model échoué — run_id conservé", error=str(exc))
 
             logger.info(
                 "Run MLflow créé",
                 model=model_name,
                 version=new_version,
                 run_id=run_id,
+                run_name=run_name,
                 trigger=trigger,
             )
             return run_id
@@ -218,16 +200,27 @@ class MLflowService:
         version: str,
         metrics: dict,
     ) -> Optional[str]:
-        """Logue un snapshot de métriques de production dans une expérience dédiée."""
+        """
+        Logue un snapshot de métriques de production.
+
+        Utilise la même expérience que le training (predictml/{model_name})
+        avec le tag run_type=monitoring pour distinguer les deux types de runs.
+        """
         if not self._configure():
             return None
         try:
-            experiment_name = f"{settings.MLFLOW_EXPERIMENT_PREFIX}/{model_name}_monitoring"
-            mlflow.set_experiment(experiment_name)
+            # Même expérience que le training — distingué par le tag run_type
+            mlflow.set_experiment(self._experiment_name(model_name))
+            _date = datetime.now(timezone.utc).strftime("%Y%m%d")
+            run_name = f"{model_name}_v{version}_monitoring_{_date}"
 
-            with mlflow.start_run(run_name=f"{model_name}_v{version}_monitoring") as run:
+            with mlflow.start_run(run_name=run_name) as run:
                 mlflow.set_tags(
-                    {"model_name": model_name, "version": version, "type": "monitoring"}
+                    {
+                        "run_type": "monitoring",
+                        "model_name": model_name,
+                        "version": version,
+                    }
                 )
                 for key, value in metrics.items():
                     if value is not None:

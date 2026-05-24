@@ -233,42 +233,51 @@ class TestLogRetrainRun:
         assert params["lookback_days"] == "30"
 
     def test_sets_tags(self):
+        """Tags contiennent run_type, trigger, auto_promoted, auto_promote_reason."""
         svc = _make_service()
         mock_mlflow, _ = _build_mock_mlflow()
         _run_log(svc, mock_mlflow, auto_promoted=True, auto_promote_reason="accuracy ok")
         tags = mock_mlflow.set_tags.call_args[0][0]
-        assert tags["model_name"] == "iris"
+        assert tags["run_type"] == "training"
+        assert tags["trigger"] == "manual"
         assert tags["auto_promoted"] == "True"
         assert tags["auto_promote_reason"] == "accuracy ok"
 
-    def test_logs_model_bytes_as_artifact(self):
+    def test_logs_minio_object_key_as_param(self):
+        """MinIO path est loggué comme param (source de vérité — pas d'artifact binaire)."""
         svc = _make_service()
         mock_mlflow, _ = _build_mock_mlflow()
-        _run_log(svc, mock_mlflow, model_bytes=_make_pkl_bytes())
-        mock_mlflow.sklearn.log_model.assert_called_once()
-        positional = mock_mlflow.sklearn.log_model.call_args[0]
-        kw = mock_mlflow.sklearn.log_model.call_args[1]
-        artifact_path = positional[1] if len(positional) > 1 else kw.get("artifact_path")
-        assert artifact_path == "model"
-
-    def test_skips_artifact_on_invalid_bytes(self):
-        svc = _make_service()
-        mock_mlflow, _ = _build_mock_mlflow()
-        _run_log(svc, mock_mlflow, model_bytes=b"not-a-valid-joblib")
+        _run_log(svc, mock_mlflow, minio_object_key="iris/2.0/model.joblib", minio_bucket="models")
+        params = mock_mlflow.log_params.call_args[0][0]
+        assert params["minio_object_key"] == "iris/2.0/model.joblib"
+        assert params["minio_bucket"] == "models"
+        # Aucun artifact binaire ne doit être stocké dans MLflow
         mock_mlflow.sklearn.log_model.assert_not_called()
 
-    def test_skips_artifact_when_model_bytes_is_none(self):
+    def test_no_model_artifact_stored(self):
+        """log_retrain_run ne stocke jamais le binaire dans MLflow (MinIO est la source de vérité)."""
         svc = _make_service()
         mock_mlflow, _ = _build_mock_mlflow()
-        _run_log(svc, mock_mlflow, model_bytes=None)
+        _run_log(svc, mock_mlflow)
         mock_mlflow.sklearn.log_model.assert_not_called()
+        mock_mlflow.log_artifact.assert_not_called()
 
-    def test_calls_register_model_when_enabled(self):
+    def test_logs_hyperparameters_as_hparam_prefixed_params(self):
+        """hyperparameters dict → loggué comme hparam_* dans les params MLflow."""
         svc = _make_service()
-        mock_mlflow, mock_run = _build_mock_mlflow("reg-run-id")
-        mock_settings = _mock_settings(register=True)
+        mock_mlflow, _ = _build_mock_mlflow()
+        _run_log(svc, mock_mlflow, hyperparameters={"n_estimators": 100, "max_depth": 5})
+        params = mock_mlflow.log_params.call_args[0][0]
+        assert params["hparam_n_estimators"] == "100"
+        assert params["hparam_max_depth"] == "5"
+
+    def test_never_calls_register_model(self):
+        """register_model n'est plus appelé — MinIO est la source de vérité du binaire."""
+        svc = _make_service()
+        mock_mlflow, _ = _build_mock_mlflow("reg-run-id")
+        mock_settings = _mock_settings(register=True)  # même avec register=True
         _run_log(svc, mock_mlflow, mock_settings=mock_settings)
-        mock_mlflow.register_model.assert_called_once_with("runs:/reg-run-id/model", "iris")
+        mock_mlflow.register_model.assert_not_called()
 
     def test_skips_register_model_when_disabled(self):
         svc = _make_service()
@@ -368,7 +377,9 @@ class TestLogProductionSnapshot:
         assert "error_rate" in metric_names
         assert "p95_latency_ms" in metric_names
 
-    def test_uses_monitoring_experiment_name(self):
+    def test_uses_same_experiment_as_training(self):
+        """Monitoring utilise la même expérience que le training (predictml/iris).
+        La distinction se fait via le tag run_type=monitoring."""
         svc = _make_service()
         mock_run = MagicMock()
         mock_run.info.run_id = "x"
@@ -383,7 +394,8 @@ class TestLogProductionSnapshot:
                 svc.log_production_snapshot(
                     model_name="iris", version="1.0", metrics={"error_rate": 0.01}
                 )
-        mock_mlflow.set_experiment.assert_called_once_with("predictml/iris_monitoring")
+        # Même expérience que le training — plus d'expérience dédiée _monitoring
+        mock_mlflow.set_experiment.assert_called_once_with("predictml/iris")
 
     def test_returns_none_on_exception(self):
         svc = _make_service()
