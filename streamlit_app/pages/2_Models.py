@@ -1,4 +1,4 @@
-﻿"""
+"""
 Gestion des modèles ML
 """
 
@@ -12,7 +12,7 @@ import streamlit as st
 from utils.api_client import get_model_detail as get_model_detail_cached
 from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
-from utils.metrics_help import METRIC_HELP
+from utils.i18n import t
 
 # --- Helpers historique ---
 
@@ -35,28 +35,12 @@ def _action_badge(action: str) -> str:
 
 _SCRIPTS_DIR = Path(__file__).parent.parent / "documentation" / "Scripts"
 
-# (chemin relatif depuis _SCRIPTS_DIR, description)
+# (catégorie, chemin relatif depuis _SCRIPTS_DIR, clé de description i18n)
 _EXAMPLE_SCRIPTS: list[tuple[str, str, str]] = [
-    (
-        "Iris",
-        "iris/train_iris.py",
-        "Script `train.py` RandomForest — à uploader pour activer le ré-entraînement automatique",
-    ),
-    (
-        "Iris",
-        "iris/upload_iris_model.py",
-        "Upload complet RandomForest — entraîne localement et uploade via l'API",
-    ),
-    (
-        "Wine",
-        "wine/train_wine.py",
-        "Script `train.py` GradientBoostingRegressor — régression sur la teneur en alcool",
-    ),
-    (
-        "Wine",
-        "wine/upload_wine_model.py",
-        "Upload complet Wine Regressor — entraîne localement et uploade via l'API",
-    ),
+    ("Iris", "iris/train_iris.py", "iris_train_desc"),
+    ("Iris", "iris/upload_iris_model.py", "iris_upload_desc"),
+    ("Wine", "wine/train_wine.py", "wine_train_desc"),
+    ("Wine", "wine/upload_wine_model.py", "wine_upload_desc"),
 ]
 
 
@@ -64,16 +48,16 @@ def _read_script(rel_path: str) -> str:
     try:
         return (_SCRIPTS_DIR / rel_path).read_text(encoding="utf-8")
     except Exception:
-        return f"# Fichier introuvable : {rel_path}"
+        return t("models.scripts_example.script_not_found", path=rel_path)
 
 
-@st.dialog("Aperçu du script", width="large")
+@st.dialog(t("models.scripts_example.dialog_title"), width="large")
 def _view_script_dialog(rel_path: str) -> None:
     content = _read_script(rel_path)
     basename = Path(rel_path).name
     st.code(content, language="python", line_numbers=True)
     st.download_button(
-        "⬇️ Télécharger",
+        t("models.scripts_example.btn_download"),
         data=content,
         file_name=basename,
         mime="text/x-python",
@@ -82,12 +66,12 @@ def _view_script_dialog(rel_path: str) -> None:
     )
 
 
-st.set_page_config(page_title="Models — PredictML", page_icon="🤖", layout="wide")
+st.set_page_config(page_title=t("models.page_title"), page_icon="🤖", layout="wide")
 require_auth()
 
 col_title, col_refresh = st.columns([8, 1])
-col_title.title("🤖 Gestion des modèles")
-if col_refresh.button("🔄 Rafraîchir", key="models_refresh", width='stretch'):
+col_title.title(t("models.title"))
+if col_refresh.button(t("models.btn_refresh"), key="models_refresh", width='stretch'):
     st.cache_data.clear()
     st.rerun()
 
@@ -226,7 +210,7 @@ def reload():
 try:
     models = fetch_models(st.session_state.get("api_url"), st.session_state.get("api_token"))
 except Exception as e:
-    st.error(f"Impossible de charger les modèles : {e}")
+    st.error(t("models.load_error", error=e))
     st.stop()
 
 cached_model_keys: list = []
@@ -236,23 +220,20 @@ if is_admin:
     )
 
 if is_admin:
-    with st.expander("📋 Scripts d'exemple", expanded=False):
-        st.caption(
-            "Scripts de référence pour prendre en main l'upload et le ré-entraînement. "
-            "Téléchargez-les ou visualisez-les directement ici."
-        )
+    with st.expander(t("models.scripts_example.expander"), expanded=False):
+        st.caption(t("models.scripts_example.caption"))
         _current_category = None
-        for _category, _script_rel, _script_desc in _EXAMPLE_SCRIPTS:
+        for _category, _script_rel, _desc_key in _EXAMPLE_SCRIPTS:
             if _category != _current_category:
                 st.markdown(f"**{_category}**")
                 _current_category = _category
             _col_desc, _col_view, _col_dl = st.columns([5, 1.5, 1.5])
             _script_basename = Path(_script_rel).name
-            _col_desc.markdown(f"**`{_script_basename}`**  \n{_script_desc}")
-            if _col_view.button("👁 Visualiser", key=f"view_{_script_rel}", width='stretch'):
+            _col_desc.markdown(f"**`{_script_basename}`**  \n{t(f'models.scripts_example.{_desc_key}')}")
+            if _col_view.button(t("models.scripts_example.btn_view"), key=f"view_{_script_rel}", width='stretch'):
                 _view_script_dialog(_script_rel)
             _col_dl.download_button(
-                "⬇️ Télécharger",
+                t("models.scripts_example.btn_download"),
                 data=_read_script(_script_rel),
                 file_name=_script_basename,
                 mime="text/x-python",
@@ -261,32 +242,32 @@ if is_admin:
             )
 
 if is_admin:
-    with st.expander("➕ Uploader un nouveau modèle", expanded=not models):
+    with st.expander(t("models.upload.expander"), expanded=not models):
         with st.form("upload_model_form", clear_on_submit=True):
-            st.markdown("##### Fichiers")
+            st.markdown(t("models.upload.section_files"))
             col_f1, col_f2 = st.columns(2)
             with col_f1:
                 pkl_file = st.file_uploader(
-                    "Fichier modèle (.joblib) *",
+                    t("models.upload.pkl_label"),
                     type=["joblib", "pkl"],
-                    help="Fichier modèle sérialisé (joblib recommandé). Aucune limite de taille imposée.",
+                    help=t("models.upload.pkl_help"),
                 )
             with col_f2:
                 train_file = st.file_uploader(
-                    "Script d'entraînement (train.py) — optionnel",
+                    t("models.upload.train_label"),
                     type=["py"],
-                    help="Doit référencer TRAIN_START_DATE, TRAIN_END_DATE, OUTPUT_MODEL_PATH.",
+                    help=t("models.upload.train_help"),
                 )
 
-            st.markdown("##### Identité")
+            st.markdown(t("models.upload.section_identity"))
             col_n, col_v = st.columns(2)
             with col_n:
-                up_name = st.text_input("Nom du modèle *", placeholder="ex : iris-classifier")
+                up_name = st.text_input(t("models.upload.name_label"), placeholder=t("models.upload.name_placeholder"))
             with col_v:
-                up_version = st.text_input("Version *", placeholder="ex : 1.0.0")
+                up_version = st.text_input(t("models.upload.version_label"), placeholder=t("models.upload.version_placeholder"))
 
             up_description = st.text_area(
-                "Description", placeholder="Description courte du modèle…", height=80
+                t("models.upload.description_label"), placeholder=t("models.upload.description_placeholder"), height=80
             )
 
             _ALGO_OPTIONS = [
@@ -306,79 +287,75 @@ if is_admin:
                 "ElasticNet",
                 "Autre",
             ]
-            up_algorithm = st.selectbox("Algorithme", _ALGO_OPTIONS)
+            up_algorithm = st.selectbox(t("models.upload.algorithm_label"), _ALGO_OPTIONS)
 
-            st.markdown("##### Métriques")
+            st.markdown(t("models.upload.section_metrics"))
             col_acc, col_auc, col_f1s = st.columns(3)
             with col_acc:
                 up_accuracy = st.number_input(
-                    "Accuracy", min_value=0.0, max_value=1.0, value=None, step=0.001, format="%.4f"
+                    t("models.upload.accuracy_label"), min_value=0.0, max_value=1.0, value=None, step=0.001, format="%.4f"
                 )
             with col_auc:
                 up_auc = st.number_input(
-                    "AUC-ROC",
+                    t("models.upload.auc_label"),
                     min_value=0.0,
                     max_value=1.0,
                     value=None,
                     step=0.001,
                     format="%.4f",
-                    help="AUC-ROC du modèle sur le jeu de test (classification binaire / multiclasse).",
+                    help=t("models.upload.auc_help"),
                 )
             with col_f1s:
                 up_f1 = st.number_input(
-                    "F1 score", min_value=0.0, max_value=1.0, value=None, step=0.001, format="%.4f"
+                    t("models.upload.f1_label"), min_value=0.0, max_value=1.0, value=None, step=0.001, format="%.4f"
                 )
 
             up_tags_raw = st.text_input(
-                "Tags (séparés par des virgules)",
-                placeholder="ex : production, finance, v2",
+                t("models.upload.tags_label"),
+                placeholder=t("models.upload.tags_placeholder"),
             )
 
-            st.markdown("##### Baseline automatique")
+            st.markdown(t("models.upload.section_baseline"))
             col_bl1, col_bl2 = st.columns([3, 1])
             with col_bl1:
                 compute_baseline_auto = st.checkbox(
-                    "Calculer la baseline depuis les données de production",
+                    t("models.upload.baseline_checkbox"),
                     value=True,
-                    help=(
-                        "Après l'upload, calcule les statistiques de distribution "
-                        "(mean, std, min, max) depuis les prédictions récentes. "
-                        "Nécessite au moins 100 prédictions pour ce nom de modèle."
-                    ),
+                    help=t("models.upload.baseline_checkbox_help"),
                 )
             with col_bl2:
                 baseline_days = st.number_input(
-                    "Fenêtre (jours)", min_value=1, max_value=180, value=30
+                    t("models.upload.baseline_days_label"), min_value=1, max_value=180, value=30
                 )
 
-            submitted = st.form_submit_button("⬆️ Uploader le modèle", type="primary")
+            submitted = st.form_submit_button(t("models.upload.submit_btn"), type="primary")
 
         if submitted:
             errors = []
             if not pkl_file:
-                errors.append("Le fichier modèle (.joblib) est obligatoire.")
+                errors.append(t("models.upload.error_no_file"))
             if not up_name.strip():
-                errors.append("Le nom du modèle est obligatoire.")
+                errors.append(t("models.upload.error_no_name"))
             if not up_version.strip():
-                errors.append("La version est obligatoire.")
+                errors.append(t("models.upload.error_no_version"))
 
             if errors:
                 for err in errors:
                     st.error(err)
             else:
                 tags = (
-                    [t.strip() for t in up_tags_raw.split(",") if t.strip()]
+                    [_tag.strip() for _tag in up_tags_raw.split(",") if _tag.strip()]
                     if up_tags_raw.strip()
                     else []
                 )
                 algorithm = up_algorithm if up_algorithm and up_algorithm != "Autre" else None
 
-                with st.spinner(f"Upload de {pkl_file.name} en cours…"):
-                    progress = st.progress(0, text="Envoi du fichier…")
+                with st.spinner(t("models.upload.spinner", filename=pkl_file.name)):
+                    progress = st.progress(0, text=t("models.upload.progress_sending"))
                     try:
                         train_bytes = train_file.read() if train_file else None
                         train_fname = train_file.name if train_file else None
-                        progress.progress(30, text="Envoi en cours…")
+                        progress.progress(30, text=t("models.upload.progress_in_progress"))
                         result = client.upload_model(
                             name=up_name.strip(),
                             version=up_version.strip(),
@@ -393,9 +370,9 @@ if is_admin:
                             train_file_bytes=train_bytes,
                             train_filename=train_fname,
                         )
-                        progress.progress(100, text="Terminé.")
+                        progress.progress(100, text=t("models.upload.progress_done"))
                         st.toast(
-                            f"Modèle {result['name']} v{result['version']} uploadé.", icon="✅"
+                            t("models.upload.success_toast", name=result['name'], version=result['version']), icon="✅"
                         )
                         if compute_baseline_auto:
                             try:
@@ -406,8 +383,7 @@ if is_admin:
                                     dry_run=False,
                                 )
                                 st.info(
-                                    f"Baseline calculée : {len(bl['baseline'])} features, "
-                                    f"{bl['predictions_used']} prédictions utilisées."
+                                    t("models.upload.baseline_success", n_features=len(bl['baseline']), n_predictions=bl['predictions_used'])
                                 )
                             except Exception as bl_exc:
                                 _bl_detail = ""
@@ -416,7 +392,7 @@ if is_admin:
                                         _bl_detail = bl_exc.response.json().get("detail", "")
                                 except Exception:
                                     pass
-                                st.warning(f"Baseline non calculée : {_bl_detail or bl_exc}")
+                                st.warning(t("models.upload.baseline_warning", error=_bl_detail or bl_exc))
                         reload()
                     except Exception as exc:
                         progress.empty()
@@ -427,44 +403,44 @@ if is_admin:
                                 detail = body.get("detail") or str(body)
                         except Exception:
                             detail = str(exc)
-                        st.error(f"Erreur lors de l'upload : {detail or exc}")
+                        st.error(t("models.upload.upload_error", detail=detail or exc))
 
 if not models:
-    st.info("Aucun modèle disponible.")
+    st.info(t("models.no_models"))
     st.stop()
 
 # Résumé
 col1, col2, col3 = st.columns(3)
-col1.metric("Total modèles", len(models))
-col2.metric("En production", sum(1 for m in models if m.get("is_production")))
-col3.metric("Avec MLflow", sum(1 for m in models if m.get("mlflow_run_id")))
+col1.metric(t("models.summary.total_models"), len(models))
+col2.metric(t("models.summary.in_production"), sum(1 for m in models if m.get("is_production")))
+col3.metric(t("models.summary.with_mlflow"), sum(1 for m in models if m.get("mlflow_run_id")))
 
 st.divider()
 
 # ── Barre de filtres (une seule ligne) ───────────────────────────────────────
 _all_model_names = sorted({m["name"] for m in models})
-_all_tags = sorted({t for m in models for t in (m.get("tags") or [])})
+_all_tags = sorted({_tag for m in models for _tag in (m.get("tags") or [])})
 _filter_cols = st.columns([3, 2, 2]) if _all_tags else st.columns([3, 2])
 
 with _filter_cols[0]:
     search_query = st.text_input(
-        "Nom ou description",
-        placeholder="Rechercher…",
+        t("models.filters.search_label"),
+        placeholder=t("models.filters.search_placeholder"),
         key="models_search",
     )
 
 with _filter_cols[1]:
     model_name_filter = st.selectbox(
-        "Modèle",
-        ["(tous les modèles)"] + _all_model_names,
+        t("models.filters.model_label"),
+        [t("models.filters.model_all")] + _all_model_names,
         key="models_name_filter",
     )
 
 if len(_filter_cols) == 3:
     with _filter_cols[2]:
-        tag_filter = st.selectbox("Tag", ["(tous les tags)"] + _all_tags, key="tag_filter")
+        tag_filter = st.selectbox(t("models.filters.tag_label"), [t("models.filters.tag_all")] + _all_tags, key="tag_filter")
 else:
-    tag_filter = "(tous les tags)"
+    tag_filter = t("models.filters.tag_all")
 
 # Appliquer les filtres
 if search_query:
@@ -473,22 +449,15 @@ if search_query:
         m for m in models
         if q in (m.get("name") or "").lower() or q in (m.get("description") or "").lower()
     ]
-if model_name_filter != "(tous les modèles)":
+if model_name_filter != t("models.filters.model_all"):
     models = [m for m in models if m.get("name") == model_name_filter]
-if tag_filter != "(tous les tags)":
+if tag_filter != t("models.filters.tag_all"):
     models = [m for m in models if tag_filter in (m.get("tags") or [])]
 
 _DEPLOY_BADGE = {
     "ab_test": "🟠 A/B",
     "shadow": "🟣 Shadow",
     "production": "🟢 Prod",
-}
-
-
-_TASK_LABELS = {
-    "regression": "📈 Régression",
-    "classification_binary": "🔵 Binaire",
-    "classification_multiclass": "🟡 Multiclass",
 }
 
 
@@ -501,10 +470,14 @@ def _infer_task(m: dict) -> str:
         if classes:
             task = "classification_binary" if len(classes) == 2 else "classification_multiclass"
         elif tm.get("r2") is not None or tm.get("rmse") is not None or tm.get("mae") is not None:
-            # Fallback : training_metrics contient des métriques de régression
             task = "regression"
         elif m.get("accuracy") is not None or m.get("f1_score") is not None:
-            task = "classification_multiclass"  # faute de mieux
+            task = "classification_multiclass"
+    _TASK_LABELS = {
+        "regression": t("models.table.task_regression"),
+        "classification_binary": t("models.table.task_binary"),
+        "classification_multiclass": t("models.table.task_multiclass"),
+    }
     return _TASK_LABELS.get(task or "", "—")
 
 
@@ -516,13 +489,30 @@ def _statut(m: dict) -> str:
     if mode == "shadow":
         return "🟣 Shadow"
     if m.get("is_production"):
-        return "🟢 Production"
+        return t("models.table.status_production")
     if m.get("is_active"):
-        return "✅ Actif"
-    return "⚫ Inactif"
+        return t("models.table.status_active")
+    return t("models.table.status_inactive")
 
 
 # Tableau de synthèse
+_col_name = t("models.table.col_name")
+_col_version = t("models.table.col_version")
+_col_tags = t("models.table.col_tags")
+_col_algorithm = t("models.table.col_algorithm")
+_col_task = t("models.table.col_task")
+_col_baseline = t("models.table.col_baseline")
+_col_cache = t("models.table.col_cache")
+_col_status = t("models.table.col_status")
+_col_creator = t("models.table.col_creator")
+_col_created_at = t("models.table.col_created_at")
+_col_last_pred = t("models.table.col_last_pred")
+_col_accuracy_eval = t("models.table.col_accuracy_eval")
+_col_auc_eval = t("models.table.col_auc_eval")
+_col_f1_eval = t("models.table.col_f1_eval")
+_col_r2_train = t("models.table.col_r2_train")
+_col_rmse_train = t("models.table.col_rmse_train")
+
 rows = []
 for m in models:
     statut = _statut(m)
@@ -530,34 +520,34 @@ for m in models:
     in_cache = f"{m.get('name')}:{m.get('version')}" in cached_model_keys
     rows.append(
         {
-            "Nom": m.get("name", ""),
-            "Version": m.get("version", ""),
-            "Tags": ", ".join(m.get("tags") or []) or "—",
-            "Algorithme": m.get("algorithm") or "—",
-            "Tâche": _infer_task(m),
-            "Baseline": "✅ Baseline" if m.get("feature_baseline") else "⚠️ No baseline",
-            "Cache": "🔥 En cache" if in_cache else "❄️ Non chargé",
-            "Statut": statut,
-            "Créateur": m.get("creator_username") or "—",
-            "Créé le": (
+            _col_name: m.get("name", ""),
+            _col_version: m.get("version", ""),
+            _col_tags: ", ".join(m.get("tags") or []) or "—",
+            _col_algorithm: m.get("algorithm") or "—",
+            _col_task: _infer_task(m),
+            _col_baseline: t("models.table.baseline_ok") if m.get("feature_baseline") else t("models.table.baseline_missing"),
+            _col_cache: t("models.table.cache_hot") if in_cache else t("models.table.cache_cold"),
+            _col_status: statut,
+            _col_creator: m.get("creator_username") or "—",
+            _col_created_at: (
                 pd.to_datetime(m.get("created_at")).strftime("%Y-%m-%d")
                 if m.get("created_at")
                 else "—"
             ),
-            "Dernière préd.": (
+            _col_last_pred: (
                 pd.to_datetime(m.get("last_seen")).strftime("%Y-%m-%d %H:%M")
                 if m.get("last_seen")
                 else "—"
             ),
-            "Accuracy (eval)": f"{m['accuracy']:.3f}" if m.get("accuracy") is not None else "—",
-            "AUC (eval)": f"{m['auc']:.3f}" if m.get("auc") is not None else "—",
-            "F1 (eval)": f"{m['f1_score']:.3f}" if m.get("f1_score") is not None else "—",
-            "R² (train)": (
+            _col_accuracy_eval: f"{m['accuracy']:.3f}" if m.get("accuracy") is not None else "—",
+            _col_auc_eval: f"{m['auc']:.3f}" if m.get("auc") is not None else "—",
+            _col_f1_eval: f"{m['f1_score']:.3f}" if m.get("f1_score") is not None else "—",
+            _col_r2_train: (
                 f"{(m.get('training_metrics') or {}).get('r2'):.3f}"
                 if (m.get("training_metrics") or {}).get("r2") is not None
                 else "—"
             ),
-            "RMSE (train)": (
+            _col_rmse_train: (
                 f"{(m.get('training_metrics') or {}).get('rmse'):.4f}"
                 if (m.get("training_metrics") or {}).get("rmse") is not None
                 else "—"
@@ -570,132 +560,78 @@ st.dataframe(
     width='stretch',
     hide_index=True,
     column_config={
-        "Nom": st.column_config.TextColumn(
-            "Nom",
-            help="Identifiant unique du modèle.",
+        _col_name: st.column_config.TextColumn(
+            _col_name,
+            help=t("models.table.col_name_help"),
         ),
-        "Version": st.column_config.TextColumn(
-            "Version",
-            help="Version du modèle au format X.Y.Z.",
+        _col_version: st.column_config.TextColumn(
+            _col_version,
+            help=t("models.table.col_version_help"),
         ),
-        "Tags": st.column_config.TextColumn(
-            "Tags",
-            help="Étiquettes libres associées au modèle (ex : Example, production, v2…).",
+        _col_tags: st.column_config.TextColumn(
+            _col_tags,
+            help=t("models.table.col_tags_help"),
         ),
-        "Algorithme": st.column_config.TextColumn(
-            "Algorithme",
-            help="Classe scikit-learn utilisée lors de l'entraînement (ex : RandomForest, GradientBoosting…).",
+        _col_algorithm: st.column_config.TextColumn(
+            _col_algorithm,
+            help=t("models.table.col_algorithm_help"),
         ),
-        "Tâche": st.column_config.TextColumn(
-            "Tâche",
-            help="Type de tâche ML : 📈 Régression, 🔵 Classification binaire ou 🟡 Classification multiclasse.",
+        _col_task: st.column_config.TextColumn(
+            _col_task,
+            help=t("models.table.col_task_help"),
         ),
-        "Baseline": st.column_config.TextColumn(
-            "Baseline",
-            help=(
-                "✅ Baseline : statistiques de référence (moyenne, std, min/max) calculées à l'entraînement. "
-                "Utilisées pour la détection de drift et la validation du schéma d'entrée. "
-                "⚠️ Absent : upload sans feature_baseline."
-            ),
+        _col_baseline: st.column_config.TextColumn(
+            _col_baseline,
+            help=t("models.table.col_baseline_help"),
         ),
-        "Cache": st.column_config.TextColumn(
-            "Cache",
-            help=(
-                "🔥 En cache : modèle chargé en mémoire — prêt à servir sans latence de cold start. "
-                "❄️ Non chargé : sera chargé depuis MinIO à la première prédiction."
-            ),
+        _col_cache: st.column_config.TextColumn(
+            _col_cache,
+            help=t("models.table.col_cache_help"),
         ),
-        "Statut": st.column_config.TextColumn(
-            "Statut",
-            help=(
-                "🟢 Production : version principale. "
-                "🟠 A/B (x%) : reçoit x% du trafic en test A/B. "
-                "🟣 Shadow : reçoit les requêtes sans retourner sa prédiction au client. "
-                "✅ Actif : disponible mais non en production. "
-                "⚫ Inactif : désactivé."
-            ),
+        _col_status: st.column_config.TextColumn(
+            _col_status,
+            help=t("models.table.col_status_help"),
         ),
-        "Créateur": st.column_config.TextColumn(
-            "Créateur",
-            help="Utilisateur ayant uploadé ce modèle.",
+        _col_creator: st.column_config.TextColumn(
+            _col_creator,
+            help=t("models.table.col_creator_help"),
         ),
-        "Créé le": st.column_config.TextColumn(
-            "Créé le",
-            help="Date d'upload du modèle (heure locale).",
+        _col_created_at: st.column_config.TextColumn(
+            _col_created_at,
+            help=t("models.table.col_created_at_help"),
         ),
-        "Dernière préd.": st.column_config.TextColumn(
-            "Dernière préd.",
-            help="Date et heure de la dernière prédiction servie par ce modèle.",
+        _col_last_pred: st.column_config.TextColumn(
+            _col_last_pred,
+            help=t("models.table.col_last_pred_help"),
         ),
-        "Accuracy (eval)": st.column_config.TextColumn(
-            "Accuracy (eval)",
-            help=(
-                "Accuracy = (vrais positifs + vrais négatifs) / total des observations.\n\n"
-                "Mesure la proportion de prédictions correctes sur le jeu de test (hold-out) "
-                "séparé avant l'entraînement.\n\n"
-                "• 1.0 → 100 % de prédictions correctes\n"
-                "• 0.5 → équivalent à un tirage aléatoire sur 2 classes\n\n"
-                "⚠️ Trompeuse sur des classes très déséquilibrées : un modèle qui "
-                "prédit toujours la classe majoritaire peut afficher 0.95 sans rien apprendre. "
-                "Dans ce cas, préférer le F1. Métrique classification uniquement."
-            ),
+        _col_accuracy_eval: st.column_config.TextColumn(
+            _col_accuracy_eval,
+            help=t("models.table.col_accuracy_eval_help"),
         ),
-        "F1 (eval)": st.column_config.TextColumn(
-            "F1 (eval)",
-            help=(
-                "F1 = 2 × (Précision × Rappel) / (Précision + Rappel)\n\n"
-                "• Précision = parmi les exemples prédits positifs, combien le sont vraiment.\n"
-                "• Rappel = parmi les exemples réellement positifs, combien sont détectés.\n\n"
-                "Le F1 est la moyenne harmonique des deux : il pénalise fortement "
-                "un score très faible sur l'un ou l'autre.\n\n"
-                "• 1.0 → précision et rappel parfaits\n"
-                "• 0.0 → modèle inutilisable\n\n"
-                "Recommandé quand les classes sont déséquilibrées ou quand les faux négatifs "
-                "et faux positifs ont un coût différent (ex : détection de fraude, diagnostic médical). "
-                "Métrique classification uniquement."
-            ),
+        _col_f1_eval: st.column_config.TextColumn(
+            _col_f1_eval,
+            help=t("models.table.col_f1_eval_help"),
         ),
-        "R² (train)": st.column_config.TextColumn(
-            "R² (train)",
-            help=(
-                "R² = 1 − (Σ(y − ŷ)²) / (Σ(y − ȳ)²)\n\n"
-                "Mesure la part de variance de la variable cible expliquée par le modèle, "
-                "calculée sur le jeu d'entraînement.\n\n"
-                "• 1.0 → le modèle prédit parfaitement toutes les valeurs\n"
-                "• 0.0 → le modèle n'explique rien (équivalent à prédire la moyenne)\n"
-                "• < 0 → le modèle est moins bon que de prédire la moyenne — signe "
-                "d'un problème (sur-régularisation, mauvais features, bug)\n\n"
-                "⚠️ Un R² élevé sur le train peut masquer du surapprentissage. "
-                "Comparer avec les métriques live en production. Métrique régression uniquement."
-            ),
+        _col_r2_train: st.column_config.TextColumn(
+            _col_r2_train,
+            help=t("models.table.col_r2_train_help"),
         ),
-        "RMSE (train)": st.column_config.TextColumn(
-            "RMSE (train)",
-            help=(
-                "RMSE = √( Σ(y − ŷ)² / n )\n\n"
-                "Erreur quadratique moyenne, exprimée dans la même unité que la variable cible. "
-                "Calculée sur le jeu d'entraînement.\n\n"
-                "• Un RMSE de 2.5 sur un prix en € signifie que le modèle se trompe "
-                "en moyenne de ±2.5 €.\n"
-                "• Plus la valeur est faible, meilleur est le modèle.\n"
-                "• Pas de borne supérieure : dépend de l'échelle de la cible.\n\n"
-                "Le RMSE pénalise davantage les grandes erreurs que la MAE "
-                "(Mean Absolute Error), car les écarts sont mis au carré avant la racine. "
-                "Métrique régression uniquement."
-            ),
+        _col_rmse_train: st.column_config.TextColumn(
+            _col_rmse_train,
+            help=t("models.table.col_rmse_train_help"),
         ),
     },
 )
-st.caption("Accuracy (eval), F1 (eval), R² (eval), RMSE (eval) : métriques issues de l'évaluation sur le jeu de test lors de l'entraînement.")
+st.caption(t("models.summary.caption"))
 
 # ---------------------------------------------------------------------------
 # Comparaison multi-versions
 # ---------------------------------------------------------------------------
 
-with st.expander("📊 Comparaison multi-versions", expanded=False):
+with st.expander(t("models.compare.expander"), expanded=False):
     model_names = sorted({m["name"] for m in models})
     compare_search = st.text_input(
-        "Filtrer par nom", key="compare_search", placeholder="Rechercher un modèle…"
+        t("models.compare.filter_label"), key="compare_search", placeholder=t("models.compare.filter_placeholder")
     )
     compare_filtered = (
         [n for n in model_names if compare_search.lower() in n.lower()]
@@ -703,14 +639,14 @@ with st.expander("📊 Comparaison multi-versions", expanded=False):
         else model_names
     )
     compare_name = st.selectbox(
-        "Modèle à comparer", compare_filtered or model_names, key="compare_model_name"
+        t("models.compare.model_label"), compare_filtered or model_names, key="compare_model_name"
     )
 
     versions_for_model = [m["version"] for m in models if m["name"] == compare_name]
     all_versions_label = f"Toutes ({len(versions_for_model)})"
     version_options = [all_versions_label] + versions_for_model
     selected_versions = st.multiselect(
-        "Versions à inclure (vide = toutes)",
+        t("models.compare.versions_label"),
         versions_for_model,
         default=[],
         key="compare_versions_select",
@@ -718,16 +654,16 @@ with st.expander("📊 Comparaison multi-versions", expanded=False):
     _cmp_col_start, _cmp_col_end = st.columns(2)
     _cmp_default_end = pd.Timestamp.now().date()
     _cmp_default_start = _cmp_default_end - pd.Timedelta(days=6)
-    compare_date_start = _cmp_col_start.date_input("Date début", value=_cmp_default_start, key="compare_date_start")
-    compare_date_end = _cmp_col_end.date_input("Date fin", value=_cmp_default_end, key="compare_date_end")
+    compare_date_start = _cmp_col_start.date_input(t("models.compare.date_start"), value=_cmp_default_start, key="compare_date_start")
+    compare_date_end = _cmp_col_end.date_input(t("models.compare.date_end"), value=_cmp_default_end, key="compare_date_end")
     compare_days = max(1, (compare_date_end - compare_date_start).days + 1)
 
-    if st.button("🔍 Comparer", key="compare_btn", type="primary"):
+    if st.button(t("models.compare.btn_compare"), key="compare_btn", type="primary"):
         if compare_date_start > compare_date_end:
-            st.warning("La date de début doit être antérieure à la date de fin.")
+            st.warning(t("models.compare.date_order_warning"))
         else:
             versions_param = ",".join(selected_versions) if selected_versions else None
-            with st.spinner("Comparaison en cours…"):
+            with st.spinner(t("models.compare.spinner")):
                 try:
                     cmp = client.compare_model_versions(
                         compare_name,
@@ -738,7 +674,7 @@ with st.expander("📊 Comparaison multi-versions", expanded=False):
                     )
                     cmp_versions = cmp.get("versions", [])
                     if not cmp_versions:
-                        st.info("Aucune version active trouvée.")
+                        st.info(t("models.compare.no_versions"))
                     else:
                         _DRIFT_BADGE = {
                             "ok": "🟢 ok",
@@ -771,85 +707,104 @@ with st.expander("📊 Comparaison multi-versions", expanded=False):
                             show["f1"]       = any(v.get("f1_score")  is not None for v in cmp_versions)
                             show["brier"]    = any(v.get("brier_score") is not None for v in cmp_versions)
 
+                        _cv = t("models.compare.col_version")
+                        _cst = t("models.table.col_status")
+                        _ctask = t("models.compare.col_task")
+                        _cnp = t("models.compare.col_nb_pred")
+                        _cns = t("models.compare.col_nb_shadow")
+                        _clp50 = t("models.compare.col_lat_p50")
+                        _clp95 = t("models.compare.col_lat_p95")
+                        _cta = t("models.compare.col_trained_at")
+                        _cd = t("models.compare.col_drift")
+                        _cmae_eval = t("models.compare.col_mae_eval")
+                        _cmae_live = t("models.compare.col_mae_live")
+                        _crmse_eval = t("models.compare.col_rmse_eval")
+                        _crmse_live = t("models.compare.col_rmse_live")
+                        _cr2_eval = t("models.compare.col_r2_eval")
+                        _cr2_live = t("models.compare.col_r2_live")
+                        _cacc_eval = t("models.compare.col_accuracy_eval")
+                        _cacc_live = t("models.compare.col_accuracy_live")
+                        _cauc_eval = t("models.compare.col_auc_eval")
+                        _cauc_live = t("models.compare.col_auc_live")
+                        _cf1_eval = t("models.compare.col_f1_eval")
+                        _cf1_live = t("models.compare.col_f1_live")
+                        _cbrier = t("models.compare.col_brier")
+
                         for v in cmp_versions:
                             full = _full_meta.get(v["version"], v)
                             row = {
-                                "Version": v["version"],
-                                "Statut": _statut(full),
-                                "Tâche": _infer_task(v),
-                                "Nb préd.": v.get("prediction_count") or 0,
-                                "Nb préd. shadow": v.get("shadow_prediction_count") or 0,
-                                "Latence p50 (ms)": _r(v.get("latency_p50_ms"), 1),
-                                "Latence p95 (ms)": _r(v.get("latency_p95_ms"), 1),
-                                "Entraîné le": (
+                                _cv: v["version"],
+                                _cst: _statut(full),
+                                _ctask: _infer_task(v),
+                                _cnp: v.get("prediction_count") or 0,
+                                _cns: v.get("shadow_prediction_count") or 0,
+                                _clp50: _r(v.get("latency_p50_ms"), 1),
+                                _clp95: _r(v.get("latency_p95_ms"), 1),
+                                _cta: (
                                     pd.to_datetime(v["trained_at"]).strftime("%Y-%m-%d")
                                     if v.get("trained_at") else "—"
                                 ),
-                                "Drift": _DRIFT_BADGE.get(v.get("drift_status") or "", "—"),
+                                _cd: _DRIFT_BADGE.get(v.get("drift_status") or "", "—"),
                             }
                             if is_regression:
                                 if show["mae"]:
-                                    row["MAE (eval)"]  = _r(v.get("mae_eval"), 4)
-                                    row["MAE (live)"]  = _r(v.get("live_mae"), 4)
+                                    row[_cmae_eval]  = _r(v.get("mae_eval"), 4)
+                                    row[_cmae_live]  = _r(v.get("live_mae"), 4)
                                 if show["rmse"]:
-                                    row["RMSE (eval)"] = _r(v.get("rmse_eval"), 4)
-                                    row["RMSE (live)"] = _r(v.get("live_rmse"), 4)
+                                    row[_crmse_eval] = _r(v.get("rmse_eval"), 4)
+                                    row[_crmse_live] = _r(v.get("live_rmse"), 4)
                                 if show["r2"]:
-                                    row["R² (eval)"]   = _r(v.get("r2_eval"), 3)
-                                    row["R² (live)"]   = _r(v.get("live_r2"), 3)
+                                    row[_cr2_eval]   = _r(v.get("r2_eval"), 3)
+                                    row[_cr2_live]   = _r(v.get("live_r2"), 3)
                             else:
                                 if show["accuracy"]:
-                                    row["Accuracy (eval)"] = _r(v.get("accuracy"))
-                                    row["Accuracy (live)"] = _r(v.get("live_accuracy"))
+                                    row[_cacc_eval] = _r(v.get("accuracy"))
+                                    row[_cacc_live] = _r(v.get("live_accuracy"))
                                 if show.get("auc"):
-                                    row["AUC (eval)"]      = _r(v.get("auc"))
-                                    row["AUC (live)"]      = _r(v.get("live_auc"))
+                                    row[_cauc_eval] = _r(v.get("auc"))
+                                    row[_cauc_live] = _r(v.get("live_auc"))
                                 if show["f1"]:
-                                    row["F1 (eval)"]       = _r(v.get("f1_score"))
-                                    row["F1 (live)"]       = _r(v.get("live_f1"))
+                                    row[_cf1_eval]  = _r(v.get("f1_score"))
+                                    row[_cf1_live]  = _r(v.get("live_f1"))
                                 if show["brier"]:
-                                    row["Brier score"]     = _r(v.get("brier_score"), 4)
+                                    row[_cbrier]    = _r(v.get("brier_score"), 4)
                             cmp_rows.append(row)
 
                         col_config = {
-                            "Nb préd.": st.column_config.NumberColumn(
-                                "Nb préd.",
-                                help=f"Prédictions production (is_shadow=False) sur la période {compare_date_start} → {compare_date_end}.",
+                            _cnp: st.column_config.NumberColumn(
+                                _cnp,
+                                help=t("models.compare.col_nb_pred_help", start=compare_date_start, end=compare_date_end),
                             ),
-                            "Nb préd. shadow": st.column_config.NumberColumn(
-                                "Nb préd. shadow",
-                                help=f"Prédictions shadow (is_shadow=True) sur la période {compare_date_start} → {compare_date_end}.",
+                            _cns: st.column_config.NumberColumn(
+                                _cns,
+                                help=t("models.compare.col_nb_shadow_help", start=compare_date_start, end=compare_date_end),
                             ),
-                            "Latence p50 (ms)": st.column_config.NumberColumn(format="%.1f"),
-                            "Latence p95 (ms)": st.column_config.NumberColumn(format="%.1f"),
+                            _clp50: st.column_config.NumberColumn(format="%.1f"),
+                            _clp95: st.column_config.NumberColumn(format="%.1f"),
                         }
                         if is_regression:
-                            for col, fmt in [("MAE", "%.4f"), ("RMSE", "%.4f"), ("R²", "%.3f")]:
-                                col_config[f"{col} (eval)"] = st.column_config.NumberColumn(f"{col} (eval)", help=f"{col} sur le jeu de test d'entraînement.", format=fmt)
-                                col_config[f"{col} (live)"] = st.column_config.NumberColumn(f"{col} (live)", help=f"{col} calculé sur les prédictions réelles avec ground truth.", format=fmt)
+                            for _ckey, _lkey, fmt in [(_cmae_eval, _cmae_live, "%.4f"), (_crmse_eval, _crmse_live, "%.4f"), (_cr2_eval, _cr2_live, "%.3f")]:
+                                col_config[_ckey] = st.column_config.NumberColumn(_ckey, help=t("models.compare.col_mae_eval_help") if _ckey == _cmae_eval else (t("models.compare.col_rmse_eval_help") if _ckey == _crmse_eval else t("models.compare.col_r2_eval_help")), format=fmt)
+                                col_config[_lkey] = st.column_config.NumberColumn(_lkey, help=t("models.compare.col_mae_live_help") if _lkey == _cmae_live else (t("models.compare.col_rmse_live_help") if _lkey == _crmse_live else t("models.compare.col_r2_live_help")), format=fmt)
                         else:
-                            for col, fmt in [("Accuracy", "%.3f"), ("F1", "%.3f")]:
-                                col_config[f"{col} (eval)"] = st.column_config.NumberColumn(f"{col} (eval)", help=f"{col} sur le jeu de test d'entraînement.", format=fmt)
-                                col_config[f"{col} (live)"] = st.column_config.NumberColumn(f"{col} (live)", help=f"{col} sur les prédictions réelles avec ground truth.", format=fmt)
+                            for _ckey, _lkey, fmt in [(_cacc_eval, _cacc_live, "%.3f"), (_cf1_eval, _cf1_live, "%.3f")]:
+                                col_config[_ckey] = st.column_config.NumberColumn(_ckey, help=t("models.compare.col_accuracy_eval_help") if _ckey == _cacc_eval else t("models.compare.col_f1_eval_help"), format=fmt)
+                                col_config[_lkey] = st.column_config.NumberColumn(_lkey, help=t("models.compare.col_accuracy_live_help") if _lkey == _cacc_live else t("models.compare.col_f1_live_help"), format=fmt)
                             if show.get("auc"):
-                                col_config["AUC (eval)"] = st.column_config.NumberColumn(
-                                    "AUC (eval)",
-                                    help="AUC-ROC sur le jeu de test d'entraînement. Requiert des probabilités prédites.",
+                                col_config[_cauc_eval] = st.column_config.NumberColumn(
+                                    _cauc_eval,
+                                    help=t("models.compare.col_auc_eval_help"),
                                     format="%.3f",
                                 )
-                                col_config["AUC (live)"] = st.column_config.NumberColumn(
-                                    "AUC (live)",
-                                    help="AUC-ROC calculé sur les prédictions réelles avec ground truth et probabilités.",
+                                col_config[_cauc_live] = st.column_config.NumberColumn(
+                                    _cauc_live,
+                                    help=t("models.compare.col_auc_live_help"),
                                     format="%.3f",
                                 )
                             if show.get("brier"):
-                                col_config["Brier score"] = st.column_config.NumberColumn(
-                                    "Brier score (?)",
-                                    help=(
-                                        "Erreur quadratique entre probabilité prédite et résultat réel (0 = parfait, 1 = pire).\n\n"
-                                        "• < 0.10 → très bon\n• 0.10–0.25 → correct\n• > 0.25 → à améliorer\n\n"
-                                        "Classifieurs avec probabilités, ≥ 30 paires ground truth."
-                                    ),
+                                col_config[_cbrier] = st.column_config.NumberColumn(
+                                    _cbrier,
+                                    help=t("models.compare.col_brier_help"),
                                     format="%.4f",
                                 )
 
@@ -860,8 +815,7 @@ with st.expander("📊 Comparaison multi-versions", expanded=False):
                             column_config=col_config,
                         )
                         st.caption(
-                            f"Comparé le {pd.to_datetime(cmp['compared_at']).strftime('%Y-%m-%d %H:%M')} UTC"
-                            f" — période : {compare_date_start} → {compare_date_end}"
+                            t("models.compare.caption", compared_at=pd.to_datetime(cmp['compared_at']).strftime('%Y-%m-%d %H:%M'), start=compare_date_start, end=compare_date_end)
                         )
 
                         # ── Courbe ROC multi-versions (classification avec probas) ──
@@ -892,12 +846,8 @@ with st.expander("📊 Comparaison multi-versions", expanded=False):
                                     pass
 
                             if roc_data:
-                                st.markdown("#### 📉 Courbe ROC — comparaison multi-versions")
-                                st.caption(
-                                    "Calculée depuis les prédictions réelles avec ground truth "
-                                    f"(période : {compare_date_start} → {compare_date_end}). "
-                                    "Requiert des probabilités prédites et des observed_results."
-                                )
+                                st.markdown(t("models.compare.roc_title"))
+                                st.caption(t("models.compare.roc_caption", start=compare_date_start, end=compare_date_end))
                                 fig_roc = _go.Figure()
                                 fig_roc.add_trace(
                                     _go.Scatter(
@@ -905,7 +855,7 @@ with st.expander("📊 Comparaison multi-versions", expanded=False):
                                         y=[0, 1],
                                         mode="lines",
                                         line=dict(dash="dash", color="gray", width=1),
-                                        name="Aléatoire (AUC = 0.50)",
+                                        name=t("models.compare.roc_random"),
                                     )
                                 )
                                 for _ver, _d in sorted(roc_data.items()):
@@ -936,20 +886,16 @@ with st.expander("📊 Comparaison multi-versions", expanded=False):
                                 )
                                 st.plotly_chart(fig_roc, width="stretch")
                             else:
-                                st.info(
-                                    "📉 Courbe ROC indisponible — elle requiert des probabilités "
-                                    "prédites et des observed_results correspondants pour au moins "
-                                    "une version sur cette période."
-                                )
+                                st.info(t("models.compare.roc_unavailable"))
                 except Exception as e:
-                    st.error(f"Erreur lors de la comparaison : {e}")
+                    st.error(t("models.compare.compare_error", error=e))
 
 st.divider()
-st.subheader("Détail et actions")
+st.subheader(t("models.detail.subheader"))
 
 model_options = {f"{m['name']} v{m['version']}": m for m in models}
 detail_search = st.text_input(
-    "Filtrer par nom", key="detail_search", placeholder="Rechercher un modèle…"
+    t("models.detail.filter_label"), key="detail_search", placeholder=t("models.detail.filter_placeholder")
 )
 filtered_keys = (
     [k for k in model_options if detail_search.lower() in k.lower()]
@@ -964,14 +910,14 @@ if _preselect:
     _hits = [i for i, k in enumerate(_detail_keys) if k.split(" v")[0] == _preselect]
     if _hits:
         _detail_idx = _hits[0]
-selected_label = st.selectbox("Sélectionner un modèle", _detail_keys, index=_detail_idx)
+selected_label = st.selectbox(t("models.detail.select_label"), _detail_keys, index=_detail_idx)
 selected = model_options[selected_label]
 
 # Détails
 _detail_tm = selected.get("training_metrics") or {}
 _detail_is_regression = any(k in _detail_tm for k in ("mae", "rmse", "r2"))
 
-with st.expander("📋 Détails complets", expanded=True):
+with st.expander(t("models.details_expander"), expanded=True):
     col_l, col_r = st.columns(2)
     # Pré-chargement des ressources téléchargeables (mis en cache 5 min par version)
     _api_url = client.base_url
@@ -996,16 +942,16 @@ with st.expander("📋 Détails complets", expanded=True):
         _pkl_bytes = fetch_model_pkl(_api_url, _token, selected["name"], selected["version"])
 
     with col_l:
-        st.markdown(f"**Nom :** `{selected.get('name')}`")
-        st.markdown(f"**Version :** `{selected.get('version')}`")
-        st.markdown(f"**Description :** {selected.get('description') or '—'}")
-        st.markdown(f"**Algorithme :** {selected.get('algorithm') or '—'}")
+        st.markdown(t("models.detail_name", name=selected.get('name')))
+        st.markdown(t("models.detail_version", version=selected.get('version')))
+        st.markdown(t("models.detail_description", value=selected.get('description') or '—'))
+        st.markdown(t("models.detail_algorithm", value=selected.get('algorithm') or '—'))
         if _ds and not _csv_bytes:
-            st.markdown(f"**Dataset d'entraînement :** `{_ds}`")
-        st.markdown(f"**Entraîné par :** {selected.get('trained_by') or '—'}")
+            st.markdown(t("models.detail_training_dataset", value=_ds))
+        st.markdown(t("models.detail_trained_by", value=selected.get('trained_by') or '—'))
         parent_v = selected.get("parent_version")
         if parent_v:
-            st.markdown(f"**Dérivé de :** `v{parent_v}`")
+            st.markdown(t("models.detail_derived_from", version=parent_v))
         tags = selected.get("tags")
         if tags:
             _tag_colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
@@ -1013,26 +959,26 @@ with st.expander("📋 Détails complets", expanded=True):
             _tag_html = " ".join(
                 f'<span style="background:{_tag_colors[i % len(_tag_colors)]};color:white;'
                 f'padding:2px 10px;border-radius:12px;font-size:0.82em;font-weight:600;'
-                f'white-space:nowrap;">{t}</span>'
-                for i, t in enumerate(tags)
+                f'white-space:nowrap;">{_tg}</span>'
+                for i, _tg in enumerate(tags)
             )
-            st.markdown(f"**Tags :** {_tag_html}", unsafe_allow_html=True)
+            st.markdown(t("models.detail_tags", tags=_tag_html), unsafe_allow_html=True)
         else:
-            st.markdown("**Tags :** —")
+            st.markdown(t("models.detail_tags_empty"))
         webhook = selected.get("webhook_url")
-        st.markdown(f"**Webhook URL :** `{webhook}`" if webhook else "**Webhook URL :** —")
+        st.markdown(t("models.detail_webhook", url=webhook) if webhook else t("models.detail_webhook_empty"))
 
         mlflow_id = selected.get("mlflow_run_id")
         if mlflow_id:
             mlflow_link = f"{MLFLOW_PUBLIC_URL}/#/experiments/0/runs/{mlflow_id}"
-            st.markdown(f"**MLflow run :** [{mlflow_id}]({mlflow_link})")
+            st.markdown(t("models.detail_mlflow", run_id=mlflow_id, link=mlflow_link))
         else:
-            st.markdown("**MLflow run :** —")
+            st.markdown(t("models.detail_mlflow_empty"))
 
         if minio_key:
-            st.markdown(f"**MinIO object :** `{selected.get('minio_bucket')}/{minio_key}`")
+            st.markdown(t("models.detail_minio", bucket=selected.get('minio_bucket'), key=minio_key))
             if size:
-                st.markdown(f"**Taille fichier :** {size / 1024:.1f} KB")
+                st.markdown(t("models.detail_file_size", size=f"{size / 1024:.1f}"))
 
     with col_r:
         # ── Statut de déploiement ─────────────────────────────────────────────
@@ -1043,19 +989,19 @@ with st.expander("📋 Détails complets", expanded=True):
 
         if _d_mode == "ab_test":
             _badge_color = "#e67e00"
-            _badge_label = f"🟠 A/B test actif — trafic {_d_weight:.0%}" if _d_weight is not None else "🟠 A/B test actif"
+            _badge_label = t("models.badge_ab_test", weight=f"{_d_weight:.0%}") if _d_weight is not None else t("models.badge_ab_test_no_weight")
         elif _d_mode == "shadow":
             _badge_color = "#7c3aed"
-            _badge_label = "🟣 Shadow actif"
+            _badge_label = t("models.badge_shadow")
         elif _d_prod:
             _badge_color = "#1a7f37"
-            _badge_label = "🟢 En production"
+            _badge_label = t("models.badge_production")
         elif _d_active:
             _badge_color = "#0ea5e9"
-            _badge_label = "✅ Actif (non production)"
+            _badge_label = t("models.badge_active")
         else:
             _badge_color = "#6b7280"
-            _badge_label = "⚫ Inactif"
+            _badge_label = t("models.badge_inactive")
 
         st.markdown(
             f'<div style="display:inline-block;background:{_badge_color};color:white;'
@@ -1064,30 +1010,32 @@ with st.expander("📋 Détails complets", expanded=True):
             unsafe_allow_html=True,
         )
 
-        st.markdown(f"**Nb features :** {selected.get('features_count') or '—'}")
+        st.markdown(t("models.detail_nb_features", value=selected.get('features_count') or '—'))
         last_seen = selected.get("last_seen")
         st.markdown(
-            f"**Dernière prédiction :** {pd.to_datetime(last_seen).strftime('%Y-%m-%d %H:%M') if last_seen else '—'}"
+            t("models.detail_last_pred", value=pd.to_datetime(last_seen).strftime('%Y-%m-%d %H:%M') if last_seen else '—')
         )
         classes = selected.get("classes")
         if not _detail_is_regression or classes:
-            st.markdown(f"**Classes :** {classes if classes else '—'}")
+            st.markdown(t("models.detail_classes", value=classes if classes else '—'))
         ct = selected.get("confidence_threshold")
         if not _detail_is_regression or ct is not None:
-            st.markdown(f"**Confidence threshold :** {f'{ct:.2f}' if ct is not None else '—'}")
+            st.markdown(t("models.detail_confidence_threshold", value=f'{ct:.2f}' if ct is not None else '—'))
 
         hp = selected.get("hyperparameters")
         if hp:
-            st.markdown("**Hyperparamètres :**")
+            st.markdown(t("models.detail_hyperparams"))
+            _col_param = t("models.detail_param_col")
+            _col_val = t("models.detail_value_col")
             st.dataframe(
                 pd.DataFrame(
-                    [{"Paramètre": k, "Valeur": str(v)} for k, v in hp.items()],
+                    [{_col_param: k, _col_val: str(v)} for k, v in hp.items()],
                 ),
                 width='stretch',
                 hide_index=True,
             )
         else:
-            st.markdown("**Hyperparamètres :** —")
+            st.markdown(t("models.detail_hyperparams_empty"))
 
     # ── 4 boutons alignés en bas de l'expander ────────────────────────────────
     _btn_labels = []
@@ -1106,7 +1054,7 @@ with st.expander("📋 Détails complets", expanded=True):
         if _csv_bytes:
             with _btn_cols[_btn_idx]:
                 st.download_button(
-                    "⬇ Dataset d'entraînement",
+                    t("models.btn_download_dataset"),
                     data=_csv_bytes,
                     file_name=_ds.split("/")[-1],
                     mime="text/csv",
@@ -1117,7 +1065,7 @@ with st.expander("📋 Détails complets", expanded=True):
         if _script_bytes:
             with _btn_cols[_btn_idx]:
                 st.download_button(
-                    "⬇ Script d'entraînement",
+                    t("models.btn_download_script"),
                     data=_script_bytes,
                     file_name=_script_filename or "train.py",
                     mime="text/x-python",
@@ -1129,7 +1077,7 @@ with st.expander("📋 Détails complets", expanded=True):
                 _show_key = f"show_train_script_{selected['name']}_{selected['version']}"
                 _is_visible = st.session_state.get(_show_key, False)
                 if st.button(
-                    "🙈 Masquer le script" if _is_visible else "👁 Visualiser le script",
+                    t("models.btn_hide_script") if _is_visible else t("models.btn_view_script"),
                     width='stretch',
                     key=f"toggle_script_{selected['name']}_{selected['version']}",
                 ):
@@ -1139,7 +1087,7 @@ with st.expander("📋 Détails complets", expanded=True):
         if _pkl_bytes:
             with _btn_cols[_btn_idx]:
                 st.download_button(
-                    f"⬇️ Télécharger le modèle{_pkl_size_label}",
+                    t("models.btn_download_model", size=_pkl_size_label),
                     data=_pkl_bytes,
                     file_name=f"{selected['name']}_{selected['version']}.joblib",
                     mime="application/octet-stream",
@@ -1156,19 +1104,19 @@ _tm = selected.get("training_metrics") or {}
 _is_regression = any(k in _tm for k in ("mae", "rmse", "r2"))
 
 # ── Analyse & Monitoring (métriques, SHAP, performance, drift) ───────────────
-with st.expander("📊 Analyse & Monitoring", expanded=False):
+with st.expander(t("models.analysis.expander"), expanded=False):
     from datetime import date as _date, timedelta as _td
 
     _today = _date.today()
     _dcol1, _dcol2 = st.columns(2)
     _date_debut = _dcol1.date_input(
-        "Date début",
+        t("models.analysis.date_start"),
         value=_today - _td(days=30),
         max_value=_today,
         key=f"ana_date_debut_{selected['name']}_{selected['version']}",
     )
     _date_fin = _dcol2.date_input(
-        "Date fin",
+        t("models.analysis.date_end"),
         value=_today,
         max_value=_today,
         key=f"ana_date_fin_{selected['name']}_{selected['version']}",
@@ -1181,21 +1129,19 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
     if not _ana_loaded:
         _gcol1, _gcol2 = st.columns([1, 3])
         if _gcol1.button(
-            "📊 Charger l'analyse",
+            t("models.analysis.btn_load"),
             key=f"btn_ana_{selected['name']}_{selected['version']}",
             type="primary",
             width='stretch',
         ):
             st.session_state[_ana_key] = True
             st.rerun()
-        _gcol2.caption(
-            "Charge les métriques SHAP, la performance, le drift de sortie et le drift des features."
-        )
+        _gcol2.caption(t("models.analysis.btn_load_caption"))
 
     # ── Métriques ─────────────────────────────────────────────────────────────
     if _ana_loaded:
         st.divider()
-        st.markdown("#### 📈 Métriques")
+        st.markdown(t("models.analysis.metrics_header"))
 
         # Récupération ground truth
         _perf_gt = None
@@ -1227,6 +1173,11 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                 ("Recall",    "recall",    "recall_weighted",     None),
             ]
 
+        _col_metric = t("models.analysis.col_metric")
+        _col_training = t("models.analysis.col_training")
+        _col_production = t("models.analysis.col_production")
+        _col_delta = t("models.analysis.col_delta")
+
         _table_rows = []
         for _label, _train_key, _gt_key, _train_fallback in _metrics_keys:
             _train_val = _tm.get(_train_key) or _train_fallback
@@ -1239,57 +1190,47 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
             if _train_val is not None and _gt_val is not None:
                 _d = round(float(_gt_val) - float(_train_val), 4)
                 _delta_str = f"{_d:+.4f}"
-            _table_rows.append({"Métrique": _label, "Entraînement": _train_str, "Production": _gt_str, "Δ": _delta_str})
+            _table_rows.append({_col_metric: _label, _col_training: _train_str, _col_production: _gt_str, _col_delta: _delta_str})
 
         st.dataframe(
             pd.DataFrame(_table_rows),
             width='stretch',
             hide_index=True,
             column_config={
-                "Métrique": st.column_config.TextColumn("Métrique"),
-                "Entraînement": st.column_config.TextColumn(
-                    "Entraînement",
-                    help="Métriques évaluées sur le jeu de test lors de l'entraînement initial.",
+                _col_metric: st.column_config.TextColumn(_col_metric),
+                _col_training: st.column_config.TextColumn(
+                    _col_training,
+                    help=t("models.analysis.col_training_help"),
                 ),
-                "Production": st.column_config.TextColumn(
-                    "Production",
-                    help=(
-                        f"Métriques calculées sur les prédictions appariées à des résultats observés "
-                        f"du {_date_debut} au {_date_fin}.\n\n"
-                        f"{_gt_n} prédiction(s) appariée(s). "
-                        "Alimenté via `POST /observed-results`."
-                    ),
+                _col_production: st.column_config.TextColumn(
+                    _col_production,
+                    help=t("models.analysis.col_production_help", start=_date_debut, end=_date_fin, n=_gt_n),
                 ),
-                "Δ": st.column_config.TextColumn(
-                    "Δ",
-                    help=(
-                        "Écart Production − Entraînement.\n\n"
-                        "- **Négatif** : dégradation en production\n"
-                        "- **Positif** : amélioration (ou distribution différente)\n"
-                        "- **—** : données insuffisantes"
-                    ),
+                _col_delta: st.column_config.TextColumn(
+                    _col_delta,
+                    help=t("models.analysis.col_delta_help"),
                 ),
             },
         )
         if _gt_n == 0:
-            st.caption("Aucune donnée de ground truth — envoyez des résultats via `POST /observed-results` pour voir la colonne Production.")
+            st.caption(t("models.analysis.no_ground_truth"))
 
         try:
             md_content = client.get_model_card(selected["name"], selected["version"], format="markdown")
             st.download_button(
-                label="📄 Exporter la model card",
+                label=t("models.analysis.export_model_card_btn"),
                 data=md_content,
                 file_name=f"{selected['name']}_{selected['version']}_model_card.md",
                 mime="text/markdown",
                 key="dl_model_card",
             )
         except Exception as e:
-            st.warning(f"Model card indisponible : {e}")
+            st.warning(t("models.analysis.model_card_error", error=e))
 
     # ── Importance des features (SHAP agrégé) ─────────────────────────────────
     if _ana_loaded:
         st.divider()
-        st.markdown("#### 📊 Importance des features (SHAP)")
+        st.markdown(t("models.analysis.shap_header"))
         _shap_start = _date_debut.strftime("%Y-%m-%dT00:00:00")
         _shap_end = _date_fin.strftime("%Y-%m-%dT23:59:59")
         _shap_total = fetch_prediction_count(
@@ -1303,22 +1244,13 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
         _shap_max = max(10, _shap_total)
         _shap_default = min(100, _shap_max)
         fi_last_n = st.slider(
-            f"Échantillon SHAP ({_shap_total} prédictions disponibles sur la période)",
+            t("models.analysis.shap_slider_label", total=_shap_total),
             min_value=10,
             max_value=_shap_max,
             value=_shap_default,
             step=max(1, _shap_max // 50),
             key=f"fi_last_n_slider_{selected['name']}_{selected['version']}",
-            help=(
-                "Nombre de prédictions récentes utilisées pour calculer l'importance SHAP.\n\n"
-                "**SHAP** estime la contribution de chaque feature à chaque prédiction — "
-                "c'est coûteux en calcul, d'où cette limite.\n\n"
-                "- **Petit** : rapide, moins représentatif\n"
-                "- **Moyen** : bon compromis vitesse / précision ✅\n"
-                "- **Grand** : plus précis, plus lent\n\n"
-                "Les prédictions sont sélectionnées par **ordre chronologique inverse** "
-                "(les N plus récentes dans la période sélectionnée, `ORDER BY id DESC`)."
-            ),
+            help=t("models.analysis.shap_slider_help"),
         )
         try:
             fi_data = fetch_feature_importance(
@@ -1332,7 +1264,7 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
             fi = fi_data.get("feature_importance", {})
             sample_size = fi_data.get("sample_size", 0)
             if not fi or sample_size == 0:
-                st.info("Pas encore assez de prédictions pour calculer l'importance des features.")
+                st.info(t("models.analysis.shap_no_data"))
             else:
                 fi_rows = [
                     {"Feature": feat, "Importance SHAP": vals["mean_abs_shap"]}
@@ -1347,39 +1279,30 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                         x="Importance SHAP",
                         y="Feature",
                         orientation="h",
-                        title=(
-                            f"Top {len(fi_df)} features — "
-                            f"{fi_data['model_name']} v{fi_data['version']}"
-                        ),
+                        title=t("models.analysis.shap_chart_title", n=len(fi_df), model=fi_data['model_name'], version=fi_data['version']),
                     )
                     fig.update_layout(
                         yaxis_title="",
-                        xaxis_title="Importance SHAP (valeur absolue moyenne)",
+                        xaxis_title=t("models.analysis.shap_xaxis"),
                         margin={"l": 10, "r": 10, "t": 40, "b": 10},
                     )
                     st.plotly_chart(fig, width='stretch')
                 except ImportError:
                     st.bar_chart(fi_df.set_index("Feature")["Importance SHAP"])
-                st.caption(
-                    f"{sample_size} prédictions analysées"
-                    f" — du {_date_debut} au {_date_fin} — version : {fi_data.get('version')}"
-                )
+                st.caption(t("models.analysis.shap_caption", n=sample_size, start=_date_debut, end=_date_fin, version=fi_data.get('version')))
         except Exception as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
             if status == 422:
-                st.info(
-                    "Ce modèle ne supporte pas l'importance des features SHAP "
-                    "(entraîner avec un DataFrame pandas pour activer cette fonctionnalité)."
-                )
+                st.info(t("models.analysis.shap_error_422"))
             elif status == 404:
-                st.error("Modèle introuvable.")
+                st.error(t("models.analysis.shap_error_404"))
             else:
-                st.warning(f"Impossible de calculer l'importance des features : {e}")
+                st.warning(t("models.analysis.shap_error_generic", error=e))
 
     # ── Métriques de performance (matrice de confusion + métriques par classe) ─
     if _ana_loaded:
         st.divider()
-        st.markdown("#### 📈 Métriques de performance")
+        st.markdown(t("models.analysis.perf_header"))
         try:
             import numpy as np
             import plotly.express as px
@@ -1396,34 +1319,31 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
             matched = perf.get("matched_predictions", 0)
 
             if matched == 0:
-                st.info(
-                    "Aucune paire (prédiction, résultat observé) disponible. "
-                    "Ajoutez des résultats via POST /observed-results pour activer cette vue."
-                )
+                st.info(t("models.analysis.perf_no_data"))
             elif model_type != "classification":
                 col_mae, col_rmse, col_r2 = st.columns(3)
                 col_mae.metric(
                     "MAE",
                     f"{perf['mae']:.4f}" if perf.get("mae") is not None else "—",
-                    help=METRIC_HELP["mae"],
+                    help=t("metrics.mae"),
                 )
                 col_rmse.metric(
                     "RMSE",
                     f"{perf['rmse']:.4f}" if perf.get("rmse") is not None else "—",
-                    help=METRIC_HELP["rmse"],
+                    help=t("metrics.rmse"),
                 )
                 col_r2.metric(
                     "R²",
                     f"{perf['r2']:.4f}" if perf.get("r2") is not None else "—",
-                    help=METRIC_HELP["r2"],
+                    help=t("metrics.r2"),
                 )
-                st.caption(f"{matched} prédictions appariées")
+                st.caption(t("models.analysis.perf_n_paired", n=matched))
             else:
                 col_acc, col_prec, col_rec, col_f1 = st.columns(4)
                 col_acc.metric(
                     "Accuracy",
                     f"{perf['accuracy']:.3f}" if perf.get("accuracy") is not None else "—",
-                    help=METRIC_HELP["accuracy"],
+                    help=t("metrics.accuracy"),
                 )
                 col_prec.metric(
                     "Precision (w.)",
@@ -1432,7 +1352,7 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                         if perf.get("precision_weighted") is not None
                         else "—"
                     ),
-                    help=METRIC_HELP["precision"],
+                    help=t("metrics.precision"),
                 )
                 col_rec.metric(
                     "Recall (w.)",
@@ -1441,14 +1361,14 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                         if perf.get("recall_weighted") is not None
                         else "—"
                     ),
-                    help=METRIC_HELP["recall"],
+                    help=t("metrics.recall"),
                 )
                 col_f1.metric(
                     "F1 (w.)",
                     f"{perf['f1_weighted']:.3f}" if perf.get("f1_weighted") is not None else "—",
-                    help=METRIC_HELP["f1"],
+                    help=t("metrics.f1"),
                 )
-                st.caption(f"{matched} prédictions appariées")
+                st.caption(t("models.analysis.perf_n_paired", n=matched))
 
                 # Mapping index → label depuis selected.classes
                 _named_classes = selected.get("classes") or []
@@ -1472,26 +1392,31 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                         y=class_labels,
                         text_auto=True,
                         color_continuous_scale="Blues",
-                        title="Matrice de confusion",
-                        labels={"x": "Prédit", "y": "Réel", "color": "Compte"},
+                        title=t("models.analysis.confusion_title"),
+                        labels={"x": t("models.analysis.confusion_predicted"), "y": t("models.analysis.confusion_actual"), "color": t("models.analysis.confusion_count")},
                     )
                     fig.update_layout(
-                        xaxis_title="Prédit",
-                        yaxis_title="Réel",
+                        xaxis_title=t("models.analysis.confusion_predicted"),
+                        yaxis_title=t("models.analysis.confusion_actual"),
                         margin={"l": 10, "r": 10, "t": 40, "b": 10},
                     )
                     st.plotly_chart(fig, width='stretch')
 
                 per_class = perf.get("per_class_metrics")
                 if per_class:
-                    st.markdown("**Métriques par classe**")
+                    st.markdown(t("models.analysis.per_class_header"))
+                    _col_class = t("models.analysis.col_class")
+                    _col_prec = t("models.analysis.col_precision")
+                    _col_rec = t("models.analysis.col_recall")
+                    _col_f1c = t("models.analysis.col_f1")
+                    _col_supp = t("models.analysis.col_support")
                     pc_rows = [
                         {
-                            "Classe": _cls_label(label),
-                            "Precision": f"{m['precision']:.3f}",
-                            "Recall": f"{m['recall']:.3f}",
-                            "F1": f"{m['f1_score']:.3f}",
-                            "Support": m["support"],
+                            _col_class: _cls_label(label),
+                            _col_prec: f"{m['precision']:.3f}",
+                            _col_rec: f"{m['recall']:.3f}",
+                            _col_f1c: f"{m['f1_score']:.3f}",
+                            _col_supp: m["support"],
                         }
                         for label, m in per_class.items()
                     ]
@@ -1500,54 +1425,36 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                         width='stretch',
                         hide_index=True,
                         column_config={
-                            "Classe": st.column_config.TextColumn(
-                                "Classe",
-                                help="Classe prédite. Le chiffre entre parenthèses est l'indice numérique stocké en base.",
+                            _col_class: st.column_config.TextColumn(
+                                _col_class,
+                                help=t("models.analysis.col_class_help"),
                             ),
-                            "Precision": st.column_config.TextColumn(
-                                "Precision",
-                                help=(
-                                    "**Precision** : parmi toutes les prédictions de cette classe, "
-                                    "quelle fraction était correcte.\n\n"
-                                    "`TP / (TP + FP)`\n\n"
-                                    "Élevée = peu de faux positifs pour cette classe."
-                                ),
+                            _col_prec: st.column_config.TextColumn(
+                                _col_prec,
+                                help=t("models.analysis.col_precision_help"),
                             ),
-                            "Recall": st.column_config.TextColumn(
-                                "Recall",
-                                help=(
-                                    "**Recall (sensibilité)** : parmi tous les vrais exemples de cette classe, "
-                                    "quelle fraction a été correctement détectée.\n\n"
-                                    "`TP / (TP + FN)`\n\n"
-                                    "Élevé = peu de faux négatifs pour cette classe."
-                                ),
+                            _col_rec: st.column_config.TextColumn(
+                                _col_rec,
+                                help=t("models.analysis.col_recall_help"),
                             ),
-                            "F1": st.column_config.TextColumn(
-                                "F1",
-                                help=(
-                                    "**F1-score** : moyenne harmonique de la Precision et du Recall.\n\n"
-                                    "`2 × (Precision × Recall) / (Precision + Recall)`\n\n"
-                                    "Bon compromis quand les classes sont déséquilibrées."
-                                ),
+                            _col_f1c: st.column_config.TextColumn(
+                                _col_f1c,
+                                help=t("models.analysis.col_f1_help"),
                             ),
-                            "Support": st.column_config.NumberColumn(
-                                "Support",
-                                help=(
-                                    "Nombre de prédictions appariées à un résultat observé pour cette classe "
-                                    "sur la période sélectionnée.\n\n"
-                                    "Un support faible rend les métriques moins fiables statistiquement."
-                                ),
+                            _col_supp: st.column_config.NumberColumn(
+                                _col_supp,
+                                help=t("models.analysis.col_support_help"),
                             ),
                         },
                     )
 
         except Exception as e:
-            st.warning(f"Impossible de charger les métriques de performance : {e}")
+            st.warning(t("models.analysis.perf_error", error=e))
 
     # ── Drift de sortie (label shift) ─────────────────────────────────────────
     if _ana_loaded:
         st.divider()
-        st.markdown("#### 📊 Drift de sortie (label shift)")
+        st.markdown(t("models.analysis.output_drift_header"))
         try:
             import plotly.express as px
 
@@ -1563,31 +1470,27 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                 "ok": "🟢 ok",
                 "warning": "🟡 warning",
                 "critical": "🔴 critical",
-                "no_baseline": "⬜ pas de baseline",
-                "insufficient_data": "⬜ données insuffisantes",
+                "no_baseline": t("models.analysis.output_drift_od_no_baseline"),
+                "insufficient_data": t("models.analysis.output_drift_od_insufficient"),
             }
-            st.markdown(f"**Statut :** {_OD_BADGE.get(od_status, od_status)}")
+            st.markdown(t("models.analysis.output_drift_status", status=_OD_BADGE.get(od_status, od_status)))
 
             if od_status in ("no_baseline", "insufficient_data"):
                 if od_status == "no_baseline":
-                    st.info(
-                        "Aucune distribution de labels d'entraînement disponible. "
-                        "Assurez-vous que le script `train.py` imprime un JSON avec `label_distribution`."
-                    )
+                    st.info(t("models.analysis.output_drift_no_baseline"))
                 else:
-                    st.info(
-                        f"Données insuffisantes ({od.get('predictions_analyzed', 0)} prédictions "
-                        f"du {_date_debut} au {_date_fin} — minimum : 30)."
-                    )
+                    st.info(t("models.analysis.output_drift_insufficient", n=od.get('predictions_analyzed', 0), start=_date_debut, end=_date_fin))
             else:
                 col_psi, col_n = st.columns(2)
                 psi_val = od.get("psi")
+                _col_psi_metric = t("models.analysis.output_drift_psi")
+                _col_n_analyzed = t("models.analysis.output_drift_n_analyzed")
                 col_psi.metric(
-                    "PSI",
+                    _col_psi_metric,
                     f"{psi_val:.4f}" if psi_val is not None else "—",
-                    help="Population Stability Index : ok < 0.1 | warning 0.1–0.2 | critical ≥ 0.2",
+                    help=t("models.analysis.output_drift_psi_help"),
                 )
-                col_n.metric("Prédictions analysées", od.get("predictions_analyzed", 0))
+                col_n.metric(_col_n_analyzed, od.get("predictions_analyzed", 0))
 
                 _od_named = selected.get("classes") or []
                 def _od_label(idx) -> str:
@@ -1601,13 +1504,17 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
 
                 by_class = od.get("by_class") or []
                 if by_class:
-                    st.markdown("**Distribution par classe**")
+                    st.markdown(t("models.analysis.output_drift_by_class_header"))
+                    _odc_class = t("models.analysis.output_drift_col_class")
+                    _odc_baseline = t("models.analysis.output_drift_col_baseline")
+                    _odc_current = t("models.analysis.output_drift_col_current")
+                    _odc_delta = t("models.analysis.output_drift_col_delta")
                     bc_rows = [
                         {
-                            "Classe": _od_label(row["label"]),
-                            "Baseline": f"{row['baseline_ratio']:.3f}",
-                            "Actuel": f"{row['current_ratio']:.3f}",
-                            "Δ": f"{row['delta']:+.3f}",
+                            _odc_class: _od_label(row["label"]),
+                            _odc_baseline: f"{row['baseline_ratio']:.3f}",
+                            _odc_current: f"{row['current_ratio']:.3f}",
+                            _odc_delta: f"{row['delta']:+.3f}",
                         }
                         for row in by_class
                     ]
@@ -1616,34 +1523,21 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                         width='stretch',
                         hide_index=True,
                         column_config={
-                            "Classe": st.column_config.TextColumn(
-                                "Classe",
-                                help="Classe prédite par le modèle. Le chiffre entre parenthèses est l'indice numérique stocké en base.",
+                            _odc_class: st.column_config.TextColumn(
+                                _odc_class,
+                                help=t("models.analysis.output_drift_col_class_help"),
                             ),
-                            "Baseline": st.column_config.TextColumn(
-                                "Baseline",
-                                help=(
-                                    "Proportion de cette classe dans le **dataset d'entraînement** "
-                                    "(stockée dans `training_stats.label_distribution`).\n\n"
-                                    "Source : script `train.py` → JSON stdout → clé `label_distribution`."
-                                ),
+                            _odc_baseline: st.column_config.TextColumn(
+                                _odc_baseline,
+                                help=t("models.analysis.output_drift_col_baseline_help"),
                             ),
-                            "Actuel": st.column_config.TextColumn(
-                                "Actuel",
-                                help=(
-                                    "Proportion de cette classe dans les **prédictions de production** "
-                                    "sur la période sélectionnée.\n\n"
-                                    "Calculé via `GROUP BY prediction_result` sur la table `predictions`."
-                                ),
+                            _odc_current: st.column_config.TextColumn(
+                                _odc_current,
+                                help=t("models.analysis.output_drift_col_current_help"),
                             ),
-                            "Δ": st.column_config.TextColumn(
-                                "Δ",
-                                help=(
-                                    "Écart entre la proportion actuelle et la baseline (Actuel − Baseline).\n\n"
-                                    "- **Positif** : surreprésentation de cette classe en production\n"
-                                    "- **Négatif** : sous-représentation\n\n"
-                                    "Un Δ élevé contribue à un PSI critique."
-                                ),
+                            _odc_delta: st.column_config.TextColumn(
+                                _odc_delta,
+                                help=t("models.analysis.output_drift_col_delta_help"),
                             ),
                         },
                     )
@@ -1654,30 +1548,30 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                     named_labels = [_od_label(l) for l in raw_labels]
                     df_bar = pd.DataFrame(
                         {
-                            "Classe": named_labels + named_labels,
+                            t("models.analysis.output_drift_col_class"): named_labels + named_labels,
                             "Ratio": [baseline_dist.get(str(l), 0.0) for l in raw_labels]
                             + [current_dist.get(str(l), 0.0) for l in raw_labels],
-                            "Source": ["Baseline"] * len(raw_labels) + ["Actuel"] * len(raw_labels),
+                            "Source": [t("models.analysis.output_drift_col_baseline")] * len(raw_labels) + [t("models.analysis.output_drift_col_current")] * len(raw_labels),
                         }
                     )
                     fig_od = px.bar(
                         df_bar,
-                        x="Classe",
+                        x=t("models.analysis.output_drift_col_class"),
                         y="Ratio",
                         color="Source",
                         barmode="group",
-                        title="Distribution baseline vs actuelle",
-                        color_discrete_map={"Baseline": "#636EFA", "Actuel": "#EF553B"},
+                        title=t("models.analysis.output_drift_chart_title"),
+                        color_discrete_map={t("models.analysis.output_drift_col_baseline"): "#636EFA", t("models.analysis.output_drift_col_current"): "#EF553B"},
                     )
                     fig_od.update_layout(yaxis_tickformat=".0%", yaxis_title="Proportion")
                     st.plotly_chart(fig_od, width='stretch')
         except Exception as e:
-            st.warning(f"Impossible de calculer le drift de sortie : {e}")
+            st.warning(t("models.analysis.output_drift_error", error=e))
 
     # ── Drift des features (inputs) ───────────────────────────────────────────
     if _ana_loaded:
         st.divider()
-        st.markdown("#### 🌡️ Drift des features (inputs)")
+        st.markdown(t("models.analysis.feature_drift_header"))
         try:
             import plotly.express as px
 
@@ -1708,47 +1602,51 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                 next(iter(_fd_features_raw.values()), {}).get("production_count")
                 or fd_analyzed
             )
-            st.markdown(f"**Statut global :** {_FD_BADGE.get(fd_summary, fd_summary)}")
-            st.caption(f"{_fd_n_preds} prédictions analysées du {_fd_start} au {_fd_end}")
+            st.markdown(t("models.analysis.feature_drift_global_status", status=_FD_BADGE.get(fd_summary, fd_summary)))
+            st.caption(t("models.analysis.feature_drift_n_analyzed", n=_fd_n_preds, start=_fd_start, end=_fd_end))
 
             features_dict = fd.get("features", {})
             if not fd_baseline:
-                st.info(
-                    "Aucune baseline de features enregistrée pour ce modèle. "
-                    "Assurez-vous que le script `train.py` imprime un JSON avec `feature_stats`."
-                )
+                st.info(t("models.analysis.feature_drift_no_baseline"))
             elif not features_dict:
-                st.info("Aucune donnée de drift de features disponible sur cette période.")
+                st.info(t("models.analysis.feature_drift_no_data"))
             else:
                 _STATUS_COLOR = {"ok": "🟢", "warning": "🟡", "critical": "🔴", "no_data": "⬜"}
+                _fdc_feature = t("models.analysis.feature_drift_col_feature")
+                _fdc_status = t("models.analysis.feature_drift_col_status")
+                _fdc_prod_mean = t("models.analysis.feature_drift_col_prod_mean")
+                _fdc_bl_mean = t("models.analysis.feature_drift_col_baseline_mean")
+                _fdc_zscore = t("models.analysis.feature_drift_col_zscore")
+                _fdc_psi = t("models.analysis.feature_drift_col_psi")
+                _fdc_n_prod = t("models.analysis.feature_drift_col_n_prod")
                 rows_fd = []
                 for feat_name, feat_data in features_dict.items():
                     ds = feat_data.get("drift_status", "no_data")
                     rows_fd.append(
                         {
-                            "Feature": feat_name,
-                            "Statut": _STATUS_COLOR.get(ds, "⬜") + f" {ds}",
-                            "Moy. prod.": (
+                            _fdc_feature: feat_name,
+                            _fdc_status: _STATUS_COLOR.get(ds, "⬜") + f" {ds}",
+                            _fdc_prod_mean: (
                                 round(feat_data["production_mean"], 4)
                                 if feat_data.get("production_mean") is not None
                                 else "—"
                             ),
-                            "Moy. baseline": (
+                            _fdc_bl_mean: (
                                 round(feat_data["baseline_mean"], 4)
                                 if feat_data.get("baseline_mean") is not None
                                 else "—"
                             ),
-                            "Z-score": (
+                            _fdc_zscore: (
                                 round(feat_data["z_score"], 3)
                                 if feat_data.get("z_score") is not None
                                 else "—"
                             ),
-                            "PSI": (
+                            _fdc_psi: (
                                 round(feat_data["psi"], 4)
                                 if feat_data.get("psi") is not None
                                 else "—"
                             ),
-                            "N prod.": feat_data.get("production_count", 0),
+                            _fdc_n_prod: feat_data.get("production_count", 0),
                         }
                     )
                 df_fd = pd.DataFrame(rows_fd)
@@ -1757,106 +1655,79 @@ with st.expander("📊 Analyse & Monitoring", expanded=False):
                     width='stretch',
                     hide_index=True,
                     column_config={
-                        "Z-score": st.column_config.TextColumn(
-                            "Z-score",
-                            help=(
-                                "**Z-score** : écart entre la moyenne de production et la moyenne baseline, "
-                                "normalisé par l'écart-type baseline.\n\n"
-                                "- 🟢 **ok** : Z < 2σ\n"
-                                "- 🟡 **warning** : 2σ ≤ Z < 3σ\n"
-                                "- 🔴 **critical** : Z ≥ 3σ\n\n"
-                                "Un Z-score élevé indique que la distribution de la feature en production "
-                                "s'est significativement éloignée des données d'entraînement."
-                            ),
+                        _fdc_zscore: st.column_config.TextColumn(
+                            _fdc_zscore,
+                            help=t("models.analysis.feature_drift_col_zscore_help"),
                         ),
-                        "PSI": st.column_config.TextColumn(
-                            "PSI",
-                            help=(
-                                "**PSI (Population Stability Index)** : mesure le changement global de "
-                                "distribution d'une feature entre baseline et production.\n\n"
-                                "- 🟢 **ok** : PSI < 0.1 — distribution stable\n"
-                                "- 🟡 **warning** : 0.1 ≤ PSI < 0.2 — changement modéré\n"
-                                "- 🔴 **critical** : PSI ≥ 0.2 — changement majeur, ré-entraînement recommandé\n\n"
-                                "Calculé sur les **5 000 dernières prédictions** de la période sélectionnée "
-                                "via une approximation gaussienne des bins baseline.\n\n"
-                                "— = non disponible (nécessite une `feature_baseline` enregistrée sur le modèle)."
-                            ),
+                        _fdc_psi: st.column_config.TextColumn(
+                            _fdc_psi,
+                            help=t("models.analysis.feature_drift_col_psi_help"),
                         ),
-                        "Moy. prod.": st.column_config.TextColumn(
-                            "Moy. prod.",
-                            help="Moyenne de la feature sur les prédictions de production de la période sélectionnée.",
+                        _fdc_prod_mean: st.column_config.TextColumn(
+                            _fdc_prod_mean,
+                            help=t("models.analysis.feature_drift_col_prod_mean_help"),
                         ),
-                        "Moy. baseline": st.column_config.TextColumn(
-                            "Moy. baseline",
-                            help="Moyenne de la feature sur le dataset d'entraînement (stockée dans `feature_baseline`).",
+                        _fdc_bl_mean: st.column_config.TextColumn(
+                            _fdc_bl_mean,
+                            help=t("models.analysis.feature_drift_col_baseline_mean_help"),
                         ),
-                        "Statut": st.column_config.TextColumn(
-                            "Statut",
-                            help=(
-                                "**Statut de drift** de la feature, calculé à partir du Z-score et du PSI.\n\n"
-                                "- 🟢 **ok** : aucun drift significatif détecté\n"
-                                "- 🟡 **warning** : drift modéré — à surveiller\n"
-                                "- 🔴 **critical** : drift important — ré-entraînement recommandé\n"
-                                "- ⬜ **no_data** : pas assez de prédictions pour calculer le drift"
-                            ),
+                        _fdc_status: st.column_config.TextColumn(
+                            _fdc_status,
+                            help=t("models.analysis.feature_drift_col_status_help"),
                         ),
-                        "N prod.": st.column_config.NumberColumn(
-                            "N prod.",
-                            help=(
-                                "Nombre de prédictions de production utilisées pour calculer le drift "
-                                "sur la période sélectionnée. "
-                                "Un faible N rend le drift moins fiable statistiquement."
-                            ),
+                        _fdc_n_prod: st.column_config.NumberColumn(
+                            _fdc_n_prod,
+                            help=t("models.analysis.feature_drift_col_n_prod_help"),
                         ),
                     },
                 )
 
                 _color_map = {"ok": "#2ECC71", "warning": "#F39C12", "critical": "#E74C3C", "no_data": "#95A5A6"}
 
-                _rows_z = [r for r in rows_fd if r["Z-score"] != "—"]
+                _rows_z = [r for r in rows_fd if r[_fdc_zscore] != "—"]
                 if _rows_z:
                     _df_z = pd.DataFrame(
                         {
-                            "Feature": [r["Feature"] for r in _rows_z],
-                            "Z-score": [abs(float(r["Z-score"])) for r in _rows_z],
-                            "Drift": [r["Statut"].split(" ", 1)[-1].strip() for r in _rows_z],
+                            "Feature": [r[_fdc_feature] for r in _rows_z],
+                            "Z-score": [abs(float(r[_fdc_zscore])) for r in _rows_z],
+                            "Drift": [r[_fdc_status].split(" ", 1)[-1].strip() for r in _rows_z],
                         }
                     ).sort_values("Z-score", ascending=True)
                     fig_z = px.bar(
                         _df_z, x="Z-score", y="Feature", color="Drift", orientation="h",
-                        title="Z-score par feature (|Δμ / σ baseline|)",
+                        title=t("models.analysis.feature_drift_zscore_chart_title"),
                         color_discrete_map=_color_map,
                     )
                     fig_z.add_vline(x=2.0, line_dash="dash", line_color="#F39C12",
-                                    annotation_text="seuil warning (2σ)", annotation_position="top right")
+                                    annotation_text=t("models.analysis.feature_drift_warning_2sigma"), annotation_position="top right")
                     fig_z.add_vline(x=3.0, line_dash="dash", line_color="#E74C3C",
-                                    annotation_text="seuil critical (3σ)", annotation_position="top right")
+                                    annotation_text=t("models.analysis.feature_drift_critical_3sigma"), annotation_position="top right")
                     fig_z.update_layout(height=max(250, len(_rows_z) * 32), yaxis_title="")
                     st.plotly_chart(fig_z, width='stretch')
 
-                _rows_psi = [r for r in rows_fd if r["PSI"] != "—"]
+                _rows_psi = [r for r in rows_fd if r[_fdc_psi] != "—"]
                 if _rows_psi:
                     _df_psi = pd.DataFrame(
                         {
-                            "Feature": [r["Feature"] for r in _rows_psi],
-                            "PSI": [float(r["PSI"]) for r in _rows_psi],
-                            "Drift": [r["Statut"].split(" ", 1)[-1].strip() for r in _rows_psi],
+                            "Feature": [r[_fdc_feature] for r in _rows_psi],
+                            "PSI": [float(r[_fdc_psi]) for r in _rows_psi],
+                            "Drift": [r[_fdc_status].split(" ", 1)[-1].strip() for r in _rows_psi],
                         }
                     ).sort_values("PSI", ascending=True)
                     fig_psi = px.bar(
                         _df_psi, x="PSI", y="Feature", color="Drift", orientation="h",
-                        title="PSI par feature (Population Stability Index)",
+                        title=t("models.analysis.feature_drift_psi_chart_title"),
                         color_discrete_map=_color_map,
                     )
                     fig_psi.add_vline(x=0.1, line_dash="dash", line_color="#F39C12",
-                                      annotation_text="seuil warning (0.1)", annotation_position="top right")
+                                      annotation_text=t("models.analysis.feature_drift_warning_01"), annotation_position="top right")
                     fig_psi.add_vline(x=0.2, line_dash="dash", line_color="#E74C3C",
-                                      annotation_text="seuil critical (0.2)", annotation_position="top right")
+                                      annotation_text=t("models.analysis.feature_drift_critical_02"), annotation_position="top right")
                     fig_psi.update_layout(height=max(250, len(_rows_psi) * 32), yaxis_title="")
                     st.plotly_chart(fig_psi, width='stretch')
 
         except Exception as e:
-            st.warning(f"Impossible de charger le drift des features : {e}")
+            st.warning(t("models.analysis.feature_drift_error", error=e))
 
 # Résolution des features pour les blocs Valider / Golden Tests
 feature_baseline = selected.get("feature_baseline") or {}
@@ -1876,11 +1747,8 @@ else:
     except Exception:
         pass
 
-with st.expander("🔍 Valider le schéma JSON", expanded=False):
-    st.markdown(
-        "Testez un payload JSON avant d'envoyer une prédiction pour détecter "
-        "les features manquantes, inattendues ou mal typées."
-    )
+with st.expander(t("models.validate.expander"), expanded=False):
+    st.markdown(t("models.validate.intro"))
 
     # Build example JSON from feature_baseline or feature_names_list
     if feature_baseline:
@@ -1893,33 +1761,33 @@ with st.expander("🔍 Valider le schéma JSON", expanded=False):
         example_payload = {}
 
     raw_json = st.text_area(
-        "Payload JSON à valider",
+        t("models.validate.json_label"),
         value=_json.dumps(example_payload, indent=2),
         height=180,
         key=f"validate_json_{selected['name']}_{selected['version']}",
     )
 
     if st.button(
-        "✅ Valider",
+        t("models.validate.btn_validate"),
         key=f"validate_btn_{selected['name']}_{selected['version']}",
     ):
         try:
             parsed = _json.loads(raw_json)
         except _json.JSONDecodeError as exc:
-            st.error(f"JSON invalide : {exc}")
+            st.error(t("models.validate.json_invalid", error=exc))
             parsed = None
 
         if parsed is not None:
-            with st.spinner("Validation en cours…"):
+            with st.spinner(t("models.validate.spinner")):
                 try:
                     result = client.validate_input(
                         selected["name"], selected["version"], parsed
                     )
 
                     if result.get("valid"):
-                        st.success("✅ Schéma valide")
+                        st.success(t("models.validate.valid"))
                     else:
-                        st.error("❌ Schéma invalide")
+                        st.error(t("models.validate.invalid"))
 
                     errors = result.get("errors") or []
                     warnings = result.get("warnings") or []
@@ -1929,9 +1797,9 @@ with st.expander("🔍 Valider le schéma JSON", expanded=False):
                         etype = err.get("type", "")
                         feat = err.get("feature", "")
                         if etype == "missing_feature":
-                            st.markdown(f"❌ **Feature manquante** : `{feat}`")
+                            st.markdown(t("models.validate.missing_feature", feature=feat))
                         elif etype == "unexpected_feature":
-                            st.markdown(f"❌ **Feature inattendue** : `{feat}`")
+                            st.markdown(t("models.validate.unexpected_feature", feature=feat))
                         else:
                             st.markdown(f"❌ `{feat}` — {etype}")
 
@@ -1941,21 +1809,19 @@ with st.expander("🔍 Valider le schéma JSON", expanded=False):
                         from_t = warn.get("from_type", "")
                         to_t = warn.get("to_type", "")
                         if wtype == "type_coercion":
-                            st.markdown(
-                                f"⚠️ **Coercition de type** : `{feat}` " f"({from_t} → {to_t})"
-                            )
+                            st.markdown(t("models.validate.type_coercion", feature=feat, from_type=from_t, to_type=to_t))
                         else:
                             st.markdown(f"⚠️ `{feat}` — {wtype}")
 
                     if expected:
-                        st.markdown("**Features attendues :**")
+                        st.markdown(t("models.validate.expected_features_header"))
                         st.markdown(" ".join(f"`{f}`" for f in expected))
 
                 except Exception as e:
-                    st.error(f"Erreur lors de la validation : {e}")
+                    st.error(t("models.validate.validate_error", error=e))
 
     st.divider()
-    st.markdown("**💻 Exemple Python — appel `/predict`**")
+    st.markdown(t("models.validate.code_example_header"))
     _predict_payload = {
         "model_name": selected["name"],
         "features": example_payload,
@@ -1973,7 +1839,7 @@ with st.expander("🔍 Valider le schéma JSON", expanded=False):
     )
     st.code(_python_code, language="python")
 
-    st.markdown("**Exemple de réponse :**")
+    st.markdown(t("models.validate.response_example_header"))
     _example_response = _json.dumps(
         {
             "model_name": selected["name"],
@@ -1992,7 +1858,7 @@ with st.expander("🔍 Valider le schéma JSON", expanded=False):
     st.code(_example_response, language="json")
 
 # Tests de régression (Golden Test Set)
-with st.expander("🧪 Tests de régression", expanded=False):
+with st.expander(t("models.golden_tests.expander"), expanded=False):
     is_admin_gt = st.session_state.get("is_admin", False)
     gt_model_name = selected["name"]
     gt_version = selected["version"]
@@ -2005,13 +1871,13 @@ with st.expander("🧪 Tests de régression", expanded=False):
     # --- Liste des cas existants ---
     if golden_tests:
         import pandas as _pd_gt
-        st.markdown(f"**{len(golden_tests)} cas enregistré(s)**")
-        for t in golden_tests:
-            tid = t["id"]
-            expected = t.get("expected_output", "—")
-            desc = t.get("description") or ""
-            features = t.get("input_features") or {}
-            created_at = t.get("created_at", "")
+        st.markdown(t("models.golden_tests.n_cases", n=len(golden_tests)))
+        for t_item in golden_tests:
+            tid = t_item["id"]
+            expected = t_item.get("expected_output", "—")
+            desc = t_item.get("description") or ""
+            features = t_item.get("input_features") or {}
+            created_at = t_item.get("created_at", "")
 
             label = f"#{tid}  →  {expected}"
             if desc:
@@ -2024,10 +1890,10 @@ with st.expander("🧪 Tests de régression", expanded=False):
             with st.expander(label, expanded=False):
                 c_feat, c_meta = st.columns([3, 1])
                 with c_feat:
-                    st.markdown("**Features d'entrée**")
+                    st.markdown(t("models.golden_tests.input_features_header"))
                     st.json(features)
                 with c_meta:
-                    st.markdown("**Sortie attendue**")
+                    st.markdown(t("models.golden_tests.expected_output_header"))
                     st.code(expected, language=None)
                     if desc:
                         st.markdown(f"*{desc}*")
@@ -2037,21 +1903,21 @@ with st.expander("🧪 Tests de régression", expanded=False):
                         except Exception:
                             st.caption(str(created_at)[:16])
                     if is_admin_gt:
-                        if st.button("🗑 Supprimer", key=f"del_gt_{tid}", type="secondary"):
+                        if st.button(t("models.golden_tests.btn_delete"), key=f"del_gt_{tid}", type="secondary"):
                             try:
                                 client.delete_golden_test(gt_model_name, tid)
-                                st.toast(f"Test #{tid} supprimé.", icon="✅")
+                                st.toast(t("models.golden_tests.delete_toast", id=tid), icon="✅")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Erreur : {e}")
+                                st.error(t("models.golden_tests.delete_error", error=e))
     else:
-        st.info("Aucun cas de test golden enregistré pour ce modèle.")
+        st.info(t("models.golden_tests.no_cases"))
 
     if is_admin_gt:
         st.divider()
 
         # --- Ajouter un cas ---
-        with st.expander("➕ Ajouter un cas de test", expanded=False):
+        with st.expander(t("models.golden_tests.add_expander"), expanded=False):
             if feature_baseline:
                 _gt_default = _json.dumps(
                     {feat: float(info.get("mean") or 0.0) for feat, info in feature_baseline.items()},
@@ -2060,22 +1926,22 @@ with st.expander("🧪 Tests de régression", expanded=False):
             elif feature_names_list:
                 _gt_default = _json.dumps({feat: 0.0 for feat in feature_names_list}, indent=2)
             else:
-                _gt_default = '{\n  "feature1": 0.0\n}'
+                _gt_default = '{}\n  "feature1": 0.0\n}'
 
             with st.form("add_golden_test_form", clear_on_submit=True):
                 raw_features_gt = st.text_area(
-                    "Features (JSON)",
+                    t("models.golden_tests.features_label"),
                     value=_gt_default,
                     height=130,
                     key="gt_features_input",
                 )
-                expected_gt = st.text_input("Expected output", placeholder="setosa", key="gt_expected")
-                desc_gt = st.text_input("Description (optionnel)", value="", key="gt_desc")
-                submitted_gt = st.form_submit_button("Ajouter")
+                expected_gt = st.text_input(t("models.golden_tests.expected_label"), placeholder=t("models.golden_tests.expected_placeholder"), key="gt_expected")
+                desc_gt = st.text_input(t("models.golden_tests.description_label"), value="", key="gt_desc")
+                submitted_gt = st.form_submit_button(t("models.golden_tests.submit_btn"))
 
             if submitted_gt:
                 if not expected_gt.strip():
-                    st.error("La sortie attendue (Expected output) est obligatoire.")
+                    st.error(t("models.golden_tests.error_no_expected"))
                 else:
                     try:
                         import json as _json
@@ -2089,43 +1955,40 @@ with st.expander("🧪 Tests de régression", expanded=False):
                                 "description": desc_gt.strip() or None,
                             },
                         )
-                        st.success("Cas de test ajouté.")
+                        st.success(t("models.golden_tests.add_success"))
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Erreur : {e}")
+                        st.error(t("models.golden_tests.add_error", error=e))
 
         # --- Upload CSV ---
-        with st.expander("📥 Importer depuis un CSV", expanded=False):
-            st.caption(
-                "Format : colonnes features + `expected_output` (requis) + `description` (optionnel). "
-                "Exemple : `sepal_length,sepal_width,petal_length,petal_width,expected_output,description`"
-            )
-            csv_file_gt = st.file_uploader("Choisir un fichier CSV", type=["csv"], key="gt_csv_upload")
-            if csv_file_gt and st.button("Importer", key="import_gt_csv"):
+        with st.expander(t("models.golden_tests.csv_expander"), expanded=False):
+            st.caption(t("models.golden_tests.csv_caption"))
+            csv_file_gt = st.file_uploader(t("models.golden_tests.csv_uploader_label"), type=["csv"], key="gt_csv_upload")
+            if csv_file_gt and st.button(t("models.golden_tests.csv_import_btn"), key="import_gt_csv"):
                 try:
                     result_csv = client.upload_golden_tests_csv(
                         gt_model_name, csv_file_gt.read(), csv_file_gt.name
                     )
-                    st.success(f"{result_csv.get('created', 0)} cas importés.")
+                    st.success(t("models.golden_tests.csv_import_success", n=result_csv.get('created', 0)))
                     if result_csv.get("errors"):
-                        st.warning(f"Erreurs : {result_csv['errors']}")
+                        st.warning(t("models.golden_tests.csv_import_errors", errors=result_csv['errors']))
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Erreur lors de l'import : {e}")
+                    st.error(t("models.golden_tests.csv_import_error", error=e))
 
     st.divider()
 
     # --- Lancer les tests ---
-    if st.button("▶️ Lancer les tests", key="run_golden_tests", type="primary"):
+    if st.button(t("models.golden_tests.run_btn"), key="run_golden_tests", type="primary"):
         try:
             gt_result = client.run_golden_tests(gt_model_name, gt_version)
             col_p, col_f, col_r = st.columns(3)
-            col_p.metric("✅ Passés", gt_result["passed"])
-            col_f.metric("❌ Échoués", gt_result["failed"])
-            col_r.metric("Taux", f"{gt_result['pass_rate']:.1%}")
+            col_p.metric(t("models.golden_tests.col_passed"), gt_result["passed"])
+            col_f.metric(t("models.golden_tests.col_failed"), gt_result["failed"])
+            col_r.metric(t("models.golden_tests.col_rate"), f"{gt_result['pass_rate']:.1%}")
 
             if gt_result["total_tests"] == 0:
-                st.info("Aucun cas de test enregistré.")
+                st.info(t("models.golden_tests.no_test_cases"))
             else:
                 for d in gt_result["details"]:
                     passed = d["passed"]
@@ -2135,22 +1998,22 @@ with st.expander("🧪 Tests de régression", expanded=False):
                     with st.expander(label, expanded=not passed):
                         c_l, c_r = st.columns(2)
                         with c_l:
-                            st.markdown("**Attendu**")
+                            st.markdown(t("models.golden_tests.result_expected_header"))
                             st.code(str(d.get("expected", "—")), language=None)
                         with c_r:
-                            st.markdown("**Obtenu**")
+                            st.markdown(t("models.golden_tests.result_actual_header"))
                             if passed:
                                 st.code(str(d.get("actual", "—")), language=None)
                             else:
                                 st.error(str(d.get("actual", "—")))
                         if d.get("input"):
-                            st.markdown("**Features utilisées**")
+                            st.markdown(t("models.golden_tests.result_features_header"))
                             st.json(d["input"])
         except Exception as e:
-            st.error(f"Erreur lors de l'exécution des tests : {e}")
+            st.error(t("models.golden_tests.run_error", error=e))
 
 # Explorateur What-if
-with st.expander("🔮 Explorateur What-if", expanded=False):
+with st.expander(t("models.whatif.expander"), expanded=False):
     _wif_api_url = st.session_state.get("api_url")
     _wif_api_token = st.session_state.get("api_token")
 
@@ -2166,17 +2029,13 @@ with st.expander("🔮 Explorateur What-if", expanded=False):
             pass
 
     if not wif_baseline:
-        st.info(
-            "⚠️ Ce modèle n'a pas de baseline de features. "
-            "Calculez-en une dans **Actions admin → Calculer le baseline** "
-            "pour activer l'explorateur What-if."
-        )
+        st.info(t("models.whatif.no_baseline"))
     else:
         _wif_key = f"whatif_history_{selected['name']}_{selected['version']}"
         if _wif_key not in st.session_state:
             st.session_state[_wif_key] = []
 
-        st.caption(f"{len(wif_baseline)} features — ajustez les sliders puis cliquez **Prédire**.")
+        st.caption(t("models.whatif.caption", n=len(wif_baseline)))
 
         _wif_cols = st.columns(2)
         wif_feature_values: dict = {}
@@ -2209,17 +2068,17 @@ with st.expander("🔮 Explorateur What-if", expanded=False):
                     )
 
         wif_use_shap = st.checkbox(
-            "Afficher les contributions SHAP",
+            t("models.whatif.shap_checkbox"),
             value=True,
             key=f"whatif_shap_{selected['name']}_{selected['version']}",
         )
 
         if st.button(
-            "🔮 Prédire",
+            t("models.whatif.btn_predict"),
             key=f"whatif_btn_{selected['name']}_{selected['version']}",
             type="primary",
         ):
-            with st.spinner("Prédiction en cours…"):
+            with st.spinner(t("models.whatif.spinner")):
                 try:
                     wif_result = client.predict(
                         model_name=selected["name"],
@@ -2253,22 +2112,24 @@ with st.expander("🔮 Explorateur What-if", expanded=False):
                             except (ValueError, IndexError):
                                 pass
 
-                    _wc1.metric("Prédiction", _wif_pred_label)
+                    _wc1.metric(t("models.whatif.metric_prediction"), _wif_pred_label)
                     if _wif_probs:
-                        _wc2.metric("Probabilité max", f"{max(_wif_probs):.2%}")
+                        _wc2.metric(t("models.whatif.metric_max_prob"), f"{max(_wif_probs):.2%}")
                     if wif_result.get("low_confidence"):
-                        _wc3.warning("⚠️ Confiance faible")
+                        _wc3.warning(t("models.whatif.low_confidence"))
 
                     if _wif_probs:
-                        st.markdown("**Probabilités par classe :**")
+                        st.markdown(t("models.whatif.class_probs_header"))
+                        _wif_col_class = t("models.whatif.col_class")
+                        _wif_col_prob = t("models.whatif.col_probability")
                         if wif_classes and len(wif_classes) == len(_wif_probs):
                             _wif_prob_rows = [
-                                {"Classe": str(c), "Probabilité": f"{p:.4f}"}
+                                {_wif_col_class: str(c), _wif_col_prob: f"{p:.4f}"}
                                 for c, p in zip(wif_classes, _wif_probs)
                             ]
                         else:
                             _wif_prob_rows = [
-                                {"Classe": f"Classe {i}", "Probabilité": f"{p:.4f}"}
+                                {_wif_col_class: t("models.whatif.col_class_i", i=i), _wif_col_prob: f"{p:.4f}"}
                                 for i, p in enumerate(_wif_probs)
                             ]
                         st.dataframe(
@@ -2279,7 +2140,7 @@ with st.expander("🔮 Explorateur What-if", expanded=False):
 
                     _wif_shap = wif_result.get("shap_values")
                     if wif_use_shap and _wif_shap:
-                        st.markdown("**Contributions SHAP :**")
+                        st.markdown(t("models.whatif.shap_header"))
                         try:
                             import plotly.express as px
 
@@ -2288,7 +2149,7 @@ with st.expander("🔮 Explorateur What-if", expanded=False):
                                     {
                                         "Feature": f,
                                         "Contribution": v,
-                                        "Signe": "Positif" if v >= 0 else "Négatif",
+                                        "Signe": t("models.whatif.shap_positive") if v >= 0 else t("models.whatif.shap_negative"),
                                     }
                                     for f, v in _wif_shap.items()
                                 ]
@@ -2300,8 +2161,8 @@ with st.expander("🔮 Explorateur What-if", expanded=False):
                                 orientation="h",
                                 color="Signe",
                                 color_discrete_map={
-                                    "Positif": "#e74c3c",
-                                    "Négatif": "#3498db",
+                                    t("models.whatif.shap_positive"): "#e74c3c",
+                                    t("models.whatif.shap_negative"): "#3498db",
                                 },
                             )
                             _wif_shap_fig.update_layout(
@@ -2313,17 +2174,17 @@ with st.expander("🔮 Explorateur What-if", expanded=False):
                         except ImportError:
                             st.bar_chart(pd.DataFrame({"SHAP": _wif_shap}))
                     elif wif_use_shap:
-                        st.info("Les valeurs SHAP ne sont pas disponibles pour ce type de modèle.")
+                        st.info(t("models.whatif.shap_unavailable"))
 
                 except Exception as e:
-                    st.error(f"Erreur lors de la prédiction : {e}")
+                    st.error(t("models.whatif.predict_error", error=e))
 
         if st.session_state[_wif_key]:
             st.divider()
-            st.markdown("**Historique des combinaisons testées**")
+            st.markdown(t("models.whatif.history_header"))
             _wif_feat_options = list(wif_baseline.keys())
             _wif_sel_feat = st.selectbox(
-                "Feature à analyser",
+                t("models.whatif.feature_select_label"),
                 _wif_feat_options,
                 key=f"whatif_feat_sel_{selected['name']}_{selected['version']}",
             )
@@ -2338,7 +2199,7 @@ with st.expander("🔮 Explorateur What-if", expanded=False):
             if _wif_chart_rows:
                 _wif_chart_df = pd.DataFrame(_wif_chart_rows).sort_values("x")
                 _wif_has_probs = st.session_state[_wif_key][-1].get("probability")
-                _wif_y_label = "Probabilité max" if _wif_has_probs else "Prédiction"
+                _wif_y_label = t("models.whatif.y_label_prob") if _wif_has_probs else t("models.whatif.y_label_pred")
                 try:
                     import plotly.express as px
 
@@ -2348,14 +2209,14 @@ with st.expander("🔮 Explorateur What-if", expanded=False):
                         y="y",
                         markers=True,
                         labels={"x": _wif_sel_feat, "y": _wif_y_label},
-                        title=f"Évolution vs {_wif_sel_feat}",
+                        title=t("models.whatif.evolution_title", feature=_wif_sel_feat),
                     )
                     st.plotly_chart(_wif_evo_fig, width='stretch')
                 except ImportError:
                     st.line_chart(_wif_chart_df.set_index("x")["y"])
 
             if st.button(
-                "🗑️ Effacer l'historique",
+                t("models.whatif.btn_clear_history"),
                 key=f"whatif_clear_{selected['name']}_{selected['version']}",
             ):
                 st.session_state[_wif_key] = []
@@ -2363,7 +2224,7 @@ with st.expander("🔮 Explorateur What-if", expanded=False):
 
 # Actions
 if is_admin:
-    with st.expander("⚙️ Actions admin", expanded=True):
+    with st.expander(t("models.admin.expander"), expanded=True):
         col_p, col_d = st.columns(2)
 
         # Readiness checklist
@@ -2371,12 +2232,12 @@ if is_admin:
             readiness = client.get_model_readiness(selected["name"], selected["version"])
             checks = readiness.get("checks", {})
             check_labels = {
-                "file_accessible": "Fichier accessible dans MinIO",
-                "baseline_computed": "Baseline des features calculée",
-                "no_critical_drift": "Aucun drift critique (24h)",
-                "is_production": "Marqué en production",
+                "file_accessible": t("models.admin.check_file_accessible"),
+                "baseline_computed": t("models.admin.check_baseline_computed"),
+                "no_critical_drift": t("models.admin.check_no_critical_drift"),
+                "is_production": t("models.admin.check_is_production"),
             }
-            st.markdown("**Checklist de production-readiness**")
+            st.markdown(t("models.admin.readiness_header"))
             for key, label in check_labels.items():
                 check = checks.get(key, {})
                 passed = check.get("pass", False)
@@ -2390,185 +2251,187 @@ if is_admin:
 
         # Passer en production
         if not selected.get("is_production"):
-            promote_help = None if ready else "Résoudre les checks ❌ ci-dessus avant de promouvoir"
+            promote_help = None if ready else t("models.admin.btn_promote_help")
             if col_p.button(
-                "🚀 Passer en production",
+                t("models.admin.btn_promote"),
                 width='stretch',
                 type="primary",
                 disabled=not ready,
                 help=promote_help,
+                key=f"promote_btn_{selected['name']}_{selected['version']}",
             ):
                 try:
                     client.update_model(selected["name"], selected["version"], {"is_production": True})
                     st.toast(
-                        f"{selected['name']} v{selected['version']} est maintenant en production.",
+                        t("models.admin.promote_toast", name=selected['name'], version=selected['version']),
                         icon="✅",
                     )
                     reload()
                 except Exception as e:
-                    st.toast(f"Erreur : {e}", icon="❌")
+                    st.toast(t("models.admin.promote_error", error=e), icon="❌")
         else:
-            col_p.info("🟢 Déjà en production")
+            col_p.info(t("models.admin.already_production"))
 
         # Préchauffage du cache
         selected_cache_key = f"{selected['name']}:{selected['version']}"
         is_selected_cached = selected_cache_key in cached_model_keys
         col_w1, col_w2 = st.columns([1, 3])
         if is_selected_cached:
-            col_w1.success("🔥 En cache")
+            col_w1.success(t("models.admin.cache_hot"))
         else:
-            col_w1.warning("❄️ Non chargé")
+            col_w1.warning(t("models.admin.cache_cold"))
         if not is_selected_cached:
             if col_w2.button(
-                "🔥 Préchauffer le cache",
+                t("models.admin.btn_warmup"),
                 width='stretch',
                 key="warmup_btn",
-                help="Charge le modèle en mémoire pour éliminer la latence de cold-start",
+                help=t("models.admin.btn_warmup_help"),
             ):
-                with st.spinner("Chargement du modèle en cache…"):
+                with st.spinner(t("models.admin.warmup_spinner")):
                     try:
                         result = client.warmup_model(selected["name"], selected["version"])
                         st.toast(
-                            f"Modèle chargé en {result['load_time_ms']:.0f} ms "
-                            f"— clé cache : {result['cache_key']}",
+                            t("models.admin.warmup_toast", ms=result['load_time_ms'], key=result['cache_key']),
                             icon="✅",
                         )
                         reload()
                     except Exception as e:
-                        st.toast(f"Erreur lors du préchauffage : {e}", icon="❌")
+                        st.toast(t("models.admin.warmup_error", error=e), icon="❌")
         else:
-            col_w2.info("Le modèle est déjà en cache — aucun préchauffage nécessaire.")
+            col_w2.info(t("models.admin.cache_already_loaded"))
 
         # Supprimer
-        if col_d.button("🗑️ Supprimer cette version", width='stretch', type="secondary"):
+        if col_d.button(t("models.admin.btn_delete"), width='stretch', type="secondary"):
             st.session_state["confirm_delete_model"] = f"{selected['name']}:{selected['version']}"
 
         key = f"{selected['name']}:{selected['version']}"
         if st.session_state.get("confirm_delete_model") == key:
-            st.warning(
-                f"Supprimer **{selected['name']} v{selected['version']}** ? (fichier MinIO + run MLflow)"
-            )
+            st.warning(t("models.admin.confirm_delete", name=selected['name'], version=selected['version']))
             c1, c2 = st.columns(2)
-            if c1.button("Oui, supprimer", type="primary"):
+            if c1.button(t("models.admin.confirm_yes"), type="primary"):
                 try:
                     client.delete_model_version(selected["name"], selected["version"])
-                    st.toast("Modèle supprimé.", icon="✅")
+                    st.toast(t("models.admin.delete_toast"), icon="✅")
                     st.session_state.pop("confirm_delete_model", None)
                     reload()
                 except Exception as e:
-                    st.toast(f"Erreur : {e}", icon="❌")
-            if c2.button("Annuler"):
+                    st.toast(t("models.admin.delete_error", error=e), icon="❌")
+            if c2.button(t("models.admin.confirm_cancel")):
                 st.session_state.pop("confirm_delete_model", None)
                 st.rerun()
 
         # Modifier les métadonnées (tous les champs PATCH /models/{name}/{version})
-        with st.expander("✏️ Modifier les métadonnées"):
+        with st.expander(t("models.edit_meta.expander")):
 
             # ── Description & informations ─────────────────────────────────────
-            st.markdown("**Description & informations**")
+            st.markdown(t("models.edit_meta.section_description"))
             _col_desc, _col_ds = st.columns(2)
             with _col_desc:
                 new_description = st.text_area(
-                    "Description",
+                    t("models.edit_meta.description_label"),
                     value=selected.get("description") or "",
-                    placeholder="Description du modèle…",
+                    placeholder=t("models.edit_meta.description_placeholder"),
                     height=80,
                 )
             with _col_ds:
                 new_training_dataset = st.text_input(
-                    "Dataset d'entraînement",
+                    t("models.edit_meta.dataset_label"),
                     value=selected.get("training_dataset") or "",
-                    placeholder="ex : iris_v2, s3://bucket/data.csv",
-                    help="Référence libre au jeu de données utilisé pour entraîner ce modèle.",
+                    placeholder=t("models.edit_meta.dataset_placeholder"),
+                    help=t("models.edit_meta.dataset_help"),
                 )
 
             # ── Tags & Webhook ─────────────────────────────────────────────────
-            st.markdown("**Tags & Webhook**")
+            st.markdown(t("models.edit_meta.section_tags"))
             _col_tags, _col_wh = st.columns(2)
             with _col_tags:
                 new_tags_raw = st.text_input(
-                    "Tags (séparés par des virgules)",
+                    t("models.edit_meta.tags_label"),
                     value=", ".join(selected.get("tags") or []),
-                    placeholder="production, finance, v2",
+                    placeholder=t("models.edit_meta.tags_placeholder"),
                 )
             with _col_wh:
                 new_webhook = st.text_input(
-                    "Webhook URL",
+                    t("models.edit_meta.webhook_label"),
                     value=selected.get("webhook_url") or "",
-                    placeholder="https://example.com/webhook",
+                    placeholder=t("models.edit_meta.webhook_placeholder"),
                 )
 
             # ── Inférence ──────────────────────────────────────────────────────
-            st.markdown("**Inférence**")
+            st.markdown(t("models.edit_meta.section_inference"))
             _cur_ct = selected.get("confidence_threshold")
             new_confidence_threshold = st.slider(
-                "Confidence threshold",
+                t("models.edit_meta.confidence_label"),
                 min_value=0.0,
                 max_value=1.0,
                 value=float(_cur_ct) if _cur_ct is not None else 0.5,
                 step=0.01,
-                help="Seuil en dessous duquel la prédiction est marquée `low_confidence=True` dans la réponse.",
+                help=t("models.edit_meta.confidence_help"),
             )
 
             # ── Déploiement A/B / Shadow ───────────────────────────────────────
-            st.markdown("**Déploiement A/B / Shadow**")
+            st.markdown(t("models.edit_meta.section_deployment"))
             _deploy_opts = ["production", "ab_test", "shadow"]
             _cur_deploy = selected.get("deployment_mode") or "production"
             _deploy_idx = _deploy_opts.index(_cur_deploy) if _cur_deploy in _deploy_opts else 0
             new_deploy_mode = st.selectbox(
-                "Mode de déploiement",
+                t("models.edit_meta.deploy_mode_label"),
                 _deploy_opts,
                 index=_deploy_idx,
                 key="deploy_mode_select",
-                format_func=lambda m: {"production": "🟢 Production", "ab_test": "🟠 A/B Test", "shadow": "🟣 Shadow"}.get(m, m),
-                help="production = trafic direct · ab_test = routage pondéré · shadow = exécution silencieuse",
+                format_func=lambda m: {
+                    "production": t("models.edit_meta.deploy_production"),
+                    "ab_test": t("models.edit_meta.deploy_ab_test"),
+                    "shadow": t("models.edit_meta.deploy_shadow"),
+                }.get(m, m),
+                help=t("models.edit_meta.deploy_mode_help"),
             )
             new_traffic_weight = None
             if new_deploy_mode == "ab_test":
                 new_traffic_weight = st.number_input(
-                    "Poids du trafic (0.0 – 1.0)",
+                    t("models.edit_meta.traffic_weight_label"),
                     min_value=0.0,
                     max_value=1.0,
                     step=0.05,
                     value=float(selected.get("traffic_weight") or 0.5),
                     key="traffic_weight_input",
-                    help="Fraction du trafic routé vers cette version (ex: 0.3 = 30 %)",
+                    help=t("models.edit_meta.traffic_weight_help"),
                 )
 
             # ── Seuils d'alerte ────────────────────────────────────────────────
-            st.markdown("**Seuils d'alerte**")
-            st.caption("Laissez à 0 pour désactiver le seuil correspondant.")
+            st.markdown(t("models.edit_meta.section_alerts"))
+            st.caption(t("models.edit_meta.alerts_caption"))
             _cur_at = selected.get("alert_thresholds") or {}
             _col_at1, _col_at2, _col_at3 = st.columns(3)
             with _col_at1:
                 _acc_min_cur = _cur_at.get("accuracy_min")
                 new_accuracy_min = st.number_input(
-                    "Accuracy min",
+                    t("models.edit_meta.accuracy_min_label"),
                     min_value=0.0,
                     max_value=1.0,
                     step=0.01,
                     value=float(_acc_min_cur) if _acc_min_cur is not None else 0.0,
-                    help="Alerte si l'accuracy live passe sous ce seuil. 0 = désactivé.",
+                    help=t("models.edit_meta.accuracy_min_help"),
                 )
             with _col_at2:
                 _err_max_cur = _cur_at.get("error_rate_max")
                 new_error_rate_max = st.number_input(
-                    "Taux d'erreur max",
+                    t("models.edit_meta.error_rate_max_label"),
                     min_value=0.0,
                     max_value=1.0,
                     step=0.01,
                     value=float(_err_max_cur) if _err_max_cur is not None else 0.0,
-                    help="Alerte si le taux d'erreur dépasse ce seuil. 0 = désactivé.",
+                    help=t("models.edit_meta.error_rate_max_help"),
                 )
             with _col_at3:
                 new_drift_auto_alert = st.checkbox(
-                    "Alerte drift auto",
+                    t("models.edit_meta.drift_auto_alert_label"),
                     value=bool(_cur_at.get("drift_auto_alert", True)),
-                    help="Activer les alertes automatiques en cas de drift critique détecté.",
+                    help=t("models.edit_meta.drift_auto_alert_help"),
                 )
 
             # ── Enregistrer ────────────────────────────────────────────────────
-            if st.button("💾 Enregistrer", key="save_meta"):
+            if st.button(t("models.edit_meta.btn_save"), key="save_meta"):
                 patch = {}
 
                 # Description
@@ -2587,7 +2450,7 @@ if is_admin:
                     patch["webhook_url"] = new_webhook if new_webhook else None
 
                 # Tags
-                new_tags = [t.strip() for t in new_tags_raw.split(",") if t.strip()]
+                new_tags = [_tag.strip() for _tag in new_tags_raw.split(",") if _tag.strip()]
                 if new_tags != (selected.get("tags") or []):
                     patch["tags"] = new_tags if new_tags else None
 
@@ -2622,41 +2485,41 @@ if is_admin:
                 if patch:
                     try:
                         client.update_model(selected["name"], selected["version"], patch)
-                        st.toast("Métadonnées mises à jour.", icon="✅")
+                        st.toast(t("models.edit_meta.save_toast"), icon="✅")
                         reload()
                     except Exception as e:
-                        st.toast(f"Erreur : {e}", icon="❌")
+                        st.toast(t("models.edit_meta.save_error", error=e), icon="❌")
                 else:
-                    st.info("Aucun changement détecté.")
+                    st.info(t("models.edit_meta.no_change"))
 
         # Ré-entraînement
         if selected.get("train_script_object_key"):
-            with st.expander("🔄 Ré-entraîner", expanded=False):
+            with st.expander(t("models.retrain.expander"), expanded=False):
                 with st.form("retrain_form"):
-                    st.markdown(f"**Ré-entraîner** `{selected['name']}` v`{selected['version']}`")
+                    st.markdown(t("models.retrain.title", name=selected['name'], version=selected['version']))
                     col_s, col_e = st.columns(2)
                     with col_s:
-                        start_date = st.date_input("Date de début", key="retrain_start")
+                        start_date = st.date_input(t("models.retrain.start_date"), key="retrain_start")
                     with col_e:
-                        end_date = st.date_input("Date de fin", key="retrain_end")
+                        end_date = st.date_input(t("models.retrain.end_date"), key="retrain_end")
                     new_version_input = st.text_input(
-                        "Nouvelle version (laisser vide = auto-généré)",
+                        t("models.retrain.new_version_label"),
                         value="",
                         placeholder=f"{selected['version']}-retrain-YYYYMMDDHHMMSS",
                         key="retrain_new_version",
                     )
                     set_prod = st.checkbox(
-                        "Mettre en production après entraînement",
+                        t("models.retrain.set_prod_label"),
                         value=False,
                         key="retrain_set_prod",
                     )
-                    submitted = st.form_submit_button("🚀 Lancer le ré-entraînement", type="primary")
+                    submitted = st.form_submit_button(t("models.retrain.submit_btn"), type="primary")
 
                 if submitted:
                     if start_date > end_date:
-                        st.error("La date de début doit être antérieure à la date de fin.")
+                        st.error(t("models.retrain.date_order_error"))
                     else:
-                        with st.spinner("Ré-entraînement en cours… (peut prendre jusqu'à 10 minutes)"):
+                        with st.spinner(t("models.retrain.spinner")):
                             try:
                                 result = client.retrain_model(
                                     name=selected["name"],
@@ -2668,24 +2531,22 @@ if is_admin:
                                 )
                                 if result.get("success"):
                                     st.toast(
-                                        f"Ré-entraînement réussi ! "
-                                        f"Nouvelle version : {result['new_version']}",
+                                        t("models.retrain.success_toast", new_version=result['new_version']),
                                         icon="✅",
                                     )
                                 else:
                                     st.toast(
-                                        f"Échec du ré-entraînement : "
-                                        f"{result.get('error', 'Erreur inconnue')}",
+                                        t("models.retrain.failure_toast", error=result.get('error', t("models.retrain.unknown_error"))),
                                         icon="❌",
                                     )
-                                with st.expander("📋 Logs stdout", expanded=not result.get("success")):
-                                    st.code(result.get("stdout", "(vide)"), language="text")
-                                with st.expander("⚠️ Logs stderr", expanded=not result.get("success")):
-                                    st.code(result.get("stderr", "(vide)"), language="text")
+                                with st.expander(t("models.retrain.stdout_expander"), expanded=not result.get("success")):
+                                    st.code(result.get("stdout", t("models.retrain.logs_empty")), language="text")
+                                with st.expander(t("models.retrain.stderr_expander"), expanded=not result.get("success")):
+                                    st.code(result.get("stderr", t("models.retrain.logs_empty")), language="text")
                                 if result.get("success"):
                                     reload()
                             except Exception as e:
-                                st.toast(f"Erreur lors du ré-entraînement : {e}", icon="❌")
+                                st.toast(t("models.retrain.error_toast", error=e), icon="❌")
 
         # Politique d'auto-promotion / circuit breaker
         if is_admin:
@@ -2693,40 +2554,38 @@ if is_admin:
             _pp_promote_on = _pp.get("auto_promote", False)
             _pp_demote_on  = _pp.get("auto_demote",  False)
 
-            with st.expander(
-                f"⚙️ Politique de promotion  "
-                f"{'🚀 Promo ' if _pp_promote_on else ''}"
-                f"{'⚡ CB' if _pp_demote_on else ''}".strip() or "⚙️ Politique de promotion",
-                expanded=False,
-            ):
-                st.caption(
-                    f"Appliquée à **toutes les versions** de `{selected['name']}`. "
-                    "0 = critère désactivé."
-                )
+            if _pp_promote_on and _pp_demote_on:
+                _policy_exp_title = t("models.policy.expander_active")
+            elif _pp_promote_on:
+                _policy_exp_title = t("models.policy.expander_promote_only")
+            elif _pp_demote_on:
+                _policy_exp_title = t("models.policy.expander_cb_only")
+            else:
+                _policy_exp_title = t("models.policy.expander_default")
+
+            with st.expander(_policy_exp_title, expanded=False):
+                st.caption(t("models.policy.caption", name=selected['name']))
 
                 # ── Auto-promotion ─────────────────────────────────────────────
-                st.markdown(
-                    f"**🚀 Auto-promotion post-retrain** — "
-                    f"{'🟢 Activée' if _pp_promote_on else '⬜ Inactive'}"
-                )
+                st.markdown(t("models.policy.promote_header_active") if _pp_promote_on else t("models.policy.promote_header_inactive"))
                 _pp_c1, _pp_c2 = st.columns(2)
                 with _pp_c1:
                     _pp_new_promote = st.checkbox(
-                        "Activer l'auto-promotion",
+                        t("models.policy.auto_promote_label"),
                         value=_pp_promote_on,
                         key="pp_auto_promote",
                     )
                     _pp_min_acc = _pp.get("min_accuracy")
                     _pp_new_min_acc = st.number_input(
-                        "Accuracy minimale (0 = désactivé)",
+                        t("models.policy.min_accuracy_label"),
                         min_value=0.0, max_value=1.0, step=0.01,
                         value=float(_pp_min_acc) if _pp_min_acc is not None else 0.0,
                         key="pp_min_accuracy",
-                        help="Accuracy requise sur les paires de validation pour promotion.",
+                        help=t("models.policy.min_accuracy_help"),
                     )
                     _pp_min_golden = _pp.get("min_golden_test_pass_rate")
                     _pp_new_golden = st.number_input(
-                        "Taux Golden Tests min (0 = désactivé)",
+                        t("models.policy.min_golden_label"),
                         min_value=0.0, max_value=1.0, step=0.01,
                         value=float(_pp_min_golden) if _pp_min_golden is not None else 0.0,
                         key="pp_min_golden",
@@ -2734,21 +2593,21 @@ if is_admin:
                 with _pp_c2:
                     _pp_max_mae = _pp.get("max_mae")
                     _pp_new_max_mae = st.number_input(
-                        "MAE maximale (0 = désactivé)",
+                        t("models.policy.max_mae_label"),
                         min_value=0.0, step=0.01,
                         value=float(_pp_max_mae) if _pp_max_mae is not None else 0.0,
                         key="pp_max_mae",
-                        help="MAE maximale autorisée (régression uniquement).",
+                        help=t("models.policy.max_mae_help"),
                     )
                     _pp_max_lat = _pp.get("max_latency_p95_ms")
                     _pp_new_max_lat = st.number_input(
-                        "Latence P95 max (ms, 0 = désactivé)",
+                        t("models.policy.max_latency_label"),
                         min_value=0.0, step=10.0,
                         value=float(_pp_max_lat) if _pp_max_lat is not None else 0.0,
                         key="pp_max_latency",
                     )
                     _pp_new_min_samples = st.number_input(
-                        "Échantillons de validation min",
+                        t("models.policy.min_samples_label"),
                         min_value=1, step=1,
                         value=int(_pp.get("min_sample_validation", 10)),
                         key="pp_min_samples",
@@ -2757,44 +2616,41 @@ if is_admin:
                 st.divider()
 
                 # ── Circuit breaker ────────────────────────────────────────────
-                st.markdown(
-                    f"**⚡ Circuit breaker (auto-demotion)** — "
-                    f"{'🔴 Activé' if _pp_demote_on else '⬜ Inactif'}"
-                )
+                st.markdown(t("models.policy.cb_header_active") if _pp_demote_on else t("models.policy.cb_header_inactive"))
                 _pp_cb1, _pp_cb2 = st.columns(2)
                 with _pp_cb1:
                     _pp_new_demote = st.checkbox(
-                        "Activer le circuit breaker",
+                        t("models.policy.auto_demote_label"),
                         value=_pp_demote_on,
                         key="pp_auto_demote",
                     )
                     _pp_new_drift = st.selectbox(
-                        "Niveau de drift déclencheur",
+                        t("models.policy.drift_level_label"),
                         ["warning", "critical"],
                         index=0 if _pp.get("demote_on_drift", "critical") == "warning" else 1,
                         key="pp_demote_on_drift",
-                        format_func=lambda x: "⚠️ Warning" if x == "warning" else "🔴 Critical",
-                        help="Warning = plus sensible, Critical = seuil strict.",
+                        format_func=lambda x: t("models.policy.drift_warning") if x == "warning" else t("models.policy.drift_critical"),
+                        help=t("models.policy.drift_level_help"),
                     )
                 with _pp_cb2:
                     _pp_acc_thr = _pp.get("demote_on_accuracy_below")
                     _pp_new_demote_acc = st.number_input(
-                        "Accuracy minimale (0 = désactivé)",
+                        t("models.policy.demote_accuracy_label"),
                         min_value=0.0, max_value=1.0, step=0.01,
                         value=float(_pp_acc_thr) if _pp_acc_thr is not None else 0.0,
                         key="pp_demote_accuracy",
-                        help="Descend sous ce seuil → demotion automatique.",
+                        help=t("models.policy.demote_accuracy_help"),
                     )
                     _pp_new_cooldown = st.number_input(
-                        "Cooldown (heures)",
+                        t("models.policy.cooldown_label"),
                         min_value=0, step=1,
                         value=int(_pp.get("demote_cooldown_hours", 24)),
                         key="pp_cooldown",
-                        help="Délai minimal entre deux auto-demotions.",
+                        help=t("models.policy.cooldown_help"),
                     )
 
                 # ── Enregistrer (une seule fois, tout la policy d'un coup) ─────
-                if st.button("💾 Sauvegarder la politique", key="save_policy"):
+                if st.button(t("models.policy.btn_save"), key="save_policy"):
                     try:
                         client.set_policy(
                             selected["name"],
@@ -2809,29 +2665,22 @@ if is_admin:
                             demote_on_accuracy_below=_pp_new_demote_acc if _pp_new_demote_acc > 0 else None,
                             demote_cooldown_hours=_pp_new_cooldown,
                         )
-                        st.toast("Politique mise à jour.", icon="✅")
+                        st.toast(t("models.policy.save_toast"), icon="✅")
                         reload()
                     except Exception as e:
-                        st.toast(f"Erreur : {e}", icon="❌")
+                        st.toast(t("models.policy.save_error", error=e), icon="❌")
 
         # Calcul du baseline depuis la production
-        with st.expander("📐 Calculer le baseline depuis la production"):
-            st.markdown(
-                "Calcule `{mean, std, min, max}` par feature depuis les prédictions de production "
-                "récentes et sauvegarde le résultat comme **feature_baseline** du modèle, "
-                "activant ainsi la détection de drift."
-            )
+        with st.expander(t("models.baseline.expander")):
+            st.markdown(t("models.baseline.description"))
             if selected.get("feature_baseline"):
-                st.warning(
-                    "⚠️ Une baseline existe déjà pour ce modèle. "
-                    "Recalculer écrasera les valeurs actuelles et réinitialisera la détection de drift."
-                )
-            baseline_days = st.slider("Fenêtre temporelle (jours)", 7, 180, 30, key="baseline_days")
+                st.warning(t("models.baseline.existing_warning"))
+            baseline_days = st.slider(t("models.baseline.days_slider_label"), 7, 180, 30, key="baseline_days")
             baseline_dry_run = st.checkbox(
-                "dry_run (simuler sans sauvegarder)", value=True, key="baseline_dry_run"
+                t("models.baseline.dry_run_label"), value=True, key="baseline_dry_run"
             )
-            if st.button("Calculer", key="baseline_compute_btn", type="primary"):
-                with st.spinner("Calcul en cours…"):
+            if st.button(t("models.baseline.btn_compute"), key="baseline_compute_btn", type="primary"):
+                with st.spinner(t("models.baseline.spinner")):
                     try:
                         result = client.compute_baseline(
                             name=selected["name"],
@@ -2839,58 +2688,53 @@ if is_admin:
                             days=baseline_days,
                             dry_run=baseline_dry_run,
                         )
-                        st.markdown(
-                            f"**Prédictions utilisées :** {result.get('predictions_used')} "
-                            f"— fenêtre : {baseline_days} jours"
-                        )
+                        st.markdown(t("models.baseline.result_caption", n=result.get('predictions_used'), days=baseline_days))
                         st.json(result.get("baseline", {}))
                         if baseline_dry_run:
-                            st.info("Décochez **dry_run** pour sauvegarder le baseline.")
+                            st.info(t("models.baseline.dry_run_info"))
                         else:
-                            st.toast("Baseline sauvegardé — drift actif pour ce modèle.", icon="✅")
+                            st.toast(t("models.baseline.save_toast"), icon="✅")
                             st.cache_data.clear()
                     except Exception as e:
-                        st.toast(f"Erreur : {e}", icon="❌")
+                        st.toast(t("models.baseline.error", error=e), icon="❌")
 
         # Historique des modifications
-        with st.expander("📜 Historique des modifications"):
+        with st.expander(t("models.history.expander")):
             try:
                 history_data = client.get_model_history(selected["name"], selected["version"], limit=20)
                 entries = history_data.get("entries", [])
                 total_hist = history_data.get("total", 0)
             except Exception as e:
-                st.error(f"Impossible de charger l'historique : {e}")
+                st.error(t("models.history.load_error", error=e))
                 entries = []
                 total_hist = 0
 
             if not entries:
-                st.info("Aucun historique disponible pour cette version.")
+                st.info(t("models.history.no_history"))
             else:
-                st.caption(f"{total_hist} entrée(s) au total — affichage des 20 dernières")
+                st.caption(t("models.history.caption", total=total_hist))
                 for entry in entries:
                     ts = pd.to_datetime(entry["timestamp"]).strftime("%Y-%m-%d %H:%M:%S UTC")
                     badge = _action_badge(entry["action"])
                     changed = ", ".join(entry.get("changed_fields") or []) or "—"
-                    who = entry.get("changed_by_username") or "inconnu"
+                    who = entry.get("changed_by_username") or t("models.history.changed_by_unknown")
 
                     col_info, col_btn = st.columns([5, 1])
                     with col_info:
-                        st.markdown(
-                            f"**{ts}** — {badge} — par **{who}**  \n" f"Champs modifiés : `{changed}`"
-                        )
+                        st.markdown(t("models.history.entry_line", ts=ts, badge=badge, who=who, changed=changed))
                     with col_btn:
                         if is_admin:
                             if st.button(
-                                "↩ Rollback",
+                                t("models.history.btn_rollback"),
                                 key=f"rollback_btn_{entry['id']}",
                                 type="secondary",
-                                help=f"Restaurer l'état de l'entrée #{entry['id']}",
+                                help=t("models.history.rollback_help", id=entry['id']),
                             ):
                                 st.session_state["confirm_rollback_id"] = entry["id"]
                                 st.session_state["confirm_rollback_model"] = selected["name"]
                                 st.session_state["confirm_rollback_version"] = selected["version"]
 
-                    with st.expander(f"Snapshot #{entry['id']}", expanded=False):
+                    with st.expander(t("models.history.snapshot_expander", id=entry['id']), expanded=False):
                         st.json(entry["snapshot"])
 
                     st.divider()
@@ -2904,17 +2748,13 @@ if is_admin:
                     and confirm_model == selected["name"]
                     and confirm_version == selected["version"]
                 ):
-                    st.warning(
-                        f"Restaurer les métadonnées de **{confirm_model} v{confirm_version}** "
-                        f"à l'état capturé dans l'entrée **#{confirm_id}** ?  \n"
-                        "Cette action est irréversible (mais loguée dans l'historique)."
-                    )
+                    st.warning(t("models.history.confirm_rollback", model=confirm_model, version=confirm_version, id=confirm_id))
                     c1, c2 = st.columns(2)
-                    if c1.button("✅ Oui, restaurer", type="primary", key="confirm_rollback_yes"):
+                    if c1.button(t("models.history.confirm_yes"), type="primary", key="confirm_rollback_yes"):
                         try:
                             result = client.rollback_model(confirm_model, confirm_version, confirm_id)
                             st.toast(
-                                f"Rollback effectué — entrée #{result['new_history_id']} créée.",
+                                t("models.history.rollback_toast", id=result['new_history_id']),
                                 icon="✅",
                             )
                             st.session_state.pop("confirm_rollback_id", None)
@@ -2922,8 +2762,8 @@ if is_admin:
                             st.session_state.pop("confirm_rollback_version", None)
                             reload()
                         except Exception as e:
-                            st.toast(f"Erreur lors du rollback : {e}", icon="❌")
-                    if c2.button("❌ Annuler", key="confirm_rollback_no"):
+                            st.toast(t("models.history.rollback_error", error=e), icon="❌")
+                    if c2.button(t("models.history.confirm_cancel"), key="confirm_rollback_no"):
                         st.session_state.pop("confirm_rollback_id", None)
                         st.session_state.pop("confirm_rollback_model", None)
                         st.session_state.pop("confirm_rollback_version", None)
