@@ -9,7 +9,6 @@ import json
 import math
 import os
 import re
-import resource
 import tempfile
 import time
 from datetime import datetime, timedelta, timezone
@@ -47,6 +46,7 @@ from sqlalchemy.orm import selectinload
 import src.core.arq_pool as arq_pool_module
 from src.core.audit import audit_log
 from src.core.config import settings
+from src.core.platform_limits import SUBPROCESS_PREEXEC_KWARGS
 from src.core.rate_limit import limiter
 from src.core.security import require_admin, verify_token
 from src.db.database import AsyncSessionLocal, get_db, get_read_db
@@ -215,22 +215,6 @@ _ALLOWED_IMPORT_MODULES = {
 }
 
 
-def _set_subprocess_limits() -> None:
-    """Appelé dans le processus enfant après fork — réduit la surface d'attaque.
-
-    RLIMIT_AS : on ne limite pas la mémoire virtuelle — mlflow + numpy + sklearn + boto3
-    nécessitent plus de 2 GB d'espace d'adressage virtuel (shared libs + compilations regex
-    de email._header_value_parser en Python 3.13). Un plafond trop bas provoque MemoryError
-    à l'import, bien avant que le script d'entraînement lui-même s'exécute.
-    La protection mémoire est assurée par les cgroups Docker du container.
-
-    RLIMIT_NOFILE : 1024 minimum requis — importlib_metadata ouvre les métadonnées de
-    tous les paquets installés à l'import de mlflow (200+ fd simultanément).
-    """
-    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-    _fd_limit = min(1024, _hard)
-    resource.setrlimit(resource.RLIMIT_NOFILE, (_fd_limit, _fd_limit))
-
 
 def _parse_json_field(value: str | None, field_name: str) -> dict | list | None:
     if not value:
@@ -381,7 +365,7 @@ async def _run_train_subprocess(
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=tmpdir,
-                preexec_fn=_set_subprocess_limits,
+                **SUBPROCESS_PREEXEC_KWARGS,
             )
             try:
                 raw_stdout, raw_stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
