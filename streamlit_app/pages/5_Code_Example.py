@@ -1,5 +1,5 @@
 """
-Exemple de code complet : MLflow + API
+Full code example: MLflow + API
 """
 
 import os
@@ -28,7 +28,7 @@ tab_python, tab_curl, tab_js = st.tabs([
 # TAB PYTHON
 # ============================================================
 with tab_python:
-    # SECTION 1 — Entraîner et tracker avec MLflow
+    # SECTION 1 — Train and track with MLflow
     st.subheader(t("code_example.python.section1_title"))
     st.markdown(t("code_example.python.section1_install"))
 
@@ -51,13 +51,13 @@ MODEL_VERSION = "1.0.0"
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 mlflow.set_experiment(EXPERIMENT_NAME)
 
-# ── Données ─────────────────────────────────────────────────────
+# ── Data ─────────────────────────────────────────────────────
 iris = load_iris()
 X_train, X_test, y_train, y_test = train_test_split(
     iris.data, iris.target, test_size=0.2, random_state=42
 )
 
-# ── Entraînement avec tracking MLflow ──────────────────────────
+# ── Training with MLflow tracking ──────────────────────────────
 with mlflow.start_run() as run:
     params = {{"n_estimators": 100, "max_depth": 5, "random_state": 42}}
     mlflow.log_params(params)
@@ -74,17 +74,17 @@ with mlflow.start_run() as run:
     mlflow.sklearn.log_model(model, "model")
 
     run_id = run.info.run_id
-    print(f"Run ID : {{run_id}}")
+    print(f"Run ID: {{run_id}}")
     print(f"Accuracy : {{acc:.4f}} | F1 : {{f1:.4f}}")
 
-# ── Sauvegarder le modèle localement ───────────────────────────
+# ── Save the model locally ─────────────────────────────────────
 joblib.dump(model, f"{{MODEL_NAME}}_v{{MODEL_VERSION}}.joblib")
 
-print("Modèle sauvegardé.")
+print("Model saved.")
 """
     st.code(code_mlflow, language="python")
 
-    # SECTION 2 — Uploader via l'API
+    # SECTION 2 — Upload via the API
     st.subheader(t("code_example.python.section2_title"))
 
     code_upload = f"""\
@@ -99,7 +99,7 @@ MODEL_FILE = f"{{MODEL_NAME}}_v{{MODEL_VERSION}}.joblib"
 
 headers = {{"Authorization": f"Bearer {{API_TOKEN}}"}}
 
-# ── Upload du modèle ────────────────────────────────────────────
+# ── Model upload ────────────────────────────────────────────────
 with open(MODEL_FILE, "rb") as f:
     response = requests.post(
         f"{{API_URL}}/models",
@@ -108,11 +108,11 @@ with open(MODEL_FILE, "rb") as f:
         data={{
             "name": MODEL_NAME,
             "version": MODEL_VERSION,
-            "description": "Random Forest sur Iris dataset",
+            "description": "Random Forest on Iris dataset",
             "algorithm": "RandomForestClassifier",
-            "accuracy": str(acc),           # variable du step 1
-            "f1_score": str(f1),            # variable du step 1
-            "mlflow_run_id": run_id,        # variable du step 1
+            "accuracy": str(acc),           # variable from step 1
+            "f1_score": str(f1),            # variable from step 1
+            "mlflow_run_id": run_id,        # variable from step 1
             "features_count": "4",
             "classes": "[0, 1, 2]",
             "training_params": '{{"n_estimators": 100, "max_depth": 5}}',
@@ -121,11 +121,11 @@ with open(MODEL_FILE, "rb") as f:
 
 response.raise_for_status()
 model_data = response.json()
-print(f"Modèle uploadé : {{model_data['name']}} v{{model_data['version']}}")
+print(f"Model uploaded: {{model_data['name']}} v{{model_data['version']}}")
 """
     st.code(code_upload, language="python")
 
-    # SECTION 3 — Faire une prédiction
+    # SECTION 3 — Make a prediction
     st.subheader(t("code_example.python.section3_title"))
 
     code_predict = f"""\
@@ -135,7 +135,7 @@ API_URL = "{API_URL}"
 API_TOKEN = "{TOKEN}"
 headers = {{"Authorization": f"Bearer {{API_TOKEN}}"}}
 
-# ── Prédiction avec le modèle par défaut (version en production) ─
+# ── Prediction using the default model (production version) ──────
 payload = {{
     "model_name": "iris_model",
     "features": {{
@@ -144,27 +144,27 @@ payload = {{
         "petal length (cm)": 1.4,
         "petal width (cm)": 0.2,
     }},
-    "id_obs": "obs_001",       # optionnel — identifiant de l\'observation
+    "id_obs": "obs_001",       # optional — observation identifier
 }}
 
 response = requests.post(f"{{API_URL}}/predict", headers=headers, json=payload)
 response.raise_for_status()
 
 result = response.json()
-print(f"Prédiction : {{result[\'prediction\']}}")
-print(f"Probabilités : {{result.get(\'probability\')}}")
+print(f"Prediction: {{result[\'prediction\']}}")
+print(f"Probabilities: {{result.get(\'probability\')}}")
 
-# ── Passer en production (admin) ─────────────────────────────────
+# ── Promote to production (admin) ───────────────────────────────
 requests.patch(
     f"{{API_URL}}/models/iris_model/1.0.0",
     headers=headers,
     json={{"is_production": True}},
 ).raise_for_status()
-print("Version 1.0.0 passée en production.")
+print("Version 1.0.0 promoted to production.")
 """
     st.code(code_predict, language="python")
 
-    # SECTION 4 — Enregistrer les résultats observés
+    # SECTION 4 — Record observed results
     st.subheader(t("code_example.python.section4_title"))
     st.markdown(t("code_example.python.section4_caption"))
 
@@ -182,14 +182,14 @@ payload = {{
             "id_obs": "obs_001",
             "model_name": "iris_model",
             "date_time": datetime.utcnow().isoformat(),
-            "observed_result": 0,    # vraie classe observée
+            "observed_result": 0,    # true observed class
         }}
     ]
 }}
 
 response = requests.post(f"{{API_URL}}/observed-results", headers=headers, json=payload)
 response.raise_for_status()
-print(f"{{response.json()[\'upserted\']}} résultat(s) enregistré(s).")
+print(f"{{response.json()[\'upserted\']}} result(s) recorded.")
 """
     st.code(code_observed, language="python")
 
@@ -209,7 +209,7 @@ curl -X POST "$API_URL/models" \\
   -F "file=@iris_model_v1.0.0.joblib;type=application/octet-stream" \\
   -F "name=iris_model" \\
   -F "version=1.0.0" \\
-  -F "description=Random Forest sur Iris dataset" \\
+  -F "description=Random Forest on Iris dataset" \\
   -F "algorithm=RandomForestClassifier" \\
   -F "accuracy=0.9667" \\
   -F "f1_score=0.9667" \\
@@ -286,14 +286,14 @@ with tab_js:
 const API_URL = "{API_URL}";
 const TOKEN = "{TOKEN}";
 
-// fileInput est un élément <input type="file"> dans votre page HTML
+// fileInput is an <input type="file"> element in your HTML page
 const pklFile = fileInput.files[0];
 
 const formData = new FormData();
 formData.append("file", pklFile, "iris_model_v1.0.0.joblib");
 formData.append("name", "iris_model");
 formData.append("version", "1.0.0");
-formData.append("description", "Random Forest sur Iris dataset");
+formData.append("description", "Random Forest on Iris dataset");
 formData.append("algorithm", "RandomForestClassifier");
 formData.append("accuracy", "0.9667");
 formData.append("f1_score", "0.9667");
@@ -306,7 +306,7 @@ const response = await fetch(`${{API_URL}}/models`, {{
   body: formData,
 }});
 const model = await response.json();
-console.log(`Modèle uploadé : ${{model.name}} v${{model.version}}`);
+console.log(`Model uploaded: ${{model.name}} v${{model.version}}`);
 """
     st.code(code_js_upload, language="javascript")
 
@@ -334,7 +334,7 @@ const response = await fetch(`${{API_URL}}/predict`, {{
   }}),
 }});
 const result = await response.json();
-console.log(`Prédiction : ${{result.prediction}}`);
+console.log(`Prediction: ${{result.prediction}}`);
 console.log(`Probabilités :`, result.probability);
 """
     st.code(code_js_predict, language="javascript")
@@ -350,7 +350,7 @@ const response = await fetch(`${{API_URL}}/predictions?${{params}}`, {{
   headers: {{ "Authorization": `Bearer ${{TOKEN}}` }},
 }});
 const history = await response.json();
-console.log(`${{history.length}} prédiction(s) trouvée(s).`);
+console.log(`${{history.length}} prediction(s) found.`);
 """
     st.code(code_js_history, language="javascript")
 
@@ -378,7 +378,7 @@ const response = await fetch(`${{API_URL}}/observed-results`, {{
   }}),
 }});
 const result = await response.json();
-console.log(`${{result.upserted}} résultat(s) enregistré(s).`);
+console.log(`${{result.upserted}} result(s) recorded.`);
 """
     st.code(code_js_observed, language="javascript")
 

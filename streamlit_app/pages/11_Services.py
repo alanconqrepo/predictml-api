@@ -1,7 +1,7 @@
 """
-Services & Accès — admin uniquement
-Liens de redirection vers les interfaces infrastructure avec credentials associés.
-Les credentials sont lus depuis les variables d'environnement du conteneur Streamlit.
+Services & Access — admin only
+Redirection links to infrastructure interfaces with associated credentials.
+Credentials are read from the Streamlit container's environment variables.
 """
 
 import os
@@ -18,7 +18,7 @@ st.set_page_config(
 
 require_admin()
 
-# ── Lecture des variables d'environnement ──────────────────────────────────────
+# ── Reading environment variables ──────────────────────────────────────────────
 GRAFANA_URL = os.environ.get("GRAFANA_PUBLIC_URL", "http://localhost:3000")
 GRAFANA_USER = os.environ.get("GRAFANA_ADMIN_USER", "admin")
 GRAFANA_PASS = os.environ.get("GRAFANA_ADMIN_PASSWORD", "")
@@ -35,7 +35,7 @@ MLFLOW_PASS = os.environ.get("MLFLOW_ADMIN_PASSWORD", "")
 st.title(t("services.title"))
 st.caption(t("services.caption"))
 
-# Avertissement variables manquantes
+# Warning for missing variables
 _missing = []
 if not GRAFANA_PASS:
     _missing.append("`GRAFANA_ADMIN_PASSWORD`")
@@ -49,14 +49,14 @@ if _missing:
 
 st.divider()
 
-# ── Toggle affichage des secrets ───────────────────────────────────────────────
+# ── Toggle display of secrets ───────────────────────────────────────────────
 _col_toggle, _ = st.columns([1, 3])
 with _col_toggle:
     show_secrets = st.toggle(t("services.show_secrets_toggle"), value=False)
 
 st.divider()
 
-# ── Définition des services ────────────────────────────────────────────────────
+# ── Service definitions ────────────────────────────────────────────────────
 _SERVICES = [
     {
         "name": "Grafana",
@@ -96,7 +96,7 @@ _SERVICES = [
     },
 ]
 
-# ── Rendu des cartes de service ────────────────────────────────────────────────
+# ── Render service cards ────────────────────────────────────────────────────
 cols = st.columns(3, gap="large")
 
 for col, svc in zip(cols, _SERVICES):
@@ -104,7 +104,7 @@ for col, svc in zip(cols, _SERVICES):
         st.subheader(f"{svc['icon']} {svc['name']}")
         st.caption(svc["description"])
 
-        # Bouton d'accès principal
+        # Main access button
         _full_url = svc["url"].rstrip("/") + svc["link_path"]
         st.link_button(
             t("services.open_btn", name=svc['name']),
@@ -116,7 +116,7 @@ for col, svc in zip(cols, _SERVICES):
         st.markdown("---")
         st.markdown(t("services.credentials_header"))
 
-        # Login
+        # Username
         st.text_input(
             t("services.login_label"),
             value=svc["user"] if svc["user"] else f"—  (var: {svc['env_user']})",
@@ -126,7 +126,7 @@ for col, svc in zip(cols, _SERVICES):
             placeholder=t("services.login_label"),
         )
 
-        # Mot de passe — masqué par défaut, st.code quand visible (bouton copier intégré)
+        # Password — hidden by default, st.code when visible (built-in copy button)
         if svc["password"]:
             if show_secrets:
                 st.code(svc["password"], language=None)
@@ -147,7 +147,7 @@ for col, svc in zip(cols, _SERVICES):
         st.code(svc["url"], language=None)
         st.caption(t("services.env_var_caption", env_url=svc['env_url']))
 
-# ── Note de sécurité ───────────────────────────────────────────────────────────
+# ── Security note ───────────────────────────────────────────────────────────
 st.divider()
 with st.expander(t("services.config_expander"), expanded=False):
     st.markdown(t("services.config_body"))

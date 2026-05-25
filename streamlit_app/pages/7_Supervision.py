@@ -1,8 +1,8 @@
 """
-Tableau de bord de supervision des modèles ML.
+ML model supervision dashboard.
 
-Vue globale : état de santé de tous les modèles sur une plage calendaire.
-Vue détaillée : zoom sur un modèle (série temporelle, drift, A/B testing).
+Global view: health status of all models over a date range.
+Detailed view: zoom in on a model (time series, drift, A/B testing).
 """
 
 from datetime import date, datetime, timedelta
@@ -15,7 +15,7 @@ from utils.auth import get_client, require_auth
 from utils.i18n import t
 
 def _fmt_pred_result(value) -> str:
-    """Formate un résultat de prédiction : float → 3 décimales, sinon str brut."""
+    """Format a prediction result: float → 3 decimal places, otherwise raw str."""
     if value is None:
         return ""
     try:
@@ -24,7 +24,7 @@ def _fmt_pred_result(value) -> str:
         return str(value)
 
 
-# Labels de mode cohérents avec les pages Modèles et A/B Testing
+# Mode labels consistent with the Models and A/B Testing pages
 _MODE_LABEL = {
     "production": "🟢 Production",
     "ab_test":    "🟠 A/B",
@@ -43,7 +43,7 @@ st.title(t("supervision.page_title"))
 client = get_client()
 
 # ---------------------------------------------------------------------------
-# Barre de filtres : plage de dates
+# Filter bar: date range
 # ---------------------------------------------------------------------------
 col_start, col_end, col_refresh = st.columns([2, 2, 1])
 
@@ -61,7 +61,7 @@ start_iso = datetime.combine(start_date, datetime.min.time()).isoformat()
 end_iso = datetime.combine(end_date, datetime.max.time()).replace(microsecond=0).isoformat()
 
 # ---------------------------------------------------------------------------
-# Chargement de la vue d'ensemble
+# Loading the overview
 # ---------------------------------------------------------------------------
 with st.spinner(t("supervision.loading.overview")):
     try:
@@ -74,7 +74,7 @@ gs = overview.get("global_stats", {})
 models_data = overview.get("models", [])
 
 # ---------------------------------------------------------------------------
-# Préparation des exports (calcul uniquement, boutons dans l'onglet global)
+# Export preparation (computation only, buttons in the global tab)
 # ---------------------------------------------------------------------------
 _STATUS_SEVERITY = {
     "ok": 0, "no_data": 0, "no_baseline": 0, "insufficient_data": 0,
@@ -115,34 +115,34 @@ if models_data:
     ]
     _csv_bytes = pd.DataFrame(_csv_rows).to_csv(index=False).encode("utf-8")
     _md_lines = [
-        f"# Rapport de supervision — {start_date} → {end_date}", "",
-        "## Résumé global", "",
-        f"- **Prédictions production** : {gs.get('total_predictions', 0):,}",
-        f"- **Prédictions shadow** : {gs.get('total_shadow', 0):,}",
-        f"- **Taux d'erreur exécution** : {gs.get('error_rate', 0) * 100:.1f} % "
-        f"(erreurs serveur, hors qualité ML)",
-        f"- **Latence moyenne** : {gs.get('avg_latency_ms') or '—'} ms",
-        f"- **Modèles actifs** : {gs.get('active_models', 0)}",
-        f"- **Alertes** : 🔴 {gs.get('models_critical', 0)} critique(s) · 🟡 {gs.get('models_warning', 0)} avertissement(s)",
+        f"# Supervision report — {start_date} → {end_date}", "",
+        "## Global summary", "",
+        f"- **Production predictions**: {gs.get('total_predictions', 0):,}",
+        f"- **Shadow predictions**: {gs.get('total_shadow', 0):,}",
+        f"- **Execution error rate**: {gs.get('error_rate', 0) * 100:.1f} % "
+        f"(server errors, excluding ML quality)",
+        f"- **Average latency**: {gs.get('avg_latency_ms') or '—'} ms",
+        f"- **Active models**: {gs.get('active_models', 0)}",
+        f"- **Alerts**: 🔴 {gs.get('models_critical', 0)} critical · 🟡 {gs.get('models_warning', 0)} warning(s)",
         "",
     ]
     if _alert_models:
-        _md_lines += ["## Modèles en alerte", ""]
+        _md_lines += ["## Models in alert", ""]
         for _m in _alert_models:
             _icon_md = "🔴" if _m.get("health_status") == "critical" else "🟡"
             _md_lines += [
                 f"### {_icon_md} {_m['model_name']}", "",
-                f"- **Statut** : {_m.get('health_status', '—')}",
-                f"- **Prédictions** : {_m.get('total_predictions', 0):,}",
-                f"- **Taux d'erreur** : {_m.get('error_rate', 0) * 100:.1f} %",
-                f"- **Drift features** : {_m.get('feature_drift_status', '—')}",
-                f"- **Drift performance** : {_m.get('performance_drift_status', '—')}",
+                f"- **Status**: {_m.get('health_status', '—')}",
+                f"- **Predictions**: {_m.get('total_predictions', 0):,}",
+                f"- **Error rate**: {_m.get('error_rate', 0) * 100:.1f} %",
+                f"- **Feature drift**: {_m.get('feature_drift_status', '—')}",
+                f"- **Performance drift**: {_m.get('performance_drift_status', '—')}",
                 "",
             ]
     _md_bytes = "\n".join(_md_lines).encode("utf-8")
 
 # ---------------------------------------------------------------------------
-# Helpers partagés
+# Shared helpers
 # ---------------------------------------------------------------------------
 STATUS_ICON = {
     "ok": "🟢", "warning": "🟡", "critical": "🔴",
@@ -153,7 +153,7 @@ def _icon(status: str) -> str:
     return STATUS_ICON.get(status, "⚪") + " " + status
 
 # ---------------------------------------------------------------------------
-# KPIs globaux — toujours visibles
+# Global KPIs — always visible
 # ---------------------------------------------------------------------------
 st.divider()
 k1, k2, k3, k4, k5, k6 = st.columns(6)
@@ -196,14 +196,14 @@ if not models_data:
     st.stop()
 
 # ---------------------------------------------------------------------------
-# Navigation principale : deux onglets
+# Main navigation: two tabs
 # ---------------------------------------------------------------------------
 st.divider()
 _tab_global, _tab_detail = st.tabs([t("supervision.tab_global"), t("supervision.tab_detail")])
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ONGLET 1 — Vue globale
+# TAB 1 — Global view
 # ═══════════════════════════════════════════════════════════════════════════
 with _tab_global:
 
@@ -225,7 +225,7 @@ with _tab_global:
             help=t("supervision.global.export_md_help"),
         )
 
-    # ── Tableau de santé ─────────────────────────────────────────────────
+    # ── Health table ─────────────────────────────────────────────────────
     st.subheader(t("supervision.global.health_subheader"))
     rows_table = []
     for m in models_data:
@@ -296,7 +296,7 @@ with _tab_global:
         },
     )
 
-    # ── Fetch timeseries par modèle (pour les graphiques d'évolution) ────
+    # ── Fetch timeseries per model (for trend charts) ────────────────────
     _ts_by_model: dict[str, list] = {}
     with st.spinner(t("supervision.loading.timeseries")):
         for _m in models_data:
@@ -345,7 +345,7 @@ with _tab_global:
     fig_pie.update_traces(
         textposition="inside",
         textinfo="percent+label",
-        hovertemplate="<b>%{label}</b><br>%{value:,} prédictions<br>%{percent}<extra></extra>",
+        hovertemplate="<b>%{label}</b><br>%{value:,} predictions<br>%{percent}<extra></extra>",
     )
     fig_pie.update_layout(showlegend=False, margin=dict(t=50, b=10, l=10, r=10))
     col_pie.plotly_chart(fig_pie, width='stretch')
@@ -417,11 +417,11 @@ with _tab_global:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ONGLET 2 — Zoom sur un modèle
+# TAB 2 — Model detail
 # ═══════════════════════════════════════════════════════════════════════════
 with _tab_detail:
 
-    # ── Sélecteur — recherche + modèle sur la même ligne ─────────────────
+    # ── Selector — search + model on the same line ───────────────────────
     model_names = [m["model_name"] for m in models_data]
     _det_c1, _det_c2 = st.columns([1, 2])
     sup_search = _det_c1.text_input(t("supervision.detail.search_label"), key="sup_model_search", placeholder=t("supervision.detail.search_placeholder"))
@@ -439,7 +439,7 @@ with _tab_detail:
     with _lc2:
         st.page_link("pages/8_Retrain.py", label=t("supervision.detail.link_retrain"),       width='stretch')
 
-    # ── Chargement du détail ──────────────────────────────────────────────
+    # ── Loading the detail ───────────────────────────────────────────────
     with st.spinner(t("supervision.loading.detail", model=selected_model)):
         try:
             detail = client.get_monitoring_model(name=selected_model, start=start_iso, end=end_iso)
@@ -471,7 +471,7 @@ with _tab_detail:
     _has_drift_alert   = _feat_drift_status in ("warning", "critical")
 
     # ────────────────────────────────────────────────────────────────────
-    # EXPANDER 1 — Versions & Trafic
+    # EXPANDER 1 — Versions & Traffic
     # ────────────────────────────────────────────────────────────────────
     with st.expander(t("supervision.detail.versions_expander"), expanded=True):
         if per_version:
@@ -504,7 +504,7 @@ with _tab_detail:
             st.info(t("supervision.detail.no_version_active"))
 
     # ────────────────────────────────────────────────────────────────────
-    # EXPANDER 2 — Activité & Latence
+    # EXPANDER 2 — Activity & Latency
     # ────────────────────────────────────────────────────────────────────
     with st.expander(t("supervision.detail.activity_expander"), expanded=False):
         if timeseries:
@@ -556,7 +556,7 @@ with _tab_detail:
             )
             if _err_max is not None:
                 fig_err_ts.add_hline(y=_err_max, line_dash="dash", line_color="#c0392b",
-                                     annotation_text=f"Seuil {_err_max * 100:.1f}%")
+                                     annotation_text=f"Threshold {_err_max * 100:.1f}%")
             else:
                 fig_err_ts.add_hline(y=0.05, line_dash="dash", line_color="#e67e22", annotation_text="5%")
                 fig_err_ts.add_hline(y=0.10, line_dash="dash", line_color="#c0392b", annotation_text="10%")
@@ -717,7 +717,7 @@ with _tab_detail:
 
         st.divider()
 
-        # Tendance de confiance
+        # Confidence trend
         st.markdown(t("supervision.confidence.header"))
         period_days = max(1, (end_date - start_date).days)
         try:
@@ -772,7 +772,7 @@ with _tab_detail:
 
         st.divider()
 
-        # Prédictions anomales
+        # Anomalous predictions
         st.markdown(t("supervision.anomalies.header"))
         st.caption(t("supervision.anomalies.caption"))
         _anom_col1, _anom_col2 = st.columns([1, 2])
@@ -892,7 +892,7 @@ with _tab_detail:
                         )
                     st.dataframe(_df_anom, width='stretch', hide_index=True, column_config=_col_cfg_anom)
 
-                    # ── Sélecteur de prédiction pour le détail ──────────────
+                    # ── Prediction selector for detail view ─────────────────
                     st.markdown(t("supervision.anomalies.detail_header"))
                     _sel_labels = [
                         f"#{_p['prediction_id']}  ·  {_p['timestamp'][:16].replace('T', ' ')}  "
@@ -1413,7 +1413,7 @@ with _tab_detail:
             t("supervision.config.tab_circuit_breaker"),
         ])
 
-        # ── Seuils d'alerte ───────────────────────────────────────────────
+        # ── Alert thresholds ─────────────────────────────────────────────
         with _conf_tab_seuils:
             if not per_version:
                 st.info(t("supervision.config.no_version"))

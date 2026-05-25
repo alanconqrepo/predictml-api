@@ -1,5 +1,5 @@
 """
-Page d'accueil et login — PredictML Admin Dashboard
+Home page and login — PredictML Admin Dashboard
 """
 
 import json
@@ -16,10 +16,10 @@ from utils.auth import logout
 from utils.i18n import init_lang, language_switcher, t
 from utils.ui_helpers import show_token_with_copy
 
-# Sessions stockées dans /tmp — survive aux hot-reloads Streamlit.
+# Sessions stored in /tmp — survive Streamlit hot-reloads.
 _SESSION_DIR = os.path.join(tempfile.gettempdir(), "predictml_sessions")
 os.makedirs(_SESSION_DIR, exist_ok=True)
-_SESSION_TTL = 8 * 3600  # 8 heures
+_SESSION_TTL = 8 * 3600  # 8 hours
 
 
 def _session_path(sid: str) -> str:
@@ -72,7 +72,7 @@ def _clear_session() -> None:
 
 
 def _is_valid_api_url(url: str) -> bool:
-    """Vérifie que l'URL est http/https et pointe vers un hôte non vide."""
+    """Check that the URL is http/https and points to a non-empty host."""
     try:
         parsed = urlparse(url)
         return parsed.scheme in ("http", "https") and bool(parsed.netloc)
@@ -154,7 +154,7 @@ def show_home():  # noqa: C901
     end_now = now.strftime("%Y-%m-%dT23:59:59")
     is_admin = st.session_state.get("is_admin", False)
 
-    # ── Chargement des données (chaque bloc isolé) ───────────────────────────
+    # ── Data loading (each block isolated) ───────────────────────────
     health: dict = {}
     monitoring: dict = {}
     pred_stats: list = []
@@ -192,7 +192,7 @@ def show_home():  # noqa: C901
     except Exception:
         pass
 
-    # ── 1. Bandeau statut système ────────────────────────────────────────────
+    # ── 1. System status banner ────────────────────────────────────────────
     api_status = health.get("status", "unknown")
     db_status = health.get("database", "unknown")
     cached = health.get("models_cached", health.get("cached_models", 0))
@@ -223,7 +223,7 @@ def show_home():  # noqa: C901
         t("home.status.alerts_count", count=models_alert_count) if models_alert_count > 0 else t("home.status.alerts_none"),
     )
 
-    # ── 2. KPIs globaux — 30 derniers jours ─────────────────────────────────
+    # ── 2. Global KPIs — last 30 days ─────────────────────────────────
     st.divider()
     st.subheader(t("home.kpis.subheader"))
 
@@ -253,7 +253,7 @@ def show_home():  # noqa: C901
         help=t("home.kpis.coverage_help"),
     )
 
-    # ── 3. Alertes actives (conditionnel) ────────────────────────────────────
+    # ── 3. Active alerts (conditional) ────────────────────────────────────
     critical = [m for m in mon_models if m.get("health_status") == "critical"]
     warning = [m for m in mon_models if m.get("health_status") == "warning"]
 
@@ -267,7 +267,7 @@ def show_home():  # noqa: C901
             st.warning(t("home.alerts.warning", count=len(warning), names=names_w))
         st.page_link("pages/7_Supervision.py", label=t("home.alerts.supervision_link"))
 
-    # ── 4. Leaderboard + Grille santé côte à côte ────────────────────────────
+    # ── 4. Leaderboard + Health grid side by side ────────────────────────────
     st.divider()
     col_lb, col_health = st.columns([3, 2])
 
@@ -328,7 +328,7 @@ def show_home():  # noqa: C901
         else:
             st.info(t("home.health.no_models"))
 
-    # ── 5. Tests A/B et Shadow actifs (conditionnel) ──────────────────────────
+    # ── 5. Active A/B tests and Shadow deployments (conditional) ──────────────────────────
     ab_versions = [m for m in all_models if m.get("deployment_mode") == "ab"]
     shadow_versions = [m for m in all_models if m.get("deployment_mode") == "shadow"]
 
@@ -343,7 +343,7 @@ def show_home():  # noqa: C901
             c2.info(t("home.ab_shadow.shadow_info", count=len(shadow_versions), names=sh_names))
         st.page_link("pages/6_AB_Testing.py", label=t("home.ab_shadow.manage_link"))
 
-    # ── 6. Cartes de navigation ───────────────────────────────────────────────
+    # ── 6. Navigation cards ───────────────────────────────────────────────
     st.divider()
     st.subheader(t("home.nav.subheader"))
 
@@ -419,8 +419,8 @@ def show_home():  # noqa: C901
                     st.page_link(page_path, label=t("home.nav.open_btn"))
 
 
-# Router principal — navigation conditionnelle selon l'état de connexion
-# Restauration de session après F5 : sid dans session_state ou dans l'URL
+# Main router — conditional navigation based on login state
+# Session restore after F5: sid in session_state or in the URL
 if not st.session_state.get("api_token"):
     _sid = st.session_state.get("_sid") or st.query_params.get("sid")
     if _sid:
@@ -429,7 +429,7 @@ if not st.session_state.get("api_token"):
 
 _logged_in = bool(st.session_state.get("api_token"))
 
-# Ré-écrire le sid dans l'URL à chaque render (la navigation le supprime)
+# Rewrite sid to URL on each render (navigation removes it)
 if _logged_in and st.session_state.get("_sid"):
     if st.query_params.get("sid") != st.session_state["_sid"]:
         st.query_params["sid"] = st.session_state["_sid"]
@@ -450,7 +450,7 @@ input[type="text"], input[type="password"], textarea {
 [data-baseweb="input"] { background-color: #262730 !important; }
 [data-baseweb="select"] > div { background-color: #262730 !important; color: #fafafa !important; }
 [data-testid="stForm"] { border-color: #555; }
-/* Spécificité élevée pour battre les classes générées st-emotion-cache-xxx */
+/* High specificity to beat generated st-emotion-cache-xxx classes */
 html body [data-testid="stApp"] button {
     background-color: #262730 !important;
     color: #fafafa !important;
@@ -472,7 +472,7 @@ pre { background-color: #1a1c23 !important; }
 hr { border-color: #555; }
 [data-testid="stMetricValue"] { color: #fafafa; }
 [data-testid="stMetricLabel"] { color: #a0a0a0; }
-/* Expanders — ciblage large car Streamlit génère des classes aléatoires */
+/* Expanders — broad targeting because Streamlit generates random classes */
 details {
     background-color: #1e2029 !important;
     border-color: #555 !important;
@@ -493,13 +493,13 @@ details > div, details > section {
     background-color: #1e2029 !important;
     border-color: #555 !important;
 }
-/* Inputs dans les expanders */
+/* Inputs inside expanders */
 details input, details textarea, details select {
     background-color: #262730 !important;
     color: #fafafa !important;
     border-color: #555 !important;
 }
-/* Tous les inputs numériques */
+/* All numeric inputs */
 input[type="number"] {
     background-color: #262730 !important;
     color: #fafafa !important;
@@ -509,7 +509,7 @@ input[type="number"] {
 """
 
 if _logged_in:
-    # Sidebar "Mon compte" — affiché sur toutes les pages
+    # Sidebar "My account" — shown on all pages
     _client = APIClient(
         base_url=st.session_state["api_url"],
         token=st.session_state["api_token"],
@@ -565,7 +565,7 @@ if _logged_in:
             st.divider()
 
     _base_pages = [
-        st.Page(show_home, title="Accueil", default=True),
+        st.Page(show_home, title="Home", default=True),
         st.Page("pages/1_Users.py", title="Users"),
         st.Page("pages/2_Models.py", title="Models"),
         st.Page("pages/3_Predictions.py", title="Predictions"),
@@ -574,7 +574,7 @@ if _logged_in:
         st.Page("pages/7_Supervision.py", title="Supervision"),
         st.Page("pages/8_Retrain.py", title="Retrain"),
         st.Page("pages/9_Golden_Tests.py", title="Golden Tests"),
-        st.Page("pages/10_Aide.py", title="Aide"),
+        st.Page("pages/10_Aide.py", title="Help"),
         st.Page("pages/5_Code_Example.py", title="Code Example"),
     ]
     if st.session_state.get("is_admin"):
@@ -583,15 +583,15 @@ if _logged_in:
 else:
     _pg = st.navigation(
         [
-            st.Page(show_login, title="Connexion", default=True),
-            st.Page("pages/0_Demande_Acces.py", title="Demande d'accès"),
+            st.Page(show_login, title="Login", default=True),
+            st.Page("pages/0_Demande_Acces.py", title="Access Request"),
         ]
     )
 
 # Language switcher — visible on all pages (login and logged-in)
 language_switcher()
 
-# Dark mode toggle — visible sur toutes les pages
+# Dark mode toggle — visible on all pages
 if st.sidebar.toggle(t("sidebar.dark_mode_toggle"), key="dark_mode"):
     st.markdown(_DARK_CSS, unsafe_allow_html=True)
 

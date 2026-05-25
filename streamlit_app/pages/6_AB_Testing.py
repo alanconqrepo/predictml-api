@@ -26,7 +26,7 @@ st.caption(t("ab_testing.caption"))
 client = get_client()
 is_admin = st.session_state.get("is_admin", False)
 
-# --- Charger la liste des modèles ---
+# --- Load model list ---
 try:
     all_models = get_models_cached(
         st.session_state.get("api_url"), st.session_state.get("api_token")
@@ -39,7 +39,7 @@ if not all_models:
     st.info(t("ab_testing.no_models"))
     st.stop()
 
-# Grouper les versions par nom de modèle
+# Group versions by model name
 model_groups: dict = defaultdict(list)
 for m in all_models:
     model_groups[m["name"]].append(m)
@@ -54,14 +54,14 @@ versions_for_model = model_groups[selected_model]
 st.divider()
 
 # ===========================================================================
-# SECTION 1 — Configuration du déploiement (admin seulement)
+# SECTION 1 — Deployment configuration (admin only)
 # ===========================================================================
 if is_admin:
-    with st.expander(t("ab_testing.config.expander"), expanded=True):  # premier expander — ouvert par défaut
+    with st.expander(t("ab_testing.config.expander"), expanded=True):  # first expander — open by default
         st.markdown(t("ab_testing.config.description"))
 
-        # Mapping label ↔ valeur API
-        # "—" = aucun changement (utilisé quand le mode courant n'est pas dans la liste)
+        # Mapping label ↔ API value
+        # "—" = no change (used when the current mode is not in the list)
         _MODE_TO_LABEL = {
             "ab_test":    "🟠 A/B",
             "shadow":     "🟣 Shadow",
@@ -86,15 +86,15 @@ if is_admin:
             row_cols = st.columns([2, 2, 1, 2, 1])
             row_cols[0].markdown(f"`{ver}`")
 
-            # Mode actuel (badge)
+            # Current mode (badge)
             row_cols[1].markdown(_MODE_TO_LABEL.get(mode_current, "⚪ —"))
 
-            # Poids actuel
+            # Current weight
             row_cols[2].markdown(
                 f"`{weight_current:.0%}`" if weight_current is not None else t("ab_testing.config.weight_no_change")
             )
 
-            # Nouveau mode — badge pré-rempli ; "—" si mode inconnu ou non défini
+            # New mode — badge pre-filled; "—" if mode is unknown or unset
             _cur_label = _MODE_TO_LABEL.get(mode_current)   # None si mode inconnu
             _default_idx = _MODE_LABELS.index(_cur_label) if _cur_label else 0  # 0 = "—"
             new_mode_label = row_cols[3].selectbox(
@@ -106,11 +106,11 @@ if is_admin:
             )
             new_mode = _LABEL_TO_MODE.get(new_mode_label)  # None si "—"
 
-            # Nouveau poids — visible uniquement en mode A/B, pré-rempli
+            # New weight — visible only in A/B mode, pre-filled
             new_weight = None
             if new_mode == "ab_test":
                 _weight_key = f"weight_{selected_model}_{ver}"
-                # Pré-remplir avec le poids actuel si l'état n'existe pas encore pour ce modèle
+                # Pre-fill with the current weight if state does not exist yet for this model
                 if _weight_key not in st.session_state:
                     st.session_state[_weight_key] = float(weight_current if weight_current is not None else 0.5)
                 new_weight = row_cols[4].number_input(
@@ -126,7 +126,7 @@ if is_admin:
 
             configs[ver] = {"mode": new_mode, "weight": new_weight, "current": v}
 
-        # Somme des poids A/B — inclut les versions sélectionnées ET celles inchangées déjà en A/B
+        # Sum of A/B weights — includes selected versions AND unchanged ones already in A/B
         total_weight = sum(
             cfg["weight"]
             for cfg in configs.values()
@@ -145,10 +145,10 @@ if is_admin:
             errors = []
             updated = 0
             for ver, cfg in configs.items():
-                # Ignorer "—" (aucun changement demandé)
+                # Ignore "—" (no change requested)
                 if cfg["mode"] is None:
                     continue
-                # Ignorer si mode et poids identiques à l'état actuel
+                # Ignore if mode and weight are identical to current state
                 cur = cfg["current"]
                 if (
                     cfg["mode"] == cur.get("deployment_mode")
@@ -180,7 +180,7 @@ else:
 st.divider()
 
 # ===========================================================================
-# SECTION 2 — Dashboard de comparaison
+# SECTION 2 — Comparison dashboard
 # ===========================================================================
 st.subheader(t("ab_testing.comparison.subheader"))
 
@@ -191,8 +191,8 @@ _ab_start = _cmp_c1.date_input(
 _ab_end = _cmp_c2.date_input(t("ab_testing.comparison.date_end"), value=date.today(), key="ab_end_date")
 days = max((_ab_end - _ab_start).days, 1)
 
-# Lire la métrique depuis session_state AVANT l'appel API
-# (Streamlit y stocke la nouvelle valeur du widget avant le rerun)
+# Read the metric from session_state BEFORE the API call
+# (Streamlit stores the new widget value there before rerun)
 _METRIC_OPTIONS = {
     t("ab_testing.ab_test.metric_auto"):          None,
     t("ab_testing.ab_test.metric_error_rate"):    "error_rate",
@@ -213,11 +213,11 @@ except Exception as e:
 
 def _output_summary(dist: dict, meta: dict) -> "str | None":
     """
-    Résumé compact des prédictions d'une version.
-    - Régression      → moyenne pondérée des valeurs prédites  (ex: µ = 3.42)
-    - Classification  → répartition des classes top-3 avec labels réels
-                        (ex: setosa: 45% · versicolor: 33%)
-    Retourne None si la distribution est vide.
+    Compact summary of predictions for a version.
+    - Regression      → weighted mean of predicted values  (e.g. µ = 3.42)
+    - Classification  → top-3 class distribution with real labels
+                        (e.g. setosa: 45% · versicolor: 33%)
+    Returns None if the distribution is empty.
     """
     try:
         if not dist:
@@ -226,7 +226,7 @@ def _output_summary(dist: dict, meta: dict) -> "str | None":
         if total == 0:
             return None
 
-        # Détecter le type de tâche depuis les métadonnées du modèle
+        # Detect task type from model metadata
         task = meta.get("model_task") or ""
         classes_list: list = meta.get("classes") or []
         if not task:
@@ -234,12 +234,12 @@ def _output_summary(dist: dict, meta: dict) -> "str | None":
             if classes_list:
                 task = "classification"
             elif tm.get("r2") is not None or tm.get("rmse") is not None or tm.get("mae") is not None:
-                # Fallback : training_metrics contient des métriques de régression
+                # Fallback: training_metrics contains regression metrics
                 task = "regression"
             elif meta.get("accuracy") is not None or meta.get("f1_score") is not None:
                 task = "classification"
 
-        # Heuristique de secours : clés numériques nombreuses → régression
+        # Fallback heuristic: many numeric keys → regression
         if not task:
             try:
                 float_vals = [float(k) for k in dist.keys()]
@@ -266,7 +266,7 @@ def _output_summary(dist: dict, meta: dict) -> "str | None":
                     pass
             return key
 
-        # Top-3 classes triées par fréquence décroissante (exclure les classes à 0)
+        # Top-3 classes sorted by descending frequency (exclude zero-count classes)
         sorted_classes = [(cls, cnt) for cls, cnt in sorted(dist.items(), key=lambda x: -x[1]) if cnt > 0]
         parts = [f"{_resolve_label(cls)}: {cnt / total:.0%}" for cls, cnt in sorted_classes[:3]]
         if len(sorted_classes) > 3:
@@ -279,13 +279,13 @@ def _output_summary(dist: dict, meta: dict) -> "str | None":
 if not versions_stats:
     st.info(t("ab_testing.comparison.no_predictions"))
 else:
-    # --- Tableau de comparaison ---
+    # --- Comparison table ---
     _BADGE_CMP = {"ab_test": "🟠 A/B", "shadow": "🟣 Shadow", "production": "🟢 Production"}
     _vfm_lookup = {v["version"]: v for v in versions_for_model}
 
-    # Détecter si le modèle sélectionné est de régression (depuis n'importe quelle version)
+    # Detect whether the selected model is a regression model (from any version)
     def _model_is_regression(vfm: dict) -> bool:
-        """Retourne True si model_task = 'regression', avec fallback sur training_metrics."""
+        """Returns True if model_task = 'regression', with fallback on training_metrics."""
         for v in vfm.values():
             mt = v.get("model_task") or ""
             if "regression" in mt:
@@ -373,10 +373,10 @@ else:
         _col_rmse:        st.column_config.NumberColumn(_col_rmse, format="%.4f", help=t("ab_testing.comparison.col_rmse_help")),
     }
 
-    # Colonnes toujours visibles
+    # Always visible columns
     _base_cols = [_col_version, _col_mode, _col_algorithm, _col_created, _col_creator,
                   _col_pred_prod, _col_shadow]
-    # Colonnes de métriques : masquées si toutes les valeurs sont null/None
+    # Metric columns: hidden if all values are null/None
     _metric_cols = [_col_output, _col_err_pct, _col_lat_avg, _col_lat_p95, _col_concordance,
                     _col_accuracy, _col_f1, _col_r2, _col_rmse]
 
@@ -389,7 +389,7 @@ else:
 
     with st.expander(t("ab_testing.ab_test.expander"), expanded=False):
         # ===========================================================================
-        # Bloc significativité statistique
+        # Statistical significance block
         # ===========================================================================
         st.divider()
         _sig_col_title, _sig_col_select = st.columns([3, 2])
@@ -421,7 +421,7 @@ else:
             winner = sig.get("winner")
             metric = sig.get("metric", "")
             test = sig.get("test", "")
-            # Avertir si la métrique réellement utilisée diffère de celle demandée
+            # Warn if the metric actually used differs from the requested one
             if _sig_metric and metric != _sig_metric:
                 st.warning(
                     t("ab_testing.ab_test.metric_fallback_warning", requested=_sig_metric_label, actual=metric)
@@ -429,7 +429,7 @@ else:
             min_needed = sig.get("min_samples_needed", 0)
             current_samples: dict = sig.get("current_samples", {})
 
-            # --- Bannière verdict ---
+            # --- Verdict banner ---
             if is_significant:
                 if winner:
                     st.success(t("ab_testing.ab_test.significant_with_winner", winner=winner, metric=metric))
@@ -440,7 +440,7 @@ else:
                     t("ab_testing.ab_test.not_significant", p_value=f"{p_value:.4f}", threshold=f"{1 - confidence:.2f}")
                 )
 
-            # --- Bandeau de promotion du gagnant (admin uniquement) ---
+            # --- Winner promotion banner (admin only) ---
             if is_significant and winner and is_admin:
                 with st.container(border=True):
                     promo_col1, promo_col2 = st.columns([3, 1])
@@ -477,11 +477,11 @@ else:
                             st.cache_data.clear()
                             st.rerun()
 
-            # --- KPI de significativité ---
+            # --- Significance KPIs ---
             sig_cols = st.columns(4)
 
             test_label = {"chi2": "Chi-²", "mann_whitney_u": "Mann-Whitney U"}.get(test, test)
-            metric_label = {"error_rate": "Taux d'erreur", "response_time_ms": "Latence (ms)"}.get(
+            metric_label = {"error_rate": "Error rate", "response_time_ms": "Latency (ms)"}.get(
                 metric, metric
             )
 
@@ -496,7 +496,7 @@ else:
             )
             sig_cols[3].metric(t("ab_testing.ab_test.kpi_confidence"), f"{confidence:.0%}", help=t("metrics.niveau_confiance"))
 
-            # --- Jauge p-value ---
+            # --- P-value gauge ---
             threshold = 1.0 - confidence
             fig_gauge = go.Figure(
                 go.Indicator(
@@ -521,7 +521,7 @@ else:
             )
             fig_gauge.update_layout(height=240, margin=dict(t=40, b=10, l=20, r=20))
 
-            # --- Jauge puissance (échantillons actuels vs nécessaires) ---
+            # --- Power gauge (current samples vs required) ---
             total_current = sum(current_samples.values())
             total_needed = min_needed * len(current_samples) if min_needed > 0 else total_current
             power_pct = min(total_current / total_needed, 1.0) * 100 if total_needed > 0 else 100.0
@@ -557,7 +557,7 @@ else:
             with gauge_col2:
                 st.plotly_chart(fig_power, width='stretch')
 
-            # --- Tableau des échantillons ---
+            # --- Samples table ---
             if current_samples:
                 st.markdown(t("ab_testing.ab_test.samples_title"))
                 _col_samp_version = t("ab_testing.ab_test.col_samples_version")
@@ -603,7 +603,7 @@ else:
                     },
                 )
 
-            # --- Recommandation finale ---
+            # --- Final recommendation ---
             with st.expander(t("ab_testing.ab_test.interp_expander")):
                 st.markdown(
                     t(
@@ -622,7 +622,7 @@ else:
 
         st.divider()
 
-        # Graphique : distribution du trafic par version
+        # Chart: traffic distribution by version
         col_chart1, col_chart2 = st.columns(2)
 
         _col_traffic_version = t("ab_testing.ab_test.traffic_col_version")
@@ -657,7 +657,7 @@ else:
         with col_chart2:
             if _is_regression:
                 st.markdown(t("ab_testing.ab_test.dist_regression_title"))
-                # Régression : histogramme des valeurs prédites (expand chaque valeur × count)
+                # Regression: histogram of predicted values (expand each value × count)
                 hist_rows = []
                 for vs in versions_stats:
                     for label, count in vs.get("prediction_distribution", {}).items():
@@ -703,7 +703,7 @@ else:
                     st.info(t("ab_testing.ab_test.dist_no_data"))
 
     with st.expander(t("ab_testing.shadow.expander"), expanded=False):
-        # Taux de concordance shadow
+        # Shadow concordance rate
         shadow_versions = [vs for vs in versions_stats if vs.get("agreement_rate") is not None]
         if shadow_versions:
             st.divider()
@@ -734,9 +734,9 @@ else:
         else:
             st.info(t("ab_testing.shadow.concordance_no_data"))
 
-        # ── Analyse shadow enrichie ──────────────────────────────────────────
+        # ── Enriched shadow analysis ──────────────────────────────────────────
         # ===========================================================================
-        # SECTION 3 — Analyse shadow enrichie
+        # SECTION 3 — Enriched shadow analysis
         # ===========================================================================
         st.subheader(t("ab_testing.shadow.enriched_title"))
         st.caption(t("ab_testing.shadow.enriched_caption"))
@@ -869,9 +869,9 @@ else:
 
         st.divider()
 
-        # ── Log des prédictions shadow récentes ────────────────────────────
+        # ── Log of recent shadow predictions ────────────────────────────
         # ===========================================================================
-        # SECTION 4 — Log des prédictions shadow récentes
+        # SECTION 4 — Log of recent shadow predictions
         # ===========================================================================
         st.subheader(t("ab_testing.shadow.recent_title"))
 

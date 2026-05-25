@@ -1,5 +1,5 @@
 """
-Statistiques et graphiques d'utilisation
+Usage statistics and charts
 """
 
 import re
@@ -24,7 +24,7 @@ if col_refresh.button(t("stats.btn_refresh"), key="stats_refresh", width='stretc
 
 client = get_client()
 
-# --- Filtres date (globaux) ---
+# --- Date filters (global) ---
 col_d1, col_d2 = st.columns([1, 1])
 
 date_start = col_d1.date_input(
@@ -61,7 +61,7 @@ if not model_names:
     st.warning(t("stats.no_models"))
     st.stop()
 
-# --- Helpers Leaderboard ---
+# --- Leaderboard helpers ---
 _DRIFT_EMOJI = {
     "ok":               t("stats.drift.ok"),
     "warning":          t("stats.drift.warning"),
@@ -86,7 +86,7 @@ def _bg_accuracy(val):
 
 
 def _bg_r2(val):
-    """Coloration R² : vert ≥ 0.90, jaune ≥ 0.70, rouge < 0.70, gris si None/NaN."""
+    """R² coloring: green ≥ 0.90, yellow ≥ 0.70, red < 0.70, grey if None/NaN."""
     try:
         v = float(val)
     except (TypeError, ValueError):
@@ -99,7 +99,7 @@ def _bg_r2(val):
 
 
 def _build_leaderboard_fallback(models_list, stats_list, metric, n_days):
-    """Construit le leaderboard côté client si l'endpoint API n'est pas disponible."""
+    """Build the leaderboard client-side if the API endpoint is unavailable."""
     stats_by_name = {s["model_name"]: s for s in stats_list}
     rows = [
         {
@@ -306,7 +306,7 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                 for e in leaderboard
             ])
 
-            # Config de chaque métrique : label, ratio [0-1] ou non, step et max pour le seuil
+            # Config for each metric: label, ratio [0-1] or not, step and max for threshold
             _METRIC_CFG = {
                 "latency_p95_ms":    {"label": t("stats.leaderboard.scatter_label_latency"),  "is_ratio": False, "step": 10.0,  "max": None, "fmt_hover": lambda v: f"{v:.0f} ms"},
                 "accuracy":          {"label": t("stats.leaderboard.scatter_label_accuracy"), "is_ratio": True,  "step": 0.05,  "max": 1.0,  "fmt_hover": lambda v: f"{v:.4f}"},
@@ -316,11 +316,11 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                 "predictions_count": {"label": t("stats.leaderboard.scatter_label_volume"),  "is_ratio": False, "step": 100.0, "max": None, "fmt_hover": lambda v: f"{int(v):,}"},
             }
 
-            # Axe Y = métrique sélectionnée dans "Trier par" (latency/count → fallback accuracy)
+            # Y axis = selected metric from "Sort by" (latency/count → fallback accuracy)
             _Y_FALLBACK = {"latency_p95_ms": "accuracy", "predictions_count": "accuracy"}
             scatter_y_metric = _Y_FALLBACK.get(lb_metric, lb_metric)
 
-            # Dropdown Axe X — toutes les métriques sauf celle déjà sur Y
+            # Dropdown X axis — all metrics except the one already on Y
             _x_options = [k for k in _METRIC_CFG if k != scatter_y_metric]
             _x_default = "latency_p95_ms" if "latency_p95_ms" in _x_options else _x_options[0]
             _x_default_idx = _x_options.index(_x_default)
@@ -339,7 +339,7 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
             x_label = cfg_x["label"]
             y_label = cfg_y["label"]
 
-            # Seuil X (ligne verticale)
+            # X threshold (vertical line)
             _sx_is_lower_better = scatter_x_metric == "rmse"
             _sx_label = (
                 t("stats.leaderboard.scatter_threshold_max", label=x_label)
@@ -357,7 +357,7 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                 key="scatter_x_threshold",
             )
 
-            # Seuil Y (ligne horizontale)
+            # Y threshold (horizontal line)
             _sy_is_lower_better = scatter_y_metric == "rmse"
             _sy_label = (
                 t("stats.leaderboard.scatter_threshold_max", label=y_label)
@@ -395,7 +395,7 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                     count   = int(row.get("predictions_count") or 0)
                     bubble  = max(10, min(60, count ** 0.5)) if count > 0 else 15
 
-                    # Hover : X et Y en tête, puis toutes les autres métriques disponibles
+                    # Hover: X and Y first, then all other available metrics
                     hover_lines = [
                         f"<b>{row['label']}</b>",
                         f"{x_label} : {cfg_x['fmt_hover'](x_val)}",
@@ -431,7 +431,7 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                         showlegend=False,
                     ))
 
-                # Ligne verticale (seuil X)
+                # Vertical line (X threshold)
                 if x_threshold > 0:
                     _vline_label = (
                         t("stats.leaderboard.scatter_vline_max", label=x_label, value=f"{x_threshold:.2f}")
@@ -449,7 +449,7 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                         annotation_font_color="#E74C3C",
                     )
 
-                # Ligne horizontale (seuil Y)
+                # Horizontal line (Y threshold)
                 if y_threshold > 0:
                     _hline_label = (
                         t("stats.leaderboard.scatter_hline_max", label=y_label, value=f"{y_threshold:.2f}")
@@ -487,9 +487,9 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                 st.plotly_chart(fig, width='stretch')
 
 
-# ── Expander 2 : Statistiques agrégées par modèle ────────────────────────────
+# ── Expander 2 : Aggregated statistics per model ────────────────────────────
 with st.expander(t("stats.aggregated.expander"), expanded=False):
-    # Filtre modèle local à cet expander
+    # Local model filter for this expander
     _s2_col_search, _s2_col_model = st.columns([2, 2])
     with _s2_col_search:
         stats_search = st.text_input(
@@ -507,7 +507,7 @@ with st.expander(t("stats.aggregated.expander"), expanded=False):
         )
     selected_model = None if model_filter == _model_all_label else model_filter
 
-    # Charger les prédictions pour chaque modèle (ou le modèle sélectionné)
+    # Load predictions for each model (or the selected model)
     all_preds = []
     fetch_models_list = [selected_model] if selected_model else model_names
 
@@ -526,7 +526,7 @@ with st.expander(t("stats.aggregated.expander"), expanded=False):
             except Exception:
                 pass
 
-    # Statistiques agrégées (endpoint /predictions/stats)
+    # Aggregated statistics (endpoint /predictions/stats)
     _agg_col_model    = t("stats.aggregated.col_model")
     _agg_col_total    = t("stats.aggregated.col_total")
     _agg_col_errors   = t("stats.aggregated.col_errors")
@@ -604,7 +604,7 @@ with st.expander(t("stats.aggregated.expander"), expanded=False):
     df["hour"] = df["timestamp"].dt.floor("h")
     df["is_error"] = df["status"] == "error"
 
-    # --- Métriques KPI ---
+    # --- KPI metrics ---
     total = len(df)
     error_rate = df["is_error"].mean() * 100
     median_rt = df["response_time_ms"].median() if "response_time_ms" in df.columns else 0
@@ -618,7 +618,7 @@ with st.expander(t("stats.aggregated.expander"), expanded=False):
 
     st.divider()
 
-    # --- Graphiques ---
+    # --- Charts ---
     _chart_model  = t("stats.aggregated.chart_label_model")
     _chart_nb_pred = t("stats.aggregated.chart_label_nb_pred")
     _chart_time_ms = t("stats.aggregated.chart_label_time_ms")
@@ -626,7 +626,7 @@ with st.expander(t("stats.aggregated.expander"), expanded=False):
 
     row1_l, row1_r = st.columns(2)
 
-    # Distribution par modèle
+    # Distribution by model
     with row1_l:
         st.subheader(t("stats.aggregated.chart_by_model"))
         model_counts = (
@@ -646,7 +646,7 @@ with st.expander(t("stats.aggregated.expander"), expanded=False):
         fig.update_layout(showlegend=False, margin=dict(t=20))
         st.plotly_chart(fig, width='stretch')
 
-    # Temps de réponse — courbe de densité (KDE) par modèle
+    # Response time — density curve (KDE) per model
     with row1_r:
         st.subheader(t("stats.aggregated.chart_rt_dist"))
         if "response_time_ms" in df.columns:
@@ -660,13 +660,13 @@ with st.expander(t("stats.aggregated.expander"), expanded=False):
                 vals = grp["response_time_ms"].values
                 if len(vals) < 5:
                     continue
-                # Borner à p99 pour ne pas écraser la courbe avec des outliers rares
+                # Clip to p99 to avoid squashing the curve with rare outliers
                 p99 = float(np.percentile(vals, 99))
                 vals_clipped = vals[vals <= p99]
-                # Histogramme normalisé en densité → 50 bacs
+                # Density-normalized histogram → 50 bins
                 counts, edges = np.histogram(vals_clipped, bins=50, density=True)
                 centers = (edges[:-1] + edges[1:]) / 2
-                # Lissage gaussien léger (convolution) sans scipy
+                # Light Gaussian smoothing (convolution) without scipy
                 sigma = 2
                 k = np.arange(-3 * sigma, 3 * sigma + 1)
                 kernel = np.exp(-0.5 * (k / sigma) ** 2)
@@ -697,7 +697,7 @@ with st.expander(t("stats.aggregated.expander"), expanded=False):
 
     row2_l, row2_r = st.columns(2)
 
-    # Série temporelle — prédictions par jour
+    # Time series — predictions per day
     with row2_l:
         st.subheader(t("stats.aggregated.chart_daily"))
         daily = df.groupby(["date", "model_name"]).size().reset_index(name="count")
@@ -712,7 +712,7 @@ with st.expander(t("stats.aggregated.expander"), expanded=False):
         fig.update_layout(margin=dict(t=20))
         st.plotly_chart(fig, width='stretch')
 
-    # Erreurs par jour par modèle
+    # Errors per day per model
     with row2_r:
         st.subheader(t("stats.aggregated.chart_errors_daily"))
         _err_label   = t("stats.aggregated.col_errors")
@@ -738,7 +738,7 @@ with st.expander(t("stats.aggregated.expander"), expanded=False):
             fig.update_layout(margin=dict(t=20), legend=dict(orientation="h", y=-0.25))
             st.plotly_chart(fig, width='stretch')
 
-    # Boîte à moustaches temps de réponse par modèle
+    # Response time box plot per model
     if "response_time_ms" in df.columns and df["response_time_ms"].notna().any():
         st.subheader(t("stats.aggregated.chart_boxplot"))
         fig = px.box(
@@ -753,7 +753,7 @@ with st.expander(t("stats.aggregated.expander"), expanded=False):
         st.plotly_chart(fig, width='stretch')
 
 
-# ── Expander 3 : Accuracy temporelle multi-modèles ───────────────────────────
+# ── Expander 3 : Multi-model temporal accuracy ───────────────────────────
 with st.expander(t("stats.accuracy_timeline.expander"), expanded=False):
     acc_col_models, acc_col_gran = st.columns([4, 1])
 
@@ -814,7 +814,7 @@ with st.expander(t("stats.accuracy_timeline.expander"), expanded=False):
         else:
             _acc_col_model = t("stats.accuracy_timeline.col_model")
             df_acc = pd.DataFrame(acc_rows)
-            # L'API renvoie "2026-W19" (granularité semaine) ou "2026-05-11" (jour).
+            # The API returns "2026-W19" (week granularity) or "2026-05-11" (day).
             _sample = str(df_acc["date"].iloc[0]) if len(df_acc) else ""
             if re.match(r"^\d{4}-W\d{2}$", _sample):
                 df_acc["date"] = pd.to_datetime(
@@ -824,7 +824,7 @@ with st.expander(t("stats.accuracy_timeline.expander"), expanded=False):
                 df_acc["date"] = pd.to_datetime(df_acc["date"])
             df_acc = df_acc.sort_values("date")
 
-            # Détecter si tous les modèles sont du même type
+            # Detect whether all models are of the same type
             _types = df_acc["model_type"].unique().tolist()
             _all_classif = all(tp == "classification" for tp in _types)
             _all_regress = all(tp == "regression" for tp in _types)
@@ -851,7 +851,7 @@ with st.expander(t("stats.accuracy_timeline.expander"), expanded=False):
                 grp = grp.sort_values("date")
                 color = colors[i % len(colors)]
                 mtype_grp = grp["model_type"].iloc[0]
-                # suffixe "(MAE)" si types mixtes
+                # "(MAE)" suffix if mixed types
                 legend_label = model if len(_types) == 1 else (
                     f"{model} {_mae_suffix}" if mtype_grp == "regression" else model
                 )
@@ -888,7 +888,7 @@ with st.expander(t("stats.accuracy_timeline.expander"), expanded=False):
             )
             st.plotly_chart(fig_acc, width='stretch')
 
-            # Tableau résumé
+            # Summary table
             _col_obs_pairs = t("stats.accuracy_timeline.col_observed_pairs")
             _summary = []
             for model, grp in df_acc.groupby(_acc_col_model, sort=False):
@@ -923,10 +923,10 @@ with st.expander(t("stats.accuracy_timeline.expander"), expanded=False):
             )
 
 
-# ── Expander 4 : Évolution multi-métriques — un modèle ───────────────────────
+# ── Expander 4 : Multi-metric evolution — one model ───────────────────────
 with st.expander(t("stats.multi_metric.expander"), expanded=False):
 
-    # ── Contrôles ────────────────────────────────────────────────────────────
+    # ── Controls ────────────────────────────────────────────────────────────
     _pm_col_model, _pm_col_ver, _pm_col_gran = st.columns([3, 2, 1])
 
     with _pm_col_model:
@@ -959,7 +959,7 @@ with st.expander(t("stats.multi_metric.expander"), expanded=False):
             key="pm_gran_select",
         )
 
-    # ── Chargement ───────────────────────────────────────────────────────────
+    # ── Loading ───────────────────────────────────────────────────────────
     try:
         _pm_perf = client.get_model_performance(
             model_name=perf_model,
@@ -975,7 +975,7 @@ with st.expander(t("stats.multi_metric.expander"), expanded=False):
         _pm_mtype = "classification"
         _pm_periods = []
 
-    # ── Catalogue des métriques disponibles selon le type ────────────────────
+    # ── Catalogue of available metrics by model type ────────────────────
     _PM_METRICS_CLASSIF: dict[str, dict] = {
         "accuracy":      {"label": t("stats.multi_metric.metric_accuracy"), "ratio": True},
         "f1_weighted":   {"label": t("stats.multi_metric.metric_f1"),       "ratio": True},
@@ -997,13 +997,13 @@ with st.expander(t("stats.multi_metric.expander"), expanded=False):
         key="pm_metrics_select",
     )
 
-    # ── Graphique ─────────────────────────────────────────────────────────────
+    # ── Chart ─────────────────────────────────────────────────────────────
     if not perf_metrics:
         st.info(t("stats.multi_metric.no_metric_selected"))
     elif not _pm_periods:
         st.info(t("stats.multi_metric.no_data"))
     else:
-        # Parse dates (jour / semaine ISO / mois)
+        # Parse dates (day / ISO week / month)
         df_pm = pd.DataFrame(_pm_periods)
         _pm_sample = str(df_pm["period"].iloc[0])
         if re.match(r"^\d{4}-W\d{2}$", _pm_sample):
@@ -1014,7 +1014,7 @@ with st.expander(t("stats.multi_metric.expander"), expanded=False):
             df_pm["date"] = pd.to_datetime(df_pm["period"])
         df_pm = df_pm.sort_values("date").reset_index(drop=True)
 
-        # Métriques primaires (axe gauche) vs matched_count (axe droit, barres)
+        # Primary metrics (left axis) vs matched_count (right axis, bars)
         _primary = [m for m in perf_metrics if m != "matched_count"]
         _show_count = "matched_count" in perf_metrics
         _all_ratio = bool(_primary) and all(_pm_catalog[m]["ratio"] for m in _primary)
@@ -1087,7 +1087,7 @@ with st.expander(t("stats.multi_metric.expander"), expanded=False):
         )
         st.plotly_chart(fig_pm, width='stretch')
 
-        # ── Résumé global de la période ───────────────────────────────────────
+        # ── Global summary for the period ───────────────────────────────────────
         _pm_global_metrics = {
             "accuracy": _pm_perf.get("accuracy"),
             "f1_weighted": _pm_perf.get("f1_weighted"),
@@ -1108,8 +1108,8 @@ with st.expander(t("stats.multi_metric.expander"), expanded=False):
                 col_w.metric(cfg["label"], fmt_val)
 
 
-# ── Expander 5 : Drift de performance ────────────────────────────────────────
-# Catalogue des métriques supportées par l'expander drift
+# ── Expander 5 : Performance drift ────────────────────────────────────────
+# Catalogue of metrics supported by the drift expander
 _DRIFT_METRIC_CFG: dict[str, dict] = {
     "accuracy":    {"label": t("stats.multi_metric.metric_accuracy"), "ratio": True,  "higher_better": True,  "help_key": "accuracy"},
     "f1_weighted": {"label": t("stats.multi_metric.metric_f1"),       "ratio": True,  "higher_better": True,  "help_key": "f1"},
@@ -1201,7 +1201,7 @@ with st.expander(t("stats.drift_performance.expander"), expanded=False):
         drift_df["date"] = pd.to_datetime(drift_df["period"])
         drift_df = drift_df.sort_values("date").reset_index(drop=True)
 
-        # Vérifier disponibilité de la métrique pour ce type de modèle
+        # Check metric availability for this model type
         _classif_metrics = {"accuracy", "f1_weighted"}
         _regress_metrics = {"mae", "rmse"}
         _wrong_type = (
@@ -1254,7 +1254,7 @@ with st.expander(t("stats.drift_performance.expander"), expanded=False):
                 f"{matched_total:,}",
             )
 
-            # Alerte seuil
+            # Threshold alert
             if alert_enabled:
                 last_rolling = drift_df["rolling_short"].iloc[-1]
                 _breach = (last_rolling < threshold) if _higher_better else (last_rolling > threshold)

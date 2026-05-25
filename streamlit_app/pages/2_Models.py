@@ -1,5 +1,5 @@
 """
-Gestion des modèles ML
+ML model management
 """
 
 import json as _json
@@ -14,7 +14,7 @@ from utils.api_client import get_models as get_models_cached
 from utils.auth import get_client, require_auth
 from utils.i18n import t
 
-# --- Helpers historique ---
+# --- History helpers ---
 
 _ACTION_ICONS = {
     "created": "🟦",
@@ -31,11 +31,11 @@ def _action_badge(action: str) -> str:
     return f"{icon} `{action}`"
 
 
-# ── Scripts d'exemple ─────────────────────────────────────────────────────────
+# ── Example scripts ───────────────────────────────────────────────────────────
 
 _SCRIPTS_DIR = Path(__file__).parent.parent / "documentation" / "Scripts"
 
-# (catégorie, chemin relatif depuis _SCRIPTS_DIR, clé de description i18n)
+# (category, relative path from _SCRIPTS_DIR, i18n description key)
 _EXAMPLE_SCRIPTS: list[tuple[str, str, str]] = [
     ("Iris", "iris/train_iris.py", "iris_train_desc"),
     ("Iris", "iris/upload_iris_model.py", "iris_upload_desc"),
@@ -120,7 +120,7 @@ def fetch_output_drift(api_url, token, name, version, period_days):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_prediction_count(api_url, token, name, version, start: str, end: str) -> int:
-    """Retourne le nombre total de prédictions sur la période (appel léger limit=1)."""
+    """Returns the total number of predictions over the period (lightweight call with limit=1)."""
     import requests
 
     try:
@@ -138,7 +138,7 @@ def fetch_prediction_count(api_url, token, name, version, start: str, end: str) 
 
 @st.cache_data(ttl=60, show_spinner=False)
 def fetch_feature_drift(api_url, token, name, start: str, end: str) -> dict:
-    """Récupère le drift des features via /monitoring/model/{name}."""
+    """Fetches feature drift via /monitoring/model/{name}."""
     import requests
 
     r = requests.get(
@@ -153,7 +153,7 @@ def fetch_feature_drift(api_url, token, name, start: str, end: str) -> dict:
 
 @st.cache_data(ttl=10, show_spinner=False)
 def fetch_cached_models(api_url, token):
-    """Retourne la liste des clés 'name:version' actuellement en cache Redis."""
+    """Returns the list of 'name:version' keys currently in Redis cache."""
     try:
         import requests
 
@@ -171,7 +171,7 @@ def fetch_cached_models(api_url, token):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_model_pkl(api_url: str, token: str, name: str, version: str) -> bytes | None:
-    """Télécharge le .joblib depuis MinIO, mis en cache 5 min par version."""
+    """Downloads the .joblib from MinIO, cached 5 min per version."""
     from utils.api_client import APIClient
 
     try:
@@ -182,7 +182,7 @@ def fetch_model_pkl(api_url: str, token: str, name: str, version: str) -> bytes 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_train_script(api_url: str, token: str, name: str, version: str) -> bytes | None:
-    """Télécharge le script train.py depuis MinIO, mis en cache 5 min par version."""
+    """Downloads the train.py script from MinIO, cached 5 min per version."""
     from utils.api_client import APIClient
 
     try:
@@ -193,7 +193,7 @@ def fetch_train_script(api_url: str, token: str, name: str, version: str) -> byt
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_training_dataset(api_url: str, token: str, name: str, version: str) -> bytes | None:
-    """Télécharge le dataset CSV depuis MinIO, mis en cache 5 min par version."""
+    """Downloads the CSV dataset from MinIO, cached 5 min per version."""
     from utils.api_client import APIClient
 
     try:
@@ -285,7 +285,7 @@ if is_admin:
                 "Ridge",
                 "Lasso",
                 "ElasticNet",
-                "Autre",
+                "Other",
             ]
             up_algorithm = st.selectbox(t("models.upload.algorithm_label"), _ALGO_OPTIONS)
 
@@ -348,7 +348,7 @@ if is_admin:
                     if up_tags_raw.strip()
                     else []
                 )
-                algorithm = up_algorithm if up_algorithm and up_algorithm != "Autre" else None
+                algorithm = up_algorithm if up_algorithm and up_algorithm != "Other" else None
 
                 with st.spinner(t("models.upload.spinner", filename=pkl_file.name)):
                     progress = st.progress(0, text=t("models.upload.progress_sending"))
@@ -409,7 +409,7 @@ if not models:
     st.info(t("models.no_models"))
     st.stop()
 
-# Résumé
+# Summary
 col1, col2, col3 = st.columns(3)
 col1.metric(t("models.summary.total_models"), len(models))
 col2.metric(t("models.summary.in_production"), sum(1 for m in models if m.get("is_production")))
@@ -417,7 +417,7 @@ col3.metric(t("models.summary.with_mlflow"), sum(1 for m in models if m.get("mlf
 
 st.divider()
 
-# ── Barre de filtres (une seule ligne) ───────────────────────────────────────
+# ── Filter bar (single row) ───────────────────────────────────────────────────
 _all_model_names = sorted({m["name"] for m in models})
 _all_tags = sorted({_tag for m in models for _tag in (m.get("tags") or [])})
 _filter_cols = st.columns([3, 2, 2]) if _all_tags else st.columns([3, 2])
@@ -442,7 +442,7 @@ if len(_filter_cols) == 3:
 else:
     tag_filter = t("models.filters.tag_all")
 
-# Appliquer les filtres
+# Apply filters
 if search_query:
     q = search_query.lower()
     models = [
@@ -462,7 +462,7 @@ _DEPLOY_BADGE = {
 
 
 def _infer_task(m: dict) -> str:
-    """Retourne le label de tâche depuis model_task, ou l'infère depuis classes/métriques."""
+    """Returns the task label from model_task, or infers it from classes/metrics."""
     task = m.get("model_task")
     if not task:
         classes = m.get("classes")
@@ -495,7 +495,7 @@ def _statut(m: dict) -> str:
     return t("models.table.status_inactive")
 
 
-# Tableau de synthèse
+# Summary table
 _col_name = t("models.table.col_name")
 _col_version = t("models.table.col_version")
 _col_tags = t("models.table.col_tags")
@@ -625,7 +625,7 @@ st.dataframe(
 st.caption(t("models.summary.caption"))
 
 # ---------------------------------------------------------------------------
-# Comparaison multi-versions
+# Multi-version comparison
 # ---------------------------------------------------------------------------
 
 with st.expander(t("models.compare.expander"), expanded=False):
@@ -643,7 +643,7 @@ with st.expander(t("models.compare.expander"), expanded=False):
     )
 
     versions_for_model = [m["version"] for m in models if m["name"] == compare_name]
-    all_versions_label = f"Toutes ({len(versions_for_model)})"
+    all_versions_label = f"All ({len(versions_for_model)})"
     version_options = [all_versions_label] + versions_for_model
     selected_versions = st.multiselect(
         t("models.compare.versions_label"),
@@ -689,13 +689,13 @@ with st.expander(t("models.compare.expander"), expanded=False):
                             if m.get("name") == compare_name
                         }
                         cmp_rows = []
-                        # Régression si training_metrics contient mae/rmse/r2
+                        # Regression if training_metrics contains mae/rmse/r2
                         is_regression = any(v.get("mae_eval") is not None for v in cmp_versions)
 
                         def _r(val, n=3):
                             return round(val, n) if val is not None else None
 
-                        # Règle : afficher une paire (eval, live) seulement si l'eval est présent
+                        # Rule: display a (eval, live) pair only if eval is present
                         show = {}
                         if is_regression:
                             show["mae"]  = any(v.get("mae_eval")  is not None for v in cmp_versions)
@@ -818,7 +818,7 @@ with st.expander(t("models.compare.expander"), expanded=False):
                             t("models.compare.caption", compared_at=pd.to_datetime(cmp['compared_at']).strftime('%Y-%m-%d %H:%M'), start=compare_date_start, end=compare_date_end)
                         )
 
-                        # ── Courbe ROC multi-versions (classification avec probas) ──
+                        # ── Multi-version ROC curve (classification with probabilities) ──
                         if not is_regression:
                             import plotly.graph_objects as _go
 
@@ -874,8 +874,8 @@ with st.expander(t("models.compare.expander"), expanded=False):
                                         )
                                     )
                                 fig_roc.update_layout(
-                                    xaxis_title="Taux de faux positifs (FPR)",
-                                    yaxis_title="Taux de vrais positifs (TPR)",
+                                    xaxis_title="False Positive Rate (FPR)",
+                                    yaxis_title="True Positive Rate (TPR)",
                                     xaxis=dict(range=[0, 1]),
                                     yaxis=dict(range=[0, 1]),
                                     legend=dict(
@@ -913,13 +913,13 @@ if _preselect:
 selected_label = st.selectbox(t("models.detail.select_label"), _detail_keys, index=_detail_idx)
 selected = model_options[selected_label]
 
-# Détails
+# Details
 _detail_tm = selected.get("training_metrics") or {}
 _detail_is_regression = any(k in _detail_tm for k in ("mae", "rmse", "r2"))
 
 with st.expander(t("models.details_expander"), expanded=True):
     col_l, col_r = st.columns(2)
-    # Pré-chargement des ressources téléchargeables (mis en cache 5 min par version)
+    # Pre-loading downloadable resources (cached 5 min per version)
     _api_url = client.base_url
     _token = client.token
     _ds = selected.get("training_dataset") or ""
@@ -981,7 +981,7 @@ with st.expander(t("models.details_expander"), expanded=True):
                 st.markdown(t("models.detail_file_size", size=f"{size / 1024:.1f}"))
 
     with col_r:
-        # ── Statut de déploiement ─────────────────────────────────────────────
+        # ── Deployment status ─────────────────────────────────────────────────
         _d_mode   = selected.get("deployment_mode")
         _d_prod   = selected.get("is_production")
         _d_active = selected.get("is_active")
@@ -1037,7 +1037,7 @@ with st.expander(t("models.details_expander"), expanded=True):
         else:
             st.markdown(t("models.detail_hyperparams_empty"))
 
-    # ── 4 boutons alignés en bas de l'expander ────────────────────────────────
+    # ── 4 buttons aligned at the bottom of the expander ──────────────────────
     _btn_labels = []
     if _csv_bytes:
         _btn_labels.append("dataset")
@@ -1099,11 +1099,11 @@ with st.expander(t("models.details_expander"), expanded=True):
     if st.session_state.get(_show_script_key) and _script_bytes:
         st.code(_script_bytes.decode("utf-8", errors="replace"), language="python", line_numbers=True)
 
-# ── Métriques en 2 blocs côte à côte ─────────────────────────────────────────
+# ── Metrics in 2 side-by-side blocks ─────────────────────────────────────────
 _tm = selected.get("training_metrics") or {}
 _is_regression = any(k in _tm for k in ("mae", "rmse", "r2"))
 
-# ── Analyse & Monitoring (métriques, SHAP, performance, drift) ───────────────
+# ── Analysis & Monitoring (metrics, SHAP, performance, drift) ────────────────
 with st.expander(t("models.analysis.expander"), expanded=False):
     from datetime import date as _date, timedelta as _td
 
@@ -1138,12 +1138,12 @@ with st.expander(t("models.analysis.expander"), expanded=False):
             st.rerun()
         _gcol2.caption(t("models.analysis.btn_load_caption"))
 
-    # ── Métriques ─────────────────────────────────────────────────────────────
+    # ── Metrics ───────────────────────────────────────────────────────────────
     if _ana_loaded:
         st.divider()
         st.markdown(t("models.analysis.metrics_header"))
 
-        # Récupération ground truth
+        # Fetch ground truth
         _perf_gt = None
         _gt_n = 0
         try:
@@ -1158,7 +1158,7 @@ with st.expander(t("models.analysis.expander"), expanded=False):
         except Exception:
             pass
 
-        # Construction du tableau comparatif entraînement vs production
+        # Build comparison table: training vs production
         if _is_regression:
             _metrics_keys = [
                 ("MAE",  "mae",  "mae",             None),
@@ -1227,7 +1227,7 @@ with st.expander(t("models.analysis.expander"), expanded=False):
         except Exception as e:
             st.warning(t("models.analysis.model_card_error", error=e))
 
-    # ── Importance des features (SHAP agrégé) ─────────────────────────────────
+    # ── Feature importance (aggregated SHAP) ──────────────────────────────────
     if _ana_loaded:
         st.divider()
         st.markdown(t("models.analysis.shap_header"))
@@ -1299,7 +1299,7 @@ with st.expander(t("models.analysis.expander"), expanded=False):
             else:
                 st.warning(t("models.analysis.shap_error_generic", error=e))
 
-    # ── Métriques de performance (matrice de confusion + métriques par classe) ─
+    # ── Performance metrics (confusion matrix + per-class metrics) ────────────
     if _ana_loaded:
         st.divider()
         st.markdown(t("models.analysis.perf_header"))
@@ -1370,7 +1370,7 @@ with st.expander(t("models.analysis.expander"), expanded=False):
                 )
                 st.caption(t("models.analysis.perf_n_paired", n=matched))
 
-                # Mapping index → label depuis selected.classes
+                # Map index → label from selected.classes
                 _named_classes = selected.get("classes") or []
                 def _cls_label(idx) -> str:
                     try:
@@ -1451,7 +1451,7 @@ with st.expander(t("models.analysis.expander"), expanded=False):
         except Exception as e:
             st.warning(t("models.analysis.perf_error", error=e))
 
-    # ── Drift de sortie (label shift) ─────────────────────────────────────────
+    # ── Output drift (label shift) ────────────────────────────────────────────
     if _ana_loaded:
         st.divider()
         st.markdown(t("models.analysis.output_drift_header"))
@@ -1568,7 +1568,7 @@ with st.expander(t("models.analysis.expander"), expanded=False):
         except Exception as e:
             st.warning(t("models.analysis.output_drift_error", error=e))
 
-    # ── Drift des features (inputs) ───────────────────────────────────────────
+    # ── Feature drift (inputs) ────────────────────────────────────────────────
     if _ana_loaded:
         st.divider()
         st.markdown(t("models.analysis.feature_drift_header"))
@@ -1589,9 +1589,9 @@ with st.expander(t("models.analysis.expander"), expanded=False):
                 "ok": "🟢 ok",
                 "warning": "🟡 warning",
                 "critical": "🔴 critical",
-                "no_data": "⬜ pas de données",
-                "no_baseline": "⬜ pas de baseline",
-                "insufficient_data": "⬜ données insuffisantes",
+                "no_data": "⬜ no data",
+                "no_baseline": "⬜ no baseline",
+                "insufficient_data": "⬜ insufficient data",
             }
             fd_summary = fd.get("drift_summary", "no_data")
             fd_baseline = fd.get("baseline_available", False)
@@ -1729,7 +1729,7 @@ with st.expander(t("models.analysis.expander"), expanded=False):
         except Exception as e:
             st.warning(t("models.analysis.feature_drift_error", error=e))
 
-# Résolution des features pour les blocs Valider / Golden Tests
+# Feature resolution for the Validate / Golden Tests blocks
 feature_baseline = selected.get("feature_baseline") or {}
 feature_names_list: list = []
 if feature_baseline:
@@ -1830,7 +1830,7 @@ with st.expander(t("models.validate.expander"), expanded=False):
         "import requests\n\n"
         'url = "http://localhost:8000/predict"\n'
         "headers = {\n"
-        '    "Authorization": "Bearer <VOTRE_TOKEN>",\n'
+        '    "Authorization": "Bearer <YOUR_TOKEN>",\n'
         '    "Content-Type": "application/json",\n'
         "}\n"
         f"payload = {_json.dumps(_predict_payload, indent=4)}\n\n"
@@ -1844,7 +1844,7 @@ with st.expander(t("models.validate.expander"), expanded=False):
         {
             "model_name": selected["name"],
             "model_version": selected["version"],
-            "prediction": "<résultat>",
+            "prediction": "<result>",
             "probability": [0.98, 0.01, 0.01],
             "low_confidence": False,
             "id_obs": None,
@@ -1857,7 +1857,7 @@ with st.expander(t("models.validate.expander"), expanded=False):
     )
     st.code(_example_response, language="json")
 
-# Tests de régression (Golden Test Set)
+# Regression tests (Golden Test Set)
 with st.expander(t("models.golden_tests.expander"), expanded=False):
     is_admin_gt = st.session_state.get("is_admin", False)
     gt_model_name = selected["name"]
@@ -1868,7 +1868,7 @@ with st.expander(t("models.golden_tests.expander"), expanded=False):
     except Exception:
         golden_tests = []
 
-    # --- Liste des cas existants ---
+    # --- List of existing cases ---
     if golden_tests:
         import pandas as _pd_gt
         st.markdown(t("models.golden_tests.n_cases", n=len(golden_tests)))
@@ -1916,7 +1916,7 @@ with st.expander(t("models.golden_tests.expander"), expanded=False):
     if is_admin_gt:
         st.divider()
 
-        # --- Ajouter un cas ---
+        # --- Add a case ---
         with st.expander(t("models.golden_tests.add_expander"), expanded=False):
             if feature_baseline:
                 _gt_default = _json.dumps(
@@ -1960,7 +1960,7 @@ with st.expander(t("models.golden_tests.expander"), expanded=False):
                     except Exception as e:
                         st.error(t("models.golden_tests.add_error", error=e))
 
-        # --- Upload CSV ---
+        # --- CSV Upload ---
         with st.expander(t("models.golden_tests.csv_expander"), expanded=False):
             st.caption(t("models.golden_tests.csv_caption"))
             csv_file_gt = st.file_uploader(t("models.golden_tests.csv_uploader_label"), type=["csv"], key="gt_csv_upload")
@@ -1978,7 +1978,7 @@ with st.expander(t("models.golden_tests.expander"), expanded=False):
 
     st.divider()
 
-    # --- Lancer les tests ---
+    # --- Run tests ---
     if st.button(t("models.golden_tests.run_btn"), key="run_golden_tests", type="primary"):
         try:
             gt_result = client.run_golden_tests(gt_model_name, gt_version)
@@ -1994,7 +1994,7 @@ with st.expander(t("models.golden_tests.expander"), expanded=False):
                     passed = d["passed"]
                     icon = "✅" if passed else "❌"
                     desc_str = f" — {d['description']}" if d.get("description") else ""
-                    label = f"{icon} #{d['test_id']}{desc_str} &nbsp; attendu : `{d['expected']}` / obtenu : `{d['actual']}`"
+                    label = f"{icon} #{d['test_id']}{desc_str} &nbsp; expected: `{d['expected']}` / received: `{d['actual']}`"
                     with st.expander(label, expanded=not passed):
                         c_l, c_r = st.columns(2)
                         with c_l:
@@ -2100,7 +2100,7 @@ with st.expander(t("models.whatif.expander"), expanded=False):
                     _wif_raw_pred = wif_result.get("prediction", "—")
                     _wif_probs = wif_result.get("probability")
 
-                    # Résoudre index → label si le modèle retourne un entier
+                    # Resolve index → label if the model returns an integer
                     _wif_pred_label = str(_wif_raw_pred)
                     if wif_classes:
                         _wif_raw_str = str(_wif_raw_pred)
@@ -2247,9 +2247,9 @@ if is_admin:
                 st.markdown(f"{icon} {label}{suffix}")
             ready = readiness.get("ready", False)
         except Exception:
-            ready = True  # ne pas bloquer si l'endpoint échoue
+            ready = True  # do not block if the endpoint fails
 
-        # Passer en production
+        # Promote to production
         if not selected.get("is_production"):
             promote_help = None if ready else t("models.admin.btn_promote_help")
             if col_p.button(
@@ -2272,7 +2272,7 @@ if is_admin:
         else:
             col_p.info(t("models.admin.already_production"))
 
-        # Préchauffage du cache
+        # Cache warm-up
         selected_cache_key = f"{selected['name']}:{selected['version']}"
         is_selected_cached = selected_cache_key in cached_model_keys
         col_w1, col_w2 = st.columns([1, 3])
@@ -2300,7 +2300,7 @@ if is_admin:
         else:
             col_w2.info(t("models.admin.cache_already_loaded"))
 
-        # Supprimer
+        # Delete
         if col_d.button(t("models.admin.btn_delete"), width='stretch', type="secondary"):
             st.session_state["confirm_delete_model"] = f"{selected['name']}:{selected['version']}"
 
@@ -2320,10 +2320,10 @@ if is_admin:
                 st.session_state.pop("confirm_delete_model", None)
                 st.rerun()
 
-        # Modifier les métadonnées (tous les champs PATCH /models/{name}/{version})
+        # Edit metadata (all PATCH /models/{name}/{version} fields)
         with st.expander(t("models.edit_meta.expander")):
 
-            # ── Description & informations ─────────────────────────────────────
+            # ── Description & information ──────────────────────────────────────
             st.markdown(t("models.edit_meta.section_description"))
             _col_desc, _col_ds = st.columns(2)
             with _col_desc:
@@ -2357,7 +2357,7 @@ if is_admin:
                     placeholder=t("models.edit_meta.webhook_placeholder"),
                 )
 
-            # ── Inférence ──────────────────────────────────────────────────────
+            # ── Inference ─────────────────────────────────────────────────────
             st.markdown(t("models.edit_meta.section_inference"))
             _cur_ct = selected.get("confidence_threshold")
             new_confidence_threshold = st.slider(
@@ -2369,7 +2369,7 @@ if is_admin:
                 help=t("models.edit_meta.confidence_help"),
             )
 
-            # ── Déploiement A/B / Shadow ───────────────────────────────────────
+            # ── A/B / Shadow deployment ───────────────────────────────────────
             st.markdown(t("models.edit_meta.section_deployment"))
             _deploy_opts = ["production", "ab_test", "shadow"]
             _cur_deploy = selected.get("deployment_mode") or "production"
@@ -2398,7 +2398,7 @@ if is_admin:
                     help=t("models.edit_meta.traffic_weight_help"),
                 )
 
-            # ── Seuils d'alerte ────────────────────────────────────────────────
+            # ── Alert thresholds ──────────────────────────────────────────────
             st.markdown(t("models.edit_meta.section_alerts"))
             st.caption(t("models.edit_meta.alerts_caption"))
             _cur_at = selected.get("alert_thresholds") or {}
@@ -2430,7 +2430,7 @@ if is_admin:
                     help=t("models.edit_meta.drift_auto_alert_help"),
                 )
 
-            # ── Enregistrer ────────────────────────────────────────────────────
+            # ── Save ──────────────────────────────────────────────────────────
             if st.button(t("models.edit_meta.btn_save"), key="save_meta"):
                 patch = {}
 
@@ -2492,7 +2492,7 @@ if is_admin:
                 else:
                     st.info(t("models.edit_meta.no_change"))
 
-        # Ré-entraînement
+        # Retraining
         if selected.get("train_script_object_key"):
             with st.expander(t("models.retrain.expander"), expanded=False):
                 with st.form("retrain_form"):
@@ -2548,7 +2548,7 @@ if is_admin:
                             except Exception as e:
                                 st.toast(t("models.retrain.error_toast", error=e), icon="❌")
 
-        # Politique d'auto-promotion / circuit breaker
+        # Auto-promotion policy / circuit breaker
         if is_admin:
             _pp = selected.get("promotion_policy") or {}
             _pp_promote_on = _pp.get("auto_promote", False)
@@ -2649,7 +2649,7 @@ if is_admin:
                         help=t("models.policy.cooldown_help"),
                     )
 
-                # ── Enregistrer (une seule fois, tout la policy d'un coup) ─────
+                # ── Save (once, entire policy at once) ────────────────────────
                 if st.button(t("models.policy.btn_save"), key="save_policy"):
                     try:
                         client.set_policy(
@@ -2670,7 +2670,7 @@ if is_admin:
                     except Exception as e:
                         st.toast(t("models.policy.save_error", error=e), icon="❌")
 
-        # Calcul du baseline depuis la production
+        # Compute baseline from production
         with st.expander(t("models.baseline.expander")):
             st.markdown(t("models.baseline.description"))
             if selected.get("feature_baseline"):
@@ -2698,7 +2698,7 @@ if is_admin:
                     except Exception as e:
                         st.toast(t("models.baseline.error", error=e), icon="❌")
 
-        # Historique des modifications
+        # Modification history
         with st.expander(t("models.history.expander")):
             try:
                 history_data = client.get_model_history(selected["name"], selected["version"], limit=20)
@@ -2739,7 +2739,7 @@ if is_admin:
 
                     st.divider()
 
-                # Dialog de confirmation du rollback
+                # Rollback confirmation dialog
                 confirm_id = st.session_state.get("confirm_rollback_id")
                 confirm_model = st.session_state.get("confirm_rollback_model")
                 confirm_version = st.session_state.get("confirm_rollback_version")

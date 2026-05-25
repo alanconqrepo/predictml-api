@@ -91,20 +91,20 @@
 
 ## Batch 6 — `streamlit_app/` pages + `app.py`
 
-- [ ] `streamlit_app/app.py`
-- [ ] `streamlit_app/pages/10_Aide.py`
-- [ ] `streamlit_app/pages/12_AutoTrain_Chatbot.py`
-- [ ] `streamlit_app/pages/2_Models.py`
-- [ ] `streamlit_app/pages/6_AB_Testing.py`
-- [ ] `streamlit_app/pages/4_Stats.py`
-- [ ] `streamlit_app/pages/7_Supervision.py`
-- [ ] `streamlit_app/pages/5_Code_Example.py`
-- [ ] `streamlit_app/pages/1_Users.py`
-- [ ] `streamlit_app/pages/3_Predictions.py`
-- [ ] `streamlit_app/pages/11_Services.py`
-- [ ] `streamlit_app/pages/9_Golden_Tests.py`
-- [ ] `streamlit_app/pages/8_Retrain.py`
-- [ ] `streamlit_app/pages/0_Demande_Acces.py`
+- [x] `streamlit_app/app.py`
+- [x] `streamlit_app/pages/10_Aide.py`
+- [x] `streamlit_app/pages/12_AutoTrain_Chatbot.py`
+- [x] `streamlit_app/pages/2_Models.py`
+- [x] `streamlit_app/pages/6_AB_Testing.py`
+- [x] `streamlit_app/pages/4_Stats.py`
+- [x] `streamlit_app/pages/7_Supervision.py`
+- [x] `streamlit_app/pages/5_Code_Example.py`
+- [x] `streamlit_app/pages/1_Users.py`
+- [x] `streamlit_app/pages/3_Predictions.py`
+- [x] `streamlit_app/pages/11_Services.py`
+- [x] `streamlit_app/pages/9_Golden_Tests.py`
+- [x] `streamlit_app/pages/8_Retrain.py`
+- [x] `streamlit_app/pages/0_Demande_Acces.py`
 
 ---
 

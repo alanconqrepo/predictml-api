@@ -1,5 +1,5 @@
 """
-Page d'aide avec chatbot LLM (function calling natif) — PredictML Admin
+Help page with LLM chatbot (native function calling) — PredictML Admin
 """
 
 import json
@@ -44,69 +44,69 @@ MODEL_ID = "claude-sonnet-4-6"
 QUICK_TOPICS = [
     (
         t("aide.quick_topics.prod_status"),
-        "Quels modèles sont actuellement en production ? "
-        "Montre-moi leurs métriques (accuracy, F1, latence) et indique s'il y a des problèmes de drift.",
+        "Which models are currently in production? "
+        "Show me their metrics (accuracy, F1, latency) and indicate whether there are any drift issues.",
     ),
     (
         t("aide.quick_topics.prediction_stats"),
-        "Donne-moi un résumé des prédictions des 7 derniers jours : volume par modèle, "
-        "taux d'erreur, latence moyenne et P95.",
+        "Give me a summary of predictions from the last 7 days: volume by model, "
+        "error rate, average latency, and P95.",
     ),
     (
         t("aide.quick_topics.generate_train_py"),
-        "Génère un script train.py complet et compatible PredictML pour un modèle de classification "
-        "avec RandomForestClassifier. Respecte le contrat de variables d'environnement "
-        "(TRAIN_START_DATE, TRAIN_END_DATE, OUTPUT_MODEL_PATH) et inclus la sortie JSON sur stdout.",
+        "Generate a complete PredictML-compatible train.py script for a classification model "
+        "using RandomForestClassifier. Respect the environment variable contract "
+        "(TRAIN_START_DATE, TRAIN_END_DATE, OUTPUT_MODEL_PATH) and include JSON output on stdout.",
     ),
     (
         t("aide.quick_topics.api_calls"),
-        "Montre-moi le workflow Python complet avec requests : uploader un modèle .joblib, "
-        "le passer en production, faire une prédiction unitaire et batch, "
-        "puis enregistrer les résultats observés.",
+        "Show me the full Python workflow using requests: upload a .joblib model, "
+        "promote it to production, make a single and batch prediction, "
+        "then record the observed results.",
     ),
     (
         t("aide.quick_topics.interpret_kpis"),
-        "Explique les principaux indicateurs de performance du dashboard PredictML : "
-        "accuracy, F1, taux d'erreur, latence P95, Brier Score, drift Z-score et PSI, p-value A/B. "
-        "Donne les seuils d'alerte recommandés.",
+        "Explain the main performance indicators in the PredictML dashboard: "
+        "accuracy, F1, error rate, P95 latency, Brier Score, drift Z-score and PSI, A/B p-value. "
+        "Give the recommended alert thresholds.",
     ),
     (
         t("aide.quick_topics.configure_ab"),
-        "Comment configurer un A/B test entre deux versions d'un modèle ? "
-        "Explique deployment_mode, traffic_weight, l'interprétation statistique "
-        "(p-value, winner, min_samples_needed) et quand promouvoir.",
+        "How do I configure an A/B test between two model versions? "
+        "Explain deployment_mode, traffic_weight, statistical interpretation "
+        "(p-value, winner, min_samples_needed) and when to promote.",
     ),
     (
         t("aide.quick_topics.auto_retrain"),
-        "Comment planifier un ré-entraînement automatique hebdomadaire avec une expression cron ? "
-        "Inclus la configuration du schedule, la politique d'auto-promotion, "
-        "et le ré-entraînement déclenché par drift.",
+        "How do I schedule an automatic weekly retraining using a cron expression? "
+        "Include the schedule configuration, the auto-promotion policy, "
+        "and drift-triggered retraining.",
     ),
     (
         t("aide.quick_topics.detect_drift"),
-        "Comment configurer et interpréter la détection de drift dans PredictML ? "
-        "Explique feature_baseline, Z-score, PSI, statuts ok/warning/critical, "
-        "et le retrain automatique quand le drift est critique.",
+        "How do I configure and interpret drift detection in PredictML? "
+        "Explain feature_baseline, Z-score, PSI, ok/warning/critical statuses, "
+        "and automatic retraining when drift is critical.",
     ),
     (
         t("aide.quick_topics.manage_users"),
-        "Comment gérer les utilisateurs ? Montre-moi les utilisateurs actuellement actifs, "
-        "leur rôle et quota. Explique aussi comment créer un compte et renouveler un token.",
+        "How do I manage users? Show me the currently active users, "
+        "their role and quota. Also explain how to create an account and renew a token.",
     ),
     (
         t("aide.quick_topics.golden_tests"),
-        "Comment créer des golden tests et les intégrer dans la politique d'auto-promotion ? "
-        "Montre les cas de test existants si disponibles.",
+        "How do I create golden tests and integrate them into the auto-promotion policy? "
+        "Show existing test cases if available.",
     ),
     (
         t("aide.quick_topics.architecture"),
-        "Explique l'architecture de PredictML : les 7 services Docker, comment ils interagissent, "
-        "et le flux de données complet d'une prédiction.",
+        "Explain the PredictML architecture: the 7 Docker services, how they interact, "
+        "and the full data flow for a prediction.",
     ),
     (
         t("aide.quick_topics.get_started"),
-        "Je veux démarrer avec PredictML de zéro. Guide-moi étape par étape : "
-        "installation Docker, premier modèle sklearn, upload, mise en production, prédiction.",
+        "I want to get started with PredictML from scratch. Guide me step by step: "
+        "Docker installation, first sklearn model, upload, production deployment, prediction.",
     ),
 ]
 
@@ -130,10 +130,10 @@ def run_agent_turn(
     token: str,
 ) -> tuple[str, list]:
     """
-    Exécute un tour complet de l'agent avec support du function calling.
+    Execute a full agent turn with function calling support.
 
-    Render les appels d'outils inline dans le chat_message courant.
-    Retourne (texte_final, liste_de_résumés_d'outils).
+    Renders tool calls inline in the current chat_message.
+    Returns (final_text, list_of_tool_summaries).
     """
     current_messages = list(raw_messages)
     final_text = ""
@@ -154,18 +154,18 @@ def run_agent_turn(
             messages=current_messages,
         )
 
-        # Texte intermédiaire émis avant les appels d'outils
+        # Intermediate text emitted before tool calls
         turn_text = "".join(
             b.text for b in response.content if hasattr(b, "text") and b.text
         )
 
         if response.stop_reason == "tool_use":
-            # Afficher le texte de réflexion intermédiaire
+            # Display intermediate reasoning text
             if turn_text:
                 st.markdown(turn_text)
                 final_text += turn_text + "\n\n"
 
-            # Traiter chaque appel d'outil
+            # Process each tool call
             tool_results = []
             for block in response.content:
                 if block.type != "tool_use":
@@ -188,25 +188,25 @@ def run_agent_turn(
                     }
                 )
 
-            # Continuer la conversation avec les résultats
+            # Continue the conversation with tool results
             current_messages = current_messages + [
                 {"role": "assistant", "content": response.content},
                 {"role": "user", "content": tool_results},
             ]
 
         else:
-            # Réponse finale
+            # Final response
             final_text += turn_text
             return final_text, tool_summaries
 
 
-# ── Rendu de l'historique ─────────────────────────────────────────────────────
+# ── Chat history rendering ────────────────────────────────────────────────────
 
 
 def render_chat_history() -> None:
     for msg in st.session_state["help_messages"]:
         with st.chat_message(msg["role"]):
-            # Pour les messages assistant, réafficher les résumés d'outils (repliés)
+            # For assistant messages, redisplay tool summaries (collapsed)
             if msg["role"] == "assistant":
                 for summary in msg.get("tool_summaries", []):
                     with st.expander(summary["label"], expanded=False):
@@ -224,7 +224,7 @@ def render_chat_history() -> None:
             st.markdown(msg["content"])
 
 
-# ── Helpers de gestion de l'état des messages ────────────────────────────────
+# ── Message state management helpers ─────────────────────────────────────────
 
 
 def _user_to_raw(text: str) -> dict:
@@ -236,14 +236,14 @@ def _assistant_to_raw(text: str) -> dict:
 
 
 def _sync_raw_from_display() -> list:
-    """Reconstruit raw_messages depuis help_messages (pour compatibilité Anthropic API)."""
+    """Rebuild raw_messages from help_messages (for Anthropic API compatibility)."""
     raw = []
     for msg in st.session_state["help_messages"]:
         raw.append({"role": msg["role"], "content": msg["content"]})
     return raw
 
 
-# ── Initialisation session state ──────────────────────────────────────────────
+# ── Session state initialization ─────────────────────────────────────────────
 
 if "help_messages" not in st.session_state:
     st.session_state["help_messages"] = []  # [{role, content, tool_summaries?}]
@@ -251,7 +251,7 @@ if "help_messages" not in st.session_state:
 if "help_pending_prompt" not in st.session_state:
     st.session_state["help_pending_prompt"] = None
 
-# ── Chargement docs, code source & prompt système ─────────────────────────────
+# ── Documentation, source code & system prompt loading ───────────────────────
 
 docs = load_all_docs()
 snippets = load_source_snippets()
@@ -262,11 +262,11 @@ docs["KPIs_Dashboard"] = f"## Définitions des KPIs du dashboard\n\n{kpis_sectio
 system_prompt = build_system_prompt(docs, snippets)
 anthropic_client = get_anthropic_client()
 
-# URL et token de la session courante
+# URL and token of the current session
 _api_url: str = st.session_state.get("api_url", "http://localhost:8000")
 _token: str = st.session_state.get("api_token", "")
 
-# ── En-tête ───────────────────────────────────────────────────────────────────
+# ── Header ────────────────────────────────────────────────────────────────────
 
 st.title(t("aide.title"))
 st.markdown(t("aide.subtitle"))
@@ -282,7 +282,7 @@ st.caption(t("aide.tools_available", tools=" · ".join(ctx_parts)))
 
 st.divider()
 
-# ── Layout principal — 3 sections pleine largeur ─────────────────────────────
+# ── Main layout — 3 full-width sections ──────────────────────────────────────
 
 # ═══════════════════════════════════════════════════════════
 # SECTION 1 — Documentation
@@ -293,17 +293,17 @@ with st.expander(t("aide.doc_expander"), expanded=True):
         st.warning(t("aide.doc_not_available"))
     else:
         labels = {
-            "API_REFERENCE":      "📖 Référence API",
+            "API_REFERENCE":      "📖 API Reference",
             "ARCHITECTURE":       "🏗️ Architecture",
-            "BEGINNER_GUIDE":     "🎓 Guide débutant",
-            "DATABASE":           "🗄️ Base de données",
+            "BEGINNER_GUIDE":     "🎓 Beginner Guide",
+            "DATABASE":           "🗄️ Database",
             "DOCKER":             "🐳 Docker",
-            "QUICKSTART":         "⚡ Démarrage rapide",
+            "QUICKSTART":         "⚡ Quick Start",
             "README":             "🏠 README",
-            "CODING_STANDARDS":   "✅ Standards de code",
-            "DASHBOARD_GUIDE":    "🖥️ Guide du dashboard",
-            "TRAIN_SCRIPT_GUIDE": "🛠️ Guide train.py",
-            "KPIS_REFERENCE":     "📊 Référence KPIs",
+            "CODING_STANDARDS":   "✅ Coding Standards",
+            "DASHBOARD_GUIDE":    "🖥️ Dashboard Guide",
+            "TRAIN_SCRIPT_GUIDE": "🛠️ train.py Guide",
+            "KPIS_REFERENCE":     "📊 KPIs Reference",
             "FAQ":                "❓ FAQ",
         }
         doc_names = [k for k in docs if k != "KPIs_Dashboard"]
@@ -380,7 +380,7 @@ with st.expander(t("aide.chat_expander"), expanded=True):
 
     render_chat_history()
 
-    # ── Traitement du message (prompt rapide ou saisie) ───
+    # ── Message processing (quick prompt or user input) ───
 
     user_input: str | None = None
 
@@ -397,15 +397,15 @@ with st.expander(t("aide.chat_expander"), expanded=True):
         user_input = typed
 
     if user_input and anthropic_client:
-        # Afficher le message utilisateur
+        # Display user message
         with st.chat_message("user"):
             st.markdown(user_input)
         st.session_state["help_messages"].append({"role": "user", "content": user_input})
 
-        # Construire le contexte de conversation (format raw pour l'API)
+        # Build conversation context (raw format for the API)
         raw_messages = _sync_raw_from_display()
 
-        # Exécuter le tour de l'agent
+        # Execute the agent turn
         with st.chat_message("assistant"):
             response_text, tool_summaries = run_agent_turn(
                 client=anthropic_client,
@@ -414,10 +414,10 @@ with st.expander(t("aide.chat_expander"), expanded=True):
                 api_url=_api_url,
                 token=_token,
             )
-            # Afficher la réponse finale
+            # Display the final response
             st.markdown(response_text)
 
-        # Sauvegarder dans l'historique
+        # Save to history
         st.session_state["help_messages"].append(
             {
                 "role": "assistant",
