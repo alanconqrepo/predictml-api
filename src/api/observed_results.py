@@ -1,5 +1,5 @@
 """
-Endpoints pour les résultats observés
+Observed results endpoints
 """
 
 import csv
@@ -58,13 +58,13 @@ async def upsert_observed_results(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Insère ou écrase des résultats réellement observés.
+    Inserts or overwrites actually observed results.
 
-    - Chaque entrée est identifiée par la paire **(id_obs, model_name)**.
-    - Si la paire existe déjà, la ligne est **écrasée** (observed_result, date_time).
-    - Le `user_id` enregistré est celui du token Bearer utilisé.
+    - Each entry is identified by the pair **(id_obs, model_name)**.
+    - If the pair already exists, the row is **overwritten** (observed_result, date_time).
+    - The recorded `user_id` is that of the Bearer token used.
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
     records = [
         {
@@ -93,21 +93,21 @@ async def upload_observed_results_csv(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Importe des résultats observés depuis un fichier CSV (multipart/form-data).
+    Imports observed results from a CSV file (multipart/form-data).
 
-    Format attendu : `id_obs, model_name, observed_result, date_time`
+    Expected format: `id_obs, model_name, observed_result, date_time`
 
-    - **model_name** (form) : écrase la colonne `model_name` du CSV si fourni
-    - Taille max : 10 MB
-    - Succès partiel : les lignes valides sont importées, les erreurs sont listées
+    - **model_name** (form): overrides the `model_name` column in the CSV if provided
+    - Max size: 10 MB
+    - Partial success: valid rows are imported, errors are listed
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
     content = await file.read()
     if len(content) > _MAX_CSV_SIZE:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Fichier trop volumineux (max 10 MB)",
+            detail="File too large (max 10 MB)",
         )
 
     text = content.decode("utf-8", errors="replace")
@@ -177,37 +177,37 @@ _EXPORT_PAGE_SIZE = 500
 
 @router.get("/observed-results/export")
 async def export_observed_results(
-    model_name: Optional[str] = Query(None, description="Filtrer par nom de modèle (optionnel)"),
-    start: datetime = Query(..., description="Début de la période (ISO 8601)"),
-    end: datetime = Query(..., description="Fin de la période (ISO 8601)"),
+    model_name: Optional[str] = Query(None, description="Filter by model name (optional)"),
+    start: datetime = Query(..., description="Start of period (ISO 8601)"),
+    end: datetime = Query(..., description="End of period (ISO 8601)"),
     export_format: str = Query(
         "csv",
         alias="format",
-        description="Format d'export : csv ou jsonl (défaut : csv)",
+        description="Export format: csv or jsonl (default: csv)",
     ),
     _auth: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Export bulk des résultats observés au format CSV ou JSONL via streaming par curseur.
+    Bulk export of observed results as CSV or JSONL via cursor-based streaming.
 
-    - **model_name** : filtrer sur un modèle (optionnel — tous les modèles si absent)
-    - **start** / **end** : plage datetime — obligatoire
-    - **format** : `csv` (défaut) ou `jsonl`
+    - **model_name**: filter by model (optional — all models if absent)
+    - **start** / **end**: datetime range — required
+    - **format**: `csv` (default) or `jsonl`
 
-    Retourne un fichier en téléchargement direct (Content-Disposition: attachment).
+    Returns a file as a direct download (Content-Disposition: attachment).
 
-    Admin uniquement.
+    Admin only.
     """
     if start > end:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="'start' doit être antérieur à 'end'.",
+            detail="'start' must be before 'end'.",
         )
     if export_format not in ("csv", "jsonl"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Le paramètre 'format' doit être 'csv' ou 'jsonl'.",
+            detail="The 'format' parameter must be 'csv' or 'jsonl'.",
         )
 
     fmt = export_format
@@ -277,17 +277,17 @@ async def export_observed_results(
 
 @router.get("/observed-results/stats", response_model=ObservedResultsStatsResponse)
 async def get_observed_results_stats(
-    model_name: Optional[str] = Query(None, description="Filtrer par modèle ; omis = global"),
+    model_name: Optional[str] = Query(None, description="Filter by model; omitted = global"),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Taux de couverture du ground truth : combien de prédictions ont un résultat observé.
+    Ground truth coverage rate: how many predictions have an observed result.
 
-    - **model_name** : si fourni, retourne les stats du modèle + breakdown par version.
-    - Si omis, retourne les stats globales + breakdown par modèle.
+    - **model_name**: if provided, returns model stats + breakdown by version.
+    - If omitted, returns global stats + breakdown by model.
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
     stats = await DBService.get_observed_results_stats(db, model_name=model_name)
     return ObservedResultsStatsResponse(**stats)
@@ -295,29 +295,29 @@ async def get_observed_results_stats(
 
 @router.get("/observed-results", response_model=ObservedResultsListResponse)
 async def get_observed_results(
-    model_name: Optional[str] = Query(None, description="Filtrer par nom de modèle"),
-    id_obs: Optional[str] = Query(None, description="Filtrer par identifiant d'observation"),
-    start: Optional[datetime] = Query(None, description="Date de début (ISO 8601)"),
-    end: Optional[datetime] = Query(None, description="Date de fin (ISO 8601)"),
-    limit: int = Query(100, ge=1, le=1000, description="Nombre max de résultats"),
-    offset: int = Query(0, ge=0, description="Décalage pour la pagination"),
+    model_name: Optional[str] = Query(None, description="Filter by model name"),
+    id_obs: Optional[str] = Query(None, description="Filter by observation identifier"),
+    start: Optional[datetime] = Query(None, description="Start date (ISO 8601)"),
+    end: Optional[datetime] = Query(None, description="End date (ISO 8601)"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of results"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Retourne les résultats observés avec filtres optionnels.
+    Returns observed results with optional filters.
 
-    - **model_name** : nom du modèle — optionnel
-    - **id_obs** : identifiant d'observation — optionnel
-    - **start** / **end** : plage datetime sur date_time — optionnel
-    - **limit** / **offset** : pagination (défaut : 100 résultats, max 1000)
+    - **model_name**: model name — optional
+    - **id_obs**: observation identifier — optional
+    - **start** / **end**: datetime range on date_time — optional
+    - **limit** / **offset**: pagination (default: 100 results, max 1000)
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
     if start and end and start > end:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="'start' doit être antérieur à 'end'.",
+            detail="'start' must be before 'end'.",
         )
 
     results, total = await DBService.get_observed_results(

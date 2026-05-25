@@ -1,5 +1,5 @@
 """
-Service pour les opérations de base de données
+Service for database operations
 """
 
 import secrets
@@ -30,8 +30,8 @@ from src.services.metrics_service import compute_auc
 
 
 def _pg(db: AsyncSession) -> bool:
-    """True si la session est connectée à PostgreSQL (production), False pour SQLite (tests)."""
-    # db.sync_session.bind est l'engine (AsyncEngine ou Engine) transmis à async_sessionmaker
+    """True if the session is connected to PostgreSQL (production), False for SQLite (tests)."""
+    # db.sync_session.bind is the engine (AsyncEngine or Engine) passed to async_sessionmaker
     try:
         bind = db.sync_session.bind
         if bind is not None:
@@ -42,13 +42,13 @@ def _pg(db: AsyncSession) -> bool:
 
 
 class DBService:
-    """Service pour les opérations CRUD de la base de données"""
+    """Service for database CRUD operations"""
 
     # === Users ===
 
     @staticmethod
     async def get_user_by_token(db: AsyncSession, api_token: str) -> Optional[User]:
-        """Récupère un utilisateur par son token"""
+        """Retrieve a user by their token"""
         result = await db.execute(
             select(User).where(and_(User.api_token == api_token, User.is_active.is_(True)))
         )
@@ -56,7 +56,7 @@ class DBService:
 
     @staticmethod
     async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[User]:
-        """Récupère un utilisateur par son ID"""
+        """Retrieve a user by their ID"""
         result = await db.execute(select(User).where(User.id == user_id))
         return result.scalar_one_or_none()
 
@@ -69,7 +69,7 @@ class DBService:
         role: str = "user",
         rate_limit: int = 1000,
     ) -> User:
-        """Crée un nouvel utilisateur"""
+        """Create a new user"""
         token_expires_at = None
         if settings.TOKEN_LIFETIME_DAYS > 0:
             token_expires_at = _utcnow() + timedelta(days=settings.TOKEN_LIFETIME_DAYS)
@@ -88,7 +88,7 @@ class DBService:
 
     @staticmethod
     async def get_all_users(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[User]:
-        """Récupère les utilisateurs avec pagination offset/limit"""
+        """Retrieve users with offset/limit pagination"""
         result = await db.execute(
             select(User).order_by(User.created_at.desc()).offset(skip).limit(limit)
         )
@@ -96,7 +96,7 @@ class DBService:
 
     @staticmethod
     async def delete_user(db: AsyncSession, user_id: int) -> bool:
-        """Supprime un utilisateur (et ses prédictions via cascade)"""
+        """Delete a user (and their predictions via cascade)"""
         user = await DBService.get_user_by_id(db, user_id)
         if not user:
             return False
@@ -106,7 +106,7 @@ class DBService:
 
     @staticmethod
     async def update_user(db: AsyncSession, user_id: int, **kwargs) -> Optional["User"]:
-        """Met à jour les propriétés d'un utilisateur. Génère un nouveau token si regenerate_token=True."""
+        """Update a user's properties. Generates a new token if regenerate_token=True."""
         user = await DBService.get_user_by_id(db, user_id)
         if not user:
             return None
@@ -126,7 +126,7 @@ class DBService:
 
     @staticmethod
     async def update_user_last_login(db: AsyncSession, user_id: int) -> None:
-        """Met à jour la dernière connexion d'un utilisateur."""
+        """Update a user's last login timestamp."""
         user = await DBService.get_user_by_id(db, user_id)
         if user:
             user.last_login = _utcnow()
@@ -134,7 +134,7 @@ class DBService:
 
     @staticmethod
     async def get_user_prediction_count_today(db: AsyncSession, user_id: int) -> int:
-        """Compte le nombre de prédictions d'un utilisateur aujourd'hui"""
+        """Count the number of predictions made by a user today"""
         today = _utcnow().date()
         result = await db.execute(
             select(func.count(Prediction.id)).where(
@@ -151,10 +151,10 @@ class DBService:
         start_date=None,
         end_date=None,
     ) -> dict:
-        """Retourne les statistiques d'usage d'un utilisateur sur une période.
+        """Return usage statistics for a user over a period.
 
-        Agrège les prédictions par modèle (calls, errors, avg_latency_ms),
-        par jour (calls) et par modèle+jour, pour compatibilité SQLite/PostgreSQL.
+        Aggregates predictions by model (calls, errors, avg_latency_ms),
+        by day (calls) and by model+day, for SQLite/PostgreSQL compatibility.
         """
         if start_date and end_date:
             if isinstance(start_date, str):
@@ -248,7 +248,7 @@ class DBService:
         max_confidence: Optional[float] = None,
         timestamp: Optional[datetime] = None,
     ) -> Prediction:
-        """Enregistre une prédiction"""
+        """Record a prediction"""
         prediction = Prediction(
             user_id=user_id,
             model_name=model_name,
@@ -276,7 +276,7 @@ class DBService:
         db: AsyncSession,
         prediction_id: int,
     ) -> Optional[Prediction]:
-        """Récupère une prédiction par son id, avec la relation user chargée."""
+        """Retrieve a prediction by its id, with the user relation loaded."""
         result = await db.execute(
             select(Prediction)
             .options(selectinload(Prediction.user))
@@ -299,13 +299,13 @@ class DBService:
         max_confidence: Optional[float] = None,
     ) -> tuple[List[Prediction], int]:
         """
-        Récupère l'historique des prédictions avec filtres (pagination par curseur).
+        Retrieve the prediction history with filters (cursor-based pagination).
 
-        Le curseur est l'id de la dernière prédiction vue. La prochaine page retourne
-        les prédictions avec un id strictement inférieur au curseur.
+        The cursor is the id of the last seen prediction. The next page returns
+        predictions with an id strictly less than the cursor.
 
         Returns:
-            Tuple (liste de prédictions — limit+1 pour détecter la page suivante, total)
+            Tuple (list of predictions — limit+1 to detect the next page, total)
         """
         filters = [
             Prediction.model_name == model_name,
@@ -349,8 +349,8 @@ class DBService:
         cursor: Optional[int] = None,
     ) -> List[tuple]:
         """
-        Récupère une page de prédictions pour l'export streaming (cursor keyset DESC).
-        Retourne des tuples (Prediction, observed_result_value | None).
+        Retrieve a page of predictions for streaming export (cursor keyset DESC).
+        Returns tuples (Prediction, observed_result_value | None).
         """
         filters = [
             Prediction.timestamp >= start,
@@ -389,8 +389,8 @@ class DBService:
         end_date: str,
     ) -> List[dict]:
         """
-        Exporte les prédictions + résultats observés pour la fenêtre [start_date, end_date].
-        Retourne une liste de dicts prête à être sérialisée en CSV pour le subprocess retrain.
+        Export predictions + observed results for the [start_date, end_date] window.
+        Returns a list of dicts ready to be serialized as CSV for the retrain subprocess.
         """
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
@@ -440,10 +440,10 @@ class DBService:
         limit: int = 200,
     ) -> List[tuple]:
         """
-        Récupère les N dernières prédictions réussies d'un modèle sur une fenêtre glissante,
-        avec leurs input_features (pour le calcul de z-scores par feature).
+        Retrieve the N most recent successful predictions for a model over a sliding window,
+        with their input_features (for per-feature z-score computation).
 
-        Retourne une liste de tuples (Prediction, Optional[ObservedResult]).
+        Returns a list of tuples (Prediction, Optional[ObservedResult]).
         """
         cutoff = _utcnow() - timedelta(days=days)
 
@@ -478,7 +478,7 @@ class DBService:
         end: Optional[datetime] = None,
         model_version: Optional[str] = None,
     ) -> int:
-        """Compte les prédictions réussies pour un modèle sur une période."""
+        """Count successful predictions for a model over a period."""
         filters = [
             Prediction.model_name == model_name,
             Prediction.status == "success",
@@ -502,9 +502,9 @@ class DBService:
         model_version: Optional[str] = None,
     ) -> list:
         """
-        Retourne les paires (prediction_result, observed_result, probabilities, timestamp)
-        pour les prédictions ayant un observed_result associé.
-        JOIN sur (id_obs, model_name), uniquement les prédictions status='success'.
+        Return (prediction_result, observed_result, probabilities, timestamp) pairs
+        for predictions that have an associated observed_result.
+        JOIN on (id_obs, model_name), only predictions with status='success'.
         """
         filters = [
             Prediction.model_name == model_name,
@@ -546,9 +546,9 @@ class DBService:
         model_name: str,
     ) -> List[dict]:
         """
-        Retourne l'évolution chronologique des métriques par version pour un modèle.
-        Pour chaque version active, calcule accuracy/F1 (classification) ou MAE (régression)
-        via les paires (prediction, observed_result). Ordonnées par created_at ASC.
+        Return the chronological evolution of metrics by version for a model.
+        For each active version, computes accuracy/F1 (classification) or MAE (regression)
+        via (prediction, observed_result) pairs. Ordered by created_at ASC.
         """
         stmt = (
             select(ModelMetadata)
@@ -636,9 +636,9 @@ class DBService:
         model_version: Optional[str] = None,
     ) -> List[dict]:
         """
-        Retourne l'accuracy journalière pour le suivi de drift de performance.
-        PostgreSQL : GROUP BY DATE_TRUNC, précision et MAE calculés en SQL.
-        SQLite (tests) : agrégation Python-side avec LIMIT de sécurité.
+        Return daily accuracy for performance drift tracking.
+        PostgreSQL: GROUP BY DATE_TRUNC, accuracy and MAE computed in SQL.
+        SQLite (tests): Python-side aggregation with safety LIMIT.
         """
         max_start = end - timedelta(days=settings.ANALYTICS_MAX_DAYS)
         if start < max_start:
@@ -828,10 +828,10 @@ class DBService:
         confidence_threshold: float = 0.5,
     ) -> dict:
         """
-        Agrège la confiance (max_confidence) par jour sur une fenêtre glissante.
-        PostgreSQL : PERCENTILE_CONT sur la colonne max_confidence (indexée).
-        SQLite (tests) : agrégation numpy Python-side sur probabilities.
-        Retourne overall stats + liste journalière triée.
+        Aggregate confidence (max_confidence) by day over a sliding window.
+        PostgreSQL: PERCENTILE_CONT on the max_confidence column (indexed).
+        SQLite (tests): numpy Python-side aggregation on probabilities.
+        Returns overall stats + sorted daily list.
         """
         days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
@@ -1051,12 +1051,12 @@ class DBService:
         end: Optional[datetime] = None,
     ) -> dict:
         """
-        Calcule les statistiques des features de production sur une fenêtre glissante.
+        Compute production feature statistics over a sliding window.
 
-        PostgreSQL : jsonb_each_text() + AVG/STDDEV_SAMP/MIN/MAX côté serveur.
-          Note : `values` est vide dans ce chemin (non nécessaire pour les agrégats SQL).
-        SQLite (tests) : agrégation numpy Python-side avec LIMIT de sécurité.
-        Retourne {feature: {mean, std, min, max, count, values, null_rate}}.
+        PostgreSQL: jsonb_each_text() + AVG/STDDEV_SAMP/MIN/MAX server-side.
+          Note: `values` is empty in this path (not needed for SQL aggregates).
+        SQLite (tests): numpy Python-side aggregation with safety LIMIT.
+        Returns {feature: {mean, std, min, max, count, values, null_rate}}.
         """
         if start is not None:
             cutoff = start
@@ -1119,7 +1119,7 @@ class DBService:
                     "null_rate": null_rate,
                 }
 
-            # Deuxième requête légère : valeurs brutes (max 500 prédictions récentes) pour le calcul PSI
+            # Second lightweight query: raw values (max 500 recent predictions) for PSI computation
             if stats:
                 sql_raw = text(f"""
                     SELECT kv.key AS feature, kv.value::float AS val
@@ -1255,10 +1255,10 @@ class DBService:
         days: int = 30,
         model_name: Optional[str] = None,
     ) -> List[dict]:
-        """Retourne les statistiques agrégées des prédictions par modèle sur une fenêtre glissante.
+        """Return aggregated prediction statistics per model over a sliding window.
 
-        PostgreSQL : GROUP BY + PERCENTILE_CONT côté serveur, sans LIMIT bloquant.
-        SQLite (tests) : agrégation Python-side avec LIMIT de sécurité.
+        PostgreSQL: GROUP BY + PERCENTILE_CONT server-side, no blocking LIMIT.
+        SQLite (tests): Python-side aggregation with safety LIMIT.
         """
         days = min(days, settings.ANALYTICS_MAX_DAYS)
         cutoff = _utcnow() - timedelta(days=days)
@@ -1373,7 +1373,7 @@ class DBService:
 
     @staticmethod
     async def delete_prediction(db: AsyncSession, prediction_id: int) -> bool:
-        """Supprime une prédiction par son ID. Retourne True si trouvée et supprimée."""
+        """Delete a prediction by its ID. Returns True if found and deleted."""
         result = await db.execute(select(Prediction).where(Prediction.id == prediction_id))
         pred = result.scalar_one_or_none()
         if pred is None:
@@ -1530,7 +1530,7 @@ class DBService:
         minio_object_key: str,
         **kwargs,
     ) -> ModelMetadata:
-        """Crée les métadonnées d'un modèle"""
+        """Create model metadata"""
         metadata = ModelMetadata(
             name=name,
             version=version,
@@ -1547,7 +1547,7 @@ class DBService:
     async def get_model_metadata(
         db: AsyncSession, name: str, version: Optional[str] = None
     ) -> Optional[ModelMetadata]:
-        """Récupère les métadonnées d'un modèle"""
+        """Retrieve model metadata"""
         query = select(ModelMetadata).where(
             and_(ModelMetadata.name == name, ModelMetadata.is_active.is_(True))
         )
@@ -1557,8 +1557,8 @@ class DBService:
             result = await db.execute(query)
             return result.scalar_one_or_none()
         else:
-            # Sans version explicite : priorité à is_production=True, sinon la plus récente
-            # Exclure les versions dépréciées pour éviter de les sélectionner en routage
+            # Without explicit version: priority to is_production=True, otherwise most recent
+            # Exclude deprecated versions to avoid selecting them in routing
             query = query.where(ModelMetadata.status != "deprecated").order_by(
                 ModelMetadata.is_production.desc(), ModelMetadata.created_at.desc()
             )
@@ -1567,7 +1567,7 @@ class DBService:
 
     @staticmethod
     async def get_production_models(db: AsyncSession) -> List[ModelMetadata]:
-        """Récupère tous les modèles actifs marqués is_production=True."""
+        """Retrieve all active models marked is_production=True."""
         result = await db.execute(
             select(ModelMetadata).where(
                 and_(ModelMetadata.is_production.is_(True), ModelMetadata.is_active.is_(True))

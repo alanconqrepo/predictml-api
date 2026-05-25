@@ -1,5 +1,5 @@
 """
-Endpoints pour les demandes de création de compte (workflow d'approbation admin)
+Endpoints for account creation requests (admin approval workflow)
 """
 
 import secrets
@@ -32,31 +32,31 @@ async def submit_account_request(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Soumet une demande de création de compte (endpoint public, sans authentification).
+    Submits an account creation request (public endpoint, no authentication required).
 
-    Un administrateur devra approuver la demande. Le token sera transmis manuellement.
+    An administrator must approve the request. The token will be transmitted manually.
 
-    - **username** : 3 à 50 caractères.
-    - **email** : adresse email valide.
-    - **message** : message optionnel à l'intention de l'admin (max 500 caractères).
-    - **role_requested** : `user` (défaut) ou `readonly`.
+    - **username**: 3 to 50 characters.
+    - **email**: valid email address.
+    - **message**: optional message to the admin (max 500 characters).
+    - **role_requested**: `user` (default) or `readonly`.
     """
-    # Vérifier absence de demande pending pour cet email
+    # Check that no pending request exists for this email
     existing_pending = await DBService.get_pending_request_by_email(db, payload.email)
     if existing_pending:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Une demande est déjà en attente pour cet email.",
+            detail="A request is already pending for this email.",
         )
 
-    # Vérifier qu'aucun compte n'existe déjà avec cet email ou ce username
+    # Check that no account already exists with this email or username
     result = await db.execute(
         select(User).where((User.email == payload.email) | (User.username == payload.username))
     )
     if result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Un compte existe déjà avec cet email ou ce nom d'utilisateur.",
+            detail="An account already exists with this email or username.",
         )
 
     req = await DBService.create_account_request(
@@ -75,9 +75,9 @@ async def get_pending_count(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
-    Retourne le nombre de demandes de compte en attente d'approbation.
+    Returns the number of account requests pending approval.
 
-    Réservé aux administrateurs.
+    Reserved for administrators.
     """
     count = await DBService.count_pending_account_requests(db)
     return {"pending_count": count}
@@ -92,11 +92,11 @@ async def list_account_requests(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Liste les demandes de création de compte avec filtrage optionnel par statut.
+    Lists account creation requests with optional filtering by status.
 
-    - **status** : `pending`, `approved`, `rejected` (optionnel)
+    - **status**: `pending`, `approved`, `rejected` (optional)
 
-    Réservé aux administrateurs.
+    Reserved for administrators.
     """
     return await DBService.get_account_requests(db, status=status_filter, skip=skip, limit=limit)
 
@@ -108,32 +108,32 @@ async def approve_account_request(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Approuve une demande de compte : crée l'utilisateur et retourne son token Bearer.
+    Approves an account request: creates the user and returns their Bearer token.
 
-    Le token n'est retourné qu'une seule fois — l'admin doit le transmettre manuellement.
+    The token is returned only once — the admin must transmit it manually.
 
-    Réservé aux administrateurs.
+    Reserved for administrators.
     """
     req = await DBService.get_account_request_by_id(db, request_id)
     if not req:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Demande {request_id} introuvable.",
+            detail=f"Request {request_id} not found.",
         )
     if req.status != AccountRequestStatus.PENDING:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"La demande est déjà en statut « {req.status.value} ».",
+            detail=f"The request is already in status '{req.status.value}'.",
         )
 
-    # Vérifier que le username/email ne sont pas déjà pris (course condition)
+    # Check that username/email are not already taken (race condition)
     result = await db.execute(
         select(User).where((User.email == req.email) | (User.username == req.username))
     )
     if result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Un compte avec ce nom d'utilisateur ou cet email existe déjà.",
+            detail="An account with this username or email already exists.",
         )
 
     api_token = secrets.token_urlsafe(32)
@@ -169,20 +169,20 @@ async def reject_account_request(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Rejette une demande de création de compte avec une raison optionnelle.
+    Rejects an account creation request with an optional reason.
 
-    Réservé aux administrateurs.
+    Reserved for administrators.
     """
     req = await DBService.get_account_request_by_id(db, request_id)
     if not req:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Demande {request_id} introuvable.",
+            detail=f"Request {request_id} not found.",
         )
     if req.status != AccountRequestStatus.PENDING:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"La demande est déjà en statut « {req.status.value} ».",
+            detail=f"The request is already in status '{req.status.value}'.",
         )
 
     updated = await DBService.reject_account_request(
