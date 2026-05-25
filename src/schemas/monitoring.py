@@ -1,5 +1,5 @@
 """
-Schémas Pydantic pour le tableau de bord de supervision des modèles
+Pydantic schemas for the model supervision dashboard
 """
 
 from datetime import datetime
@@ -17,7 +17,7 @@ class ModelHealthSummary(BaseModel):
     model_name: str
     versions: list[str]
     deployment_modes: dict[str, Optional[str]]  # version → mode
-    total_predictions: int  # non-shadow uniquement
+    total_predictions: int  # non-shadow only
     shadow_predictions: int
     error_count: int
     error_rate: float
@@ -79,6 +79,6 @@ class ModelDetailDashboard(BaseModel):
     per_version_stats: list[VersionStats]
     timeseries: list[TimeseriesPoint]
     performance_by_day: list[dict]  # [{date, accuracy/mae, matched_count}]
-    feature_drift: dict  # réponse brute du service drift
-    ab_comparison: Optional[dict]  # réponse brute ab-compare
-    recent_errors: list[str]  # derniers messages d'erreur distincts (max 5)
+    feature_drift: dict  # raw response from drift service
+    ab_comparison: Optional[dict]  # raw ab-compare response
+    recent_errors: list[str]  # last distinct error messages (max 5)

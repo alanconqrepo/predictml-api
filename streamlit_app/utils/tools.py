@@ -1,9 +1,9 @@
 ﻿"""
-Outils natifs (function calling) pour le chatbot d'aide PredictML.
+Native tools (function calling) for the PredictML help chatbot.
 
-Deux tools disponibles pour Claude :
-  - query_database : exécute une requête SQL SELECT en lecture seule sur PostgreSQL
-  - call_api       : effectue un appel HTTP vers l'API PredictML avec le token utilisateur
+Two tools available for Claude:
+  - query_database : executes a read-only SQL SELECT query on PostgreSQL
+  - call_api       : makes an HTTP call to the PredictML API with the user's token
 """
 
 import json
@@ -14,17 +14,17 @@ import psycopg2
 import psycopg2.extras
 import requests
 
-# ── Définitions des outils (schéma Anthropic tool use) ───────────────────────
+# ── Tool definitions (Anthropic tool use schema) ──────────────────────────────
 
 TOOL_DEFINITIONS: list[dict] = [
     {
         "name": "query_database",
         "description": (
-            "Exécute une requête SQL SELECT en lecture seule sur la base de données PostgreSQL "
-            "de PredictML. Utilise ce tool pour répondre à des questions basées sur des données "
-            "réelles : modèles déployés, historique des prédictions, statistiques d'utilisation, "
-            "performances mesurées, utilisateurs actifs, résultats observés, golden tests, etc. "
-            "Tables disponibles : users, model_metadata, predictions, observed_results, "
+            "Executes a read-only SQL SELECT query on the PredictML PostgreSQL database. "
+            "Use this tool to answer questions based on real data: deployed models, "
+            "prediction history, usage statistics, measured performance, active users, "
+            "observed results, golden tests, etc. "
+            "Available tables: users, model_metadata, predictions, observed_results, "
             "golden_tests, model_history."
         ),
         "input_schema": {
@@ -33,9 +33,9 @@ TOOL_DEFINITIONS: list[dict] = [
                 "query": {
                     "type": "string",
                     "description": (
-                        "Requête SQL SELECT à exécuter. Doit commencer par SELECT. "
-                        "Une clause LIMIT sera ajoutée automatiquement si absente. "
-                        "Exemples : "
+                        "SQL SELECT query to execute. Must start with SELECT. "
+                        "A LIMIT clause will be added automatically if absent. "
+                        "Examples: "
                         "'SELECT name, version, accuracy, is_production FROM model_metadata WHERE is_active=true ORDER BY created_at DESC', "
                         "'SELECT model_name, COUNT(*) as nb FROM predictions WHERE timestamp > NOW()-INTERVAL\\'7 days\\' GROUP BY model_name', "
                         "'SELECT username, role, rate_limit_per_day FROM users WHERE is_active=true'."
@@ -43,7 +43,7 @@ TOOL_DEFINITIONS: list[dict] = [
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Nombre maximum de lignes à retourner (défaut : 20, max : 100).",
+                    "description": "Maximum number of rows to return (default: 20, max: 100).",
                     "default": 20,
                 },
             },
@@ -53,12 +53,12 @@ TOOL_DEFINITIONS: list[dict] = [
     {
         "name": "call_api",
         "description": (
-            "Effectue n'importe quelle requête HTTP vers l'API PredictML au nom de l'utilisateur "
-            "connecté (token Bearer de sa session). "
-            "Tu as accès à TOUS les endpoints documentés — consulte la section DOC: API_REFERENCE "
-            "dans ton contexte pour connaître l'endpoint exact, la méthode, les paramètres de "
-            "chemin, les query params et le corps JSON attendus. "
-            "Endpoints disponibles (non exhaustif) : "
+            "Makes any HTTP request to the PredictML API on behalf of the logged-in user "
+            "(Bearer token from their session). "
+            "You have access to ALL documented endpoints — consult the DOC: API_REFERENCE "
+            "section in your context for the exact endpoint, method, path parameters, "
+            "query params and expected JSON body. "
+            "Available endpoints (non-exhaustive): "
             "GET /models, GET /models/{name}/drift, GET /models/{name}/performance, "
             "GET /models/leaderboard, GET /predictions, GET /predictions/stats, "
             "GET /models/{name}/ab-compare, GET /models/{name}/feature-importance, "
@@ -68,8 +68,8 @@ TOOL_DEFINITIONS: list[dict] = [
             "PATCH /models/{name}/{version}, PATCH /models/{name}/policy, "
             "PATCH /models/{name}/{version}/schedule, PATCH /users/{id}, "
             "DELETE /predictions/purge, DELETE /models/{name}/{version}. "
-            "Pour les appels destructifs (DELETE, PATCH modifiant la production), "
-            "annonce à l'utilisateur l'action que tu vas effectuer avant de l'exécuter."
+            "For destructive calls (DELETE, PATCH modifying production), "
+            "announce the action to the user before executing it."
         ),
         "input_schema": {
             "type": "object",
@@ -78,24 +78,24 @@ TOOL_DEFINITIONS: list[dict] = [
                     "type": "string",
                     "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
                     "description": (
-                        "Méthode HTTP. Consulte la documentation API_REFERENCE pour la méthode "
-                        "correcte de chaque endpoint. GET = lecture, POST = créer/exécuter, "
-                        "PATCH = modifier partiellement, PUT = remplacer, DELETE = supprimer."
+                        "HTTP method. Consult the API_REFERENCE documentation for the correct "
+                        "method for each endpoint. GET = read, POST = create/execute, "
+                        "PATCH = partial update, PUT = replace, DELETE = delete."
                     ),
                 },
                 "endpoint": {
                     "type": "string",
                     "description": (
-                        "Chemin complet de l'endpoint avec les paramètres de chemin résolus "
-                        "(sans l'URL de base). Exemples : '/models', '/models/iris/drift', "
+                        "Full endpoint path with resolved path parameters "
+                        "(without the base URL). Examples: '/models', '/models/iris/drift', "
                         "'/models/iris/1.0.0/retrain', '/predictions/purge', '/users/42'. "
-                        "Remplace {name}, {version}, {id} par les valeurs réelles."
+                        "Replace {name}, {version}, {id} with real values."
                     ),
                 },
                 "params": {
                     "type": "object",
                     "description": (
-                        "Paramètres de requête (query string) sous forme de dict. "
+                        "Query string parameters as a dict. "
                         "Ex: {\"days\": 7, \"model_name\": \"iris\", \"dry_run\": true}."
                     ),
                     "additionalProperties": True,
@@ -103,9 +103,9 @@ TOOL_DEFINITIONS: list[dict] = [
                 "body": {
                     "type": "object",
                     "description": (
-                        "Corps JSON pour POST/PUT/PATCH. "
+                        "JSON body for POST/PUT/PATCH. "
                         "Ex: {\"features\": {\"sepal_length\": 5.1}, \"model_name\": \"iris\"}. "
-                        "Consulte la doc API_REFERENCE pour le schéma exact attendu."
+                        "Consult the API_REFERENCE doc for the exact expected schema."
                     ),
                     "additionalProperties": True,
                 },
@@ -116,7 +116,7 @@ TOOL_DEFINITIONS: list[dict] = [
 ]
 
 
-# ── Connexion PostgreSQL ───────────────────────────────────────────────────────
+# ── PostgreSQL connection ─────────────────────────────────────────────────────
 
 
 def _get_db_conn() -> psycopg2.extensions.connection:
@@ -130,18 +130,18 @@ def _get_db_conn() -> psycopg2.extensions.connection:
     )
 
 
-# ── Implémentation des outils ─────────────────────────────────────────────────
+# ── Tool implementations ──────────────────────────────────────────────────────
 
 
 def execute_sql(query: str, limit: int = 20) -> dict[str, Any]:
-    """Exécute une requête SELECT et retourne colonnes + lignes."""
+    """Executes a SELECT query and returns columns + rows."""
     limit = min(max(1, int(limit)), 100)
 
     clean = query.strip()
     if not clean.upper().startswith("SELECT"):
-        return {"error": "Seules les requêtes SELECT sont autorisées pour des raisons de sécurité."}
+        return {"error": "Only SELECT queries are allowed for security reasons."}
 
-    # Ajouter LIMIT si absent
+    # Add LIMIT if absent
     if "LIMIT" not in clean.upper():
         clean = clean.rstrip(";") + f" LIMIT {limit}"
 
@@ -160,9 +160,9 @@ def execute_sql(query: str, limit: int = 20) -> dict[str, Any]:
             "query_executed": clean,
         }
     except psycopg2.Error as e:
-        return {"error": f"Erreur SQL : {e.pgerror or str(e)}"}
+        return {"error": f"SQL error: {e.pgerror or str(e)}"}
     except Exception as e:
-        return {"error": f"Erreur de connexion à PostgreSQL : {str(e)}"}
+        return {"error": f"PostgreSQL connection error: {str(e)}"}
 
 
 def execute_api_call(
@@ -173,7 +173,7 @@ def execute_api_call(
     params: dict | None = None,
     body: dict | None = None,
 ) -> dict[str, Any]:
-    """Effectue un appel HTTP vers l'API PredictML."""
+    """Makes an HTTP call to the PredictML API."""
     url = api_url.rstrip("/") + "/" + endpoint.lstrip("/")
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
@@ -193,9 +193,9 @@ def execute_api_call(
 
         return {"status_code": resp.status_code, "ok": resp.ok, "data": data}
     except requests.Timeout:
-        return {"error": "Timeout : l'API ne répond pas dans les 15 secondes."}
+        return {"error": "Timeout: the API did not respond within 15 seconds."}
     except requests.ConnectionError:
-        return {"error": f"Impossible de contacter l'API à {api_url}. Vérifiez que le service est démarré."}
+        return {"error": f"Unable to reach the API at {api_url}. Make sure the service is running."}
     except Exception as e:
         return {"error": str(e)}
 
@@ -206,7 +206,7 @@ def execute_tool(
     api_url: str,
     token: str,
 ) -> dict[str, Any]:
-    """Dispatche l'exécution vers le bon outil."""
+    """Dispatches execution to the appropriate tool."""
     if tool_name == "query_database":
         return execute_sql(
             query=tool_input["query"],
@@ -221,16 +221,16 @@ def execute_tool(
             params=tool_input.get("params"),
             body=tool_input.get("body"),
         )
-    return {"error": f"Outil inconnu : {tool_name}"}
+    return {"error": f"Unknown tool: {tool_name}"}
 
 
-# ── Helpers de rendu ─────────────────────────────────────────────────────────
+# ── Rendering helpers ─────────────────────────────────────────────────────────
 
 
 def tool_expander_label(tool_name: str, tool_input: dict) -> str:
-    """Génère un label court pour le titre de l'expander."""
+    """Generates a short label for the expander title."""
     if tool_name == "query_database":
-        # Extrait les premières tables mentionnées
+        # Extract the first tables mentioned
         q = tool_input.get("query", "")
         short = q.replace("\n", " ").strip()[:80]
         return f"🗄️ SQL — `{short}…`" if len(q) > 80 else f"🗄️ SQL — `{short}`"
@@ -242,39 +242,39 @@ def tool_expander_label(tool_name: str, tool_input: dict) -> str:
 
 
 def render_tool_input(tool_name: str, tool_input: dict) -> None:
-    """Affiche les paramètres d'un appel d'outil."""
+    """Displays the parameters of a tool call."""
     import streamlit as st
 
     if tool_name == "query_database":
         st.code(tool_input.get("query", ""), language="sql")
         if tool_input.get("limit"):
-            st.caption(f"Limite : {tool_input['limit']} lignes")
+            st.caption(f"Limit: {tool_input['limit']} rows")
     elif tool_name == "call_api":
         method = tool_input.get("method", "GET")
         endpoint = tool_input.get("endpoint", "")
         st.code(f"{method} {endpoint}", language="http")
         if tool_input.get("params"):
-            st.caption("Paramètres :")
+            st.caption("Parameters:")
             st.json(tool_input["params"])
         if tool_input.get("body"):
-            st.caption("Corps :")
+            st.caption("Body:")
             st.json(tool_input["body"])
     else:
         st.json(tool_input)
 
 
 def render_tool_result(tool_name: str, result: dict) -> None:
-    """Affiche le résultat d'un appel d'outil de façon lisible."""
+    """Displays the result of a tool call in a readable format."""
     import pandas as pd
     import streamlit as st
 
     if "error" in result:
-        st.error(f"Erreur : {result['error']}")
+        st.error(f"Error: {result['error']}")
         return
 
     if tool_name == "query_database":
         row_count = result.get("row_count", 0)
-        st.caption(f"{row_count} ligne(s) retournée(s)")
+        st.caption(f"{row_count} row(s) returned")
         if row_count > 0:
             try:
                 df = pd.DataFrame(result["rows"])
@@ -282,20 +282,20 @@ def render_tool_result(tool_name: str, result: dict) -> None:
             except Exception:
                 st.json(result["rows"])
         else:
-            st.info("Aucune ligne retournée.")
+            st.info("No rows returned.")
 
     elif tool_name == "call_api":
         status = result.get("status_code", "?")
         ok = result.get("ok", False)
         color = "green" if ok else "red"
-        st.markdown(f"**Status :** :{color}[{status}]")
+        st.markdown(f"**Status:** :{color}[{status}]")
         data = result.get("data")
         if isinstance(data, (dict, list)):
-            # Tronquer les grosses réponses
+            # Truncate large responses
             raw = json.dumps(data, ensure_ascii=False, default=str)
             if len(raw) > 3000:
                 st.json(json.loads(raw[:3000]))
-                st.caption(f"… réponse tronquée ({len(raw)} caractères au total)")
+                st.caption(f"… response truncated ({len(raw)} characters total)")
             else:
                 st.json(data)
         else:
@@ -306,13 +306,13 @@ def render_tool_result(tool_name: str, result: dict) -> None:
 
 
 def build_tool_summary(tool_name: str, tool_input: dict, result: dict) -> dict:
-    """Construit un résumé compact pour l'historique de conversation."""
+    """Builds a compact summary for the conversation history."""
     if tool_name == "query_database":
         q = tool_input.get("query", "")
-        rows = result.get("row_count", "?") if "error" not in result else "erreur"
+        rows = result.get("row_count", "?") if "error" not in result else "error"
         return {
             "type": "sql",
-            "label": f"🗄️ SQL ({rows} lignes)",
+            "label": f"🗄️ SQL ({rows} rows)",
             "query": q,
             "result_preview": (
                 json.dumps(result.get("rows", [])[:3], ensure_ascii=False, default=str)

@@ -1,18 +1,18 @@
 """
-Scheduler de ré-entraînement automatique basé sur des expressions cron.
+Automatic retraining scheduler based on cron expressions.
 
-Un job APScheduler est créé par version de modèle ayant un ``retrain_schedule``
-actif en base. Au démarrage de l'application, tous les schedules actifs sont
-chargés depuis la DB.
+One APScheduler job is created per model version that has an active
+``retrain_schedule`` in the database. All active schedules are loaded
+from the DB at application startup.
 
-Chaque job :
-1. Acquiert un verrou Redis (SET NX EX 700) pour éviter les exécutions concurrentes
-   en environnement multi-réplicas.
-2. Télécharge le script ``train.py`` depuis MinIO.
-3. Exécute le script dans un sous-processus (timeout 600 s).
-4. Upload le ``.joblib`` produit et crée une nouvelle version en base.
-5. Évalue l'auto-promotion si ``schedule.auto_promote=True``.
-6. Met à jour ``last_run_at`` et ``next_run_at`` sur la version source.
+Each job:
+1. Acquires a Redis lock (SET NX EX 700) to prevent concurrent runs
+   in multi-replica environments.
+2. Downloads the ``train.py`` script from MinIO.
+3. Executes the script in an isolated subprocess (timeout 600 s).
+4. Uploads the produced ``.joblib`` and creates a new version in the DB.
+5. Evaluates auto-promotion if ``schedule.auto_promote=True``.
+6. Updates ``last_run_at`` and ``next_run_at`` on the source version.
 """
 
 import asyncio
@@ -55,7 +55,7 @@ _SAFE_ENV_KEYS = {
 
 
 def _compute_next_run_at(cron: str) -> Optional[datetime]:
-    """Retourne le prochain déclenchement (naive UTC) pour une expression cron."""
+    """Return the next fire time (naive UTC) for a cron expression."""
     try:
         trigger = CronTrigger.from_crontab(cron, timezone="UTC")
         now = datetime.now(timezone.utc)
@@ -68,12 +68,12 @@ def _compute_next_run_at(cron: str) -> Optional[datetime]:
 
 
 # ---------------------------------------------------------------------------
-# Gestion des jobs
+# Job management
 # ---------------------------------------------------------------------------
 
 
 def add_retrain_job(name: str, version: str, schedule: dict) -> None:
-    """Ajoute ou remplace un job cron dans le scheduler."""
+    """Add or replace a cron job in the scheduler."""
     if not schedule.get("enabled", True):
         return
     cron = schedule.get("cron")
@@ -89,26 +89,26 @@ def add_retrain_job(name: str, version: str, schedule: dict) -> None:
         replace_existing=True,
         misfire_grace_time=300,
     )
-    logger.info("Job de ré-entraînement planifié", model=name, version=version, cron=cron)
+    logger.info("Retrain job scheduled", model=name, version=version, cron=cron)
 
 
 def remove_retrain_job(name: str, version: str) -> None:
-    """Retire un job du scheduler — silencieux si absent."""
+    """Remove a job from the scheduler — silent if not found."""
     job_id = f"retrain_schedule:{name}:{version}"
     try:
         _retrain_scheduler.remove_job(job_id)
-        logger.info("Job de ré-entraînement supprimé", model=name, version=version)
+        logger.info("Retrain job removed", model=name, version=version)
     except Exception:
         pass
 
 
 # ---------------------------------------------------------------------------
-# Job principal
+# Main job
 # ---------------------------------------------------------------------------
 
 
 async def _run_retrain_job(name: str, version: str) -> None:
-    """Point d'entrée APScheduler. Acquiert le verrou Redis puis délègue."""
+    """APScheduler entry point. Acquires the Redis lock then delegates."""
     from src.services.model_service import model_service
 
     redis_client = await model_service._get_redis()
@@ -116,7 +116,7 @@ async def _run_retrain_job(name: str, version: str) -> None:
     acquired = await redis_client.set(lock_key, "1", nx=True, ex=700)
     if not acquired:
         logger.warning(
-            "Job de ré-entraînement ignoré — verrou Redis actif",
+            "Retrain job skipped — Redis lock active",
             model=name,
             version=version,
         )
@@ -126,7 +126,7 @@ async def _run_retrain_job(name: str, version: str) -> None:
         await _do_retrain(name, version)
     except Exception as exc:
         logger.error(
-            "Erreur inattendue dans le job de ré-entraînement",
+            "Unexpected error in retrain job",
             model=name,
             version=version,
             error=str(exc),
@@ -136,8 +136,8 @@ async def _run_retrain_job(name: str, version: str) -> None:
 
 
 async def _do_retrain(name: str, version: str) -> None:
-    """Logique core : télécharge train.py, exécute subprocess, upload, crée ModelMetadata."""
-    # Imports lazy pour éviter les effets de bord à l'import et faciliter le mock en tests
+    """Core logic: download train.py, run subprocess, upload, create ModelMetadata."""
+    # Lazy imports to avoid side effects at import time and ease mocking in tests
     from sqlalchemy import and_, select
 
     from src.core.config import settings
@@ -150,11 +150,11 @@ async def _do_retrain(name: str, version: str) -> None:
     from src.services.mlflow_service import mlflow_service
     from src.services.model_service import compute_model_hmac, model_service
 
-    logger.info("Démarrage du ré-entraînement planifié", model=name, version=version)
+    logger.info("Starting scheduled retrain", model=name, version=version)
     structlog.contextvars.bind_contextvars(event_type="retrain", model_name=name)
 
-    # --- Session 1 : lecture pré-subprocess ---
-    # Fermer la connexion DB avant le subprocess (600 s) pour libérer le pool.
+    # --- Session 1: pre-subprocess read ---
+    # Close the DB connection before the subprocess (600 s) to free up the pool.
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(ModelMetadata).where(
@@ -163,23 +163,23 @@ async def _do_retrain(name: str, version: str) -> None:
         )
         source_model = result.scalar_one_or_none()
         if not source_model:
-            logger.error("Modèle source introuvable", model=name, version=version)
+            logger.error("Source model not found", model=name, version=version)
             return
 
         schedule = source_model.retrain_schedule or {}
         if not schedule.get("enabled", True):
-            logger.info("Schedule désactivé, job ignoré", model=name, version=version)
+            logger.info("Schedule disabled, job skipped", model=name, version=version)
             return
 
         if not source_model.train_script_object_key:
             logger.error(
-                "Pas de train_script_object_key — retrain impossible",
+                "No train_script_object_key — retrain not possible",
                 model=name,
                 version=version,
             )
             return
 
-        # Extraire tous les champs nécessaires en mémoire avant de fermer la session
+        # Extract all needed fields into memory before closing the session
         source_fields = {
             "train_script_object_key": source_model.train_script_object_key,
             "description": source_model.description,
@@ -198,24 +198,24 @@ async def _do_retrain(name: str, version: str) -> None:
             "f1_score": source_model.f1_score,
         }
 
-        # 2. Calculer la plage de dates (ici pour pouvoir exporter avant de fermer la session)
+        # 2. Compute the date range (done here so we can export before closing the session)
         lookback_days = int(schedule.get("lookback_days", 30))
         now_utc = datetime.now(timezone.utc)
         end_date = now_utc.strftime("%Y-%m-%d")
         start_date = (now_utc - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
-        # Exporter les données de production avant de libérer la connexion
+        # Export production data before releasing the connection
         retrain_rows = await DBService.export_retrain_data(db, name, start_date, end_date)
-    # ← connexion DB libérée ici, avant le subprocess de 600 s
+    # ← DB connection released here, before the 600 s subprocess
 
-    # 3. Télécharger train.py depuis MinIO
+    # 3. Download train.py from MinIO
     try:
         script_bytes = await minio_service.async_download_file_bytes(
             source_fields["train_script_object_key"]
         )
     except Exception as exc:
         logger.error(
-            "Téléchargement train.py échoué",
+            "train.py download failed",
             model=name,
             version=version,
             error=str(exc),
@@ -223,7 +223,7 @@ async def _do_retrain(name: str, version: str) -> None:
         retrain_total.labels(model_name=name, status="failure").inc()
         return
 
-    # 4. Exécuter le subprocess (timeout 600 s — identique à l'endpoint manuel)
+    # 4. Run the subprocess (timeout 600 s — same as the manual endpoint)
     timestamp = now_utc.strftime("%Y%m%d%H%M%S")
     new_version = f"{version}-sched-{timestamp}"
     mlflow_uri = settings.MLFLOW_TRACKING_URI
@@ -238,7 +238,7 @@ async def _do_retrain(name: str, version: str) -> None:
         with open(script_path, "wb") as f:
             f.write(script_bytes)
 
-        # Écrire le CSV de données de production si disponible
+        # Write production data CSV if available
         train_data_path = None
         if retrain_rows:
             train_data_path = os.path.join(tmpdir, "train_data.csv")
@@ -271,7 +271,7 @@ async def _do_retrain(name: str, version: str) -> None:
                         }
                     )
             logger.info(
-                "Données de production exportées pour le retrain planifié",
+                "Production data exported for scheduled retrain",
                 model=name,
                 rows=len(retrain_rows),
             )
@@ -305,7 +305,7 @@ async def _do_retrain(name: str, version: str) -> None:
                 proc.kill()
                 await proc.communicate()
                 logger.error(
-                    "Timeout ré-entraînement planifié (600 s)",
+                    "Scheduled retrain timeout (600 s)",
                     model=name,
                     version=version,
                 )
@@ -317,7 +317,7 @@ async def _do_retrain(name: str, version: str) -> None:
 
             if proc.returncode != 0:
                 logger.error(
-                    "Script de ré-entraînement échoué",
+                    "Retrain script failed",
                     model=name,
                     returncode=proc.returncode,
                     stderr=stderr_text[:500],
@@ -327,7 +327,7 @@ async def _do_retrain(name: str, version: str) -> None:
 
             if not os.path.exists(output_model_path):
                 logger.error(
-                    "Fichier modèle absent après l'exécution du script",
+                    "Model file missing after script execution",
                     model=name,
                     version=version,
                 )
@@ -339,7 +339,7 @@ async def _do_retrain(name: str, version: str) -> None:
 
         except Exception as exc:
             logger.error(
-                "Erreur lors de l'exécution du subprocess",
+                "Error during subprocess execution",
                 model=name,
                 version=version,
                 error=str(exc),
@@ -347,7 +347,7 @@ async def _do_retrain(name: str, version: str) -> None:
             retrain_total.labels(model_name=name, status="failure").inc()
             return
 
-    # 5. Extraire les métriques depuis la dernière ligne JSON de stdout
+    # 5. Extract metrics from the last JSON line of stdout
     new_accuracy = source_fields["accuracy"]
     new_auc = source_fields.get("auc")
     new_f1 = source_fields["f1_score"]
@@ -373,9 +373,9 @@ async def _do_retrain(name: str, version: str) -> None:
         "label_distribution": parsed_metrics.get("label_distribution"),
     }
 
-    # 5b. Snapshot des versions de librairies (généré ici, uploadé MinIO en step 6)
-    # Priorité : "dependencies" dans le stdout JSON (auto-reporté par le script),
-    # fallback sur AST + importlib.metadata si absent.
+    # 5b. Library version snapshot (generated here, uploaded to MinIO in step 6)
+    # Priority: "dependencies" in stdout JSON (self-reported by the script),
+    # fallback to AST + importlib.metadata if absent.
     from src.services.env_snapshot_service import (
         dependencies_to_requirements_txt as _deps_to_req,
     )
@@ -389,7 +389,7 @@ async def _do_retrain(name: str, version: str) -> None:
     else:
         _req_txt = _gen_req(script_bytes.decode("utf-8", errors="replace"))
 
-    # 5c. Créer le run MLflow (dégradation gracieuse si MLflow indisponible)
+    # 5c. Create the MLflow run (graceful degradation if MLflow is unavailable)
     _mlflow_run_id: Optional[str] = None
     try:
         _mlflow_run_id = mlflow_service.log_retrain_run(
@@ -415,9 +415,9 @@ async def _do_retrain(name: str, version: str) -> None:
             requirements_txt=_req_txt,
         )
     except Exception as _exc:
-        logger.warning("MLflow logging échoué (scheduler)", error=str(_exc))
+        logger.warning("MLflow logging failed (scheduler)", error=str(_exc))
 
-    # 6. Uploader le nouveau modèle, le script et le requirements.txt dans MinIO
+    # 6. Upload the new model, script and requirements.txt to MinIO
     new_object_key = f"{name}/v{new_version}.joblib"
     new_model_hmac_signature = compute_model_hmac(new_model_bytes)
     upload_info = await minio_service.async_upload_model_bytes(new_model_bytes, new_object_key)
@@ -431,13 +431,13 @@ async def _do_retrain(name: str, version: str) -> None:
             _req_txt.encode("utf-8"), _req_object_key, content_type="text/plain"
         )
     except Exception as _exc:
-        logger.warning("Upload requirements.txt échoué (scheduler) — non bloquant", error=str(_exc))
+        logger.warning("requirements.txt upload failed (scheduler) — non-blocking", error=str(_exc))
         _req_object_key = None
 
-    # --- Session 2 : écriture post-subprocess ---
+    # --- Session 2: post-subprocess write ---
     now_naive = now_utc.replace(tzinfo=None)
     async with AsyncSessionLocal() as db:
-        # 7. Créer la nouvelle entrée ModelMetadata
+        # 7. Create the new ModelMetadata entry
         new_metadata = ModelMetadata(
             name=name,
             version=new_version,
@@ -479,7 +479,7 @@ async def _do_retrain(name: str, version: str) -> None:
             db, new_metadata, HistoryActionType.CREATED, None, "scheduler"
         )
 
-        # 8. Auto-promotion si activée et policy définie
+        # 8. Auto-promotion if enabled and policy defined
         _auto_promoted = False
         _auto_promote_reason: Optional[str] = None
         if schedule.get("auto_promote") and source_fields["promotion_policy"]:
@@ -503,7 +503,7 @@ async def _do_retrain(name: str, version: str) -> None:
                 new_metadata.is_production = True
                 await db.flush()
             logger.info(
-                "Auto-promotion évaluée",
+                "Auto-promotion evaluated",
                 model=name,
                 new_version=new_version,
                 promoted=should_promote,
@@ -518,7 +518,7 @@ async def _do_retrain(name: str, version: str) -> None:
                 "auto_promote_reason": _auto_promote_reason,
             }
 
-        # Mettre à jour les tags MLflow avec le résultat final de promotion
+        # Update MLflow tags with the final promotion outcome
         if _mlflow_run_id:
             try:
                 mlflow_service.update_run_tags(
@@ -530,9 +530,9 @@ async def _do_retrain(name: str, version: str) -> None:
                     },
                 )
             except Exception as _exc:
-                logger.warning("MLflow tag update échoué (scheduler)", error=str(_exc))
+                logger.warning("MLflow tag update failed (scheduler)", error=str(_exc))
 
-        # 9. Mettre à jour last_run_at et next_run_at sur le modèle source
+        # 9. Update last_run_at and next_run_at on the source model
         cron_expr = schedule.get("cron", "")
         next_run = _compute_next_run_at(cron_expr) if cron_expr else None
         source_update_result = await db.execute(
@@ -550,21 +550,21 @@ async def _do_retrain(name: str, version: str) -> None:
 
         await db.commit()
 
-        # 10. Invalider le cache Redis du modèle (forcer le rechargement de la nouvelle version)
+        # 10. Invalidate the Redis model cache (force reload of the new version)
         await model_service.invalidate_model_cache(name)
 
-        # 11. Pré-chauffer le cache pour la nouvelle version si promue en production
+        # 11. Warm up the cache for the new version if promoted to production
         if _auto_promoted or new_metadata.is_production:
             try:
                 async with AsyncSessionLocal() as warmup_db:
                     await model_service.load_model(warmup_db, name, new_version)
                 logger.info(
-                    "Cache pré-chauffé pour la nouvelle version",
+                    "Cache warmed up for new version",
                     model=name,
                     new_version=new_version,
                 )
             except Exception as _exc:
-                logger.warning("Pré-chauffe cache échouée (non bloquant)", error=str(_exc))
+                logger.warning("Cache warm-up failed (non-blocking)", error=str(_exc))
 
         _wh = source_fields["webhook_url"]
         if _wh:
@@ -603,7 +603,7 @@ async def _do_retrain(name: str, version: str) -> None:
 
         retrain_total.labels(model_name=name, status="success").inc()
         logger.info(
-            "Ré-entraînement planifié terminé",
+            "Scheduled retrain completed",
             model=name,
             source_version=version,
             new_version=new_version,
@@ -619,10 +619,10 @@ async def _do_retrain(name: str, version: str) -> None:
 
 
 async def start_retrain_scheduler() -> None:
-    """Charge les schedules actifs depuis la DB et démarre le scheduler.
+    """Load active schedules from the DB and start the scheduler.
 
-    Cette fonction est ``async`` (contrairement à ``start_scheduler`` du
-    supervision_reporter) car elle effectue une requête DB.
+    This function is ``async`` (unlike ``start_scheduler`` in
+    supervision_reporter) because it performs a DB query.
     """
     from sqlalchemy import select
 
@@ -644,14 +644,14 @@ async def start_retrain_scheduler() -> None:
                 loaded += 1
 
         _retrain_scheduler.start()
-        logger.info("Scheduler de ré-entraînement démarré", jobs_loaded=loaded)
+        logger.info("Retrain scheduler started", jobs_loaded=loaded)
 
     except Exception as exc:
-        logger.warning("Impossible de démarrer le scheduler de ré-entraînement", error=str(exc))
+        logger.warning("Failed to start the retrain scheduler", error=str(exc))
 
 
 def stop_retrain_scheduler() -> None:
-    """Arrête proprement le scheduler."""
+    """Gracefully stop the scheduler."""
     if _retrain_scheduler.running:
         _retrain_scheduler.shutdown(wait=False)
-        logger.info("Scheduler de ré-entraînement arrêté")
+        logger.info("Retrain scheduler stopped")

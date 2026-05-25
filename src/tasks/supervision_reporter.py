@@ -1,13 +1,13 @@
 """
-Scheduler de supervision — rapport hebdomadaire et alertes automatiques.
+Supervision scheduler — weekly report and automatic alerts.
 
-Utilise APScheduler (AsyncIOScheduler) intégré au cycle de vie FastAPI.
-Activé via les variables d'environnement :
-  - ENABLE_EMAIL_ALERTS=true   → vérification toutes les 6h (e-mails)
-  - WEEKLY_REPORT_ENABLED=true → rapport le WEEKLY_REPORT_DAY à WEEKLY_REPORT_HOUR h
+Uses APScheduler (AsyncIOScheduler) integrated into the FastAPI lifecycle.
+Enabled via environment variables:
+  - ENABLE_EMAIL_ALERTS=true   → check every 6 h (emails)
+  - WEEKLY_REPORT_ENABLED=true → report on WEEKLY_REPORT_DAY at WEEKLY_REPORT_HOUR h
 
-Le job d'alerte tourne toujours (même sans e-mail) pour déclencher les webhooks
-configurés sur les modèles (drift_critical, error_rate_threshold).
+The alert job always runs (even without email) to trigger webhooks
+configured on models (drift_critical, error_rate_threshold).
 """
 
 import asyncio
@@ -24,7 +24,7 @@ _DRIFT_LEVEL: dict[str, int] = {"ok": 0, "warning": 1, "critical": 2}
 
 
 def _get_model_threshold(thresholds: dict | None, key: str, default: float) -> float:
-    """Retourne le seuil du modèle si défini, sinon le seuil global."""
+    """Return the model-specific threshold if set, otherwise the global threshold."""
     if thresholds and (val := thresholds.get(key)) is not None:
         return val
     return default
@@ -38,7 +38,7 @@ try:
 except ImportError:
     _scheduler = None  # type: ignore[assignment]
     _APSCHEDULER_AVAILABLE = False
-    logger.warning("APScheduler non installé — scheduler de supervision désactivé")
+    logger.warning("APScheduler not installed — supervision scheduler disabled")
 
 
 # ---------------------------------------------------------------------------
@@ -48,15 +48,15 @@ except ImportError:
 
 async def run_alert_check() -> None:
     """
-    Vérification toutes les 6h des indicateurs de supervision sur les 24 dernières heures.
-    Envoie des alertes e-mail si ENABLE_EMAIL_ALERTS=true.
-    Déclenche les webhooks configurés sur les modèles indépendamment des e-mails :
-      - error_rate_threshold : taux d'erreur > seuil
-      - drift_critical       : drift de features critique détecté
+    Check supervision indicators every 6 h over the last 24 hours.
+    Sends email alerts if ENABLE_EMAIL_ALERTS=true.
+    Triggers webhooks configured on models regardless of email setting:
+      - error_rate_threshold : error rate > threshold
+      - drift_critical       : critical feature drift detected
     """
     from src.core.ml_metrics import drift_detected_total
 
-    logger.info("Vérification des alertes de supervision")
+    logger.info("Checking supervision alerts")
     structlog.contextvars.bind_contextvars(event_type="supervision")
 
     try:
@@ -71,7 +71,7 @@ async def run_alert_check() -> None:
         async with AsyncSessionLocal() as db:
             raw_stats = await DBService.get_global_monitoring_stats(db, start, end)
 
-            # Charger tous les modèles actifs UNE SEULE FOIS avant la boucle
+            # Load all active models ONCE before the loop
             all_metas = await DBService.get_all_active_models(db)
             meta_by_name: dict[str, list] = {}
             for m in all_metas:
@@ -81,16 +81,16 @@ async def run_alert_check() -> None:
                 model_name = model_stat["model_name"]
                 error_rate = model_stat["error_rate"]
 
-                # Résoudre les métadonnées et seuils pour ce modèle
+                # Resolve metadata and thresholds for this model
                 metas = meta_by_name.get(model_name, [])
                 prod_meta = next((m for m in metas if m.is_production), metas[0] if metas else None)
                 thresholds = prod_meta.alert_thresholds if prod_meta else None
 
-                # Suivi du niveau de drift max détecté pour le trigger drift-retrain
+                # Track the max detected drift level for the drift-retrain trigger
                 _max_input_drift = "ok"
                 _max_output_drift = "ok"
 
-                # Alerte pic d'erreurs
+                # Error spike alert
                 error_threshold = _get_model_threshold(
                     thresholds, "error_rate_max", settings.ERROR_RATE_ALERT_THRESHOLD
                 )
@@ -100,7 +100,7 @@ async def run_alert_check() -> None:
                         model_name=model_name, drift_type="error_rate", severity=severity
                     ).inc()
                     logger.warning(
-                        "Pic d'erreurs détecté",
+                        "Error spike detected",
                         model=model_name,
                         error_rate=error_rate,
                     )
@@ -123,12 +123,12 @@ async def run_alert_check() -> None:
                             )
                         )
 
-                # Alerte drift de performance
+                # Performance drift alert
                 perf_by_day = await DBService.get_accuracy_drift(db, model_name, start, end)
                 if len(perf_by_day) >= 2:
                     use_mae = any(d.get("mae") is not None for d in perf_by_day)
                     if use_mae:
-                        # Régression : hausse de MAE = dégradation → on inverse
+                        # Regression: rising MAE = degradation → invert
                         metrics = [
                             -d["mae"]
                             for d in perf_by_day
@@ -141,7 +141,7 @@ async def run_alert_check() -> None:
                         avg_first = sum(metrics[:mid]) / mid
                         avg_second = sum(metrics[mid:]) / (len(metrics) - mid)
 
-                        # Seuil absolu (accuracy_min) si configuré, sinon seuil relatif (drop)
+                        # Absolute threshold (accuracy_min) if configured, otherwise relative drop
                         accuracy_min = thresholds.get("accuracy_min") if thresholds else None
                         if accuracy_min is not None and not use_mae:
                             should_alert = avg_second < accuracy_min
@@ -156,7 +156,7 @@ async def run_alert_check() -> None:
                                 severity="warning",
                             ).inc()
                             logger.warning(
-                                "Drift de performance détecté",
+                                "Performance drift detected",
                                 model=model_name,
                             )
                             if settings.ENABLE_EMAIL_ALERTS:
@@ -164,7 +164,7 @@ async def run_alert_check() -> None:
                                     model_name, avg_second, avg_first
                                 )
 
-                # Alerte drift features
+                # Feature drift alert
                 if prod_meta and prod_meta.feature_baseline:
                     drift_enabled = (
                         thresholds.get("drift_auto_alert", True) if thresholds is not None else True
@@ -189,7 +189,7 @@ async def run_alert_check() -> None:
                                 ).inc()
                             if feat_result.drift_status == "critical":
                                 logger.warning(
-                                    "Drift features critique",
+                                    "Critical feature drift",
                                     model=model_name,
                                     feature=feat_name,
                                 )
@@ -220,7 +220,7 @@ async def run_alert_check() -> None:
                                         )
                                     )
 
-                # Alerte drift de sortie (label shift)
+                # Output drift alert (label shift)
                 if prod_meta:
                     drift_enabled = (
                         thresholds.get("drift_auto_alert", True) if thresholds is not None else True
@@ -242,7 +242,7 @@ async def run_alert_check() -> None:
                             ).inc()
                         if output_report.status == "critical":
                             logger.warning(
-                                "Drift de sortie critique (label shift)",
+                                "Critical output drift (label shift)",
                                 model=model_name,
                                 psi=output_report.psi,
                             )
@@ -265,6 +265,7 @@ async def run_alert_check() -> None:
                                 )
 
                 # Circuit breaker — auto-demotion
+
                 if prod_meta and prod_meta.promotion_policy:
                     policy = prod_meta.promotion_policy
                     if policy.get("auto_demote"):
@@ -273,13 +274,13 @@ async def run_alert_check() -> None:
                         demoted, reason = await evaluate_auto_demotion(db, model_name, policy)
                         if demoted:
                             logger.warning(
-                                "Modèle auto-démis par le circuit breaker",
+                                "Model auto-demoted by circuit breaker",
                                 model=model_name,
                                 version=prod_meta.version,
                                 reason=reason,
                             )
 
-                # Retrain déclenché par drift
+                # Drift-triggered retrain
                 if prod_meta:
                     sched = prod_meta.retrain_schedule
                     if (
@@ -305,25 +306,25 @@ async def run_alert_check() -> None:
 
                                 asyncio.create_task(_run_retrain_job(model_name, prod_meta.version))
                                 logger.info(
-                                    "Retrain déclenché par drift",
+                                    "Retrain triggered by drift",
                                     model=model_name,
                                     version=prod_meta.version,
                                 )
 
     except Exception as exc:
-        logger.error("Erreur lors de la vérification des alertes", error=str(exc))
+        logger.error("Error during alert check", error=str(exc))
     finally:
         structlog.contextvars.clear_contextvars()
 
 
 async def run_weekly_report() -> None:
     """
-    Rapport hebdomadaire : envoie un e-mail récapitulatif de la semaine écoulée.
+    Weekly report: sends a summary email for the past week.
     """
     if not settings.WEEKLY_REPORT_ENABLED:
         return
 
-    logger.info("Génération du rapport hebdomadaire")
+    logger.info("Generating weekly report")
 
     try:
         from src.db.database import AsyncSessionLocal
@@ -340,7 +341,7 @@ async def run_weekly_report() -> None:
             for m in all_metas:
                 meta_by_name.setdefault(m.name, []).append(m)
 
-        # Construire un dict compatible avec email_service.send_weekly_report()
+        # Build a dict compatible with email_service.send_weekly_report()
         models_summary = []
         total_pred = 0
         total_errors = 0
@@ -388,7 +389,7 @@ async def run_weekly_report() -> None:
         email_service.send_weekly_report(overview)
 
     except Exception as exc:
-        logger.error("Erreur lors de la génération du rapport hebdomadaire", error=str(exc))
+        logger.error("Error during weekly report generation", error=str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -397,9 +398,9 @@ async def run_weekly_report() -> None:
 
 
 def start_scheduler() -> None:
-    """Démarre le scheduler avec les jobs configurés."""
+    """Start the scheduler with the configured jobs."""
     if not _APSCHEDULER_AVAILABLE or _scheduler is None:
-        logger.warning("APScheduler indisponible, scheduler non démarré")
+        logger.warning("APScheduler unavailable, scheduler not started")
         return
 
     _scheduler.add_job(
@@ -409,7 +410,7 @@ def start_scheduler() -> None:
         id="alert_check",
         replace_existing=True,
     )
-    logger.info("Job de vérification d'alertes configuré (toutes les 6h)")
+    logger.info("Alert check job configured (every 6 h)")
 
     if settings.WEEKLY_REPORT_ENABLED:
         _scheduler.add_job(
@@ -422,7 +423,7 @@ def start_scheduler() -> None:
             replace_existing=True,
         )
         logger.info(
-            "Job de rapport hebdomadaire configuré",
+            "Weekly report job configured",
             day=settings.WEEKLY_REPORT_DAY,
             hour=settings.WEEKLY_REPORT_HOUR,
         )
@@ -431,7 +432,7 @@ def start_scheduler() -> None:
 
 
 def stop_scheduler() -> None:
-    """Arrête proprement le scheduler."""
+    """Gracefully stop the scheduler."""
     if _scheduler is not None and _scheduler.running:
         _scheduler.shutdown(wait=False)
-        logger.info("Scheduler de supervision arrêté")
+        logger.info("Supervision scheduler stopped")

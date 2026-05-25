@@ -60,32 +60,32 @@
 
 ## Batch 4 — `src/schemas/` + `src/tasks/` + `src/db/` + `src/workers/`
 
-- [ ] `src/schemas/prediction.py`
-- [ ] `src/schemas/model.py`
-- [ ] `src/schemas/observed_result.py`
-- [ ] `src/schemas/user.py`
-- [ ] `src/schemas/golden_test.py`
-- [ ] `src/schemas/task_run.py`
-- [ ] `src/schemas/monitoring.py`
-- [ ] `src/schemas/__init__.py`
-- [ ] `src/tasks/retrain_scheduler.py`
-- [ ] `src/tasks/arq_worker.py`
-- [ ] `src/tasks/supervision_reporter.py`
-- [ ] `src/db/database.py`
-- [ ] `src/workers/prediction_writer.py`
+- [x] `src/schemas/prediction.py`
+- [x] `src/schemas/model.py`
+- [x] `src/schemas/observed_result.py`
+- [x] `src/schemas/user.py`
+- [x] `src/schemas/golden_test.py`
+- [x] `src/schemas/task_run.py`
+- [x] `src/schemas/monitoring.py`
+- [x] `src/schemas/__init__.py`
+- [x] `src/tasks/retrain_scheduler.py`
+- [x] `src/tasks/arq_worker.py`
+- [x] `src/tasks/supervision_reporter.py`
+- [x] `src/db/database.py`
+- [x] `src/workers/prediction_writer.py`
 
 ---
 
 ## Batch 5 — `streamlit_app/utils/`
 
-- [ ] `streamlit_app/utils/autotraining_tools.py` (heaviest)
-- [ ] `streamlit_app/utils/metrics_help.py`
-- [ ] `streamlit_app/utils/docs_loader.py`
-- [ ] `streamlit_app/utils/tools.py`
-- [ ] `streamlit_app/utils/api_client.py`
-- [ ] `streamlit_app/utils/auth.py`
-- [ ] `streamlit_app/utils/i18n.py`
-- [ ] `streamlit_app/utils/ui_helpers.py`
+- [x] `streamlit_app/utils/autotraining_tools.py` (heaviest)
+- [x] `streamlit_app/utils/metrics_help.py`
+- [x] `streamlit_app/utils/docs_loader.py`
+- [x] `streamlit_app/utils/tools.py`
+- [x] `streamlit_app/utils/api_client.py`
+- [x] `streamlit_app/utils/auth.py`
+- [x] `streamlit_app/utils/i18n.py`
+- [x] `streamlit_app/utils/ui_helpers.py`
 
 ---
 

@@ -1,4 +1,4 @@
-"""Schémas Pydantic pour le Golden Test Set"""
+"""Pydantic schemas for the Golden Test Set"""
 
 from datetime import datetime
 from typing import Dict, List, Optional, Union
@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 class GoldenTestCreate(BaseModel):
-    """Payload de création d'un cas de test golden"""
+    """Payload for creating a golden test case"""
 
     input_features: Dict[str, Union[float, int, str]]
     expected_output: str = Field(..., max_length=500)
@@ -15,7 +15,7 @@ class GoldenTestCreate(BaseModel):
 
 
 class GoldenTestResponse(BaseModel):
-    """Représentation d'un cas de test golden"""
+    """Representation of a golden test case"""
 
     id: int
     model_name: str
@@ -29,7 +29,7 @@ class GoldenTestResponse(BaseModel):
 
 
 class GoldenTestRunDetail(BaseModel):
-    """Résultat détaillé d'un cas de test lors d'une exécution"""
+    """Detailed result of a test case during an execution"""
 
     test_id: int
     description: Optional[str]
@@ -40,7 +40,7 @@ class GoldenTestRunDetail(BaseModel):
 
 
 class GoldenTestRunResponse(BaseModel):
-    """Résultat complet d'une exécution du golden test set"""
+    """Complete result of a golden test set execution"""
 
     model_name: str
     version: str

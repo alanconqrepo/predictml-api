@@ -7,118 +7,118 @@
 # translations/fr.yaml and translations/en.yaml.
 
 METRIC_HELP = {
-    # Supervision globale — KPIs
+    # Global supervision — KPIs
     "predictions_prod": (
-        "Prédictions production retournées aux clients (is_shadow=False) sur la période. "
-        "N'inclut pas les exécutions shadow."
+        "Production predictions returned to clients (is_shadow=False) over the period. "
+        "Does not include shadow executions."
     ),
     "predictions_shadow": (
-        "Prédictions silencieuses calculées en arrière-plan (is_shadow=True), "
-        "non retournées au client.\n\n"
-        "Utilisées pour comparer de nouvelles versions avec la production "
-        "sans impacter le trafic réel."
+        "Silent predictions computed in the background (is_shadow=True), "
+        "not returned to the client.\n\n"
+        "Used to compare new versions against production "
+        "without impacting real traffic."
     ),
     "modeles_actifs": (
-        "Nombre de modèles distincts ayant au moins une version active (is_active=True) "
-        "avec des prédictions sur la période sélectionnée.\n\n"
-        "Un modèle est « actif » dès qu'une version est chargeable, "
-        "quel que soit son mode de déploiement (Production, A/B, Shadow ou aucun routage).\n\n"
-        "À ne pas confondre avec « en production » : un modèle actif peut n'être "
-        "qu'en shadow ou uploadé sans être exposé au trafic."
+        "Number of distinct models with at least one active version (is_active=True) "
+        "with predictions in the selected period.\n\n"
+        "A model is 'active' as soon as one version is loadable, "
+        "regardless of its deployment mode (Production, A/B, Shadow or no routing).\n\n"
+        "Not to be confused with 'in production': an active model may only be "
+        "in shadow or uploaded without being exposed to traffic."
     ),
     "alertes_sante": (
-        "Nombre de modèles en alerte sur la période.\n\n"
-        "Le statut de santé de chaque modèle est le pire des 4 indicateurs :\n\n"
-        "• Taux d'erreur exécution\n"
+        "Number of models in alert status over the period.\n\n"
+        "Each model's health status is the worst of 4 indicators:\n\n"
+        "• Execution error rate\n"
         "  🟡 ≥ 5 %  ·  🔴 ≥ 10 %\n\n"
-        "• Drift features (Z-score + PSI + null rate)\n"
+        "• Feature drift (Z-score + PSI + null rate)\n"
         "  Z-score 🟡 ≥ 2  · 🔴 ≥ 3\n"
         "  PSI 🟡 ≥ 0.1  ·  🔴 ≥ 0.2\n"
-        "  Null rate 🟡 écart ≥ 5 pts  ·  🔴 ≥ 15 pts ou > 30 %\n\n"
-        "• Drift performance (accuracy 1ère vs 2ème moitié de période)\n"
-        "  🟡 baisse ≥ 5 pts  ·  🔴 baisse ≥ 10 pts\n\n"
-        "• Drift sortie (PSI distribution des prédictions)\n"
+        "  Null rate 🟡 gap ≥ 5 pts  ·  🔴 ≥ 15 pts or > 30 %\n\n"
+        "• Performance drift (accuracy 1st vs 2nd half of period)\n"
+        "  🟡 drop ≥ 5 pts  ·  🔴 drop ≥ 10 pts\n\n"
+        "• Output drift (PSI of prediction distribution)\n"
         "  🟡 PSI ≥ 0.1  ·  🔴 PSI ≥ 0.2\n\n"
-        "Le statut final retenu est le plus sévère parmi ces quatre.\n"
-        "⚪ no_data / no_baseline ne dégrade pas le statut global."
+        "The final status is the most severe among these four.\n"
+        "⚪ no_data / no_baseline does not degrade the overall status."
     ),
-    # Erreur / performance
+    # Error / performance
     "taux_erreur": (
-        "Proportion de requêtes ayant échoué à l'exécution sur la période.\n\n"
-        "⚠️ Ce n'est PAS un indicateur de qualité ML : une prédiction peut être "
-        "correctement calculée et renvoyée au client, mais fausse sur le plan métier.\n\n"
-        "Une erreur d'exécution signifie que l'API n'a pas pu produire de prédiction "
-        "(exception serveur, modèle non chargé, timeout, entrée invalide…). "
-        "Calculé sur les prédictions production uniquement (hors shadow).\n\n"
-        "🟡 Avertissement : ≥ 5 %  ·  🔴 Critique : ≥ 10 %"
+        "Proportion of requests that failed execution over the period.\n\n"
+        "⚠️ This is NOT an ML quality indicator: a prediction can be "
+        "correctly computed and returned to the client, yet be wrong from a business standpoint.\n\n"
+        "An execution error means the API could not produce a prediction "
+        "(server exception, model not loaded, timeout, invalid input…). "
+        "Computed on production predictions only (shadow excluded).\n\n"
+        "🟡 Warning: ≥ 5 %  ·  🔴 Critical: ≥ 10 %"
     ),
-    "accuracy": "Proportion de prédictions correctes. 1.0 = 100 % de bonnes prédictions.",
+    "accuracy": "Proportion of correct predictions. 1.0 = 100 % correct predictions.",
     "auc": (
-        "AUC-ROC (Area Under the ROC Curve) : aire sous la courbe Receiver Operating Characteristic.\n\n"
-        "Mesure la capacité du modèle à distinguer les classes, indépendamment du seuil de décision.\n\n"
-        "• 1.0 = discriminant parfait\n"
-        "• 0.5 = pas mieux que le hasard (classificateur aléatoire)\n"
-        "• < 0.5 = pire que le hasard\n\n"
-        "Interprétation :\n"
+        "AUC-ROC (Area Under the ROC Curve): area under the Receiver Operating Characteristic curve.\n\n"
+        "Measures the model's ability to distinguish classes, independently of the decision threshold.\n\n"
+        "• 1.0 = perfect discriminator\n"
+        "• 0.5 = no better than random (random classifier)\n"
+        "• < 0.5 = worse than random\n\n"
+        "Interpretation:\n"
         "• 🟢 ≥ 0.90 → excellent\n"
-        "• 🟡 0.70–0.90 → bon à acceptable\n"
-        "• 🔴 < 0.70 → à améliorer\n\n"
-        "Requiert les probabilités prédites (le modèle doit sortir des scores de confiance, pas seulement une classe).\n"
-        "Classification binaire : AUC standard. Multiclasse : OvR (One vs Rest) pondéré."
+        "• 🟡 0.70–0.90 → good to acceptable\n"
+        "• 🔴 < 0.70 → needs improvement\n\n"
+        "Requires predicted probabilities (the model must output confidence scores, not just a class).\n"
+        "Binary classification: standard AUC. Multiclass: OvR (One vs Rest) weighted."
     ),
-    "mae": "Mean Absolute Error : écart moyen absolu entre la prédiction et la valeur réelle. Plus c'est bas, mieux c'est.",
-    "rmse": "Root Mean Square Error : écart quadratique moyen. Pénalise davantage les grandes erreurs que le MAE.",
-    "r2": "Coefficient de détermination : part de variance expliquée par le modèle. 1.0 = modèle parfait, 0 = modèle nul, négatif = pire que la moyenne.",
-    "precision": "Parmi les prédictions positives, proportion réellement positives. Évalue la fiabilité des détections positives. (w.) = moyenne pondérée par classe.",
-    "recall": "Parmi les cas positifs réels, proportion correctement détectés. Évalue la capacité à ne pas rater de cas positifs. (w.) = moyenne pondérée par classe.",
-    "f1": "Moyenne harmonique de la précision et du rappel. Utile quand les classes sont déséquilibrées. (w.) = moyenne pondérée par classe.",
-    # Latence
-    "latence_mediane": "Temps de réponse médian : la moitié des requêtes ont un temps inférieur à cette valeur.",
-    "latence_avg": "Temps de réponse moyen sur toutes les requêtes.",
-    "latence_p95": "95e percentile de latence : 95 % des requêtes sont traitées en moins de ce temps. Indicateur clé de performance en production.",
+    "mae": "Mean Absolute Error: average absolute difference between the prediction and the actual value. Lower is better.",
+    "rmse": "Root Mean Square Error: root mean squared error. Penalises large errors more than MAE.",
+    "r2": "Coefficient of determination: proportion of variance explained by the model. 1.0 = perfect model, 0 = null model, negative = worse than the mean.",
+    "precision": "Of all positive predictions, the proportion that are truly positive. Evaluates the reliability of positive detections. (w.) = weighted average by class.",
+    "recall": "Of all actual positive cases, the proportion correctly detected. Evaluates the ability not to miss positive cases. (w.) = weighted average by class.",
+    "f1": "Harmonic mean of precision and recall. Useful when classes are imbalanced. (w.) = weighted average by class.",
+    # Latency
+    "latence_mediane": "Median response time: half of requests have a time below this value.",
+    "latence_avg": "Average response time across all requests.",
+    "latence_p95": "95th percentile of latency: 95 % of requests are processed in less than this time. Key production performance indicator.",
     # A/B Testing
-    "concordance_shadow": "Taux d'accord entre le modèle shadow et le modèle de production : proportion de cas où les deux modèles donnent la même prédiction.",
-    "p_value": "Probabilité d'observer un écart aussi grand si les deux versions étaient équivalentes. En dessous du seuil (ex. 0.05) → différence statistiquement significative.",
-    "niveau_confiance": "Niveau de confiance du test. 95 % signifie : on accepte 5 % de risque de conclure à tort à une différence alors qu'il n'y en a pas.",
-    "test_statistique": "Test statistique utilisé pour comparer les versions. Chi-² pour les taux d'erreur (proportions), Mann-Whitney U pour les distributions de latence (continues).",
-    "metrique_analysee": "Métrique sur laquelle porte le test statistique : taux d'erreur ou temps de réponse.",
+    "concordance_shadow": "Agreement rate between the shadow model and the production model: proportion of cases where both models give the same prediction.",
+    "p_value": "Probability of observing a difference this large if the two versions were equivalent. Below the threshold (e.g. 0.05) → statistically significant difference.",
+    "niveau_confiance": "Confidence level of the test. 95 % means: we accept a 5 % risk of wrongly concluding there is a difference when there is none.",
+    "test_statistique": "Statistical test used to compare versions. Chi-squared for error rates (proportions), Mann-Whitney U for latency distributions (continuous).",
+    "metrique_analysee": "Metric on which the statistical test is performed: error rate or response time.",
     # Calibration — classification
-    "brier_score": "Brier score : mesure la précision des probabilités prédites. 0 = parfait (probabilités exactes), 1 = pire cas. En dessous de 0.25 est généralement acceptable.",
-    "gap_confiance": "Écart entre la confiance moyenne prédite et la précision réelle observée. Positif = surconfiance (le modèle surestime ses certitudes), négatif = sous-confiance. Idéalement proche de 0.",
-    "statut_calibration": "Statut de calibration du modèle : OK si l'écart est faible, Surconfiant si le modèle surestime ses probabilités, Sous-confiant s'il les sous-estime.",
-    # Calibration — régression
+    "brier_score": "Brier score: measures the accuracy of predicted probabilities. 0 = perfect (exact probabilities), 1 = worst case. Below 0.25 is generally acceptable.",
+    "gap_confiance": "Gap between the average predicted confidence and the actual observed accuracy. Positive = overconfidence (model overestimates its certainty), negative = underconfidence. Ideally close to 0.",
+    "statut_calibration": "Model calibration status: OK if the gap is small, Overconfident if the model overestimates its probabilities, Underconfident if it underestimates them.",
+    # Calibration — regression
     "calib_mae": (
-        "MAE (Mean Absolute Error) : erreur absolue moyenne entre ŷ prédit et y réel.\n\n"
-        "MAE = moyenne(|ŷ − y|)\n\n"
-        "Plus c'est bas, mieux c'est. "
-        "Même unité que la variable cible."
+        "MAE (Mean Absolute Error): average absolute error between predicted ŷ and actual y.\n\n"
+        "MAE = mean(|ŷ − y|)\n\n"
+        "Lower is better. "
+        "Same unit as the target variable."
     ),
     "calib_rmse": (
-        "RMSE (Root Mean Square Error) : racine de l'erreur quadratique moyenne.\n\n"
-        "RMSE = √(moyenne((ŷ − y)²))\n\n"
-        "Pénalise davantage les grandes erreurs que le MAE. "
-        "Même unité que la variable cible. Plus c'est bas, mieux c'est."
+        "RMSE (Root Mean Square Error): square root of the mean squared error.\n\n"
+        "RMSE = √(mean((ŷ − y)²))\n\n"
+        "Penalises large errors more than MAE. "
+        "Same unit as the target variable. Lower is better."
     ),
     "calib_r2": (
-        "R² (coefficient de détermination) : part de variance expliquée par le modèle.\n\n"
+        "R² (coefficient of determination): proportion of variance explained by the model.\n\n"
         "R² = 1 − SS_res / SS_tot\n"
         "SS_res = Σ(ŷ − y)²,  SS_tot = Σ(y − ȳ)²\n\n"
-        "1.0 = modèle parfait · 0 = pas mieux que la moyenne · négatif = pire que la moyenne. "
-        "Idéalement > 0.80."
+        "1.0 = perfect model · 0 = no better than the mean · negative = worse than the mean. "
+        "Ideally > 0.80."
     ),
     "calib_biais": (
-        "Biais systématique du modèle : moyenne des résidus (ŷ − y).\n\n"
-        "Biais = moyenne(ŷ − y)\n\n"
-        "Positif → le modèle sur-estime en moyenne.\n"
-        "Négatif → le modèle sous-estime en moyenne.\n"
-        "Proche de 0 → pas de biais systématique (bonne calibration).\n\n"
-        "Statut : 🟢 OK si |biais relatif| < 10 % de l'écart-type des y observés, "
-        "🟡 Sur-estimation ou Sous-estimation sinon."
+        "Systematic model bias: mean of residuals (ŷ − y).\n\n"
+        "Bias = mean(ŷ − y)\n\n"
+        "Positive → the model overestimates on average.\n"
+        "Negative → the model underestimates on average.\n"
+        "Close to 0 → no systematic bias (good calibration).\n\n"
+        "Status: 🟢 OK if |relative bias| < 10 % of the standard deviation of observed y, "
+        "🟡 Overestimation or Underestimation otherwise."
     ),
-    # Confiance
-    "confiance_moyenne": "Probabilité maximale moyenne retournée par le modèle pour ses prédictions. Indique à quel point le modèle est 'sûr' en moyenne.",
-    "p25_confiance": "25e percentile de confiance : 25 % des prédictions ont une confiance inférieure à cette valeur.",
-    "p75_confiance": "75e percentile de confiance : 75 % des prédictions ont une confiance inférieure à cette valeur.",
-    # Tendance
-    "tendance_performance": "Comparaison de la performance entre la 1re et la 2e moitié de la période sélectionnée. Une baisse indique un drift potentiel du modèle.",
+    # Confidence
+    "confiance_moyenne": "Average maximum probability returned by the model for its predictions. Indicates how 'confident' the model is on average.",
+    "p25_confiance": "25th percentile of confidence: 25 % of predictions have a confidence below this value.",
+    "p75_confiance": "75th percentile of confidence: 75 % of predictions have a confidence below this value.",
+    # Trend
+    "tendance_performance": "Comparison of performance between the 1st and 2nd half of the selected period. A drop indicates potential model drift.",
 }

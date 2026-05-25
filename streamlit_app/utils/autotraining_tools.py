@@ -353,13 +353,13 @@ def _run_fetch_training_data(tool_input: dict, api_url: str, token: str) -> dict
         pd.DataFrame(observed) if observed else pd.DataFrame(columns=["id_obs", "observed_result"])
     )
 
-    # S'assurer que les colonnes nécessaires existent
+    # Ensure required columns exist
     if "id_obs" not in df_pred.columns:
         df_pred["id_obs"] = None
     if "observed_result" not in df_obs.columns:
         df_obs["observed_result"] = None
 
-    # Fusionner par id_obs (left join depuis les prédictions)
+    # Merge by id_obs (left join from predictions)
     if not df_obs.empty and "id_obs" in df_obs.columns:
         obs_map = df_obs.set_index("id_obs")["observed_result"].to_dict()
         df_pred["observed_result"] = df_pred["id_obs"].map(obs_map)
@@ -372,7 +372,7 @@ def _run_fetch_training_data(tool_input: dict, api_url: str, token: str) -> dict
     )
     n_labeled = int(labeled_mask.sum())
 
-    # Extraire les noms de features à partir de la première ligne
+    # Extract feature names from the first row
     feature_names: list[str] = []
     try:
         sample_feat = df_pred["input_features"].dropna().iloc[0]
@@ -383,7 +383,7 @@ def _run_fetch_training_data(tool_input: dict, api_url: str, token: str) -> dict
     except Exception:
         pass
 
-    # Colonnes requises par le contrat train.py
+    # Columns required by the train.py contract
     columns_needed = [
         "id_obs",
         "input_features",
@@ -397,20 +397,20 @@ def _run_fetch_training_data(tool_input: dict, api_url: str, token: str) -> dict
         if col not in df_pred.columns:
             df_pred[col] = None
 
-    # Sérialiser les colonnes JSON si nécessaire
+    # Serialize JSON columns if necessary
     for col in ["input_features", "prediction_result", "observed_result"]:
         if col in df_pred.columns:
             df_pred[col] = df_pred[col].apply(
                 lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, (dict, list)) else x
             )
 
-    # Écrire le CSV dans un fichier temporaire
+    # Write the CSV to a temporary file
     tmp = tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w", encoding="utf-8")
     df_pred[columns_needed].to_csv(tmp, index=False)
     csv_path = tmp.name
     tmp.close()
 
-    # Stocker en session state
+    # Store in session state
     st.session_state["autotrain_dataset_path"] = csv_path
     st.session_state["autotrain_dataset_info"] = {
         "n_rows": n_rows,
@@ -449,7 +449,7 @@ def _run_upload_model(tool_input: dict, api_url: str, token: str) -> dict[str, A
     algorithm = tool_input.get("algorithm")
     tags = tool_input.get("tags")
 
-    # Récupérer les métriques du dernier script exécuté
+    # Retrieve metrics from the last executed script
     scripts: list = st.session_state.get("autotrain_scripts", [])
     last_metrics: dict = scripts[-1]["metrics"] if scripts else {}
     accuracy = last_metrics.get("accuracy")
@@ -496,7 +496,7 @@ def _run_upload_model(tool_input: dict, api_url: str, token: str) -> dict[str, A
         return {"error": str(e)}
 
 
-# ── Dispatcher principal ──────────────────────────────────────────────────────
+# ── Main dispatcher ──────────────────────────────────────────────────────────
 
 
 def execute_autotraining_tool(
@@ -505,7 +505,7 @@ def execute_autotraining_tool(
     api_url: str,
     token: str,
 ) -> dict[str, Any]:
-    """Dispatche l'exécution vers le bon outil."""
+    """Dispatches execution to the appropriate tool."""
     if tool_name == "execute_python":
         return _run_execute_python(tool_input)
 
@@ -515,7 +515,7 @@ def execute_autotraining_tool(
     if tool_name == "upload_model":
         return _run_upload_model(tool_input, api_url, token)
 
-    # Outils partagés depuis tools.py
+    # Shared tools from tools.py
     if tool_name == "call_api":
         return execute_api_call(
             method=tool_input["method"],
@@ -532,14 +532,14 @@ def execute_autotraining_tool(
             limit=tool_input.get("limit", 20),
         )
 
-    return {"error": f"Outil inconnu : {tool_name}"}
+    return {"error": f"Unknown tool: {tool_name}"}
 
 
-# ── Helpers de rendu ─────────────────────────────────────────────────────────
+# ── Rendering helpers ─────────────────────────────────────────────────────────
 
 
 def autotraining_tool_expander_label(tool_name: str, tool_input: dict) -> str:
-    """Génère un label court pour le titre de l'expander."""
+    """Generates a short label for the expander title."""
     if tool_name == "execute_python":
         code = tool_input.get("code", "")
         short = code.replace("\n", " ").strip()[:60]
@@ -556,55 +556,55 @@ def autotraining_tool_expander_label(tool_name: str, tool_input: dict) -> str:
         version = tool_input.get("version", "?")
         return f"🚀 upload_model — `{name}` v{version}"
 
-    # Déléguer aux rendeurs de tools.py pour les outils partagés
+    # Delegate to tools.py renderers for shared tools
     return tool_expander_label(tool_name, tool_input)
 
 
 def render_autotraining_tool_input(tool_name: str, tool_input: dict) -> None:
-    """Affiche les paramètres d'un appel d'outil."""
+    """Displays the parameters of a tool call."""
     if tool_name == "execute_python":
         code = tool_input.get("code", "")
         st.code(code, language="python")
         timeout = tool_input.get("timeout", 120)
-        st.caption(f"Timeout : {timeout}s | {len(code.splitlines())} lignes")
+        st.caption(f"Timeout: {timeout}s | {len(code.splitlines())} lines")
 
     elif tool_name == "fetch_training_data":
         col1, col2, col3 = st.columns(3)
-        col1.metric("Modèle", tool_input.get("model_name", "?"))
-        col2.metric("Début", tool_input.get("start_date", "?"))
-        col3.metric("Fin", tool_input.get("end_date", "?"))
-        st.caption(f"Limite : {tool_input.get('limit', 1000)} lignes")
+        col1.metric("Model", tool_input.get("model_name", "?"))
+        col2.metric("Start", tool_input.get("start_date", "?"))
+        col3.metric("End", tool_input.get("end_date", "?"))
+        st.caption(f"Limit: {tool_input.get('limit', 1000)} rows")
 
     elif tool_name == "upload_model":
         col1, col2 = st.columns(2)
-        col1.metric("Nom", tool_input.get("name", "?"))
+        col1.metric("Name", tool_input.get("name", "?"))
         col2.metric("Version", tool_input.get("version", "?"))
         if tool_input.get("algorithm"):
-            st.caption(f"Algorithme : {tool_input['algorithm']}")
+            st.caption(f"Algorithm: {tool_input['algorithm']}")
         if tool_input.get("description"):
-            st.caption(f"Description : {tool_input['description']}")
+            st.caption(f"Description: {tool_input['description']}")
 
     else:
-        # Déléguer à tools.py pour call_api et query_database
+        # Delegate to tools.py for call_api and query_database
         render_tool_input(tool_name, tool_input)
 
 
 def render_autotraining_tool_result(tool_name: str, result: dict) -> None:
-    """Affiche le résultat d'un appel d'outil de façon lisible."""
+    """Displays the result of a tool call in a readable format."""
     if "error" in result:
-        st.error(f"Erreur : {result['error']}")
+        st.error(f"Error: {result['error']}")
         return
 
     if tool_name == "execute_python":
         exit_code = result.get("exit_code", -1)
 
-        # Badge exit code
+        # Exit code badge
         if exit_code == 0:
-            st.success(f"✅ Exit code : {exit_code} — succès")
+            st.success(f"✅ Exit code: {exit_code} — success")
         else:
-            st.error(f"❌ Exit code : {exit_code} — échec")
+            st.error(f"❌ Exit code: {exit_code} — failure")
 
-        # Métriques
+        # Metrics
         metrics = result.get("metrics", {})
         if metrics:
             m_cols = st.columns(3)
@@ -616,51 +616,51 @@ def render_autotraining_tool_result(tool_name: str, result: dict) -> None:
                 "F1 Score",
                 f"{metrics['f1_score']:.4f}" if "f1_score" in metrics else "—",
             )
-            m_cols[2].metric("Lignes d'entraînement", metrics.get("n_rows", "—"))
+            m_cols[2].metric("Training rows", metrics.get("n_rows", "—"))
 
-        # Temps d'exécution
+        # Execution time
         exec_ms = result.get("execution_time_ms", 0)
-        st.caption(f"⏱️ Temps d'exécution : {exec_ms} ms")
+        st.caption(f"⏱️ Execution time: {exec_ms} ms")
 
-        # Modèle produit
+        # Model produced
         if result.get("model_produced"):
-            st.success("✅ Modèle .joblib produit et prêt pour l'upload")
+            st.success("✅ .joblib model produced and ready for upload")
         else:
-            st.warning("⚠️ Aucun fichier .joblib produit")
+            st.warning("⚠️ No .joblib file produced")
 
-        # Stdout (tronqué)
+        # Stdout (truncated)
         if result.get("stdout"):
             with st.expander("📤 Stdout", expanded=False):
                 st.code(result["stdout"], language="text")
 
-        # Stderr (logs de progression)
+        # Stderr (progress logs)
         if result.get("stderr"):
             with st.expander("📋 Logs (stderr)", expanded=exit_code != 0):
                 st.code(result["stderr"], language="text")
 
     elif tool_name == "fetch_training_data":
         col1, col2 = st.columns(2)
-        col1.metric("Lignes totales", result.get("n_rows", 0))
-        col2.metric("Labellisées", result.get("n_labeled", 0))
+        col1.metric("Total rows", result.get("n_rows", 0))
+        col2.metric("Labeled", result.get("n_labeled", 0))
 
         feature_names = result.get("feature_names", [])
         if feature_names:
             st.caption(
-                f"Features détectées : `{', '.join(feature_names[:10])}`"
+                f"Detected features: `{', '.join(feature_names[:10])}`"
                 + (" ..." if len(feature_names) > 10 else "")
             )
 
         if result.get("saved"):
             st.success(
-                "✅ CSV sauvegardé — TRAIN_DATA_PATH sera injecté lors du prochain execute_python"
+                "✅ CSV saved — TRAIN_DATA_PATH will be injected on the next execute_python call"
             )
 
         preview = result.get("sample_preview", [])
         if preview:
-            with st.expander("👁️ Aperçu (3 premières lignes)", expanded=False):
+            with st.expander("👁️ Preview (first 3 rows)", expanded=False):
                 try:
                     df_preview = pd.DataFrame(preview)
-                    # Tronquer les colonnes JSON longues pour l'affichage
+                    # Truncate long JSON columns for display
                     for col in ["input_features", "prediction_result", "observed_result"]:
                         if col in df_preview.columns:
                             df_preview[col] = df_preview[col].astype(str).str[:50]
@@ -673,30 +673,30 @@ def render_autotraining_tool_result(tool_name: str, result: dict) -> None:
         if ok:
             name = result.get("model_name", "?")
             version = result.get("version", "?")
-            st.success(f"✅ Modèle **{name}** v{version} uploadé avec succès !")
+            st.success(f"✅ Model **{name}** v{version} uploaded successfully!")
             st.info(
-                "→ Consultez la page **2 Modèles** pour le visualiser et le mettre en production."
+                "→ Go to the **2 Models** page to view it and set it as production."
             )
             data = result.get("data", {})
             if data:
                 raw = json.dumps(data, ensure_ascii=False, default=str)
                 if len(raw) > 2000:
                     st.json(json.loads(raw[:2000]))
-                    st.caption("… réponse tronquée")
+                    st.caption("… response truncated")
                 else:
                     st.json(data)
         else:
-            st.error(f"❌ Upload échoué : {result.get('error', 'Erreur inconnue')}")
+            st.error(f"❌ Upload failed: {result.get('error', 'Unknown error')}")
 
     else:
-        # Déléguer à tools.py pour call_api et query_database
+        # Delegate to tools.py for call_api and query_database
         render_tool_result(tool_name, result)
 
 
 def build_autotraining_tool_summary(tool_name: str, tool_input: dict, result: dict) -> dict:
-    """Construit un résumé compact pour l'historique de conversation."""
+    """Builds a compact summary for the conversation history."""
     if tool_name == "execute_python":
-        exit_code = result.get("exit_code", "?") if "error" not in result else "erreur"
+        exit_code = result.get("exit_code", "?") if "error" not in result else "error"
         metrics = result.get("metrics", {})
         acc_str = f"acc={metrics['accuracy']:.3f}" if "accuracy" in metrics else ""
         f1_str = f"f1={metrics['f1_score']:.3f}" if "f1_score" in metrics else ""
@@ -720,9 +720,9 @@ def build_autotraining_tool_summary(tool_name: str, tool_input: dict, result: di
 
     if tool_name == "fetch_training_data":
         model = tool_input.get("model_name", "?")
-        n_rows = result.get("n_rows", "?") if "error" not in result else "erreur"
+        n_rows = result.get("n_rows", "?") if "error" not in result else "error"
         n_labeled = result.get("n_labeled", "?") if "error" not in result else ""
-        label = f"📥 fetch_training_data — {model} ({n_rows} lignes, {n_labeled} labellisées)"
+        label = f"📥 fetch_training_data — {model} ({n_rows} rows, {n_labeled} labeled)"
         return {
             "type": "fetch_training_data",
             "label": label,
@@ -738,7 +738,7 @@ def build_autotraining_tool_summary(tool_name: str, tool_input: dict, result: di
         name = tool_input.get("name", "?")
         version = tool_input.get("version", "?")
         ok = result.get("ok", False) if "error" not in result else False
-        status = "✅ succès" if ok else "❌ erreur"
+        status = "✅ success" if ok else "❌ error"
         label = f"🚀 upload_model — {name} v{version} → {status}"
         return {
             "type": "upload_model",
@@ -751,15 +751,15 @@ def build_autotraining_tool_summary(tool_name: str, tool_input: dict, result: di
             )[:300],
         }
 
-    # Déléguer à tools.py pour les outils partagés
+    # Delegate to tools.py for shared tools
     return build_tool_summary(tool_name, tool_input, result)
 
 
-# ── Prompt système ────────────────────────────────────────────────────────────
+# ── System prompt ────────────────────────────────────────────────────────────
 
 
 def build_autotraining_system_prompt() -> str:
-    """Construit le prompt système spécialisé AutoTrain ML Coach."""
+    """Builds the specialised AutoTrain ML Coach system prompt."""
     example_train_code = _load_example_train_script()
 
     _allowed_modules = (

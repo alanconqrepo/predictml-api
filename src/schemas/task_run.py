@@ -1,5 +1,5 @@
 """
-Schémas Pydantic pour les task_runs (jobs ARQ).
+Pydantic schemas for task_runs (ARQ jobs).
 """
 
 from datetime import datetime
@@ -10,19 +10,19 @@ from pydantic import BaseModel
 
 
 class TaskRunEnqueued(BaseModel):
-    """Réponse 202 immédiate après enqueue d'un retrain."""
+    """Immediate 202 response after a retrain is enqueued."""
 
     job_id: UUID
     status: str  # "queued"
     model_name: str
     model_version: str
-    new_version: str  # version qui sera créée si succès
+    new_version: str  # version that will be created on success
     triggered_by: str
     enqueued_at: datetime
 
 
 class TaskRunStatus(BaseModel):
-    """Statut complet d'un job — GET /jobs/{job_id}."""
+    """Complete job status — GET /jobs/{job_id}."""
 
     job_id: UUID
     task_type: str

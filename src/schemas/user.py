@@ -1,5 +1,5 @@
 """
-Schémas Pydantic pour la gestion des utilisateurs
+Pydantic schemas for user management
 """
 
 from datetime import date, datetime
@@ -9,7 +9,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class UserUpdateInput(BaseModel):
-    """Données pour mettre à jour un utilisateur existant"""
+    """Data to update an existing user"""
 
     is_active: Optional[bool] = None
     role: Optional[str] = Field(None, pattern="^(admin|user|readonly)$")
@@ -18,7 +18,7 @@ class UserUpdateInput(BaseModel):
 
 
 class UserCreateInput(BaseModel):
-    """Données pour créer un nouvel utilisateur"""
+    """Data to create a new user"""
 
     username: str = Field(..., min_length=3, max_length=50)
     email: EmailStr
@@ -27,7 +27,7 @@ class UserCreateInput(BaseModel):
 
 
 class UserResponse(BaseModel):
-    """Réponse utilisateur (inclut le token — à transmettre de façon sécurisée)"""
+    """User response (includes the token — transmit securely)"""
 
     id: int
     username: str
@@ -44,7 +44,7 @@ class UserResponse(BaseModel):
 
 
 class QuotaResponse(BaseModel):
-    """Quota journalier de l'utilisateur courant"""
+    """Daily quota for the current user"""
 
     rate_limit_per_day: int
     used_today: int
@@ -53,7 +53,7 @@ class QuotaResponse(BaseModel):
 
 
 class UserUsageByModel(BaseModel):
-    """Statistiques d'usage pour un modèle donné"""
+    """Usage statistics for a given model"""
 
     model_name: str
     calls: int
@@ -62,14 +62,14 @@ class UserUsageByModel(BaseModel):
 
 
 class UserUsageByDay(BaseModel):
-    """Statistiques d'usage pour un jour donné"""
+    """Usage statistics for a given day"""
 
     date: date
     calls: int
 
 
 class UserUsageByModelDay(BaseModel):
-    """Statistiques d'usage par modèle et par jour"""
+    """Usage statistics by model and by day"""
 
     model_name: str
     date: date
@@ -77,7 +77,7 @@ class UserUsageByModelDay(BaseModel):
 
 
 class UserUsageResponse(BaseModel):
-    """Statistiques d'usage d'un utilisateur sur une période"""
+    """Usage statistics for a user over a period"""
 
     user_id: int
     username: str

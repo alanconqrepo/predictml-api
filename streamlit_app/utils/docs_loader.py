@@ -1,16 +1,16 @@
 """
-Chargement de la documentation et du code source pour le chatbot d'aide PredictML.
+Documentation and source code loader for the PredictML help chatbot.
 """
 
 from pathlib import Path
 
 import streamlit as st
 
-# ── Chemins de résolution (dev local puis Docker volume mount) ────────────────
+# ── Resolution paths (local dev then Docker volume mount) ────────────────────
 
 _PROJECT_ROOT_CANDIDATES = [
-    Path(__file__).parent.parent.parent,  # dev local : predictml-api/
-    Path("/app").parent,                  # Docker : /
+    Path(__file__).parent.parent.parent,  # local dev: predictml-api/
+    Path("/app").parent,                  # Docker: /
 ]
 
 _DOC_DIR_CANDIDATES = [
@@ -28,8 +28,8 @@ _ROOT_MD_CANDIDATES = [
     ("CODING_STANDARDS",  [Path(__file__).parent.parent.parent / "CODING_STANDARDS.md",  Path("/app/CODING_STANDARDS.md")]),
 ]
 
-# ── Fichiers source à inclure dans le contexte LLM ───────────────────────────
-# Sélection intentionnelle : les plus utiles pour répondre aux questions utilisateur
+# ── Source files to include in the LLM context ───────────────────────────────
+# Intentional selection: the most useful files for answering user questions
 
 _SOURCE_FILES = [
     "main.py",
@@ -62,7 +62,7 @@ def _resolve(candidates: list[Path]) -> Path | None:
 
 @st.cache_data(show_spinner=False)
 def load_all_docs() -> dict[str, str]:
-    """Charge tous les fichiers .md disponibles (documentation/ + racine)."""
+    """Loads all available .md files (documentation/ + project root)."""
     docs: dict[str, str] = {}
 
     doc_dir = _resolve(_DOC_DIR_CANDIDATES)
@@ -81,7 +81,7 @@ def load_all_docs() -> dict[str, str]:
 
 @st.cache_data(show_spinner=False)
 def load_source_snippets() -> dict[str, str]:
-    """Charge les fichiers source clés pour enrichir le contexte du chatbot."""
+    """Loads key source files to enrich the chatbot context."""
     snippets: dict[str, str] = {}
 
     src_dir = _resolve(_SRC_DIR_CANDIDATES)
@@ -91,7 +91,7 @@ def load_source_snippets() -> dict[str, str]:
             if p.exists():
                 snippets[f"src/{rel}"] = p.read_text(encoding="utf-8")
 
-    # Fichiers à la racine du projet
+    # Files at the project root
     for rel in _INIT_DATA_FILES:
         for root_candidate in _DOC_DIR_CANDIDATES:
             p = root_candidate.parent / rel
@@ -103,10 +103,10 @@ def load_source_snippets() -> dict[str, str]:
 
 
 def build_system_prompt(docs: dict[str, str], snippets: dict[str, str]) -> str:
-    """Construit le prompt système spécialisé pour l'assistant PredictML."""
+    """Builds the specialised system prompt for the PredictML assistant."""
 
     parts = [
-        # ── Identité et rôle ──────────────────────────────────────────────────
+        # ── Identity and role ─────────────────────────────────────────────────
         "Tu es l'**Assistant PredictML**, un expert spécialisé dans la présentation,",
         "l'utilisation et le développement autour de la plateforme PredictML API.",
         "",
@@ -183,18 +183,18 @@ def build_system_prompt(docs: dict[str, str], snippets: dict[str, str]) -> str:
         "",
     ]
 
-    # Injection de la documentation
+    # Inject documentation
     for name, content in docs.items():
         parts += [f"## DOC: {name}", "", content, ""]
 
-    # Injection des fichiers source (limités à 300 lignes chacun pour les gros fichiers)
+    # Inject source files (capped at 300 lines each for large files)
     if snippets:
-        parts += ["---", "", "# Code source (extraits clés)", ""]
+        parts += ["---", "", "# Source code (key excerpts)", ""]
         for path, content in snippets.items():
             lines = content.splitlines()
             if len(lines) > 300:
-                # Garder début et fin pour les gros fichiers
-                preview = "\n".join(lines[:200]) + f"\n\n... [{len(lines) - 200} lignes tronquées] ...\n\n" + "\n".join(lines[-50:])
+                # Keep start and end for large files
+                preview = "\n".join(lines[:200]) + f"\n\n... [{len(lines) - 200} lines truncated] ...\n\n" + "\n".join(lines[-50:])
             else:
                 preview = content
             parts += [f"## SOURCE: {path}", "", "```python", preview, "```", ""]

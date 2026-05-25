@@ -334,71 +334,73 @@ class PredictionStatsResponse(BaseModel):
 
 
 class PurgeResponse(BaseModel):
-    """Résultat d'une purge de prédictions (rétention RGPD)"""
+    """Result of a prediction purge (GDPR data retention)"""
 
-    dry_run: bool = Field(..., description="True si simulation sans suppression réelle")
+    dry_run: bool = Field(..., description="True if simulation without actual deletion")
     deleted_count: int = Field(
-        ..., description="Nombre de prédictions supprimées (ou à supprimer en dry_run)"
+        ..., description="Number of predictions deleted (or to be deleted in dry_run)"
     )
     deleted_observed_results_count: int = Field(
         0,
-        description="Nombre d'observed_results supprimés en cascade (0 en dry_run)",
+        description="Number of observed_results deleted in cascade (0 in dry_run)",
     )
     oldest_remaining: Optional[datetime] = Field(
         None,
-        description="Timestamp de la prédiction la plus ancienne restante après la purge",
+        description="Timestamp of the oldest remaining prediction after the purge",
     )
-    models_affected: List[str] = Field(..., description="Liste des modèles concernés par la purge")
+    models_affected: List[str] = Field(..., description="List of models affected by the purge")
     linked_observed_results_count: int = Field(
         ...,
         description=(
-            "Nombre d'observed_results liés aux prédictions à purger "
-            "(en dry_run : estimation ; après suppression : correspond à deleted_observed_results_count)."
+            "Number of observed_results linked to predictions to be purged "
+            "(in dry_run: estimate; after deletion: matches deleted_observed_results_count)."
         ),
     )
 
 
 class AnomalyFeatureDetail(BaseModel):
-    """Détail d'une feature aberrante dans une prédiction"""
+    """Detail of an anomalous feature in a prediction"""
 
-    value: float = Field(..., description="Valeur observée de la feature")
-    z_score: float = Field(..., description="Z-score : |value - baseline_mean| / baseline_std")
-    baseline_mean: float = Field(..., description="Moyenne de la baseline")
-    baseline_std: float = Field(..., description="Écart-type de la baseline")
+    value: float = Field(..., description="Observed value of the feature")
+    z_score: float = Field(..., description="Z-score: |value - baseline_mean| / baseline_std")
+    baseline_mean: float = Field(..., description="Baseline mean")
+    baseline_std: float = Field(..., description="Baseline standard deviation")
 
 
 class AnomalyPredictionEntry(BaseModel):
-    """Une prédiction contenant au moins une feature aberrante"""
+    """A prediction containing at least one anomalous feature"""
 
-    prediction_id: int = Field(..., description="Identifiant de la prédiction")
-    timestamp: datetime = Field(..., description="Horodatage de la prédiction")
-    prediction_result: Any = Field(..., description="Résultat de la prédiction")
-    max_confidence: Optional[float] = Field(None, description="Probabilité max (si disponible)")
+    prediction_id: int = Field(..., description="Prediction identifier")
+    timestamp: datetime = Field(..., description="Prediction timestamp")
+    prediction_result: Any = Field(..., description="Prediction result")
+    max_confidence: Optional[float] = Field(None, description="Max probability (if available)")
     id_obs: Optional[str] = Field(
         None,
-        description="Identifiant métier de l'observation (clé de jointure avec observed_results)",
+        description="Business observation identifier (join key with observed_results)",
     )
     ground_truth: Optional[Any] = Field(
-        None, description="Résultat réellement observé (si disponible via observed_results)"
+        None, description="Actually observed result (if available via observed_results)"
     )
     anomalous_features: Dict[str, AnomalyFeatureDetail] = Field(
-        ..., description="Features dont le z-score dépasse le seuil"
+        ..., description="Features whose z-score exceeds the threshold"
     )
 
 
 class AnomaliesResponse(BaseModel):
-    """Réponse de GET /predictions/anomalies"""
+    """Response for GET /predictions/anomalies"""
 
-    model_name: str = Field(..., description="Nom du modèle analysé")
-    period_days: int = Field(..., description="Fenêtre temporelle analysée (jours)")
-    z_threshold: float = Field(..., description="Seuil z-score utilisé")
-    total_checked: int = Field(..., description="Nombre de prédictions analysées")
-    anomalous_count: int = Field(..., description="Nombre de prédictions avec features aberrantes")
-    anomaly_rate: float = Field(..., description="Taux de prédictions anomales (anomalous / total)")
+    model_name: str = Field(..., description="Name of the analyzed model")
+    period_days: int = Field(..., description="Analyzed time window (days)")
+    z_threshold: float = Field(..., description="Z-score threshold used")
+    total_checked: int = Field(..., description="Number of predictions analyzed")
+    anomalous_count: int = Field(..., description="Number of predictions with anomalous features")
+    anomaly_rate: float = Field(
+        ..., description="Rate of anomalous predictions (anomalous / total)"
+    )
     predictions: List[AnomalyPredictionEntry] = Field(
-        ..., description="Prédictions avec features aberrantes"
+        ..., description="Predictions with anomalous features"
     )
     error: Optional[str] = Field(
         None,
-        description="Code d'erreur si l'analyse est impossible (ex : 'no_baseline')",
+        description="Error code if analysis is impossible (e.g. 'no_baseline')",
     )

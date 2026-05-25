@@ -1,5 +1,5 @@
 """
-Client HTTP pour l'API predictml
+HTTP client for the predictml API
 """
 
 from typing import Optional, Tuple, Union
@@ -10,19 +10,19 @@ import streamlit as st
 
 @st.cache_data(ttl=30, show_spinner=False)
 def get_models(api_url: str, token: str) -> list:
-    """Liste tous les modèles — résultat mis en cache 30 secondes."""
+    """List all models — result cached for 30 seconds."""
     return APIClient(api_url, token).list_models()
 
 
 @st.cache_data(ttl=10, show_spinner=False)
 def get_model_detail(api_url: str, token: str, name: str, version: str) -> dict:
-    """Détail d'une version de modèle — résultat mis en cache 10 secondes."""
+    """Detail of a model version — result cached for 10 seconds."""
     return APIClient(api_url, token).get_model(name, version)
 
 
 @st.cache_data(ttl=10, show_spinner=False)
 def get_golden_tests(api_url: str, token: str, model_name: str) -> list:
-    """Liste les golden tests d'un modèle — résultat mis en cache 10 secondes."""
+    """List a model's golden tests — result cached for 10 seconds."""
     return APIClient(api_url, token).list_golden_tests(model_name)
 
 
@@ -74,8 +74,8 @@ class APIClient:
 
     def check_auth(self) -> Tuple[bool, bool]:
         """
-        Vérifie le token et le rôle.
-        Retourne (is_valid, is_admin).
+        Verify the token and role.
+        Returns (is_valid, is_admin).
         """
         try:
             r = self._get("/users")
@@ -158,7 +158,7 @@ class APIClient:
         train_file_bytes: Optional[bytes] = None,
         train_filename: Optional[str] = None,
     ) -> dict:
-        """Upload un modèle .joblib avec ses métadonnées (multipart/form-data)."""
+        """Upload a .joblib model with its metadata (multipart/form-data)."""
         import json
 
         data: dict = {"name": name, "version": version}
@@ -242,7 +242,7 @@ class APIClient:
         limit: int = 50,
         offset: int = 0,
     ) -> dict:
-        """Retourne l'historique d'un modèle (toutes versions ou version spécifique)."""
+        """Return the history of a model (all versions or a specific version)."""
         if version:
             path = f"/models/{name}/{version}/history"
         else:
@@ -252,7 +252,7 @@ class APIClient:
         return r.json()
 
     def get_retrain_history(self, name: str, limit: int = 50, offset: int = 0) -> dict:
-        """Retourne l'historique des ré-entraînements d'un modèle."""
+        """Return the retraining history of a model."""
         r = self._get(
             f"/models/{name}/retrain-history",
             params={"limit": limit, "offset": offset},
@@ -261,19 +261,19 @@ class APIClient:
         return r.json()
 
     def rollback_model(self, name: str, version: str, history_id: int) -> dict:
-        """Restaure les métadonnées d'un modèle à un état antérieur (admin requis)."""
+        """Restore a model's metadata to a previous state (admin required)."""
         r = self._post(f"/models/{name}/{version}/rollback/{history_id}")
         r.raise_for_status()
         return r.json()
 
     def validate_input(self, name: str, version: str, features: dict) -> dict:
-        """Valide le schéma d'entrée sans lancer de prédiction."""
+        """Validate the input schema without running a prediction."""
         r = self._post(f"/models/{name}/{version}/validate-input", json=features)
         r.raise_for_status()
         return r.json()
 
     def warmup_model(self, name: str, version: str) -> dict:
-        """Préchauffe le cache Redis pour un modèle (admin requis)."""
+        """Warm up the Redis cache for a model (admin required)."""
         r = self._post(f"/models/{name}/{version}/warmup")
         r.raise_for_status()
         return r.json()
@@ -281,7 +281,7 @@ class APIClient:
     def compute_baseline(
         self, name: str, version: str, days: int = 30, dry_run: bool = True
     ) -> dict:
-        """Calcule le baseline de features depuis les prédictions de production (admin requis)."""
+        """Compute the feature baseline from production predictions (admin required)."""
         r = self._post(
             f"/models/{name}/{version}/compute-baseline",
             params={"days": days, "dry_run": dry_run},
@@ -299,10 +299,10 @@ class APIClient:
         set_production: bool = False,
     ) -> dict:
         """
-        Lance le ré-entraînement d'un modèle via son script train.py stocké dans MinIO.
+        Trigger retraining of a model via its train.py script stored in MinIO.
 
-        Timeout de 660s pour accommoder les entraînements longs (jusqu'à 10 min).
-        Requiert un token admin.
+        Timeout of 660 s to accommodate long training runs (up to 10 min).
+        Requires an admin token.
         """
         payload: dict = {
             "start_date": start_date,
@@ -329,7 +329,7 @@ class APIClient:
         auto_promote: bool = False,
         enabled: bool = True,
     ) -> dict:
-        """Configure le planning cron de ré-entraînement d'un modèle (admin requis)."""
+        """Configure the retraining cron schedule for a model (admin required)."""
         r = self._patch(
             f"/models/{name}/{version}/schedule",
             json={
@@ -346,6 +346,7 @@ class APIClient:
         self,
         name: str,
         # Auto-promotion
+
         auto_promote: bool = False,
         min_accuracy: Optional[float] = None,
         max_mae: Optional[float] = None,
@@ -354,11 +355,12 @@ class APIClient:
         min_golden_test_pass_rate: Optional[float] = None,
         # Circuit breaker (auto-demotion)
         auto_demote: bool = False,
+
         demote_on_drift: str = "critical",
         demote_on_accuracy_below: Optional[float] = None,
         demote_cooldown_hours: int = 24,
     ) -> dict:
-        """Définit la politique d'auto-promotion / circuit breaker d'un modèle (admin requis)."""
+        """Set the auto-promotion / circuit breaker policy for a model (admin required)."""
         r = self._patch(
             f"/models/{name}/policy",
             json={
@@ -425,7 +427,7 @@ class APIClient:
         return r.json()
 
     def explain_prediction(self, prediction_id: int) -> dict:
-        """Retourne l'explication SHAP post-hoc pour une prédiction (GET /predictions/{id}/explain)."""
+        """Return the post-hoc SHAP explanation for a prediction (GET /predictions/{id}/explain)."""
         r = self._get(f"/predictions/{prediction_id}/explain")
         r.raise_for_status()
         return r.json()
@@ -473,7 +475,7 @@ class APIClient:
         deployment_mode: str,
         traffic_weight: Optional[float] = None,
     ) -> dict:
-        """Configure le deployment_mode et le traffic_weight d'une version de modèle."""
+        """Configure the deployment_mode and traffic_weight for a model version."""
         payload: dict = {"deployment_mode": deployment_mode}
         if traffic_weight is not None:
             payload["traffic_weight"] = traffic_weight
@@ -486,7 +488,7 @@ class APIClient:
         last_n: int = 100,
         days: int = 7,
     ) -> dict:
-        """Récupère l'importance globale des features via SHAP agrégé."""
+        """Retrieve global feature importance via aggregated SHAP."""
         r = self._get(
             f"/models/{name}/feature-importance",
             params={"version": version, "last_n": last_n, "days": days},
@@ -495,7 +497,7 @@ class APIClient:
         return r.json()
 
     def get_ab_comparison(self, model_name: str, days: int = 30, metric: str | None = None) -> dict:
-        """Retourne les statistiques de comparaison A/B / shadow pour un modèle."""
+        """Return A/B / shadow comparison statistics for a model."""
         params: dict = {"days": days}
         if metric:
             params["metric"] = metric
@@ -504,7 +506,7 @@ class APIClient:
         return r.json()
 
     def get_shadow_comparison(self, model_name: str, period_days: int = 30) -> dict:
-        """Retourne les métriques enrichies shadow vs production pour un modèle."""
+        """Return enriched shadow vs production metrics for a model."""
         r = self._get(
             f"/models/{model_name}/shadow-compare", params={"period_days": period_days}
         )
@@ -519,7 +521,7 @@ class APIClient:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> dict:
-        """Comparaison multi-versions d'un modèle en un seul appel."""
+        """Multi-version comparison of a model in a single call."""
         params: dict = {"days": days}
         if versions:
             params["versions"] = versions
@@ -538,7 +540,7 @@ class APIClient:
         days: int = 30,
         granularity: str = "day",
     ) -> dict:
-        """Tendance de confiance du modèle (max proba) sur une fenêtre glissante."""
+        """Model confidence trend (max probability) over a rolling window."""
         params = {
             k: v
             for k, v in {"version": version, "days": days, "granularity": granularity}.items()
@@ -556,7 +558,7 @@ class APIClient:
         end: Optional[str] = None,
         n_bins: int = 10,
     ) -> dict:
-        """Calibration des probabilités d'un modèle (Brier score, reliability diagram)."""
+        """Probability calibration of a model (Brier score, reliability diagram)."""
         params = {
             k: v
             for k, v in {"version": version, "start": start, "end": end, "n_bins": n_bins}.items()
@@ -569,7 +571,7 @@ class APIClient:
     # --- Observed Results ---
 
     def get_observed_results_stats(self, model_name: Optional[str] = None) -> dict:
-        """Taux de couverture du ground truth (labeled / total prédictions)."""
+        """Ground truth coverage rate (labeled / total predictions)."""
         r = self._get(
             "/observed-results/stats",
             params={"model_name": model_name},
@@ -580,13 +582,13 @@ class APIClient:
     # --- Monitoring / Supervision Dashboard ---
 
     def get_monitoring_overview(self, start: str, end: str) -> dict:
-        """Vue d'ensemble de la santé de tous les modèles sur une plage calendaire."""
+        """Health overview of all models over a date range."""
         r = self._get("/monitoring/overview", params={"start": start, "end": end})
         r.raise_for_status()
         return r.json()
 
     def get_monitoring_model(self, name: str, start: str, end: str) -> dict:
-        """Détail complet de supervision pour un modèle."""
+        """Full supervision detail for a model."""
         r = self._get(f"/monitoring/model/{name}", params={"start": start, "end": end})
         r.raise_for_status()
         return r.json()
@@ -598,7 +600,7 @@ class APIClient:
         z_threshold: float = 3.0,
         limit: int = 200,
     ) -> dict:
-        """Prédictions avec features aberrantes (z-score ≥ seuil)."""
+        """Predictions with anomalous features (z-score ≥ threshold)."""
         r = self._get(
             "/predictions/anomalies",
             params={
@@ -642,7 +644,7 @@ class APIClient:
         model_name: str,
         observed_result,
     ) -> dict:
-        """Soumet un résultat observé unique via POST /observed-results."""
+        """Submit a single observed result via POST /observed-results."""
         from datetime import datetime
 
         payload = {
@@ -754,10 +756,10 @@ class APIClient:
         model_version: Optional[str] = None,
     ) -> dict:
         """
-        Envoie une liste de dicts de features à POST /predict-batch et retourne les prédictions.
+        Send a list of feature dicts to POST /predict-batch and return predictions.
 
-        rows: liste de dicts {"feature1": val, "feature2": val, ...}
-        Timeout de 120s pour accommoder les gros batches.
+        rows: list of dicts {"feature1": val, "feature2": val, ...}
+        Timeout of 120 s to accommodate large batches.
         """
         payload: dict = {
             "model_name": model_name,
@@ -820,14 +822,14 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
-    # --- Gestion du token (self-service) ---
+    # --- Token management (self-service) ---
 
     def regenerate_my_token(self) -> dict:
         r = self._post("/users/me/regenerate-token")
         r.raise_for_status()
         return r.json()
 
-    # --- Demandes de création de compte ---
+    # --- Account creation requests ---
 
     def submit_account_request(self, data: dict) -> dict:
         r = requests.post(
