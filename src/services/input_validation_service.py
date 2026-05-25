@@ -1,9 +1,9 @@
 """
-Service de validation du schéma d'entrée des modèles ML.
+Input schema validation service for ML models.
 
-Utilisé par :
+Used by:
 - POST /models/{name}/{version}/validate-input
-- POST /predict avec ?strict_validation=true
+- POST /predict with ?strict_validation=true
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -16,11 +16,11 @@ def validate_input_features(
     expected_features: List[str],
 ) -> Tuple[List[InputValidationError], List[InputValidationWarning]]:
     """
-    Valide les features d'entrée contre la liste des features attendues.
+    Validate input features against the list of expected features.
 
-    Retourne (errors, warnings) :
-    - errors  : features manquantes ou inattendues — bloquant en mode strict
-    - warnings : valeurs string coercibles en float — informatif
+    Returns (errors, warnings):
+    - errors  : missing or unexpected features — blocking in strict mode
+    - warnings: string values coercible to float — informational
     """
     errors: List[InputValidationError] = []
     warnings: List[InputValidationWarning] = []
@@ -57,12 +57,12 @@ def resolve_expected_features(
     feature_baseline: Optional[Dict[str, Any]],
 ) -> Optional[List[str]]:
     """
-    Résout la liste des features attendues depuis le modèle ou le baseline.
+    Resolve the list of expected features from the model or the baseline.
 
-    Priorité :
-    1. feature_names_in_ du modèle sklearn (entraîné sur DataFrame pandas)
-    2. Clés de feature_baseline stockées en DB
-    3. None si aucune source disponible
+    Priority:
+    1. feature_names_in_ from the sklearn model (trained on a pandas DataFrame)
+    2. Keys from feature_baseline stored in the DB
+    3. None if no source is available
     """
     if loaded_model is not None and hasattr(loaded_model, "feature_names_in_"):
         return list(loaded_model.feature_names_in_)

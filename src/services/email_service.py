@@ -1,8 +1,8 @@
 """
-Service d'envoi d'e-mails SMTP pour les alertes de supervision.
+SMTP email sending service for monitoring alerts.
 
-Utilise smtplib (stdlib Python) — aucune dépendance externe requise.
-Si SMTP_HOST n'est pas configuré, toutes les méthodes sont des no-ops silencieux.
+Uses smtplib (Python stdlib) — no external dependency required.
+If SMTP_HOST is not configured, all methods are silent no-ops.
 """
 
 import smtplib
@@ -19,18 +19,18 @@ logger = structlog.get_logger(__name__)
 
 
 class EmailService:
-    """Envoi d'e-mails transactionnels pour la supervision des modèles ML."""
+    """Transactional email sending for ML model monitoring."""
 
     def _is_configured(self) -> bool:
         return bool(settings.SMTP_HOST and settings.ALERT_EMAIL_TO)
 
     def _send_email(self, to: list[str], subject: str, html_body: str) -> bool:
         """
-        Envoie un e-mail HTML via SMTP.
-        Retourne True si l'envoi a réussi, False sinon (erreur loggée, pas propagée).
+        Send an HTML email via SMTP.
+        Returns True if sending succeeded, False otherwise (error logged, not raised).
         """
         if not self._is_configured():
-            logger.debug("SMTP non configuré, e-mail ignoré", subject=subject)
+            logger.debug("SMTP not configured, email ignored", subject=subject)
             return False
 
         msg = MIMEMultipart("alternative")
@@ -54,21 +54,21 @@ class EmailService:
                         server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
                     server.sendmail(msg["From"], to, msg.as_string())
 
-            logger.info("E-mail envoyé", subject=subject, recipients=to)
+            logger.info("Email sent", subject=subject, recipients=to)
             return True
 
         except Exception as exc:
-            logger.warning("Échec envoi e-mail", subject=subject, error=str(exc))
+            logger.warning("Email send failed", subject=subject, error=str(exc))
             return False
 
     # ------------------------------------------------------------------
-    # Templates HTML (inline, sans dépendance moteur de template)
+    # HTML templates (inline, no template engine dependency)
     # ------------------------------------------------------------------
 
     @staticmethod
     def _base_html(title: str, body_content: str) -> str:
         return f"""<!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <style>
@@ -93,10 +93,10 @@ class EmailService:
   <div class="card">
     <h1>🤖 PredictML — {title}</h1>
     {body_content}
-    <a class="btn" href="{settings.STREAMLIT_URL}">Ouvrir le tableau de bord</a>
+    <a class="btn" href="{settings.STREAMLIT_URL}">Open dashboard</a>
     <p class="footer">
-      Généré le {datetime.utcnow().strftime('%d/%m/%Y à %H:%M')} UTC •
-      PredictML Supervision
+      Generated on {datetime.utcnow().strftime('%Y-%m-%d at %H:%M')} UTC •
+      PredictML Monitoring
     </p>
   </div>
 </body>
@@ -108,13 +108,13 @@ class EmailService:
         return f'<span class="{cls}">{emoji} {status}</span>'
 
     # ------------------------------------------------------------------
-    # Méthodes d'envoi
+    # Send methods
     # ------------------------------------------------------------------
 
     def send_weekly_report(self, overview: dict) -> bool:
         """
-        Rapport hebdomadaire : résumé de santé de tous les modèles.
-        `overview` est la réponse sérialisée de GET /monitoring/overview.
+        Weekly report: health summary of all models.
+        `overview` is the serialized response of GET /monitoring/overview.
         """
         gs = overview.get("global_stats", {})
         period = overview.get("period", {})
@@ -138,33 +138,33 @@ class EmailService:
             </tr>"""
 
         body = f"""
-        <p>Voici le rapport hebdomadaire de supervision de vos modèles ML
-           pour la période du <strong>{start}</strong> au <strong>{end}</strong>.</p>
-        <h2>📊 Métriques globales</h2>
+        <p>Here is the weekly monitoring report for your ML models
+           for the period from <strong>{start}</strong> to <strong>{end}</strong>.</p>
+        <h2>📊 Global metrics</h2>
         <table>
-          <tr><th>Prédictions</th><td>{gs.get('total_predictions', 0):,}</td></tr>
-          <tr><th>Taux d'erreur</th>
+          <tr><th>Predictions</th><td>{gs.get('total_predictions', 0):,}</td></tr>
+          <tr><th>Error rate</th>
               <td>{gs.get('error_rate', 0) * 100:.1f} %</td></tr>
-          <tr><th>Latence moyenne</th>
+          <tr><th>Average latency</th>
               <td>{gs.get('avg_latency_ms') or '—'} ms</td></tr>
-          <tr><th>Modèles en alerte</th>
-              <td>🔴 {gs.get('models_critical', 0)} critique(s) •
-                  🟡 {gs.get('models_warning', 0)} avertissement(s)</td></tr>
+          <tr><th>Models in alert</th>
+              <td>🔴 {gs.get('models_critical', 0)} critical •
+                  🟡 {gs.get('models_warning', 0)} warning(s)</td></tr>
         </table>
-        <h2>🏥 Santé par modèle</h2>
+        <h2>🏥 Health by model</h2>
         <table>
           <tr>
-            <th>Modèle</th><th>Prédictions</th><th>Erreurs</th>
-            <th>Latence moy.</th><th>Drift features</th>
-            <th>Drift perf.</th><th>Statut</th>
+            <th>Model</th><th>Predictions</th><th>Errors</th>
+            <th>Avg latency</th><th>Feature drift</th>
+            <th>Perf. drift</th><th>Status</th>
           </tr>
           {rows}
         </table>"""
 
         return self._send_email(
             to=settings.ALERT_EMAIL_TO,
-            subject=f"[PredictML] Rapport hebdomadaire — {start} au {end}",
-            html_body=self._base_html("Rapport hebdomadaire", body),
+            subject=f"[PredictML] Weekly report — {start} to {end}",
+            html_body=self._base_html("Weekly report", body),
         )
 
     def send_drift_alert(
@@ -175,26 +175,26 @@ class EmailService:
         z_score: float | None = None,
         psi: float | None = None,
     ) -> bool:
-        """Alerte de drift de features détecté."""
+        """Feature drift detected alert."""
         z_txt = f"{z_score:.3f}" if z_score is not None else "N/A"
         psi_txt = f"{psi:.4f}" if psi is not None else "N/A"
         body = f"""
-        <p>Un drift de données a été détecté sur le modèle
+        <p>Data drift has been detected on model
            <strong>{model_name}</strong> — feature <strong>{feature}</strong>.</p>
         <table>
-          <tr><th>Statut</th><td>{self._status_badge(drift_status)}</td></tr>
-          <tr><th>Z-score</th><td>{z_txt} (seuil warning ≥ 2, critique ≥ 3)</td></tr>
-          <tr><th>PSI</th><td>{psi_txt} (seuil warning ≥ 0.1, critique ≥ 0.2)</td></tr>
-          <tr><th>Détecté le</th>
-              <td>{datetime.utcnow().strftime('%d/%m/%Y %H:%M')} UTC</td></tr>
+          <tr><th>Status</th><td>{self._status_badge(drift_status)}</td></tr>
+          <tr><th>Z-score</th><td>{z_txt} (warning threshold ≥ 2, critical ≥ 3)</td></tr>
+          <tr><th>PSI</th><td>{psi_txt} (warning threshold ≥ 0.1, critical ≥ 0.2)</td></tr>
+          <tr><th>Detected on</th>
+              <td>{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC</td></tr>
         </table>
-        <p>Vérifiez si les données en entrée ont changé de distribution.
-           Un re-entraînement du modèle peut être nécessaire.</p>"""
+        <p>Check whether the input data distribution has changed.
+           Model retraining may be necessary.</p>"""
 
         return self._send_email(
             to=settings.ALERT_EMAIL_TO,
-            subject=f"[PredictML] ⚠️ Drift features — {model_name} / {feature}",
-            html_body=self._base_html("Alerte drift features", body),
+            subject=f"[PredictML] ⚠️ Feature drift — {model_name} / {feature}",
+            html_body=self._base_html("Feature drift alert", body),
         )
 
     def send_performance_alert(
@@ -203,45 +203,45 @@ class EmailService:
         current_accuracy: float,
         baseline_accuracy: float,
     ) -> bool:
-        """Alerte de dégradation de performance (accuracy/MAE)."""
+        """Performance degradation alert (accuracy/MAE)."""
         drop = baseline_accuracy - current_accuracy
         body = f"""
-        <p>Une dégradation de performance a été détectée sur le modèle
+        <p>A performance degradation has been detected on model
            <strong>{model_name}</strong>.</p>
         <table>
-          <tr><th>Accuracy baseline</th><td>{baseline_accuracy:.1%}</td></tr>
-          <tr><th>Accuracy récente</th><td>{current_accuracy:.1%}</td></tr>
-          <tr><th>Baisse</th><td><strong>−{drop:.1%}</strong></td></tr>
-          <tr><th>Détectée le</th>
-              <td>{datetime.utcnow().strftime('%d/%m/%Y %H:%M')} UTC</td></tr>
+          <tr><th>Baseline accuracy</th><td>{baseline_accuracy:.1%}</td></tr>
+          <tr><th>Recent accuracy</th><td>{current_accuracy:.1%}</td></tr>
+          <tr><th>Drop</th><td><strong>−{drop:.1%}</strong></td></tr>
+          <tr><th>Detected on</th>
+              <td>{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC</td></tr>
         </table>
-        <p>Vérifiez les résultats observés récents et envisagez un re-entraînement.</p>"""
+        <p>Check recent observed results and consider retraining.</p>"""
 
         return self._send_email(
             to=settings.ALERT_EMAIL_TO,
-            subject=f"[PredictML] 🔴 Drift performance — {model_name}",
-            html_body=self._base_html("Alerte drift performance", body),
+            subject=f"[PredictML] 🔴 Performance drift — {model_name}",
+            html_body=self._base_html("Performance drift alert", body),
         )
 
     def send_error_spike_alert(self, model_name: str, error_rate: float) -> bool:
-        """Alerte de pic d'erreurs."""
+        """Error spike alert."""
         threshold = settings.ERROR_RATE_ALERT_THRESHOLD
         body = f"""
-        <p>Un pic d'erreurs a été détecté sur le modèle
+        <p>An error spike has been detected on model
            <strong>{model_name}</strong>.</p>
         <table>
-          <tr><th>Taux d'erreur actuel</th>
+          <tr><th>Current error rate</th>
               <td><strong>{error_rate:.1%}</strong></td></tr>
-          <tr><th>Seuil configuré</th><td>{threshold:.1%}</td></tr>
-          <tr><th>Détecté le</th>
-              <td>{datetime.utcnow().strftime('%d/%m/%Y %H:%M')} UTC</td></tr>
+          <tr><th>Configured threshold</th><td>{threshold:.1%}</td></tr>
+          <tr><th>Detected on</th>
+              <td>{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC</td></tr>
         </table>
-        <p>Vérifiez les logs de l'API et l'état du modèle en production.</p>"""
+        <p>Check the API logs and the state of the production model.</p>"""
 
         return self._send_email(
             to=settings.ALERT_EMAIL_TO,
-            subject=f"[PredictML] 🔴 Pic d'erreurs — {model_name} ({error_rate:.1%})",
-            html_body=self._base_html("Alerte pic d'erreurs", body),
+            subject=f"[PredictML] 🔴 Error spike — {model_name} ({error_rate:.1%})",
+            html_body=self._base_html("Error spike alert", body),
         )
 
     def send_auto_demotion_alert(
@@ -251,33 +251,31 @@ class EmailService:
         reason: str,
         no_fallback: bool = False,
     ) -> bool:
-        """Alerte d'auto-demotion du circuit breaker."""
+        """Circuit breaker auto-demotion alert."""
         fallback_warning = (
             """<p style="color:#c0392b;font-weight:bold">
-            ⚠️ Aucune version de fallback disponible — le modèle N'A PAS été démis.
-            Action manuelle requise.</p>"""
+            ⚠️ No fallback version available — the model has NOT been demoted.
+            Manual action required.</p>"""
             if no_fallback
             else ""
         )
         action_txt = (
-            "retiré de la production"
-            if not no_fallback
-            else "maintenu en production (pas de fallback)"
+            "removed from production" if not no_fallback else "kept in production (no fallback)"
         )
         body = f"""
-        <p>Le circuit breaker a détecté une dégradation critique sur le modèle
+        <p>The circuit breaker detected a critical degradation on model
            <strong>{model_name}</strong> v<strong>{version}</strong>
-           et l'a <strong>{action_txt}</strong> automatiquement.</p>
+           and has <strong>{action_txt}</strong> it automatically.</p>
         {fallback_warning}
         <table>
-          <tr><th>Modèle</th><td>{model_name}</td></tr>
+          <tr><th>Model</th><td>{model_name}</td></tr>
           <tr><th>Version</th><td>{version}</td></tr>
-          <tr><th>Raison</th><td>{reason}</td></tr>
-          <tr><th>Détecté le</th>
-              <td>{datetime.utcnow().strftime('%d/%m/%Y %H:%M')} UTC</td></tr>
+          <tr><th>Reason</th><td>{reason}</td></tr>
+          <tr><th>Detected on</th>
+              <td>{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC</td></tr>
         </table>
-        <p>Vérifiez le tableau de bord de supervision et promouvez une version saine
-           si nécessaire.</p>"""
+        <p>Check the monitoring dashboard and promote a healthy version
+           if necessary.</p>"""
 
         return self._send_email(
             to=settings.ALERT_EMAIL_TO,
@@ -286,5 +284,5 @@ class EmailService:
         )
 
 
-# Instance globale
+# Global instance
 email_service = EmailService()

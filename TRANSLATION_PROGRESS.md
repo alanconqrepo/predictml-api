@@ -29,32 +29,32 @@
 
 ## Batch 2 — `src/api/`
 
-- [ ] `src/api/models.py` (heaviest)
-- [ ] `src/api/predict.py`
-- [ ] `src/api/monitoring.py`
-- [ ] `src/api/users.py`
-- [ ] `src/api/observed_results.py`
-- [ ] `src/api/jobs.py`
-- [ ] `src/api/account_requests.py`
+- [x] `src/api/models.py` (heaviest)
+- [x] `src/api/predict.py`
+- [x] `src/api/monitoring.py`
+- [x] `src/api/users.py`
+- [x] `src/api/observed_results.py`
+- [x] `src/api/jobs.py`
+- [x] `src/api/account_requests.py`
 
 ---
 
 ## Batch 3 — `src/services/`
 
-- [ ] `src/services/db_service.py`
-- [ ] `src/services/retrain_service.py`
-- [ ] `src/services/model_service.py`
-- [ ] `src/services/auto_promotion_service.py`
-- [ ] `src/services/email_service.py`
-- [ ] `src/services/minio_service.py`
-- [ ] `src/services/mlflow_service.py`
-- [ ] `src/services/drift_service.py`
-- [ ] `src/services/metrics_service.py`
-- [ ] `src/services/shap_service.py`
-- [ ] `src/services/golden_test_service.py`
-- [ ] `src/services/ab_significance_service.py`
-- [ ] `src/services/input_validation_service.py`
-- [ ] `src/services/__init__.py`
+- [x] `src/services/db_service.py`
+- [x] `src/services/retrain_service.py`
+- [x] `src/services/model_service.py`
+- [x] `src/services/auto_promotion_service.py`
+- [x] `src/services/email_service.py`
+- [x] `src/services/minio_service.py`
+- [x] `src/services/mlflow_service.py`
+- [x] `src/services/drift_service.py`
+- [x] `src/services/metrics_service.py`
+- [x] `src/services/shap_service.py`
+- [x] `src/services/golden_test_service.py`
+- [x] `src/services/ab_significance_service.py`
+- [x] `src/services/input_validation_service.py`
+- [x] `src/services/__init__.py`
 
 ---
 

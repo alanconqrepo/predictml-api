@@ -1,17 +1,17 @@
 """
-Service de détection de data drift.
+Data drift detection service.
 
-Calcule trois métriques par feature numérique :
-- Z-score : écart normalisé entre la moyenne de production et la baseline
-- PSI (Population Stability Index) : divergence de distribution via bins normaux
-- Null rate : taux de valeurs nulles/manquantes en production vs baseline
+Computes three metrics per numeric feature:
+- Z-score: normalized deviation between production mean and baseline
+- PSI (Population Stability Index): distribution divergence via normal bins
+- Null rate: rate of null/missing values in production vs baseline
 
-Seuils de statut :
+Status thresholds:
   Z-score    : ok < 2 | warning 2–3 | critical ≥ 3
   PSI        : ok < 0.1 | warning 0.1–0.2 | critical ≥ 0.2
-  Null rate  : ok si écart absolu < 5 pts | warning 5–15 pts | critical > 15 pts ou prod > 30 %
+  Null rate  : ok if absolute deviation < 5 pts | warning 5–15 pts | critical > 15 pts or prod > 30 %
 
-Statut final = pire des trois statuts.
+Final status = worst of the three statuses.
 """
 
 import math
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from src.schemas.model import OutputDriftResponse
 
 _N_BINS = 10
-_EPS = 1e-6  # évite log(0)
+_EPS = 1e-6  # avoids log(0)
 
 
 def _status_from_z(z: float) -> str:
@@ -71,13 +71,13 @@ def _compute_psi(
     baseline_max: float,
 ) -> float:
     """
-    Calcule le PSI en comparant la distribution de production à la distribution
-    N(baseline_mean, baseline_std) découpée en _N_BINS bins égaux.
+    Compute PSI by comparing the production distribution to the
+    N(baseline_mean, baseline_std) distribution split into _N_BINS equal bins.
     """
     if baseline_std <= 0:
         return 0.0
 
-    # Bornes des bins : légèrement élargies au-delà de [min, max]
+    # Bin edges: slightly expanded beyond [min, max]
     margin = 0.5 * baseline_std
     low = baseline_min - margin
     high = baseline_max + margin
@@ -86,12 +86,12 @@ def _compute_psi(
 
     bin_edges = np.linspace(low, high, _N_BINS + 1)
 
-    # Proportions attendues (distribution normale baseline)
+    # Expected proportions (baseline normal distribution)
     expected = np.diff(stats.norm.cdf(bin_edges, loc=baseline_mean, scale=baseline_std))
     expected = np.clip(expected, _EPS, None)
     expected /= expected.sum()
 
-    # Proportions observées en production
+    # Observed proportions in production
     counts, _ = np.histogram(prod_values, bins=bin_edges)
     total = counts.sum()
     if total == 0:
@@ -109,12 +109,12 @@ def compute_feature_drift(
     min_count: int = 30,
 ) -> Dict[str, FeatureDriftResult]:
     """
-    Compare les stats de production au baseline par feature.
+    Compare production stats to the baseline per feature.
 
     Args:
-        baseline: {feature: {mean, std, min, max, null_rate?}} — issu de model_metadata.feature_baseline
-        production_stats: {feature: {mean, std, min, max, count, values, null_rate?}} — calculé depuis les prédictions
-        min_count: nombre minimum de prédictions pour calculer le drift
+        baseline: {feature: {mean, std, min, max, null_rate?}} — from model_metadata.feature_baseline
+        production_stats: {feature: {mean, std, min, max, count, values, null_rate?}} — computed from predictions
+        min_count: minimum number of predictions to compute drift
 
     Returns:
         Dict[feature, FeatureDriftResult]
@@ -132,7 +132,7 @@ def compute_feature_drift(
         prod_std: Optional[float] = ps.get("std")
         null_rate_prod: Optional[float] = ps.get("null_rate")
 
-        # Pas de baseline pour cette feature
+        # No baseline for this feature
         if bl is None:
             results[feature] = FeatureDriftResult(
                 production_mean=round(prod_mean, 6) if prod_mean is not None else None,
@@ -156,7 +156,7 @@ def compute_feature_drift(
         if null_rate_prod is not None and null_rate_base is not None:
             null_rate_status = _status_from_null_rate(null_rate_prod, null_rate_base)
 
-        # Données de production insuffisantes
+        # Insufficient production data
         if prod_count < min_count or prod_mean is None:
             results[feature] = FeatureDriftResult(
                 baseline_mean=round(bl_mean, 6),
@@ -183,7 +183,7 @@ def compute_feature_drift(
             z_score = round(z_score, 4)
             z_status = _status_from_z(z_score)
 
-        # PSI (nécessite les valeurs brutes)
+        # PSI (requires raw values)
         psi: Optional[float] = None
         psi_status = "ok"
         raw_values = ps.get("values")
@@ -192,7 +192,7 @@ def compute_feature_drift(
             psi = _compute_psi(arr, bl_mean, bl_std, bl_min, bl_max)
             psi_status = _status_from_psi(psi)
 
-        # Statut final : pire des trois dimensions
+        # Final status: worst of the three dimensions
         candidate_statuses = [z_status, psi_status]
         if null_rate_status is not None:
             candidate_statuses.append(null_rate_status)
@@ -217,9 +217,9 @@ def compute_feature_drift(
 
 
 def summarize_drift(features: Dict[str, FeatureDriftResult], baseline_available: bool) -> str:
-    """Retourne le statut global le plus défavorable parmi toutes les features.
+    """Return the worst overall status among all features.
 
-    Prend en compte drift_status (Z-score + PSI) et null_rate_status comme quatrième dimension.
+    Takes into account drift_status (Z-score + PSI) and null_rate_status as a fourth dimension.
     """
     if not baseline_available:
         return "no_baseline"
@@ -229,7 +229,7 @@ def summarize_drift(features: Dict[str, FeatureDriftResult], baseline_available:
         return "insufficient_data"
 
     ranked = [s for s in statuses if s in ("ok", "warning", "critical")]
-    # null_rate_status des features à données insuffisantes contribue aussi au résumé
+    # null_rate_status of features with insufficient data also contributes to the summary
     null_ranked = [
         f.null_rate_status
         for f in features.values()
@@ -245,7 +245,7 @@ def summarize_drift(features: Dict[str, FeatureDriftResult], baseline_available:
 
 
 def is_nan_safe(value: float) -> bool:
-    """Vérifie si une valeur float est NaN ou infinie."""
+    """Check whether a float value is NaN or infinite."""
     return math.isnan(value) or math.isinf(value)
 
 
@@ -273,14 +273,14 @@ async def compute_output_drift(
     min_predictions: int = 30,
 ) -> "OutputDriftResponse":
     """
-    Calcule le drift de distribution des sorties (label shift).
+    Compute output distribution drift (label shift).
 
-    - Classification : compare prediction_result discrets au baseline (PSI).
-    - Régression     : si regression_bins présent dans training_stats, bucket les
-                       prédictions live sur les quartiles d'entraînement puis PSI.
+    - Classification: compare discrete prediction_result to baseline (PSI).
+    - Regression: if regression_bins is present in training_stats, bucket
+                  live predictions on training quartiles then compute PSI.
 
     PSI < 0.1 → ok | 0.1–0.2 → warning | ≥ 0.2 → critical
-    Retourne status="no_baseline" si label_distribution absent.
+    Returns status="no_baseline" if label_distribution is absent.
     """
     from src.schemas.model import OutputDriftClassResult, OutputDriftResponse
     from src.services.db_service import DBService
@@ -310,7 +310,7 @@ async def compute_output_drift(
     regression_bins: list[float] | None = training_stats.get("regression_bins")
 
     if regression_bins and len(regression_bins) >= 3:
-        # ── Régression : bucketing des prédictions live sur les quartiles ─────
+        # ── Regression: bucketing live predictions on quartiles ──────────────
         raw_values = await DBService.get_prediction_numeric_values(
             db, model_name, metadata.version, days=period_days
         )
@@ -334,7 +334,7 @@ async def compute_output_drift(
         current_distribution = {labels[i]: bucket_counts[i] / total for i in range(n_buckets)}
 
     else:
-        # ── Classification : GROUP BY sur prediction_result ───────────────────
+        # ── Classification: GROUP BY on prediction_result ────────────────────
         label_counts, total = await DBService.get_prediction_label_distribution(
             db, model_name, metadata.version, days=period_days
         )

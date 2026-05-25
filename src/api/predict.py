@@ -1,5 +1,5 @@
 """
-Endpoints pour les prédictions
+Prediction endpoints
 """
 
 import asyncio
@@ -53,9 +53,9 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["predictions"])
 
-# Limite le nombre de prédictions shadow simultanées pour éviter de saturer le pool de connexions
+# Limits the number of concurrent shadow predictions to avoid saturating the connection pool
 _SHADOW_SEMAPHORE = asyncio.Semaphore(int(os.getenv("SHADOW_CONCURRENCY", "20")))
-# En mode batch, on échantillonne au plus N items par version shadow
+# In batch mode, sample at most N items per shadow version
 _MAX_SHADOW_ITEMS_PER_BATCH = int(os.getenv("MAX_SHADOW_ITEMS_PER_BATCH", "50"))
 
 
@@ -70,8 +70,8 @@ async def _run_shadow_prediction(
     timestamp: Optional[datetime] = None,
 ) -> None:
     """
-    Exécute la prédiction du modèle shadow en background et la persiste avec is_shadow=True.
-    Toutes les exceptions sont catchées et loggées — ne propage jamais rien au client.
+    Runs the shadow model prediction in the background and persists it with is_shadow=True.
+    All exceptions are caught and logged — never propagates to the client.
     """
     import time as _time
 
@@ -85,7 +85,7 @@ async def _run_shadow_prediction(
 
                 if not hasattr(shadow_model, "feature_names_in_"):
                     raise ValueError(
-                        f"Shadow model '{model_name}:{shadow_version}' n'a pas feature_names_in_"
+                        f"Shadow model '{model_name}:{shadow_version}' does not have feature_names_in_"
                     )
 
                 x = np.array([[features[n] for n in shadow_model.feature_names_in_]], dtype=object)
@@ -117,7 +117,7 @@ async def _run_shadow_prediction(
                 )
 
                 logger.info(
-                    "Shadow prediction enregistrée",
+                    "Shadow prediction recorded",
                     model_name=model_name,
                     version=shadow_version,
                     result=result,
@@ -125,7 +125,7 @@ async def _run_shadow_prediction(
 
         except Exception as e:
             logger.warning(
-                "Échec de la prédiction shadow (non-bloquant)",
+                "Shadow prediction failed (non-blocking)",
                 model_name=model_name,
                 version=shadow_version,
                 error=str(e),
@@ -133,7 +133,7 @@ async def _run_shadow_prediction(
 
 
 async def _publish_prediction_to_stream(payload: dict) -> bool:
-    """Publie le payload de prédiction dans Redis Stream. Retourne True si succès, False sinon."""
+    """Publishes the prediction payload to Redis Stream. Returns True on success, False otherwise."""
     try:
         redis = await model_service._get_redis()
         flat: dict = {
@@ -164,26 +164,26 @@ async def _publish_prediction_to_stream(payload: dict) -> bool:
         )
         return True
     except Exception as exc:
-        logger.warning("Échec publication stream Redis — fallback sync", error=str(exc))
+        logger.warning("Redis stream publish failed — falling back to sync", error=str(exc))
         return False
 
 
 @router.get("/predictions/stats", response_model=PredictionStatsResponse)
 async def get_prediction_stats(
-    model_name: Optional[str] = Query(None, description="Filtrer par nom de modèle (optionnel)"),
-    days: int = Query(30, ge=1, le=365, description="Fenêtre en jours (défaut : 30, max : 365)"),
+    model_name: Optional[str] = Query(None, description="Filter by model name (optional)"),
+    days: int = Query(30, ge=1, le=365, description="Time window in days (default: 30, max: 365)"),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Statistiques agrégées des prédictions par modèle sur une fenêtre glissante.
+    Aggregated prediction statistics per model over a sliding window.
 
-    - **model_name** : filtrer sur un seul modèle (optionnel)
-    - **days** : fenêtre temporelle en jours (défaut 30, max 365)
+    - **model_name**: filter on a single model (optional)
+    - **days**: time window in days (default 30, max 365)
 
-    Retourne pour chaque modèle : total, erreurs, taux d'erreur, temps de réponse moyen / p50 / p95.
+    Returns for each model: total, errors, error rate, mean / p50 / p95 response time.
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
     raw = await DBService.get_prediction_stats(db, days=days, model_name=model_name)
     return PredictionStatsResponse(
@@ -195,52 +195,52 @@ async def get_prediction_stats(
 
 @router.get("/predictions", response_model=PredictionsListResponse)
 async def get_predictions(
-    name: str = Query(..., description="Nom du modèle"),
+    name: str = Query(..., description="Model name"),
     start: datetime = Query(
-        ..., description="Début de la période (ISO 8601, ex: 2024-01-01T00:00:00)"
+        ..., description="Start of period (ISO 8601, e.g. 2024-01-01T00:00:00)"
     ),
-    end: datetime = Query(..., description="Fin de la période (ISO 8601, ex: 2024-12-31T23:59:59)"),
-    version: Optional[str] = Query(None, description="Version du modèle (optionnel)"),
-    user: Optional[str] = Query(None, description="Nom d'utilisateur (optionnel)"),
-    id_obs: Optional[str] = Query(None, description="Identifiant de l'observation (optionnel)"),
-    limit: int = Query(100, ge=1, le=1000, description="Nombre max de résultats"),
+    end: datetime = Query(..., description="End of period (ISO 8601, e.g. 2024-12-31T23:59:59)"),
+    version: Optional[str] = Query(None, description="Model version (optional)"),
+    user: Optional[str] = Query(None, description="Username (optional)"),
+    id_obs: Optional[str] = Query(None, description="Observation identifier (optional)"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of results"),
     cursor: Optional[int] = Query(
-        None, ge=1, description="Curseur de pagination (id de la dernière prédiction vue)"
+        None, ge=1, description="Pagination cursor (id of the last seen prediction)"
     ),
     min_confidence: Optional[float] = Query(
         None,
         ge=0.0,
         le=1.0,
-        description="Confiance minimale (max des probabilités) — optionnel, classifieurs uniquement",
+        description="Minimum confidence (max of probabilities) — optional, classifiers only",
     ),
     max_confidence: Optional[float] = Query(
         None,
         ge=0.0,
         le=1.0,
-        description="Confiance maximale (max des probabilités) — optionnel, classifieurs uniquement",
+        description="Maximum confidence (max of probabilities) — optional, classifiers only",
     ),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Retourne l'historique des prédictions avec filtres (pagination par curseur).
+    Returns the prediction history with filters (cursor-based pagination).
 
-    - **name** : nom du modèle — obligatoire
-    - **start** / **end** : plage datetime — obligatoire
-    - **version** : version du modèle — optionnel
-    - **user** : nom d'utilisateur — optionnel
-    - **id_obs** : identifiant de l'observation — optionnel
-    - **limit** : nombre max de résultats (défaut : 100, max : 1000)
-    - **cursor** : id de la dernière prédiction vue (pour la page suivante, utiliser `next_cursor` de la réponse précédente)
-    - **min_confidence** : filtre sur la confiance minimale (max des probabilités), 0.0–1.0 — optionnel
-    - **max_confidence** : filtre sur la confiance maximale (max des probabilités), 0.0–1.0 — optionnel
+    - **name**: model name — required
+    - **start** / **end**: datetime range — required
+    - **version**: model version — optional
+    - **user**: username — optional
+    - **id_obs**: observation identifier — optional
+    - **limit**: maximum number of results (default: 100, max: 1000)
+    - **cursor**: id of the last seen prediction (for the next page, use `next_cursor` from the previous response)
+    - **min_confidence**: filter on minimum confidence (max of probabilities), 0.0–1.0 — optional
+    - **max_confidence**: filter on maximum confidence (max of probabilities), 0.0–1.0 — optional
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
     if start > end:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="'start' doit être antérieur à 'end'.",
+            detail="'start' must be before 'end'.",
         )
 
     rows, total = await DBService.get_predictions(
@@ -292,50 +292,50 @@ _EXPORT_PAGE_SIZE = 500
 
 @router.get("/predictions/export")
 async def export_predictions(
-    model_name: Optional[str] = Query(None, description="Filtrer par nom de modèle (optionnel)"),
-    start: datetime = Query(..., description="Début de la période (ISO 8601)"),
-    end: datetime = Query(..., description="Fin de la période (ISO 8601)"),
+    model_name: Optional[str] = Query(None, description="Filter by model name (optional)"),
+    start: datetime = Query(..., description="Start of period (ISO 8601)"),
+    end: datetime = Query(..., description="End of period (ISO 8601)"),
     export_format: str = Query(
         "csv",
         alias="format",
-        description="Format d'export : csv, jsonl ou parquet (défaut : csv)",
+        description="Export format: csv, jsonl or parquet (default: csv)",
     ),
-    include_features: bool = Query(True, description="Inclure input_features dans l'export"),
+    include_features: bool = Query(True, description="Include input_features in the export"),
     pred_status: Optional[str] = Query(
-        None, alias="status", description="Filtrer par statut : success ou error"
+        None, alias="status", description="Filter by status: success or error"
     ),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Export bulk des prédictions au format CSV, JSONL ou Parquet via streaming par curseur.
+    Bulk export of predictions in CSV, JSONL or Parquet format via cursor-based streaming.
 
-    - **model_name** : filtrer sur un modèle (optionnel — tous les modèles si absent)
-    - **start** / **end** : plage datetime — obligatoire
-    - **format** : `csv` (défaut), `jsonl` ou `parquet`
-    - **include_features** : inclure `input_features` dans l'export (défaut : true)
-    - **status** : filtrer par statut `success` ou `error` (optionnel)
+    - **model_name**: filter on a model (optional — all models if absent)
+    - **start** / **end**: datetime range — required
+    - **format**: `csv` (default), `jsonl` or `parquet`
+    - **include_features**: include `input_features` in the export (default: true)
+    - **status**: filter by status `success` or `error` (optional)
 
-    Retourne un fichier en téléchargement direct (Content-Disposition: attachment).
-    Le streaming par curseur évite de charger tout l'historique en mémoire (CSV/JSONL).
-    Le format Parquet charge toutes les lignes en mémoire avant sérialisation.
+    Returns a file as a direct download (Content-Disposition: attachment).
+    Cursor-based streaming avoids loading the entire history into memory (CSV/JSONL).
+    Parquet format loads all rows into memory before serialization.
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
     if start > end:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="'start' doit être antérieur à 'end'.",
+            detail="'start' must be before 'end'.",
         )
     if export_format not in ("csv", "jsonl", "parquet"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Le paramètre 'format' doit être 'csv', 'jsonl' ou 'parquet'.",
+            detail="The 'format' parameter must be 'csv', 'jsonl' or 'parquet'.",
         )
     if pred_status is not None and pred_status not in ("success", "error"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Le paramètre 'status' doit être 'success' ou 'error'.",
+            detail="The 'status' parameter must be 'success' or 'error'.",
         )
 
     fmt = export_format
@@ -455,8 +455,8 @@ async def export_predictions(
                     "username": row.user.username if row.user else None,
                     "id_obs": row.id_obs,
                     "prediction_result": json.dumps(row.prediction_result),
-                    # observed_result peut être float (régression) ou str (classification) ;
-                    # on sérialise en JSON pour éviter les colonnes à type mixte dans Parquet.
+                    # observed_result can be float (regression) or str (classification);
+                    # serialize as JSON to avoid mixed-type columns in Parquet.
                     "observed_result": json.dumps(obs_result) if obs_result is not None else None,
                     "probabilities": json.dumps(row.probabilities),
                     "response_time_ms": row.response_time_ms,
@@ -492,38 +492,38 @@ async def export_predictions(
 
 @router.get("/predictions/anomalies", response_model=AnomaliesResponse)
 async def get_anomalous_predictions(
-    model_name: str = Query(..., description="Nom du modèle (requis)"),
-    days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours (défaut : 7)"),
+    model_name: str = Query(..., description="Model name (required)"),
+    days: int = Query(7, ge=1, le=90, description="Time window in days (default: 7)"),
     z_threshold: float = Query(
-        3.0, ge=0.0, description="Seuil z-score pour détection (défaut : 3.0)"
+        3.0, ge=0.0, description="Z-score threshold for detection (default: 3.0)"
     ),
     limit: int = Query(
-        200, ge=1, le=1000, description="Max prédictions à analyser (défaut : 200, max : 1000)"
+        200, ge=1, le=1000, description="Max predictions to analyze (default: 200, max: 1000)"
     ),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Prédictions avec features aberrantes (z-score ≥ seuil).
+    Predictions with anomalous features (z-score >= threshold).
 
-    Pour chaque prédiction dans la fenêtre temporelle, calcule le z-score par feature
-    en comparant à la baseline du modèle : z = |value - baseline_mean| / baseline_std.
-    Retourne uniquement les prédictions où au moins une feature dépasse z_threshold.
+    For each prediction in the time window, computes the z-score per feature
+    by comparing to the model baseline: z = |value - baseline_mean| / baseline_std.
+    Returns only predictions where at least one feature exceeds z_threshold.
 
-    - **model_name** : nom du modèle — obligatoire
-    - **days** : fenêtre temporelle en jours (défaut : 7, max : 90)
-    - **z_threshold** : seuil de détection (défaut : 3.0)
-    - **limit** : max prédictions à analyser (défaut : 200, max : 1000)
+    - **model_name**: model name — required
+    - **days**: time window in days (default: 7, max: 90)
+    - **z_threshold**: detection threshold (default: 3.0)
+    - **limit**: max predictions to analyze (default: 200, max: 1000)
 
-    Retourne `error: "no_baseline"` si le modèle n'a pas de baseline de features.
+    Returns `error: "no_baseline"` if the model has no feature baseline.
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
     metadata = await DBService.get_model_metadata(db, model_name)
     if metadata is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{model_name}' introuvable.",
+            detail=f"Model '{model_name}' not found.",
         )
 
     baseline = metadata.feature_baseline
@@ -616,29 +616,29 @@ async def purge_predictions(
     older_than_days: int = Query(
         ...,
         ge=0,
-        description="Supprimer les prédictions plus anciennes que N jours (0 = toutes)",
+        description="Delete predictions older than N days (0 = all)",
     ),
     model_name: Optional[str] = Query(
         None,
-        description="Restreindre la purge à un modèle spécifique (optionnel)",
+        description="Restrict the purge to a specific model (optional)",
     ),
     dry_run: bool = Query(
         True,
-        description="Simuler sans supprimer (défaut : true — passer dry_run=false pour supprimer réellement)",
+        description="Simulate without deleting (default: true — pass dry_run=false to actually delete)",
     ),
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Purge les prédictions et leurs observed_results associés.
+    Purges predictions and their associated observed_results.
 
-    - **older_than_days** : seuil de rétention en jours (0 = tout supprimer)
-    - **model_name** : restreindre la purge à un seul modèle (optionnel)
-    - **dry_run** : `true` par défaut — simulation sans suppression. Passer `dry_run=false` pour supprimer réellement.
+    - **older_than_days**: retention threshold in days (0 = delete all)
+    - **model_name**: restrict the purge to a single model (optional)
+    - **dry_run**: `true` by default — simulation without deletion. Pass `dry_run=false` to actually delete.
 
-    Supprime en cascade les observed_results (ground truth) liés aux prédictions purgées.
+    Cascades deletion to observed_results (ground truth) linked to purged predictions.
 
-    Accès réservé aux administrateurs.
+    Admin access only.
     """
     result = await DBService.purge_predictions(
         db=db,
@@ -655,10 +655,10 @@ async def delete_prediction(
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Supprime une prédiction par son ID (admin uniquement)."""
+    """Deletes a prediction by its ID (admin only)."""
     deleted = await DBService.delete_prediction(db, prediction_id)
     if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prédiction introuvable.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prediction not found.")
 
 
 @router.get("/predictions/{prediction_id}", response_model=PredictionResponse)
@@ -668,22 +668,22 @@ async def get_prediction_by_id(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Lookup direct d'une prédiction par son id.
+    Direct lookup of a prediction by its id.
 
-    - Retourne 404 si la prédiction n'existe pas.
-    - Un utilisateur standard ne voit que ses propres prédictions (403 sinon).
-    - Un admin voit toutes les prédictions.
+    - Returns 404 if the prediction does not exist.
+    - A standard user can only see their own predictions (403 otherwise).
+    - An admin can see all predictions.
     """
     prediction = await DBService.get_prediction_by_id(db, prediction_id)
     if prediction is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Prédiction {prediction_id} introuvable.",
+            detail=f"Prediction {prediction_id} not found.",
         )
     if user.role != UserRole.ADMIN and prediction.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Accès refusé : cette prédiction ne vous appartient pas.",
+            detail="Access denied: this prediction does not belong to you.",
         )
     return PredictionResponse(
         id=prediction.id,
@@ -710,32 +710,32 @@ async def explain_prediction_by_id(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Retourne l'explication SHAP d'une prédiction stockée (post-hoc).
+    Returns the SHAP explanation of a stored prediction (post-hoc).
 
-    - Retourne 404 si la prédiction n'existe pas.
-    - Un utilisateur standard ne voit que ses propres prédictions (403 sinon).
-    - Un admin voit toutes les prédictions.
-    - Retourne 422 si la prédiction est en erreur (status != 'success') ou si input_features est null.
+    - Returns 404 if the prediction does not exist.
+    - A standard user can only see their own predictions (403 otherwise).
+    - An admin can see all predictions.
+    - Returns 422 if the prediction is in error (status != 'success') or if input_features is null.
 
-    Utilise les input_features déjà stockées en base — aucune re-soumission des features requise.
+    Uses input_features already stored in the database — no re-submission of features required.
     """
     prediction = await DBService.get_prediction_by_id(db, prediction_id)
     if prediction is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Prédiction {prediction_id} introuvable.",
+            detail=f"Prediction {prediction_id} not found.",
         )
     if user.role != UserRole.ADMIN and prediction.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Accès refusé : cette prédiction ne vous appartient pas.",
+            detail="Access denied: this prediction does not belong to you.",
         )
     if prediction.status != "success" or prediction.input_features is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
-                "Impossible d'expliquer cette prédiction : "
-                "statut différent de 'success' ou input_features absent."
+                "Cannot explain this prediction: "
+                "status is not 'success' or input_features is absent."
             ),
         )
 
@@ -747,8 +747,8 @@ async def explain_prediction_by_id(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
-                f"Le modèle '{prediction.model_name}' ne possède pas l'attribut "
-                "'feature_names_in_'. Le modèle doit avoir été entraîné avec un DataFrame pandas."
+                f"Model '{prediction.model_name}' does not have the 'feature_names_in_' attribute. "
+                "The model must have been trained with a pandas DataFrame."
             ),
         )
 
@@ -782,43 +782,43 @@ async def predict(
     strict_validation: bool = Query(
         False,
         description=(
-            "Si true, rejette la requête avec 422 si les features ne correspondent pas "
-            "exactement au schéma du modèle (features inattendues incluses)."
+            "If true, rejects the request with 422 if the features do not match "
+            "the model schema exactly (including unexpected features)."
         ),
     ),
     explain: bool = Query(
         False,
         description=(
-            "Si true, calcule et retourne les valeurs SHAP locales inline dans la réponse "
-            "(shap_values, shap_base_value). Silencieux si le type de modèle n'est pas supporté."
+            "If true, computes and returns local SHAP values inline in the response "
+            "(shap_values, shap_base_value). Silent if the model type is not supported."
         ),
     ),
     store: bool = Query(
         True,
         description=(
-            "Si false, la prédiction n'est pas enregistrée en base de données "
-            "(utile pour les tests interactifs depuis l'UI ou les outils de débogage)."
+            "If false, the prediction is not saved to the database "
+            "(useful for interactive tests from the UI or debugging tools)."
         ),
     ),
     user: User = Depends(check_prediction_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Fait une prédiction avec le modèle sklearn spécifié.
+    Makes a prediction with the specified sklearn model.
 
-    - **model_name**: Nom du modèle à utiliser
-    - **model_version**: Version cible (ex: `1.0.0`). Si absent, utilise la version
-      `is_production=True` ; à défaut, la version la plus récente.
-    - **id_obs**: Identifiant de l'observation (optionnel, stocké en DB)
-    - **features**: Features sous forme de dict nommé `{"feature1": valeur, ...}`.
-      Le modèle doit exposer `feature_names_in_` (entraîné avec un DataFrame pandas).
-      Les clés manquantes retournent une erreur 422.
-    - **strict_validation**: Si `true`, rejette également les features inattendues avec 422.
-    - **explain**: Si `true`, retourne les valeurs SHAP locales (`shap_values`, `shap_base_value`)
-      dans la réponse. Silencieux si le type de modèle n'est pas supporté par SHAP.
+    - **model_name**: Name of the model to use
+    - **model_version**: Target version (e.g. `1.0.0`). If absent, uses the `is_production=True`
+      version; otherwise, the most recent version.
+    - **id_obs**: Observation identifier (optional, stored in DB)
+    - **features**: Features as a named dict `{"feature1": value, ...}`.
+      The model must expose `feature_names_in_` (trained with a pandas DataFrame).
+      Missing keys return a 422 error.
+    - **strict_validation**: If `true`, also rejects unexpected features with 422.
+    - **explain**: If `true`, returns local SHAP values (`shap_values`, `shap_base_value`)
+      in the response. Silent if the model type is not supported by SHAP.
 
-    Nécessite un token Bearer dans le header Authorization.
-    Toutes les prédictions sont loggées dans la base de données.
+    Requires a Bearer token in the Authorization header.
+    All predictions are logged to the database.
     """
     start_time = time.time()
     prediction_result = None
@@ -830,9 +830,9 @@ async def predict(
     structlog.contextvars.bind_contextvars(event_type="predict", model_name=input_data.model_name)
 
     try:
-        # --- Routage : version explicite OU routage A/B/shadow ---
+        # --- Routing: explicit version OR A/B/shadow routing ---
         if input_data.model_version is not None:
-            # Chemin explicite → vérifier la dépréciation AVANT de charger depuis MinIO
+            # Explicit path → check deprecation BEFORE loading from MinIO
             explicit_meta = await DBService.get_model_metadata(
                 db, input_data.model_name, input_data.model_version
             )
@@ -851,14 +851,14 @@ async def predict(
             )
             shadow_meta = []
         else:
-            # Routage intelligent : A/B test ou shadow si configuré
+            # Smart routing: A/B test or shadow if configured
             primary_meta, shadow_meta = await model_service.select_routing_versions(
                 db, input_data.model_name
             )
             if primary_meta is None:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Aucune version active trouvée pour le modèle '{input_data.model_name}'.",
+                    detail=f"No active version found for model '{input_data.model_name}'.",
                 )
             model_data = await model_service.load_model(
                 db, input_data.model_name, primary_meta.version
@@ -867,15 +867,14 @@ async def predict(
         model = model_data["model"]
         metadata = model_data["metadata"]
 
-        # Convertir le dict de features en array numpy
+        # Convert the features dict to a numpy array
         if not hasattr(model, "feature_names_in_"):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=(
-                    f"Le modèle '{input_data.model_name}' ne possède pas l'attribut "
-                    "'feature_names_in_'. Le modèle doit avoir été entraîné avec un "
-                    "DataFrame pandas (les noms de colonnes sont alors automatiquement "
-                    "sauvegardés par sklearn)."
+                    f"Model '{input_data.model_name}' does not have the 'feature_names_in_' attribute. "
+                    "The model must have been trained with a pandas DataFrame "
+                    "(column names are then automatically saved by sklearn)."
                 ),
             )
         missing = set(model.feature_names_in_) - set(input_data.features.keys())
@@ -883,12 +882,12 @@ async def predict(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=(
-                    f"Features manquantes dans la requête : {sorted(missing)}. "
-                    f"Features attendues : {list(model.feature_names_in_)}"
+                    f"Missing features in the request: {sorted(missing)}. "
+                    f"Expected features: {list(model.feature_names_in_)}"
                 ),
             )
 
-        # Mode strict : rejeter si des features inattendues sont présentes
+        # Strict mode: reject if unexpected features are present
         if strict_validation:
             expected = resolve_expected_features(model, getattr(metadata, "feature_baseline", None))
             if expected is not None:
@@ -897,7 +896,7 @@ async def predict(
                     raise HTTPException(
                         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                         detail={
-                            "message": "Validation stricte échouée : le schéma d'entrée ne correspond pas.",
+                            "message": "Strict validation failed: the input schema does not match.",
                             "valid": False,
                             "errors": [e.model_dump() for e in errors],
                             "expected_features": sorted(expected),
@@ -907,15 +906,15 @@ async def predict(
             [[input_data.features[name] for name in model.feature_names_in_]], dtype=object
         )
 
-        # Faire la prédiction
+        # Run prediction
         prediction = model.predict(x)[0]
         prediction_result = prediction.item() if hasattr(prediction, "item") else prediction
 
-        # Essayer d'obtenir les probabilités si le modèle le supporte
+        # Try to get probabilities if the model supports it
         if hasattr(model, "predict_proba"):
             probability = model.predict_proba(x)[0].tolist()
 
-        # Calculer low_confidence si un seuil est configuré sur le modèle
+        # Compute low_confidence if a threshold is configured on the model
         low_confidence = None
         if probability is not None and metadata.confidence_threshold is not None:
             low_confidence = max(probability) < metadata.confidence_threshold
@@ -934,7 +933,7 @@ async def predict(
             version=_metric_version,
         ).observe(response_time_ms / 1000)
 
-        # Logger la prédiction réussie — ignoré si store=False (tests UI)
+        # Log the successful prediction — skipped if store=False (UI tests)
         if store:
             _prediction_payload = {
                 "user_id": user.id,
@@ -958,7 +957,7 @@ async def predict(
             else:
                 await DBService.create_prediction(db=db, **_prediction_payload)
 
-            # --- Dispatch shadow en background (versions shadow + A/B non sélectionnés) ---
+            # --- Dispatch shadow in background (shadow + non-selected A/B versions) ---
             for _sm in shadow_meta:
                 background_tasks.add_task(
                     _run_shadow_prediction,
@@ -972,7 +971,7 @@ async def predict(
                     timestamp=input_data.timestamp,
                 )
 
-            # Déclencher le webhook si configuré sur le modèle
+            # Fire webhook if configured on the model
             if metadata.webhook_url:
                 background_tasks.add_task(
                     send_webhook,
@@ -987,10 +986,10 @@ async def predict(
                     },
                 )
 
-        # selected_version est renseigné uniquement si le routage A/B a été utilisé
+        # selected_version is set only if A/B routing was used
         selected_version = metadata.version if input_data.model_version is None else None
 
-        # Explication SHAP inline (silently skip si modèle non supporté ou feature manquante)
+        # Inline SHAP explanation (silently skip if model not supported or feature missing)
         shap_values_inline = None
         shap_base_value_inline = None
         if explain:
@@ -1009,7 +1008,7 @@ async def predict(
                 shap_base_value_inline = explanation["base_value"]
             except Exception:
                 logger.debug(
-                    "SHAP inline ignoré (modèle non supporté)",
+                    "Inline SHAP skipped (model not supported)",
                     model=metadata.name,
                     version=metadata.version,
                 )
@@ -1027,11 +1026,11 @@ async def predict(
         )
 
     except HTTPException:
-        # Re-raise les HTTPException (404, etc.)
+        # Re-raise HTTPExceptions (404, etc.)
         raise
 
     except Exception as e:
-        # Logger l'erreur
+        # Log the error
         response_time_ms = (time.time() - start_time) * 1000
         error_message = str(e)
 
@@ -1061,16 +1060,16 @@ async def predict(
                     timestamp=input_data.timestamp,
                 )
             except Exception as log_error:
-                logger.error("Erreur lors du logging de la prédiction", error=str(log_error))
+                logger.error("Error logging the prediction", error=str(log_error))
 
         logger.error(
-            "Erreur interne lors de la prédiction",
+            "Internal error during prediction",
             model=input_data.model_name,
             error=error_message,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Erreur interne lors de la prédiction. Consultez les logs serveur.",
+            detail="Internal prediction error. Check server logs.",
         )
 
     finally:
@@ -1089,48 +1088,48 @@ async def predict_batch(
     strict_validation: bool = Query(
         False,
         description=(
-            "Si true, rejette la requête avec 422 si des features inattendues sont présentes "
-            "dans l'un des items du batch."
+            "If true, rejects the request with 422 if unexpected features are present "
+            "in any item of the batch."
         ),
     ),
     user: User = Depends(check_prediction_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Fait des prédictions en batch avec le modèle sklearn spécifié.
+    Makes batch predictions with the specified sklearn model.
 
-    - **model_name**: Nom du modèle à utiliser
-    - **model_version**: Version cible (optionnel)
-    - **inputs**: Liste d'observations, chacune avec `features` et un `id_obs` optionnel
+    - **model_name**: Name of the model to use
+    - **model_version**: Target version (optional)
+    - **inputs**: List of observations, each with `features` and an optional `id_obs`
 
-    Le modèle est chargé une seule fois (cache), toutes les prédictions sont persistées
-    en une seule transaction (`add_all`).
+    The model is loaded once (shared cache), all predictions are persisted
+    in a single transaction (`add_all`).
 
-    Nécessite un token Bearer dans le header Authorization.
+    Requires a Bearer token in the Authorization header.
     """
     batch_size = len(input_data.inputs)
     if batch_size > MAX_BATCH_SIZE:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Batch trop grand ({batch_size} items, max {MAX_BATCH_SIZE}).",
+            detail=f"Batch too large ({batch_size} items, max {MAX_BATCH_SIZE}).",
         )
     client_ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
 
-    # Vérifier que le quota restant couvre la taille du batch
+    # Check that the remaining quota covers the batch size
     today_count = await DBService.get_user_prediction_count_today(db, user.id)
     remaining = user.rate_limit_per_day - today_count
     if batch_size > remaining:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=(
-                f"Rate limit insuffisant pour ce batch ({batch_size} prédictions demandées, "
-                f"{remaining} restantes aujourd'hui sur {user.rate_limit_per_day})."
+                f"Rate limit insufficient for this batch ({batch_size} predictions requested, "
+                f"{remaining} remaining today out of {user.rate_limit_per_day})."
             ),
         )
 
     try:
-        # Routing A/B / shadow si aucune version explicite
+        # A/B / shadow routing if no explicit version
         batch_shadow_list: List = []
         if input_data.model_version is None:
             primary_meta, batch_shadow_list = await model_service.select_routing_versions(
@@ -1139,25 +1138,24 @@ async def predict_batch(
             if primary_meta is None:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Aucune version active trouvée pour le modèle '{input_data.model_name}'.",
+                    detail=f"No active version found for model '{input_data.model_name}'.",
                 )
             resolved_version = primary_meta.version
         else:
             resolved_version = input_data.model_version
 
-        # Charger le modèle une seule fois (cache partagé)
+        # Load the model once (shared cache)
         model_data = await model_service.load_model(db, input_data.model_name, resolved_version)
         model = model_data["model"]
         metadata = model_data["metadata"]
 
-        # Valider que le modèle expose feature_names_in_
+        # Validate that the model exposes feature_names_in_
         if not hasattr(model, "feature_names_in_"):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=(
-                    f"Le modèle '{input_data.model_name}' ne possède pas l'attribut "
-                    "'feature_names_in_'. Le modèle doit avoir été entraîné avec un "
-                    "DataFrame pandas."
+                    f"Model '{input_data.model_name}' does not have the 'feature_names_in_' attribute. "
+                    "The model must have been trained with a pandas DataFrame."
                 ),
             )
 
@@ -1169,18 +1167,18 @@ async def predict_batch(
         for item in input_data.inputs:
             item_start = time.time()
 
-            # Valider les features de cet item
+            # Validate the features of this item
             missing = set(model.feature_names_in_) - set(item.features.keys())
             if missing:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=(
-                        f"Features manquantes pour l'observation '{item.id_obs}': "
-                        f"{sorted(missing)}. Features attendues : {list(model.feature_names_in_)}"
+                        f"Missing features for observation '{item.id_obs}': "
+                        f"{sorted(missing)}. Expected features: {list(model.feature_names_in_)}"
                     ),
                 )
 
-            # Mode strict : rejeter si des features inattendues sont présentes
+            # Strict mode: reject if unexpected features are present
             if strict_validation:
                 expected = resolve_expected_features(
                     model, getattr(metadata, "feature_baseline", None)
@@ -1191,7 +1189,7 @@ async def predict_batch(
                         raise HTTPException(
                             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                             detail={
-                                "message": f"Validation stricte échouée pour l'observation '{item.id_obs}' : le schéma d'entrée ne correspond pas.",
+                                "message": f"Strict validation failed for observation '{item.id_obs}': the input schema does not match.",
                                 "valid": False,
                                 "errors": [e.model_dump() for e in errors],
                                 "expected_features": sorted(expected),
@@ -1204,7 +1202,7 @@ async def predict_batch(
             prediction_result = raw.item() if hasattr(raw, "item") else raw
             probability = model.predict_proba(x)[0].tolist() if has_proba else None
 
-            # Calculer low_confidence si un seuil est configuré sur le modèle
+            # Compute low_confidence if a threshold is configured on the model
             low_confidence = None
             if probability is not None and confidence_threshold is not None:
                 low_confidence = max(probability) < confidence_threshold
@@ -1237,12 +1235,12 @@ async def predict_batch(
                 )
             )
 
-        # Persister toutes les prédictions en une seule transaction
+        # Persist all predictions in a single transaction
         db.add_all(orm_objects)
         await db.commit()
 
-        # Dispatcher les prédictions shadow en background (versions shadow + A/B non sélectionnés)
-        # On échantillonne pour éviter de saturer l'event loop sur les gros batchs
+        # Dispatch shadow predictions in the background (shadow + non-selected A/B versions)
+        # Sample to avoid saturating the event loop on large batches
         if batch_shadow_list:
             shadow_items = (
                 input_data.inputs
@@ -1296,16 +1294,16 @@ async def predict_batch(
             db.add_all(error_objects)
             await db.commit()
         except Exception as log_error:
-            logger.error("Erreur lors du logging du batch en erreur", error=str(log_error))
+            logger.error("Error logging the failed batch", error=str(log_error))
 
         logger.error(
-            "Erreur interne lors du batch",
+            "Internal error during batch",
             model=input_data.model_name,
             error=error_message,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Erreur interne lors du traitement batch. Consultez les logs serveur.",
+            detail="Internal error during batch processing. Check server logs.",
         )
 
 
@@ -1316,19 +1314,19 @@ async def explain(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Retourne les importances SHAP locales pour une observation.
+    Returns local SHAP importances for an observation.
 
-    - **model_name** / **model_version** : même sélection que `/predict`
-    - **features** : même format que `/predict`
+    - **model_name** / **model_version**: same selection as `/predict`
+    - **features**: same format as `/predict`
 
-    Ne consomme pas de quota rate-limit et ne logue pas en base de données.
+    Does not consume rate-limit quota and does not log to the database.
 
-    **Modèles supportés** :
-    - Arbres : RandomForest, GradientBoosting, DecisionTree, ExtraTrees, HistGradientBoosting
-    - Linéaires : LogisticRegression, LinearRegression, Ridge, Lasso, ElasticNet, SGD
+    **Supported models**:
+    - Trees: RandomForest, GradientBoosting, DecisionTree, ExtraTrees, HistGradientBoosting
+    - Linear: LogisticRegression, LinearRegression, Ridge, Lasso, ElasticNet, SGD
 
-    Retourne un dict `{feature: shap_value}` indiquant la contribution de chaque feature
-    à la prédiction, ainsi que la valeur de base `E[f(X)]` du modèle.
+    Returns a dict `{feature: shap_value}` indicating the contribution of each feature
+    to the prediction, as well as the model's base value `E[f(X)]`.
     """
     model_data = await model_service.load_model(db, input_data.model_name, input_data.model_version)
     model = model_data["model"]
@@ -1338,8 +1336,8 @@ async def explain(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
-                f"Le modèle '{input_data.model_name}' ne possède pas l'attribut "
-                "'feature_names_in_'. Le modèle doit avoir été entraîné avec un DataFrame pandas."
+                f"Model '{input_data.model_name}' does not have the 'feature_names_in_' attribute. "
+                "The model must have been trained with a pandas DataFrame."
             ),
         )
 
@@ -1349,8 +1347,8 @@ async def explain(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
-                f"Features manquantes dans la requête : {sorted(missing)}. "
-                f"Features attendues : {feature_names}"
+                f"Missing features in the request: {sorted(missing)}. "
+                f"Expected features: {feature_names}"
             ),
         )
 

@@ -1,14 +1,14 @@
 """
-Service de ré-entraînement partagé entre :
+Retraining service shared between:
   - src/tasks/arq_worker.py  (retrain_task, scheduled_retrain_task)
-  - src/api/models.py        (validation pré-enqueue uniquement)
+  - src/api/models.py        (pre-enqueue validation only)
 
-Fonctionnalités clés :
-  - Exécution du subprocess train.py avec timeout 600 s
-  - Streaming ligne-par-ligne de stdout vers Redis (clé retrain_logs:{job_id})
-  - Création de la nouvelle version ModelMetadata en DB
-  - Auto-promotion selon la PromotionPolicy configurée
-  - Mises à jour du TaskRun (status, result, logs, timestamps)
+Key features:
+  - Subprocess train.py execution with 600 s timeout
+  - Line-by-line stdout streaming to Redis (key retrain_logs:{job_id})
+  - Creation of the new ModelMetadata version in DB
+  - Auto-promotion according to the configured PromotionPolicy
+  - TaskRun updates (status, result, logs, timestamps)
 """
 
 import asyncio
@@ -26,7 +26,7 @@ from src.core.platform_limits import SUBPROCESS_PREEXEC_KWARGS
 logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
-# Constantes subprocess
+# Subprocess constants
 # ---------------------------------------------------------------------------
 
 _SAFE_ENV_KEYS = {
@@ -43,11 +43,11 @@ _SAFE_ENV_KEYS = {
     "VIRTUAL_ENV",
 }
 
-_SUBPROCESS_TIMEOUT = 600.0  # secondes
+_SUBPROCESS_TIMEOUT = 600.0  # seconds
 
 
 # ---------------------------------------------------------------------------
-# Streaming subprocess
+# Subprocess streaming
 # ---------------------------------------------------------------------------
 
 
@@ -56,10 +56,10 @@ async def _stream_stdout(
     job_id: Optional[str],
     redis_client,
 ) -> List[str]:
-    """Lit stdout ligne-par-ligne et pousse chaque ligne dans Redis si job_id fourni.
+    """Read stdout line-by-line and push each line to Redis if job_id is provided.
 
-    Returns :
-        Liste des lignes décodées (sans \\n final).
+    Returns:
+        List of decoded lines (without trailing \\n).
     """
     lines: List[str] = []
     while True:
@@ -76,11 +76,11 @@ async def _stream_stdout(
 
 
 # ---------------------------------------------------------------------------
-# Cœur du retrain
+# Retrain core
 # ---------------------------------------------------------------------------
 
 
-async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
+async def do_retrain(  # noqa: C901 — complexity inherent to the pipeline
     *,
     # Identité
     model_name: str,
@@ -100,9 +100,9 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
     # Injection (fournie par le contexte ARQ ou les tests)
     db_session=None,  # AsyncSession — si None, une nouvelle session est créée
 ) -> Dict[str, Any]:
-    """Exécute le pipeline complet de ré-entraînement.
+    """Execute the full retraining pipeline.
 
-    Returns un dict avec :
+    Returns a dict with:
         success, stdout, stderr, new_version, accuracy, f1_score,
         auto_promoted, auto_promote_reason, training_stats, error
     """
@@ -126,12 +126,12 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
     )
 
     def _log(job_id, redis_client, line: str):
-        """Pousse une ligne de log dans Redis de façon synchrone (wrap async)."""
-        # Utilisé pour les messages de l'API elle-même (hors subprocess)
-        pass  # Les messages API sont dans structlog, les logs subprocess dans Redis
+        """Push a log line to Redis synchronously (async wrap)."""
+        # Used for API-level messages (outside the subprocess)
+        pass  # API messages are in structlog, subprocess logs are in Redis
 
     # ------------------------------------------------------------------ #
-    # 1. Charger les champs source si non fournis
+    # 1. Load source fields if not provided
     # ------------------------------------------------------------------ #
     if source_fields is None:
         async with AsyncSessionLocal() as db:
@@ -147,7 +147,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
             if not src:
                 return {
                     "success": False,
-                    "error": f"Modèle source '{model_name}' v{source_version} introuvable.",
+                    "error": f"Source model '{model_name}' v{source_version} not found.",
                     "stdout": "",
                     "stderr": "",
                 }
@@ -175,19 +175,19 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
     if not source_fields.get("train_script_object_key"):
         return {
             "success": False,
-            "error": f"Le modèle '{model_name}' v{source_version} n'a pas de script train.py.",
+            "error": f"Model '{model_name}' v{source_version} has no train.py script.",
             "stdout": "",
             "stderr": "",
         }
 
     # ------------------------------------------------------------------ #
-    # 2. Exporter les données de production (avant le subprocess de 600 s)
+    # 2. Export production data (before the 600 s subprocess)
     # ------------------------------------------------------------------ #
     async with AsyncSessionLocal() as db:
         retrain_rows = await DBService.export_retrain_data(db, model_name, start_date, end_date)
 
     # ------------------------------------------------------------------ #
-    # 3. Télécharger train.py depuis MinIO
+    # 3. Download train.py from MinIO
     # ------------------------------------------------------------------ #
     try:
         script_bytes = await minio_service.async_download_file_bytes(
@@ -195,23 +195,23 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
         )
     except Exception as exc:
         logger.error(
-            "Téléchargement train.py échoué",
+            "train.py download failed",
             model=model_name,
             error=str(exc),
         )
         retrain_total.labels(model_name=model_name, status="failure").inc()
         return {
             "success": False,
-            "error": f"Téléchargement train.py impossible : {exc}",
+            "error": f"train.py download failed: {exc}",
             "stdout": "",
             "stderr": "",
         }
 
     # ------------------------------------------------------------------ #
-    # 4. Exécuter le subprocess avec streaming stdout → Redis
+    # 4. Run the subprocess with stdout streaming → Redis
     # ------------------------------------------------------------------ #
     logger.info(
-        "Démarrage subprocess train.py",
+        "Starting train.py subprocess",
         model=model_name,
         new_version=new_version,
         timeout=_SUBPROCESS_TIMEOUT,
@@ -228,7 +228,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
         with open(script_path, "wb") as f:
             f.write(script_bytes)
 
-        # Écrire le CSV des données de production si disponible
+        # Write the production data CSV if available
         train_data_path: Optional[str] = None
         if retrain_rows:
             train_data_path = os.path.join(tmpdir, "train_data.csv")
@@ -261,12 +261,12 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
                         }
                     )
             logger.info(
-                "Données production exportées",
+                "Production data exported",
                 model=model_name,
                 rows=len(retrain_rows),
             )
 
-        # Environnement minimal (pas de SECRET_KEY, DATABASE_URL, etc.)
+        # Minimal environment (no SECRET_KEY, DATABASE_URL, etc.)
         _minio_scheme = "https" if settings.MINIO_SECURE else "http"
         env = {k: v for k, v in os.environ.items() if k in _SAFE_ENV_KEYS}
         env.update(
@@ -318,14 +318,14 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
                 proc.kill()
                 await proc.wait()
                 logger.error(
-                    "Timeout subprocess retrain",
+                    "Retrain subprocess timeout",
                     model=model_name,
                     timeout=_SUBPROCESS_TIMEOUT,
                 )
                 retrain_total.labels(model_name=model_name, status="failure").inc()
                 return {
                     "success": False,
-                    "error": f"Timeout : le script a dépassé {int(_SUBPROCESS_TIMEOUT)} s.",
+                    "error": f"Timeout: script exceeded {int(_SUBPROCESS_TIMEOUT)} s.",
                     "stdout": "",
                     "stderr": "",
                 }
@@ -334,7 +334,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
 
             if proc.returncode != 0:
                 logger.error(
-                    "Script retrain échoué",
+                    "Retrain script failed",
                     model=model_name,
                     returncode=proc.returncode,
                     stderr=stderr_text[:500],
@@ -342,21 +342,21 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
                 retrain_total.labels(model_name=model_name, status="failure").inc()
                 return {
                     "success": False,
-                    "error": f"Script terminé avec code {proc.returncode}.",
+                    "error": f"Script exited with code {proc.returncode}.",
                     "stdout": stdout_text,
                     "stderr": stderr_text,
                 }
 
             if not os.path.exists(output_model_path):
                 logger.error(
-                    "Script n'a pas produit de .joblib",
+                    "Script did not produce a .joblib",
                     model=model_name,
                     new_version=new_version,
                 )
                 retrain_total.labels(model_name=model_name, status="failure").inc()
                 return {
                     "success": False,
-                    "error": "Le script n'a pas produit de fichier à OUTPUT_MODEL_PATH.",
+                    "error": "Script did not produce a file at OUTPUT_MODEL_PATH.",
                     "stdout": stdout_text,
                     "stderr": stderr_text,
                 }
@@ -366,14 +366,14 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
 
         except Exception as exc:
             logger.error(
-                "Erreur inattendue subprocess",
+                "Unexpected subprocess error",
                 model=model_name,
                 error=str(exc),
             )
             retrain_total.labels(model_name=model_name, status="failure").inc()
             return {
                 "success": False,
-                "error": f"Erreur d'exécution inattendue : {exc}",
+                "error": f"Unexpected execution error: {exc}",
                 "stdout": "\n".join(stdout_lines),
                 "stderr": stderr_text,
             }
@@ -381,7 +381,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
     stdout_text = "\n".join(stdout_lines)
 
     # ------------------------------------------------------------------ #
-    # 5. Extraire les métriques JSON depuis la dernière ligne stdout
+    # 5. Extract JSON metrics from the last stdout line
     # ------------------------------------------------------------------ #
     new_accuracy = source_fields.get("accuracy")
     new_auc = source_fields.get("auc")
@@ -410,7 +410,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
     }
 
     # ------------------------------------------------------------------ #
-    # 5b. Snapshot requirements
+    # 5b. Requirements snapshot
     # ------------------------------------------------------------------ #
     from src.services.env_snapshot_service import (
         dependencies_to_requirements_txt as _deps_to_req,
@@ -426,9 +426,9 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
         _req_txt = _gen_req(script_bytes.decode("utf-8", errors="replace"))
 
     # ------------------------------------------------------------------ #
-    # 5c. MLflow run (dégradation gracieuse)
-    # Le chemin MinIO est calculé ici (déterministe) pour être passé à MLflow
-    # avant l'upload effectif, sans dupliquer le binaire dans le bucket mlflow.
+    # 5c. MLflow run (graceful degradation)
+    # The MinIO path is computed here (deterministic) to be passed to MLflow
+    # before the actual upload, without duplicating the binary in the mlflow bucket.
     # ------------------------------------------------------------------ #
     now_utc = datetime.now(timezone.utc)
     new_object_key = f"{model_name}/{new_version}/model.joblib"
@@ -459,21 +459,21 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
             minio_bucket="models",
         )
     except Exception as _exc:
-        logger.warning("MLflow logging échoué (non bloquant)", error=str(_exc))
+        logger.warning("MLflow logging failed (non-blocking)", error=str(_exc))
 
     # ------------------------------------------------------------------ #
-    # 6. Upload MinIO : .joblib + train.py + requirements.txt
+    # 6. MinIO upload: .joblib + train.py + requirements.txt
     # ------------------------------------------------------------------ #
-    # new_object_key déjà calculé section 5c
+    # new_object_key already computed in section 5c
     new_model_hmac_signature = compute_model_hmac(new_model_bytes)
     try:
         upload_info = await minio_service.async_upload_model_bytes(new_model_bytes, new_object_key)
     except Exception as exc:
-        logger.error("Upload .joblib MinIO échoué", error=str(exc))
+        logger.error("MinIO .joblib upload failed", error=str(exc))
         retrain_total.labels(model_name=model_name, status="failure").inc()
         return {
             "success": False,
-            "error": f"Upload MinIO .joblib échoué : {exc}",
+            "error": f"MinIO .joblib upload failed: {exc}",
             "stdout": stdout_text,
             "stderr": stderr_text,
         }
@@ -484,11 +484,11 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
             script_bytes, new_train_key, content_type="text/x-python"
         )
     except Exception as exc:
-        logger.error("Upload train.py MinIO échoué", error=str(exc))
+        logger.error("MinIO train.py upload failed", error=str(exc))
         retrain_total.labels(model_name=model_name, status="failure").inc()
         return {
             "success": False,
-            "error": f"Upload MinIO train.py échoué : {exc}",
+            "error": f"MinIO train.py upload failed: {exc}",
             "stdout": stdout_text,
             "stderr": stderr_text,
         }
@@ -499,11 +499,11 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
             _req_txt.encode("utf-8"), _req_object_key, content_type="text/plain"
         )
     except Exception as _exc:
-        logger.warning("Upload requirements.txt échoué (non bloquant)", error=str(_exc))
+        logger.warning("requirements.txt upload failed (non-blocking)", error=str(_exc))
         _req_object_key = None
 
     # ------------------------------------------------------------------ #
-    # 7. Écriture DB : nouvelle version + history + auto-promotion
+    # 7. DB write: new version + history + auto-promotion
     # ------------------------------------------------------------------ #
     now_naive = now_utc.replace(tzinfo=None)
     auto_promoted = False
@@ -544,7 +544,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
             promotion_policy=source_fields.get("promotion_policy"),
             trained_by=triggered_by,
             training_date=now_naive,
-            user_id_creator=None,  # scheduler — pas d'utilisateur
+            user_id_creator=None,  # scheduler — no user
             is_active=True,
             is_production=False,
             parent_version=source_version,
@@ -557,10 +557,10 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
             write_db, new_metadata, HistoryActionType.CREATED, None, triggered_by
         )
 
-        # Promotion manuelle ou auto-promotion selon policy
+        # Manual promotion or auto-promotion according to policy
         promotion_policy = source_fields.get("promotion_policy") or {}
         if set_production:
-            # Promotion manuelle explicite
+            # Explicit manual promotion
             other_result = await write_db.execute(
                 select(ModelMetadata).where(
                     and_(
@@ -595,14 +595,14 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
                 auto_promoted = True
                 await write_db.flush()
             logger.info(
-                "Auto-promotion évaluée",
+                "Auto-promotion evaluated",
                 model=model_name,
                 new_version=new_version,
                 promoted=should_promote,
                 reason=reason,
             )
 
-        # Persister auto_promoted dans training_stats
+        # Persist auto_promoted in training_stats
         if promotion_policy.get("auto_promote") and not set_production:
             new_metadata.training_stats = {
                 **(new_metadata.training_stats or {}),
@@ -610,7 +610,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
                 "auto_promote_reason": auto_promote_reason,
             }
 
-        # Mise à jour last_run_at / next_run_at pour les retrains planifiés
+        # Update last_run_at / next_run_at for scheduled retrains
         if trigger == "scheduler":
             from apscheduler.triggers.cron import CronTrigger
 
@@ -641,7 +641,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
                     "next_run_at": next_run.isoformat() if next_run else None,
                 }
 
-        # MLflow tags finaux
+        # Final MLflow tags
         if _mlflow_run_id:
             try:
                 mlflow_service.update_run_tags(
@@ -653,30 +653,31 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
                     },
                 )
             except Exception as _exc:
-                logger.warning("MLflow tag update échoué", error=str(_exc))
+                logger.warning("MLflow tag update failed", error=str(_exc))
 
         await write_db.commit()
         await write_db.refresh(new_metadata)
 
     # ------------------------------------------------------------------ #
-    # 8. Cache Redis : invalidation + pré-chauffe si en production
+    # 8. Redis cache: invalidation + warm-up if in production
     # ------------------------------------------------------------------ #
     try:
         await model_service.invalidate_model_cache(model_name)
     except Exception as _exc:
-        logger.warning("Invalidation cache échouée (non bloquant)", error=str(_exc))
+        logger.warning("Cache invalidation failed (non-blocking)", error=str(_exc))
 
     if new_metadata.is_production:
         try:
             async with AsyncSessionLocal() as warmup_db:
                 await model_service.load_model(warmup_db, model_name, new_version)
-            logger.info("Cache pré-chauffé", model=model_name, new_version=new_version)
+            logger.info("Cache warmed up", model=model_name, new_version=new_version)
         except Exception as _exc:
-            logger.warning("Pré-chauffe cache échouée (non bloquant)", error=str(_exc))
+            logger.warning("Cache warm-up failed (non-blocking)", error=str(_exc))
 
     # ------------------------------------------------------------------ #
     # 9. Webhooks
     # ------------------------------------------------------------------ #
+
     _wh = source_fields.get("webhook_url")
     if _wh:
         import asyncio as _asyncio
@@ -716,7 +717,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
 
     retrain_total.labels(model_name=model_name, status="success").inc()
     logger.info(
-        "Ré-entraînement terminé avec succès",
+        "Retraining completed successfully",
         model=model_name,
         source_version=source_version,
         new_version=new_version,
@@ -734,7 +735,7 @@ async def do_retrain(  # noqa: C901 — complexité inhérente au pipeline
         "f1_score": new_f1,
         "auto_promoted": (
             None
-            if set_production  # promotion manuelle → auto-promotion non évaluée
+            if set_production  # manual promotion → auto-promotion not evaluated
             else (auto_promoted if promotion_policy.get("auto_promote") else None)
         ),
         "auto_promote_reason": auto_promote_reason,

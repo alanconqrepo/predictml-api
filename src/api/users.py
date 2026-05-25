@@ -1,5 +1,5 @@
 """
-Endpoints pour la gestion des utilisateurs
+User management endpoints
 """
 
 import secrets
@@ -35,11 +35,11 @@ async def regenerate_my_token(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Régénère le token Bearer de l'utilisateur authentifié (self-service).
+    Regenerates the Bearer token of the authenticated user (self-service).
 
-    L'ancien token est immédiatement invalidé. Le nouveau token est retourné une seule fois.
+    The old token is immediately invalidated. The new token is returned only once.
 
-    Accessible par tous les rôles.
+    Accessible by all roles.
     """
     user = await DBService.update_user(db, current_user.id, regenerate_token=True)
     audit_log("user.token_self_regen", actor_id=current_user.id, resource=f"user:{current_user.id}")
@@ -49,9 +49,9 @@ async def regenerate_my_token(
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(verify_token)):
     """
-    Retourne le profil de l'utilisateur authentifié.
+    Returns the profile of the authenticated user.
 
-    Accessible par tous les rôles.
+    Accessible by all roles.
     """
     return current_user
 
@@ -62,9 +62,9 @@ async def get_my_quota(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Retourne le quota journalier de l'utilisateur authentifié.
+    Returns the daily quota of the authenticated user.
 
-    Accessible par tous les rôles.
+    Accessible by all roles.
     """
     used = await DBService.get_user_prediction_count_today(db, current_user.id)
     remaining = max(0, current_user.rate_limit_per_day - used)
@@ -86,23 +86,23 @@ async def create_user(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Crée un nouvel utilisateur et génère son token Bearer.
+    Creates a new user and generates their Bearer token.
 
-    - **username** et **email** doivent être uniques.
-    - **role** : `user` (défaut), `admin`, ou `readonly`.
-    - **rate_limit** : nombre max de prédictions par jour (défaut: 1000).
-    - Le **api_token** généré est retourné une seule fois — conservez-le.
+    - **username** and **email** must be unique.
+    - **role**: `user` (default), `admin`, or `readonly`.
+    - **rate_limit**: max predictions per day (default: 1000).
+    - The generated **api_token** is returned only once — save it.
 
-    Réservé aux administrateurs.
+    Reserved for administrators.
     """
-    # Vérifier l'unicité username et email
+    # Check username and email uniqueness
     existing = await db.execute(
         select(User).where((User.username == payload.username) | (User.email == payload.email))
     )
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Un utilisateur avec ce nom ou cet email existe déjà.",
+            detail="A user with this name or email already exists.",
         )
 
     api_token = secrets.token_urlsafe(32)
@@ -131,12 +131,12 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Liste les utilisateurs avec pagination.
+    Lists users with pagination.
 
-    - **skip** : nombre d'utilisateurs à ignorer (défaut: 0)
-    - **limit** : nombre maximum d'utilisateurs retournés (défaut: 100, max: 500)
+    - **skip**: number of users to skip (default: 0)
+    - **limit**: maximum number of users returned (default: 100, max: 500)
 
-    Réservé aux administrateurs.
+    Reserved for administrators.
     """
     return await DBService.get_all_users(db, skip=skip, limit=limit)
 
@@ -148,21 +148,21 @@ async def get_user(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Récupère un utilisateur par son ID.
+    Retrieves a user by their ID.
 
-    Accessible par l'administrateur ou par l'utilisateur lui-même.
+    Accessible by the administrator or by the user themselves.
     """
     if current_user.role != UserRole.ADMIN and current_user.id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Accès refusé : vous ne pouvez consulter que votre propre profil.",
+            detail="Access denied: you can only view your own profile.",
         )
 
     user = await DBService.get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Utilisateur {user_id} introuvable.",
+            detail=f"User {user_id} not found.",
         )
     return user
 
@@ -177,28 +177,28 @@ async def get_user_usage(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Retourne les statistiques d'usage d'un utilisateur sur une période.
+    Returns usage statistics for a user over a period.
 
-    - **by_model** : appels, erreurs et latence moyenne par modèle.
-    - **by_day** : nombre d'appels par jour sur la période.
-    - **by_model_day** : appels par modèle et par jour.
+    - **by_model**: calls, errors and average latency per model.
+    - **by_day**: number of calls per day over the period.
+    - **by_model_day**: calls per model per day.
 
-    Passer `start_date` et `end_date` (YYYY-MM-DD) pour une plage personnalisée,
-    ou `days` pour les N derniers jours (défaut : 30).
+    Pass `start_date` and `end_date` (YYYY-MM-DD) for a custom range,
+    or `days` for the last N days (default: 30).
 
-    Accessible par l'administrateur ou par l'utilisateur lui-même.
+    Accessible by the administrator or by the user themselves.
     """
     if current_user.role != UserRole.ADMIN and current_user.id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Accès refusé : vous ne pouvez consulter que vos propres statistiques.",
+            detail="Access denied: you can only view your own statistics.",
         )
 
     user = await DBService.get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Utilisateur {user_id} introuvable.",
+            detail=f"User {user_id} not found.",
         )
 
     if days is None or days < 1:
@@ -226,19 +226,19 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Met à jour un utilisateur : statut actif, rôle, rate limit, ou renouvellement du token.
+    Updates a user: active status, role, rate limit, or token renewal.
 
-    - **is_active** : activer ou désactiver le compte.
-    - **role** : changer le rôle (`admin`, `user`, `readonly`).
-    - **rate_limit** : modifier le quota journalier.
-    - **regenerate_token** : si `true`, génère un nouveau token Bearer.
+    - **is_active**: enable or disable the account.
+    - **role**: change the role (`admin`, `user`, `readonly`).
+    - **rate_limit**: modify the daily quota.
+    - **regenerate_token**: if `true`, generates a new Bearer token.
 
-    Réservé aux administrateurs.
+    Reserved for administrators.
     """
     if payload.is_active is False and current_user.id == user_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Vous ne pouvez pas désactiver votre propre compte.",
+            detail="You cannot deactivate your own account.",
         )
     user = await DBService.update_user(
         db,
@@ -251,7 +251,7 @@ async def update_user(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Utilisateur {user_id} introuvable.",
+            detail=f"User {user_id} not found.",
         )
     if payload.regenerate_token:
         audit_log("user.token_regen", actor_id=current_user.id, resource=f"user:{user_id}")
@@ -267,22 +267,22 @@ async def delete_user(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Supprime un utilisateur et toutes ses prédictions (cascade).
+    Deletes a user and all their predictions (cascade).
 
-    Un administrateur ne peut pas se supprimer lui-même.
+    An administrator cannot delete themselves.
 
-    Réservé aux administrateurs.
+    Reserved for administrators.
     """
     if current_user.id == user_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Vous ne pouvez pas supprimer votre propre compte.",
+            detail="You cannot delete your own account.",
         )
 
     deleted = await DBService.delete_user(db, user_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Utilisateur {user_id} introuvable.",
+            detail=f"User {user_id} not found.",
         )
     audit_log("user.delete", actor_id=current_user.id, resource=f"user:{user_id}")

@@ -1,9 +1,9 @@
 """
-Endpoints pour le tableau de bord de supervision des modèles.
+Endpoints for the model monitoring dashboard.
 
-Deux routes :
-  GET /monitoring/overview          — santé globale de tous les modèles
-  GET /monitoring/model/{name}      — détail complet pour un modèle
+Two routes:
+  GET /monitoring/overview          — global health of all models
+  GET /monitoring/model/{name}      — full detail for one model
 """
 
 import csv
@@ -35,11 +35,11 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 
-# Seuils de santé dérivés des stats globales
-_ERROR_RATE_WARNING = 0.05  # 5 % → warning
-_ERROR_RATE_CRITICAL = 0.10  # 10 % → critical
+# Health thresholds derived from global stats
+_ERROR_RATE_WARNING = 0.05  # 5% → warning
+_ERROR_RATE_CRITICAL = 0.10  # 10% → critical
 
-# Seuil de drift de performance (baisse relative d'accuracy entre 1re et 2e moitié de période)
+# Performance drift threshold (relative accuracy drop between 1st and 2nd half of period)
 _PERF_DRIFT_WARNING = 0.05  # −5 pts → warning
 _PERF_DRIFT_CRITICAL = 0.10  # −10 pts → critical
 
@@ -50,7 +50,7 @@ _PERF_DRIFT_CRITICAL = 0.10  # −10 pts → critical
 
 
 def _worst_health(*statuses: str) -> str:
-    """Retourne le statut le plus défavorable parmi ok/warning/critical/no_data."""
+    """Returns the most unfavourable status among ok/warning/critical/no_data."""
     order = {
         "ok": 0,
         "no_data": 0,
@@ -72,16 +72,16 @@ def _error_rate_status(error_rate: float) -> str:
 
 def _performance_drift_status(perf_by_day: list[dict]) -> str:
     """
-    Compare la 1re moitié de la période vs la 2e moitié.
-    Utilise MAE pour la régression, accuracy pour la classification.
-    Retourne ok / warning / critical / no_data.
+    Compares the 1st half of the period vs the 2nd half.
+    Uses MAE for regression, accuracy for classification.
+    Returns ok / warning / critical / no_data.
     """
     if len(perf_by_day) < 4:
         return "no_data"
     mid = len(perf_by_day) // 2
     use_mae = any(d.get("mae") is not None for d in perf_by_day)
     if use_mae:
-        # Pour la régression : hausse de MAE = dégradation → on inverse pour réutiliser la même logique
+        # For regression: rising MAE = degradation → invert to reuse the same logic
         first_half = [
             -d["mae"]
             for d in perf_by_day[:mid]
@@ -99,7 +99,7 @@ def _performance_drift_status(perf_by_day: list[dict]) -> str:
         return "no_data"
     avg_first = sum(first_half) / len(first_half)
     avg_second = sum(second_half) / len(second_half)
-    drop = avg_first - avg_second  # positif = dégradation
+    drop = avg_first - avg_second  # positive = degradation
     if drop >= _PERF_DRIFT_CRITICAL:
         return "critical"
     if drop >= _PERF_DRIFT_WARNING:
@@ -114,7 +114,7 @@ async def _compute_feature_drift_status(
     period_days: int,
     feature_baseline: Optional[dict],
 ) -> str:
-    """Retourne le statut de drift features (ok/warning/critical/no_baseline/insufficient_data)."""
+    """Returns the feature drift status (ok/warning/critical/no_baseline/insufficient_data)."""
     if not feature_baseline:
         return "no_baseline"
     production_stats = await DBService.get_feature_production_stats(
@@ -132,7 +132,7 @@ async def _compute_output_drift_status(
     model_version: Optional[str],
     period_days: int,
 ) -> str:
-    """Retourne le statut de drift de sortie (ok/warning/critical/no_baseline/insufficient_data)."""
+    """Returns the output drift status (ok/warning/critical/no_baseline/insufficient_data)."""
     report = await drift_service.compute_output_drift(
         model_name=model_name,
         period_days=period_days,
@@ -163,34 +163,34 @@ _CSV_COLUMNS = [
 
 @router.get("/overview", response_model=GlobalDashboard)
 async def monitoring_overview(
-    start: datetime = Query(..., description="Début de la période (ISO 8601)"),
-    end: datetime = Query(..., description="Fin de la période (ISO 8601)"),
+    start: datetime = Query(..., description="Start of the period (ISO 8601)"),
+    end: datetime = Query(..., description="End of the period (ISO 8601)"),
     format: str = Query(
         default="json",
         pattern="^(json|csv)$",
-        description="Format de sortie : json (défaut) ou csv",
+        description="Output format: json (default) or csv",
     ),
     db: AsyncSession = Depends(get_read_db),
     _user: User = Depends(verify_token),
 ) -> Union[GlobalDashboard, StreamingResponse]:
     """
-    Vue d'ensemble de la santé de tous les modèles sur une plage calendaire.
+    Overview of the health of all models over a calendar range.
 
-    Pour chaque modèle actif ayant reçu des prédictions dans la période :
-    - Volume de prédictions (réelles + shadow), taux d'erreur, latence (avg/p50/p95)
-    - Statut de drift des features (Z-score + PSI vs baseline)
-    - Statut de drift de performance (accuracy 1re moitié vs 2e moitié)
-    - Santé globale : pire des indicateurs (ok / warning / critical)
+    For each active model that received predictions in the period:
+    - Prediction volume (real + shadow), error rate, latency (avg/p50/p95)
+    - Feature drift status (Z-score + PSI vs baseline)
+    - Performance drift status (accuracy 1st half vs 2nd half)
+    - Overall health: worst indicator (ok / warning / critical)
     """
     if end <= start:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="'end' doit être postérieur à 'start'.",
+            detail="'end' must be after 'start'.",
         )
 
     period_days = max(1, (end - start).days)
 
-    # 1. Stats de base par modèle
+    # 1. Base stats per model
     raw_stats = await DBService.get_global_monitoring_stats(db, start, end)
 
     if not raw_stats:
@@ -220,23 +220,23 @@ async def monitoring_overview(
             models=[],
         )
 
-    # 2. Métadonnées de tous les modèles actifs (versions, deployment_modes, baselines)
+    # 2. Metadata for all active models (versions, deployment_modes, baselines)
     all_metadata = await DBService.get_all_active_models(db)
     meta_by_name: dict[str, list] = {}
     for m in all_metadata:
         meta_by_name.setdefault(m.name, []).append(m)
 
-    # 3. Construire le résumé de santé par modèle
+    # 3. Build health summary per model
     model_summaries: list[ModelHealthSummary] = []
 
     for raw in raw_stats:
         model_name = raw["model_name"]
         metas = meta_by_name.get(model_name, [])
 
-        # Versions et deployment_modes depuis la metadata
+        # Versions and deployment_modes from metadata
         versions = sorted({m.version for m in metas}) or raw["versions"]
         deployment_modes: dict[str, Optional[str]] = {m.version: m.deployment_mode for m in metas}
-        # Baseline : on prend la version production si disponible, sinon la première
+        # Baseline: use the production version if available, otherwise the first one
         prod_meta = next((m for m in metas if m.is_production), metas[0] if metas else None)
 
         # Feature drift status
@@ -260,10 +260,10 @@ async def monitoring_overview(
         perf_by_day = await DBService.get_accuracy_drift(db, model_name, start, end)
         perf_drift_status = _performance_drift_status(perf_by_day)
 
-        # Statut erreur
+        # Error status
         err_status = _error_rate_status(raw["error_rate"])
 
-        # Santé globale = pire indicateur
+        # Overall health = worst indicator
         health = _worst_health(
             err_status, feature_drift_status, perf_drift_status, output_drift_status
         )
@@ -288,7 +288,7 @@ async def monitoring_overview(
             )
         )
 
-    # 4. Stats globales agrégées
+    # 4. Aggregated global stats
     total_pred = sum(m.total_predictions for m in model_summaries)
     total_shadow = sum(m.shadow_predictions for m in model_summaries)
     total_errors = sum(m.error_count for m in model_summaries)
@@ -358,42 +358,42 @@ async def monitoring_overview(
 @router.get("/model/{name}", response_model=ModelDetailDashboard)
 async def monitoring_model_detail(
     name: str,
-    start: datetime = Query(..., description="Début de la période (ISO 8601)"),
-    end: datetime = Query(..., description="Fin de la période (ISO 8601)"),
+    start: datetime = Query(..., description="Start of the period (ISO 8601)"),
+    end: datetime = Query(..., description="End of the period (ISO 8601)"),
     db: AsyncSession = Depends(get_read_db),
     _user: User = Depends(verify_token),
 ):
     """
-    Tableau de bord détaillé pour un modèle sur une plage calendaire.
+    Detailed dashboard for a model over a calendar range.
 
-    Retourne :
-    - Statistiques par version (prédictions, erreurs, latence p50/p95)
-    - Série temporelle quotidienne (volume, erreurs, latence)
-    - Drift de performance (accuracy/MAE par jour vs baseline)
-    - Drift de features (Z-score + PSI par feature)
-    - Comparaison A/B (si plusieurs versions en mode ab_test)
-    - Dernières erreurs distinctes
+    Returns:
+    - Per-version statistics (predictions, errors, p50/p95 latency)
+    - Daily time series (volume, errors, latency)
+    - Performance drift (accuracy/MAE per day vs baseline)
+    - Feature drift (Z-score + PSI per feature)
+    - A/B comparison (if multiple versions in ab_test mode)
+    - Latest distinct errors
     """
     if end <= start:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="'end' doit être postérieur à 'start'.",
+            detail="'end' must be after 'start'.",
         )
 
     period_days = max(1, (end - start).days)
 
-    # Vérifier que le modèle existe
+    # Verify the model exists
     all_metas = await DBService.get_all_active_models(db)
     metas = [m for m in all_metas if m.name == name]
     if not metas:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' introuvable.",
+            detail=f"Model '{name}' not found.",
         )
 
-    # 1. Stats par version dans la période
+    # 1. Per-version stats over the period
     version_stats_raw = await DBService.get_model_version_stats_range(db, name, start, end)
-    # Enrichir avec deployment_mode + traffic_weight depuis la metadata
+    # Enrich with deployment_mode + traffic_weight from metadata
     meta_by_version = {m.version: m for m in metas}
     per_version_stats = [
         VersionStats(
@@ -411,7 +411,7 @@ async def monitoring_model_detail(
         for v in version_stats_raw
     ]
 
-    # 2. Série temporelle quotidienne
+    # 2. Daily time series
     timeseries_raw = await DBService.get_model_predictions_timeseries(db, name, start, end)
     timeseries = [
         TimeseriesPoint(
@@ -426,10 +426,10 @@ async def monitoring_model_detail(
         for t in timeseries_raw
     ]
 
-    # 3. Performance par jour (accuracy vs observed_results)
+    # 3. Performance per day (accuracy vs observed_results)
     performance_by_day = await DBService.get_accuracy_drift(db, name, start, end)
 
-    # 4. Feature drift — sur la fenêtre glissante équivalente à la période
+    # 4. Feature drift — over the sliding window equivalent to the period
     prod_meta = next((m for m in metas if m.is_production), metas[0])
     production_stats = await DBService.get_feature_production_stats(
         db, name, prod_meta.version, period_days
@@ -467,7 +467,7 @@ async def monitoring_model_detail(
             },
         }
 
-    # 5. Comparaison A/B/Shadow — si plusieurs versions actives
+    # 5. A/B/Shadow comparison — if multiple active versions
     ab_comparison: Optional[dict] = None
     has_ab = any(m.deployment_mode in ("ab_test", "shadow") for m in metas)
     if has_ab:
@@ -478,7 +478,7 @@ async def monitoring_model_detail(
             "shadow_agreement_rate": agreement,
         }
 
-    # 6. Dernières erreurs distinctes
+    # 6. Latest distinct errors
     recent_errors = await DBService.get_model_recent_errors(db, name, start, end, limit=5)
 
     return ModelDetailDashboard(
