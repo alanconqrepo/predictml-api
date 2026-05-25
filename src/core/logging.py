@@ -1,14 +1,14 @@
 """
-Configuration du logging structuré (JSON) pour l'application.
+Structured (JSON) logging configuration for the application.
 
-En production (DEBUG=False) : sortie JSON exploitable par ELK/Datadog/CloudWatch.
-En développement (DEBUG=True) : sortie colorée lisible dans le terminal.
+In production (DEBUG=False): JSON output suitable for ELK/Datadog/CloudWatch.
+In development (DEBUG=True): coloured, human-readable terminal output.
 
-Architecture :
-  On attache le handler structlog au logger "src" (propagate=False) en PLUS
-  du root logger. Ainsi, même si uvicorn reconfigure le root logger via
-  dictConfig dans ses workers, le logger "src.*" conserve son handler direct
-  et continue d'écrire sur stderr — visible dans docker logs.
+Architecture:
+  The structlog handler is attached to both the "src" logger (propagate=False)
+  AND the root logger. This way, even if uvicorn reconfigures the root logger
+  via dictConfig inside its workers, "src.*" loggers keep their own direct
+  handler and continue writing to stderr — visible in docker logs.
 """
 
 import logging
@@ -18,7 +18,7 @@ import structlog
 
 
 def setup_logging(debug: bool = False) -> None:
-    """Configure structlog avec rendu JSON en production et pretty-print en debug."""
+    """Configure structlog with JSON rendering in production and pretty-print in debug."""
     level = logging.DEBUG if debug else logging.INFO
 
     shared_processors = [
@@ -53,23 +53,23 @@ def setup_logging(debug: bool = False) -> None:
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(formatter)
 
-    # Root logger — pour les libs tierces et le fallback
+    # Root logger — for third-party libs and fallback
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
     root_logger.setLevel(level)
 
-    # Logger "src" avec handler direct + propagate=False.
-    # Uvicorn applique son propre dictConfig dans chaque worker après notre
-    # setup_logging(). Avec propagate=False, les logs "src.*" ne passent plus
-    # par le root (potentiellement écrasé) — ils ont leur propre handler garanti.
+    # "src" logger with a direct handler + propagate=False.
+    # Uvicorn applies its own dictConfig in each worker after our setup_logging().
+    # With propagate=False, "src.*" logs no longer go through the root (potentially
+    # overwritten) — they have their own guaranteed handler.
     src_logger = logging.getLogger("src")
     src_logger.handlers.clear()
     src_logger.addHandler(handler)
     src_logger.setLevel(level)
     src_logger.propagate = False
 
-    # Réduire le bruit des libs tierces en production
+    # Reduce noise from third-party libs in production
     if not debug:
         logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
         logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)

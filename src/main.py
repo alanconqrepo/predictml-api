@@ -1,5 +1,5 @@
 """
-Point d'entrée principal de l'application FastAPI
+Main entry point for the FastAPI application
 """
 
 import asyncio
@@ -31,11 +31,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.base import BaseHTTPMiddleware
 
-# ── Logging configuré EN PREMIER — avant tout import du projet ────────────────
-# Raison : structlog.cache_logger_on_first_use=True met en cache le logger à la
-# première utilisation. Si un module (ex : src.api.models) est importé avant
-# setup_logging(), son logger se cache dans un état non-configuré et les appels
-# logger.info() n'apparaissent jamais dans docker logs.
+# ── Logging configured FIRST — before any project imports ────────────────────
+# Reason: structlog.cache_logger_on_first_use=True caches the logger on first
+# use. If a module (e.g. src.api.models) is imported before setup_logging(),
+# its logger gets cached in an unconfigured state and logger.info() calls
+# never appear in docker logs.
 from src.core.config import settings
 from src.core.logging import setup_logging
 
@@ -63,7 +63,7 @@ logger = structlog.get_logger(__name__)
 
 
 async def run_migrations() -> None:
-    """Applique les migrations Alembic en attente (alembic upgrade head)."""
+    """Apply pending Alembic migrations (alembic upgrade head)."""
 
     def _run() -> None:
         cfg = AlembicConfig("alembic.ini")
@@ -73,27 +73,27 @@ async def run_migrations() -> None:
 
 
 def _check_metrics_config() -> None:
-    """Avertit si METRICS_TOKEN n'est pas défini.
+    """Warn if METRICS_TOKEN is not set.
 
-    Note sécurité : le port 8000 de l'API n'est pas exposé à l'hôte dans
-    docker-compose.yml — l'endpoint /metrics n'est accessible que depuis le
-    réseau interne Docker (Prometheus/grafana). Ne pas lever d'exception ici
-    permet au stack de démarrer sans METRICS_TOKEN tout en conservant la
-    protection optionnelle via Bearer token si METRICS_TOKEN est défini.
+    Security note: API port 8000 is not exposed to the host in docker-compose.yml —
+    the /metrics endpoint is only reachable from the internal Docker network
+    (Prometheus/Grafana). Not raising an exception here allows the stack to start
+    without METRICS_TOKEN while still keeping optional Bearer token protection
+    when METRICS_TOKEN is defined.
     """
     if not settings.METRICS_TOKEN:
-        logger.warning("METRICS_TOKEN non défini — endpoint /metrics accessible publiquement")
+        logger.warning("METRICS_TOKEN not set — /metrics endpoint is publicly accessible")
 
 
 async def _bootstrap_admin_user() -> None:
-    """Crée l'utilisateur admin au premier démarrage s'il n'existe pas.
+    """Create the admin user on first startup if it does not already exist.
 
-    Idempotent et race-safe : IntegrityError ignorée si un autre réplica
-    a déjà inséré la ligne en parallèle.
-    Ne fait rien si ADMIN_TOKEN n'est pas défini.
+    Idempotent and race-safe: IntegrityError is silently ignored if another
+    replica has already inserted the row in parallel.
+    Does nothing if ADMIN_TOKEN is not set.
     """
     if not settings.ADMIN_TOKEN:
-        logger.warning("ADMIN_TOKEN non défini — utilisateur admin non créé automatiquement")
+        logger.warning("ADMIN_TOKEN not set — admin user will not be created automatically")
         return
 
     from sqlalchemy import select
@@ -116,15 +116,15 @@ async def _bootstrap_admin_user() -> None:
             )
             db.add(user)
             await db.commit()
-            logger.info("Utilisateur admin créé", email=settings.ADMIN_EMAIL)
+            logger.info("Admin user created", email=settings.ADMIN_EMAIL)
     except IntegrityError:
-        logger.debug("Utilisateur admin déjà présent (race ignorée)")
+        logger.debug("Admin user already exists (race condition ignored)")
     except Exception as e:
-        logger.warning("Bootstrap admin ignoré", error=str(e))
+        logger.warning("Admin bootstrap skipped", error=str(e))
 
 
 async def _warmup_production_models() -> None:
-    """Précharge en Redis les modèles marqués is_production=True."""
+    """Pre-load into Redis all models marked is_production=True."""
     try:
         async with AsyncSessionLocal() as db:
             active_models = await db_service.get_production_models(db)
@@ -135,17 +135,17 @@ async def _warmup_production_models() -> None:
 
         tasks = [_load_one(m.name, m.version) for m in active_models]
         await asyncio.gather(*tasks, return_exceptions=True)
-        logger.info("Warm-up terminé", count=len(active_models))
+        logger.info("Warm-up complete", count=len(active_models))
     except Exception as e:
-        logger.warning("Warm-up ignoré", error=str(e))
+        logger.warning("Warm-up skipped", error=str(e))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Gestion du cycle de vie de l'application"""
+    """Application lifecycle management."""
     # Startup
     logger.info(
-        "Démarrage de l'application",
+        "Starting application",
         title=settings.API_TITLE,
         version=settings.API_VERSION,
     )
@@ -154,22 +154,22 @@ async def lifespan(app: FastAPI):
 
     try:
         await run_migrations()
-        logger.info("Migrations Alembic appliquées")
+        logger.info("Alembic migrations applied")
     except Exception as e:
-        logger.warning("Avertissement migrations", error=str(e))
+        logger.warning("Migration warning", error=str(e))
 
     try:
         await init_db()
-        logger.info("Base de données connectée")
+        logger.info("Database connected")
     except Exception as e:
-        logger.warning("Avertissement DB", error=str(e))
+        logger.warning("Database warning", error=str(e))
 
     await _bootstrap_admin_user()
 
     await _warmup_production_models()
 
     logger.info(
-        "Application prête",
+        "Application ready",
         postgresql=(
             settings.DATABASE_URL.split("@")[1] if "@" in settings.DATABASE_URL else "configured"
         ),
@@ -177,24 +177,24 @@ async def lifespan(app: FastAPI):
         minio_bucket=settings.MINIO_BUCKET,
     )
 
-    # Initialiser le pool ARQ pour l'enqueue des tâches longues
-    # (retrain, etc.) vers le worker retrain-worker
+    # Initialise ARQ pool for enqueueing long-running tasks
+    # (retrain, etc.) to the retrain-worker
     try:
         import src.core.arq_pool as arq_pool_module
 
         await arq_pool_module.get_arq_pool()
-        logger.info("ARQ pool initialisé — worker retrain-worker prêt à recevoir des jobs")
+        logger.info("ARQ pool initialised — retrain-worker ready to receive jobs")
     except Exception as e:
         logger.warning(
-            "ARQ pool indisponible au démarrage — les retrain manuels retourneront 503 "
-            "jusqu'à ce que le worker soit joignable",
+            "ARQ pool unavailable at startup — manual retrains will return 503 "
+            "until the worker is reachable",
             error=str(e),
         )
 
     yield
 
     # Shutdown
-    logger.info("Fermeture de l'application")
+    logger.info("Shutting down application")
     try:
         import src.core.arq_pool as arq_pool_module
 
@@ -204,18 +204,18 @@ async def lifespan(app: FastAPI):
 
     try:
         await close_db()
-        logger.info("Connexions DB fermées")
+        logger.info("Database connections closed")
     except Exception as e:
-        logger.warning("Erreur fermeture DB", error=str(e))
+        logger.warning("Error closing database", error=str(e))
     try:
         await model_service.close()
     except Exception as e:
-        logger.warning("Erreur fermeture Redis", error=str(e))
-    logger.info("Application arrêtée")
+        logger.warning("Error closing Redis", error=str(e))
+    logger.info("Application stopped")
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Ajoute les en-têtes de sécurité HTTP à chaque réponse."""
+    """Adds HTTP security headers to every response."""
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -227,19 +227,19 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-# Créer l'application FastAPI
+# Create the FastAPI application
 app = FastAPI(
     title=settings.API_TITLE,
     version=settings.API_VERSION,
-    description="API REST pour faire des prédictions avec plusieurs modèles scikit-learn",
+    description="REST API for serving predictions with multiple scikit-learn models",
     lifespan=lifespan,
 )
 
-# Rate limiting par IP (slowapi)
+# Per-IP rate limiting (slowapi)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS — n'autoriser que les origines explicitement configurées
+# CORS — only allow explicitly configured origins
 _cors_origins = [
     o.strip()
     for o in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:8501").split(",")
@@ -255,16 +255,16 @@ app.add_middleware(
 
 app.add_middleware(SecurityHeadersMiddleware)
 
-# Instrumenter l'app sans exposer — l'endpoint /metrics est défini plus bas
+# Instrument the app without exposing — /metrics endpoint is defined below
 Instrumentator().instrument(app)
 
-# Activer OpenTelemetry si demandé
+# Enable OpenTelemetry if requested
 if settings.ENABLE_OTEL:
     from src.core.telemetry import setup_telemetry
 
     setup_telemetry(app, engine=engine)
 
-# Inclure les routers
+# Include routers
 app.include_router(predict.router)
 app.include_router(models.router)
 app.include_router(users.router)
@@ -284,8 +284,8 @@ async def metrics(request: Request) -> Response:
     if "PROMETHEUS_MULTIPROC_DIR" in os.environ:
         registry = CollectorRegistry()
         prom_multiprocess.MultiProcessCollector(registry)
-        # Ajoute les métriques process (mémoire RSS, CPU) du worker courant.
-        # En mode multi-worker, cela reflète le worker qui répond au scraping.
+        # Add process metrics (RSS memory, CPU) for the current worker.
+        # In multi-worker mode this reflects whichever worker handles the scrape.
         ProcessCollector(namespace="", registry=registry)
         data = generate_latest(registry)
     else:
@@ -296,7 +296,7 @@ async def metrics(request: Request) -> Response:
 @app.get("/")
 async def root():
     """
-    Endpoint racine - Informations sur l'API
+    Root endpoint — API information
     """
     return {
         "status": "ok",
@@ -310,7 +310,7 @@ async def health(db: AsyncSession = Depends(get_db)):
     """
     Health check endpoint
 
-    Vérifie que l'API fonctionne correctement
+    Verifies that the API is operating correctly
     """
     try:
         available = await model_service.get_available_models(db)
@@ -323,7 +323,7 @@ async def health(db: AsyncSession = Depends(get_db)):
             "models_cached": len(cached),
         }
     except Exception as e:
-        logger.warning("Health check dégradé", error=str(e))
+        logger.warning("Degraded health check", error=str(e))
         return {
             "status": "degraded",
             "database": "error",
@@ -337,7 +337,7 @@ async def _check_db(db: AsyncSession) -> DependencyDetail:
         return DependencyDetail(status="ok", latency_ms=round((time.monotonic() - start) * 1000, 1))
     except Exception as exc:
         logger.warning("Health check DB failed", error=str(exc))
-        return DependencyDetail(status="error", latency_ms=None, detail="connexion échouée")
+        return DependencyDetail(status="error", latency_ms=None, detail="connection failed")
 
 
 async def _check_redis() -> DependencyDetail:
@@ -348,7 +348,7 @@ async def _check_redis() -> DependencyDetail:
         return DependencyDetail(status="ok", latency_ms=round((time.monotonic() - start) * 1000, 1))
     except Exception as exc:
         logger.warning("Health check Redis failed", error=str(exc))
-        return DependencyDetail(status="error", latency_ms=None, detail="connexion échouée")
+        return DependencyDetail(status="error", latency_ms=None, detail="connection failed")
 
 
 async def _check_minio() -> DependencyDetail:
@@ -359,7 +359,7 @@ async def _check_minio() -> DependencyDetail:
         return DependencyDetail(status="ok", latency_ms=round((time.monotonic() - start) * 1000, 1))
     except Exception as exc:
         logger.warning("Health check MinIO failed", error=str(exc))
-        return DependencyDetail(status="error", latency_ms=None, detail="connexion échouée")
+        return DependencyDetail(status="error", latency_ms=None, detail="connection failed")
 
 
 async def _check_mlflow() -> DependencyDetail:
@@ -372,7 +372,7 @@ async def _check_mlflow() -> DependencyDetail:
         return DependencyDetail(status="ok", latency_ms=round((time.monotonic() - start) * 1000, 1))
     except Exception as exc:
         logger.warning("Health check MLflow failed", error=str(exc))
-        return DependencyDetail(status="error", latency_ms=None, detail="connexion échouée")
+        return DependencyDetail(status="error", latency_ms=None, detail="connection failed")
 
 
 @app.get("/health/dependencies", response_model=DependencyHealthResponse)
@@ -380,11 +380,11 @@ async def health_dependencies(
     db: AsyncSession = Depends(get_db), _: object = Depends(require_admin)
 ):
     """
-    Health check détaillé — vérifie DB, Redis, MinIO et MLflow en parallèle.
+    Detailed health check — verifies DB, Redis, MinIO and MLflow in parallel.
 
-    - **ok** : toutes les dépendances répondent
-    - **degraded** : ≥ 1 dépendance non-critique en erreur
-    - **critical** : la base de données est inaccessible
+    - **ok**: all dependencies are responding
+    - **degraded**: ≥ 1 non-critical dependency is in error
+    - **critical**: the database is unreachable
     """
     db_result, redis_result, minio_result, mlflow_result = await asyncio.gather(
         _check_db(db),

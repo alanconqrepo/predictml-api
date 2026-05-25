@@ -1,1 +1,1 @@
-"""Configuration et sécurité"""
+"""Configuration and security"""

@@ -1,24 +1,27 @@
 """
-Utilitaires de limitation de ressources processus — cross-platform (Unix et Windows).
+Process resource-limit utilities — cross-platform (Unix and Windows).
 
-Sur Windows, ``resource`` n'existe pas ; toutes les opérations sont des no-ops et
-``preexec_fn`` (non supporté par asyncio.create_subprocess_exec) est omis des kwargs.
+On Windows, ``resource`` does not exist; all operations are no-ops and
+``preexec_fn`` (unsupported by asyncio.create_subprocess_exec) is omitted
+from the kwargs dict.
 """
+
 import sys
 
 if sys.platform != "win32":
-    import resource as _resource  # module Unix uniquement
+    import resource as _resource  # Unix-only module
 
 
 def set_subprocess_limits() -> None:
     """
-    Appelé dans le processus enfant après fork (preexec_fn) — réduit la surface d'attaque.
+    Called in the child process after fork (preexec_fn) — reduces the attack surface.
 
-    RLIMIT_NOFILE : 1024 minimum requis — importlib_metadata ouvre les métadonnées de
-    tous les paquets installés à l'import de mlflow (200+ fd simultanément).
+    RLIMIT_NOFILE: 1024 minimum required — importlib_metadata opens the metadata
+    of all installed packages when mlflow is imported (200+ simultaneous file
+    descriptors).
 
-    No-op sur Windows : le module ``resource`` n'existe pas sur cette plateforme.
-    La gestion des limites de ressources est assurée par le système d'exploitation.
+    No-op on Windows: the ``resource`` module does not exist on that platform.
+    Resource limit management is handled by the operating system.
     """
     if sys.platform == "win32":
         return
@@ -27,9 +30,8 @@ def set_subprocess_limits() -> None:
     _resource.setrlimit(_resource.RLIMIT_NOFILE, (_fd_limit, _fd_limit))
 
 
-# Kwargs supplémentaires pour asyncio.create_subprocess_exec.
-# preexec_fn n'est pas supporté sur Windows (lève ValueError).
+# Extra kwargs for asyncio.create_subprocess_exec.
+# preexec_fn is not supported on Windows (raises ValueError).
 SUBPROCESS_PREEXEC_KWARGS: dict = (
-    {} if sys.platform == "win32"
-    else {"preexec_fn": set_subprocess_limits}
+    {} if sys.platform == "win32" else {"preexec_fn": set_subprocess_limits}
 )
