@@ -1,5 +1,5 @@
 """
-Endpoints pour la gestion des modèles
+Model management endpoints
 """
 
 import ast
@@ -139,7 +139,7 @@ def validate_model_name(name: str) -> str:
     if not NAME_RE.match(name):
         raise HTTPException(
             status_code=422,
-            detail="Nom de modèle invalide (caractères autorisés : a-z A-Z 0-9 _ -)",
+            detail="Invalid model name (allowed characters: a-z A-Z 0-9 _ -)",
         )
     return name
 
@@ -148,7 +148,7 @@ def validate_version(version: str) -> str:
     if not VERSION_RE.match(version):
         raise HTTPException(
             status_code=422,
-            detail="Version invalide (format attendu : X.Y ou X.Y.Z)",
+            detail="Invalid version (expected format: X.Y or X.Y.Z)",
         )
     return version
 
@@ -156,11 +156,11 @@ def validate_version(version: str) -> str:
 # Annotated path-parameter types — FastAPI enforces the pattern before the handler runs
 ModelNamePath = Annotated[
     str,
-    Path(pattern=r"^[a-zA-Z0-9_-]{1,64}$", description="Nom du modèle"),
+    Path(pattern=r"^[a-zA-Z0-9_-]{1,64}$", description="Model name"),
 ]
 ModelVersionPath = Annotated[
     str,
-    Path(pattern=r"^\d+\.\d+(\.\d+)?$", description="Version du modèle (X.Y ou X.Y.Z)"),
+    Path(pattern=r"^\d+\.\d+(\.\d+)?$", description="Model version (X.Y or X.Y.Z)"),
 ]
 
 
@@ -215,7 +215,6 @@ _ALLOWED_IMPORT_MODULES = {
 }
 
 
-
 def _parse_json_field(value: str | None, field_name: str) -> dict | list | None:
     if not value:
         return None
@@ -227,23 +226,23 @@ def _parse_json_field(value: str | None, field_name: str) -> dict | list | None:
 
 def _validate_train_script(source: str) -> Optional[str]:
     """
-    Valide statiquement un script train.py contre les contraintes requises.
+    Validates a train.py script against the required constraints.
 
-    Le script doit :
-    1. Être du Python syntaxiquement valide
-    2. N'importer que des modules de la liste autorisée
-    3. Référencer TRAIN_START_DATE (variable d'env)
-    4. Référencer TRAIN_END_DATE (variable d'env)
-    5. Référencer OUTPUT_MODEL_PATH (variable d'env)
-    6. Contenir un appel de sauvegarde : joblib.dump ou save_model
+    The script must:
+    1. Be syntactically valid Python
+    2. Only import modules from the allowed list
+    3. Reference TRAIN_START_DATE (env variable)
+    4. Reference TRAIN_END_DATE (env variable)
+    5. Reference OUTPUT_MODEL_PATH (env variable)
+    6. Contain a save call: joblib.dump or save_model
 
     Returns:
-        None si le script est valide, sinon un message d'erreur.
+        None if the script is valid, otherwise an error message.
     """
     try:
         tree = ast.parse(source)
     except SyntaxError as e:
-        return f"Syntaxe Python invalide : {e}"
+        return f"Invalid Python syntax: {e}"
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -251,22 +250,22 @@ def _validate_train_script(source: str) -> Optional[str]:
                 top = alias.name.split(".")[0]
                 if top not in _ALLOWED_IMPORT_MODULES:
                     return (
-                        f"Import non autorisé : '{alias.name}'. "
-                        f"Modules autorisés in _ALLOWED_IMPORT_MODULES: {sorted(_ALLOWED_IMPORT_MODULES)}"
+                        f"Unauthorized import: '{alias.name}'. "
+                        f"Allowed modules: {sorted(_ALLOWED_IMPORT_MODULES)}"
                     )
         elif isinstance(node, ast.ImportFrom):
             if node.module:
                 top = node.module.split(".")[0]
                 if top not in _ALLOWED_IMPORT_MODULES:
                     return (
-                        f"Import non autorisé : '{node.module}'. "
-                        f"Modules autorisés in _ALLOWED_IMPORT_MODULES : {sorted(_ALLOWED_IMPORT_MODULES)}"
+                        f"Unauthorized import: '{node.module}'. "
+                        f"Allowed modules: {sorted(_ALLOWED_IMPORT_MODULES)}"
                     )
 
     required_tokens = {
-        "TRAIN_START_DATE": "doit référencer la variable d'env TRAIN_START_DATE",
-        "TRAIN_END_DATE": "doit référencer la variable d'env TRAIN_END_DATE",
-        "OUTPUT_MODEL_PATH": "doit référencer la variable d'env OUTPUT_MODEL_PATH",
+        "TRAIN_START_DATE": "must reference the TRAIN_START_DATE env variable",
+        "TRAIN_END_DATE": "must reference the TRAIN_END_DATE env variable",
+        "OUTPUT_MODEL_PATH": "must reference the OUTPUT_MODEL_PATH env variable",
     }
     for token, msg in required_tokens.items():
         if token not in source:
@@ -274,27 +273,27 @@ def _validate_train_script(source: str) -> Optional[str]:
 
     save_calls = ["joblib.dump", "save_model"]
     if not any(call in source for call in save_calls):
-        return "Le script doit sauvegarder le modèle avec joblib.dump ou save_model"
+        return "The script must save the model with joblib.dump or save_model"
 
     return None
 
 
 def _detect_task_type(model_bytes: bytes) -> Optional[str]:
     """
-    Détecte le type de tâche depuis les bytes du modèle sklearn (.joblib).
-    Retourne "regression", "classification_binary", "classification_multiclass", ou None.
+    Detects the task type from the sklearn model bytes (.joblib).
+    Returns 'regression', 'classification_binary', 'classification_multiclass', or None.
     """
     try:
         import joblib
 
         obj = joblib.load(io.BytesIO(model_bytes))
-        # Unwrap Pipeline : prendre le dernier estimateur
+        # Unwrap Pipeline: take the last estimator
         if hasattr(obj, "steps"):
             obj = obj.steps[-1][1]
         if hasattr(obj, "classes_"):
             n = len(obj.classes_)
             return "classification_binary" if n == 2 else "classification_multiclass"
-        # Régression : pas de classes_, mais prédit des valeurs continues
+        # Regression: no classes_, but predicts continuous values
         if hasattr(obj, "predict"):
             return "regression"
     except Exception:
@@ -321,15 +320,15 @@ async def _run_train_subprocess(
     train_source: str,
 ) -> tuple[Optional[str], Optional[bytes]]:
     """
-    Lance train.py en subprocess avec des dates par défaut (J-30 → aujourd'hui).
+    Runs train.py in a subprocess with default dates (D-30 → today).
 
-    Retourne ``(req_txt, model_bytes)`` :
-    - ``req_txt``     : contenu du requirements.txt (depuis "dependencies" dans stdout JSON),
-                        ou None si le champ est absent (l'appelant fait le fallback AST).
-    - ``model_bytes`` : contenu du .joblib généré par le script, ou None si le subprocess a échoué
-                        ou n'a pas produit de fichier (l'appelant utilise le fichier uploadé).
+    Returns ``(req_txt, model_bytes)``:
+    - ``req_txt``     : contents of requirements.txt (from "dependencies" in stdout JSON),
+                        or None if the field is absent (caller falls back to AST).
+    - ``model_bytes`` : contents of the .joblib produced by the script, or None if the subprocess
+                        failed or produced no file (caller uses the uploaded file).
 
-    Timeout : 120 s.
+    Timeout: 120 s.
     """
     import asyncio
     import json as _json
@@ -377,19 +376,19 @@ async def _run_train_subprocess(
 
             stdout_text = raw_stdout.decode("utf-8", errors="replace")
 
-            # Lire le .joblib produit (si présent)
+            # Read the produced .joblib (if present)
             model_bytes: Optional[bytes] = None
             if proc.returncode == 0 and os.path.exists(output_path):
                 with open(output_path, "rb") as f:
                     model_bytes = f.read()
             elif proc.returncode != 0:
                 logger.warning(
-                    "_run_train_subprocess : subprocess échoué",
+                    "_run_train_subprocess: subprocess failed",
                     returncode=proc.returncode,
                     stderr=raw_stderr.decode("utf-8", errors="replace")[:300],
                 )
 
-            # Extraire "dependencies" depuis la dernière ligne JSON de stdout
+            # Extract "dependencies" from the last JSON line of stdout
             req_txt: Optional[str] = None
             for line in reversed(stdout_text.strip().splitlines()):
                 stripped = line.strip()
@@ -412,33 +411,33 @@ async def _run_train_subprocess(
 
 @router.get("/models", response_model=List[Dict[str, Any]])
 async def list_models(
-    tag: Optional[str] = Query(None, description="Filtrer par tag (ex: production, finance)"),
-    is_production: Optional[bool] = Query(None, description="Filtrer sur is_production"),
+    tag: Optional[str] = Query(None, description="Filter by tag (e.g. production, finance)"),
+    is_production: Optional[bool] = Query(None, description="Filter by is_production"),
     algorithm: Optional[str] = Query(
-        None, description="Filtre exact sur l'algorithme (ex: RandomForest)"
+        None, description="Exact filter on algorithm (e.g. RandomForest)"
     ),
-    min_accuracy: Optional[float] = Query(None, description="Filtre accuracy >= valeur (ex: 0.85)"),
+    min_accuracy: Optional[float] = Query(None, description="Filter accuracy >= value (e.g. 0.85)"),
     deployment_mode: Optional[Literal["production", "ab_test", "shadow"]] = Query(
-        None, description="Mode de déploiement : production | ab_test | shadow"
+        None, description="Deployment mode: production | ab_test | shadow"
     ),
     search: Optional[str] = Query(
-        None, description="Recherche textuelle sur le nom et la description (insensible à la casse)"
+        None, description="Text search on name and description (case-insensitive)"
     ),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Liste tous les modèles disponibles depuis la base de données.
+    Lists all available models from the database.
 
-    Filtres optionnels (combinables en AND) :
-    - **tag** : filtrer par tag
-    - **is_production** : filtrer sur le statut de production
-    - **algorithm** : filtre exact sur l'algorithme
-    - **min_accuracy** : accuracy minimale (>= valeur)
-    - **deployment_mode** : mode de déploiement (`production`, `ab_test`, `shadow`)
-    - **search** : recherche textuelle sur name et description (ILIKE)
+    Optional filters (combinable with AND):
+    - **tag**: filter by tag
+    - **is_production**: filter by production status
+    - **algorithm**: exact filter on algorithm
+    - **min_accuracy**: minimum accuracy (>= value)
+    - **deployment_mode**: deployment mode (`production`, `ab_test`, `shadow`)
+    - **search**: text search on name and description (ILIKE)
 
     Returns:
-        Liste des modèles actifs avec leurs métadonnées
+        List of active models with their metadata
     """
     models = await model_service.get_available_models(
         db,
@@ -456,10 +455,10 @@ async def list_models(
 @router.get("/models/cached")
 async def list_cached_models():
     """
-    Liste les modèles actuellement en cache mémoire
+    Lists models currently in memory cache.
 
     Returns:
-        Liste des object keys MinIO en cache
+        List of MinIO object keys in cache
     """
     cached = await model_service.get_cached_models()
     return {"cached_models": cached, "count": len(cached)}
@@ -475,10 +474,10 @@ async def get_models_leaderboard(
     _user: User = Depends(verify_token),
 ) -> List[LeaderboardEntry]:
     """
-    Classement global des modèles en production par métrique de performance.
+    Global ranking of production models by performance metric.
 
-    Trie tous les modèles actifs en production selon `metric` sur les `days` derniers jours.
-    Résultat mis en cache 5 minutes (TTL) pour éviter de recalculer le drift à chaque appel.
+    Sorts all active production models by `metric` over the last `days` days.
+    Result is cached for 5 minutes (TTL) to avoid recomputing drift on each call.
     """
     cache_key = f"{metric}:{days}"
     cached = _leaderboard_cache.get(cache_key)
@@ -525,7 +524,7 @@ async def get_models_leaderboard(
     elif metric == "r2":
         entries.sort(key=lambda e: e.r2 if e.r2 is not None else -float("inf"), reverse=True)
     elif metric == "rmse":
-        # RMSE : plus petit = meilleur → ordre croissant, None en dernier
+        # RMSE: lower is better → ascending order, None last
         entries.sort(key=lambda e: e.rmse if e.rmse is not None else float("inf"))
     else:  # accuracy
         entries.sort(key=lambda e: e.accuracy if e.accuracy is not None else -1, reverse=True)
@@ -543,7 +542,7 @@ async def get_models_leaderboard(
 
 
 def _detect_model_type(metadata: Optional[ModelMetadata], pairs: list) -> str:
-    """Détecte si le modèle est de classification ou de régression."""
+    """Detects whether the model is classification or regression."""
     if metadata and metadata.classes:
         return "classification"
     if any(row.probabilities for row in pairs):
@@ -608,36 +607,36 @@ def _bucket_key(ts: datetime, granularity: str) -> str:
 @router.get("/models/{name}/performance", response_model=ModelPerformanceResponse)
 async def get_model_performance(
     name: ModelNamePath,
-    start: Optional[datetime] = Query(None, description="Début de période (ISO 8601)"),
-    end: Optional[datetime] = Query(None, description="Fin de période (ISO 8601)"),
+    start: Optional[datetime] = Query(None, description="Start of period (ISO 8601)"),
+    end: Optional[datetime] = Query(None, description="End of period (ISO 8601)"),
     version: Optional[str] = Query(
-        None, description="Version du modèle (optionnel)", pattern=r"^\d+\.\d+(\.\d+)?$"
+        None, description="Model version (optional)", pattern=r"^\d+\.\d+(\.\d+)?$"
     ),
     granularity: Optional[Literal["day", "week", "month"]] = Query(
-        None, description="Agrégation temporelle (day, week, month)"
+        None, description="Temporal aggregation (day, week, month)"
     ),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Calcule les métriques de performance réelle en production pour un modèle.
+    Computes real production performance metrics for a model.
 
-    Joint les prédictions et les résultats observés via `id_obs` pour calculer :
-    - **Classification** : accuracy, precision/recall/f1 weighted, confusion matrix, métriques par classe
-    - **Régression** : MAE, MSE, RMSE, R²
+    Joins predictions and observed results via `id_obs` to compute:
+    - **Classification**: accuracy, precision/recall/f1 weighted, confusion matrix, per-class metrics
+    - **Regression**: MAE, MSE, RMSE, R²
 
-    Paramètres optionnels :
-    - **start** / **end** : plage temporelle
-    - **version** : version spécifique du modèle
-    - **granularity** : décomposer les métriques par jour, semaine ou mois
+    Optional parameters:
+    - **start** / **end**: time range
+    - **version**: specific model version
+    - **granularity**: break down metrics by day, week, or month
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
     metadata = await DBService.get_model_metadata(db, name, version)
     if not metadata:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' introuvable.",
+            detail=f"Model '{name}' not found.",
         )
 
     total = await DBService.count_predictions(db, name, start, end, version)
@@ -685,7 +684,7 @@ async def get_model_performance(
         response.confusion_matrix = cm
         response.classes = classes
         response.per_class_metrics = per_class
-        # AUC et courbe ROC (nécessitent des probabilités)
+        # AUC and ROC curve (require probabilities)
         response.auc = compute_auc(y_true, y_prob, metadata.classes)
         fpr, tpr = compute_roc_curve(y_true, y_prob)
         response.roc_curve_fpr = fpr
@@ -738,22 +737,22 @@ async def get_model_performance_timeline(
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Retourne l'évolution chronologique des métriques de performance par version du modèle.
+    Returns the chronological evolution of performance metrics per model version.
 
-    Pour chaque version active (triée par date de déploiement), calcule :
-    - **Classification** : accuracy + F1 weighted
-    - **Régression** : MAE
+    For each active version (sorted by deployment date), computes:
+    - **Classification**: accuracy + F1 weighted
+    - **Regression**: MAE
 
-    Les métriques sont `null` si aucun observed_result n'est disponible pour la version.
-    `sample_count` indique le nombre de paires (prédiction, observed_result) utilisées.
+    Metrics are `null` if no observed_result is available for the version.
+    `sample_count` indicates the number of (prediction, observed_result) pairs used.
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
     metadata = await DBService.get_model_metadata(db, name)
     if not metadata:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' introuvable.",
+            detail=f"Model '{name}' not found.",
         )
 
     timeline_data = await DBService.get_performance_timeline(db, name)
@@ -769,34 +768,34 @@ async def get_model_drift(
     name: ModelNamePath,
     version: Optional[str] = Query(
         None,
-        description="Version du modèle (défaut : production/dernière)",
+        description="Model version (default: production/latest)",
         pattern=r"^\d+\.\d+(\.\d+)?$",
     ),
-    days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours"),
+    days: int = Query(7, ge=1, le=90, description="Time window in days"),
     min_predictions: int = Query(
-        30, ge=5, description="Nombre minimum de prédictions pour calculer le drift"
+        30, ge=5, description="Minimum number of predictions to compute drift"
     ),
     user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Rapport de data drift pour un modèle.
+    Data drift report for a model.
 
-    Compare la distribution des features reçues en production (sur `days` jours)
-    au profil baseline stocké lors de l'upload du modèle.
+    Compares the distribution of features received in production (over `days` days)
+    against the baseline profile stored at model upload time.
 
-    - **Z-score** : `|prod_mean - baseline_mean| / baseline_std`
+    - **Z-score**: `|prod_mean - baseline_mean| / baseline_std`
       - ok < 2 | warning 2–3 | critical ≥ 3
-    - **PSI** : divergence de distribution via bins normaux
+    - **PSI**: distribution divergence via normal bins
       - ok < 0.1 | warning 0.1–0.2 | critical ≥ 0.2
 
-    Retourne `drift_summary = "no_baseline"` si le profil baseline n'a pas été enregistré.
+    Returns `drift_summary = "no_baseline"` if the baseline profile was not recorded.
     """
     metadata = await DBService.get_model_metadata(db, name, version)
     if not metadata:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' introuvable.",
+            detail=f"Model '{name}' not found.",
         )
 
     production_stats = await DBService.get_feature_production_stats(
@@ -847,32 +846,32 @@ async def get_model_drift(
 @router.get("/models/{name}/output-drift", response_model=OutputDriftResponse)
 async def get_model_output_drift(
     name: ModelNamePath,
-    period_days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours"),
+    period_days: int = Query(7, ge=1, le=90, description="Time window in days"),
     model_version: Optional[str] = Query(
         None,
-        description="Version du modèle (défaut : production/dernière)",
+        description="Model version (default: production/latest)",
         pattern=r"^\d+\.\d+(\.\d+)?$",
     ),
     min_predictions: int = Query(
-        30, ge=5, description="Nombre minimum de prédictions pour calculer le drift"
+        30, ge=5, description="Minimum number of predictions to compute drift"
     ),
     user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Rapport de drift de distribution des sorties (label shift) pour un modèle.
+    Output distribution drift report (label shift) for a model.
 
-    Compare la distribution récente des `prediction_result` (sur `period_days` jours)
-    à la distribution d'entraînement stockée dans `training_stats.label_distribution`.
+    Compares the recent distribution of `prediction_result` (over `period_days` days)
+    against the training distribution stored in `training_stats.label_distribution`.
 
-    - **PSI** : ok < 0.1 | warning 0.1–0.2 | critical ≥ 0.2
-    - Retourne `status = "no_baseline"` si `label_distribution` absent de `training_stats`.
+    - **PSI**: ok < 0.1 | warning 0.1–0.2 | critical ≥ 0.2
+    - Returns `status = "no_baseline"` if `label_distribution` is absent from `training_stats`.
     """
     metadata = await DBService.get_model_metadata(db, name, model_version)
     if not metadata:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' introuvable.",
+            detail=f"Model '{name}' not found.",
         )
 
     return await drift_service.compute_output_drift(
@@ -892,22 +891,20 @@ async def get_model_output_drift(
 @router.get("/models/{name}/readiness")
 async def get_model_readiness(
     name: ModelNamePath,
-    version: str = Query(
-        ..., description="Version du modèle à vérifier", pattern=r"^\d+\.\d+(\.\d+)?$"
-    ),
+    version: str = Query(..., description="Model version to check", pattern=r"^\d+\.\d+(\.\d+)?$"),
     user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Vérifie si une version de modèle est opérationnellement prête pour la mise en trafic.
+    Checks whether a model version is operationally ready for traffic.
 
-    Exécute 4 checks :
-    - **is_production** : la version est marquée comme production
-    - **file_accessible** : le fichier .joblib est accessible dans MinIO
-    - **baseline_computed** : le profil baseline des features est calculé
-    - **no_critical_drift** : aucun drift critique sur les dernières 24h
+    Runs 4 checks:
+    - **is_production**: the version is marked as production
+    - **file_accessible**: the .joblib file is accessible in MinIO
+    - **baseline_computed**: the feature baseline profile is computed
+    - **no_critical_drift**: no critical drift in the last 24h
 
-    Toujours HTTP 200 — `ready: false` est un état, pas une erreur.
+    Always HTTP 200 — `ready: false` is a state, not an error.
     """
     from fastapi.responses import JSONResponse
 
@@ -915,7 +912,7 @@ async def get_model_readiness(
     if not model_meta:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' version '{version}' introuvable.",
+            detail=f"Model '{name}' version '{version}' not found.",
         )
 
     prod_check = ReadinessCheck(
@@ -966,9 +963,9 @@ async def get_model_readiness(
 
 
 # ---------------------------------------------------------------------------
-# Feature importance globale (SHAP agrégé)
-# IMPORTANT : déclarée AVANT /models/{name}/{version} pour éviter que
-# "feature-importance" soit interprété comme un paramètre `version`.
+# Global feature importance (aggregated SHAP)
+# IMPORTANT: declared BEFORE /models/{name}/{version} to prevent
+# "feature-importance" from being interpreted as a `version` parameter.
 # ---------------------------------------------------------------------------
 
 
@@ -977,31 +974,31 @@ async def get_feature_importance(
     name: ModelNamePath,
     version: Optional[str] = Query(
         None,
-        description="Version du modèle (défaut : production/dernière)",
+        description="Model version (default: production/latest)",
         pattern=r"^\d+\.\d+(\.\d+)?$",
     ),
-    last_n: int = Query(100, ge=1, le=500, description="Nb de prédictions à échantillonner"),
-    days: int = Query(7, ge=1, le=90, description="Fenêtre temporelle en jours"),
+    last_n: int = Query(100, ge=1, le=500, description="Number of predictions to sample"),
+    days: int = Query(7, ge=1, le=90, description="Time window in days"),
     user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Importance globale des features via valeurs SHAP agrégées.
+    Global feature importance via aggregated SHAP values.
 
-    Calcule la moyenne de |SHAP| par feature sur un échantillon de prédictions
-    récentes pour identifier les features les plus influentes du modèle en
-    production et détecter des dérives comportementales.
+    Computes the mean of |SHAP| per feature over a sample of recent predictions
+    to identify the most influential features of the model in production
+    and detect behavioral drift.
 
-    - **version** : version cible ; si absente, la version `is_production=True`
-      est utilisée, sinon la plus récente.
-    - **last_n** : nombre maximum de prédictions à échantillonner (défaut 100, max 500).
-    - **days** : fenêtre temporelle en jours (défaut 7).
+    - **version**: target version; if absent, the `is_production=True` version
+      is used, otherwise the most recent.
+    - **last_n**: maximum number of predictions to sample (default 100, max 500).
+    - **days**: time window in days (default 7).
     """
     metadata = await DBService.get_model_metadata(db, name, version)
     if not metadata:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' introuvable.",
+            detail=f"Model '{name}' not found.",
         )
 
     try:
@@ -1009,7 +1006,7 @@ async def get_feature_importance(
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Impossible de charger le modèle '{name}:{metadata.version}': {exc}",
+            detail=f"Failed to load model '{name}:{metadata.version}': {exc}",
         )
 
     model = model_data["model"]
@@ -1018,8 +1015,8 @@ async def get_feature_importance(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
-                f"Le modèle '{name}:{metadata.version}' ne possède pas 'feature_names_in_'. "
-                "Il doit avoir été entraîné avec un DataFrame pandas."
+                f"Model '{name}:{metadata.version}' does not have 'feature_names_in_'. "
+                "It must have been trained with a pandas DataFrame."
             ),
         )
 
@@ -1093,9 +1090,9 @@ async def get_feature_importance(
 
 
 # ---------------------------------------------------------------------------
-# Historique des changements de modèles
-# IMPORTANT : ces routes doivent être déclarées AVANT /models/{name}/{version}
-# pour éviter que "history" soit interprété comme un paramètre `version`.
+# Model change history
+# IMPORTANT: these routes must be declared BEFORE /models/{name}/{version}
+# to prevent "history" from being interpreted as a `version` parameter.
 # ---------------------------------------------------------------------------
 
 
@@ -1108,9 +1105,9 @@ async def list_model_history(
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Retourne l'historique complet de toutes les versions d'un modèle (tri timestamp DESC).
+    Returns the full history of all versions of a model (sorted by timestamp DESC).
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
     entries, total = await DBService.get_model_history(
         db, name, model_version=None, limit=limit, offset=offset
@@ -1133,9 +1130,9 @@ async def list_model_version_history(
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Retourne l'historique d'une version spécifique d'un modèle (tri timestamp DESC).
+    Returns the history of a specific version of a model (sorted by timestamp DESC).
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
     entries, total = await DBService.get_model_history(
         db, name, model_version=version, limit=limit, offset=offset
@@ -1160,14 +1157,14 @@ async def rollback_model(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Restaure les métadonnées d'un modèle à l'état capturé dans une entrée d'historique.
+    Restores a model's metadata to the state captured in a history entry.
 
-    Seuls les champs de métadonnées sont restaurés (pas les références artifacts MinIO/MLflow).
-    Si le snapshot avait `is_production=True`, les autres versions sont automatiquement rétrogradées.
+    Only metadata fields are restored (not MinIO/MLflow artifact references).
+    If the snapshot had `is_production=True`, other versions are automatically demoted.
 
-    Réservé aux administrateurs.
+    Reserved for administrators.
     """
-    # Charger le modèle cible
+    # Load the target model
     result = await db.execute(
         select(ModelMetadata)
         .options(selectinload(ModelMetadata.creator))
@@ -1177,26 +1174,26 @@ async def rollback_model(
     if not model:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' version '{version}' introuvable.",
+            detail=f"Model '{name}' version '{version}' not found.",
         )
 
-    # Charger l'entrée d'historique
+    # Load the history entry
     history_entry = await DBService.get_history_entry_by_id(db, history_id)
     if not history_entry:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Entrée d'historique {history_id} introuvable.",
+            detail=f"History entry {history_id} not found.",
         )
     if history_entry.model_name != name or history_entry.model_version != version:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="L'entrée d'historique n'appartient pas à ce modèle/version.",
+            detail="The history entry does not belong to this model/version.",
         )
 
     snapshot = history_entry.snapshot
     restored_fields = []
 
-    # Si le snapshot restaure is_production=True → rétrograder les autres versions
+    # If the snapshot restores is_production=True → demote other versions
     if snapshot.get("is_production") is True:
         other_result = await db.execute(
             select(ModelMetadata).where(
@@ -1218,11 +1215,11 @@ async def rollback_model(
                 ["is_production"],
             )
 
-    # Appliquer le snapshot sur les champs restaurables
+    # Apply the snapshot to restorable fields
     for field in _ROLLBACK_FIELDS:
         if field in snapshot:
             value = snapshot[field]
-            # Re-parser training_date si stocké en ISO string
+            # Re-parse training_date if stored as ISO string
             if field == "training_date" and isinstance(value, str):
                 value = datetime.fromisoformat(value)
             setattr(model, field, value)
@@ -1230,7 +1227,7 @@ async def rollback_model(
 
     await db.flush()
 
-    # Logger le rollback comme nouvelle entrée d'historique
+    # Log the rollback as a new history entry
     new_entry = await DBService.log_model_history(
         db, model, HistoryActionType.ROLLBACK, user.id, user.username, restored_fields
     )
@@ -1263,15 +1260,15 @@ async def deprecate_model_version(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Déprécie une version de modèle (status → deprecated, is_production → False).
+    Deprecates a model version (status → deprecated, is_production → False).
 
-    Le modèle reste consultable (historique, métriques, prédictions passées) mais
-    les appels à POST /predict retourneront HTTP 410 Gone avec suggestion de la
-    version production courante. Réversible via PATCH /models/{name}/{version}.
+    The model remains viewable (history, metrics, past predictions) but
+    calls to POST /predict will return HTTP 410 Gone with a suggestion of the
+    current production version. Reversible via PATCH /models/{name}/{version}.
 
-    Réservé aux administrateurs.
+    Reserved for administrators.
     """
-    # Charger directement (sans filtre deprecated) pour détecter déjà-déprécié
+    # Load directly (without deprecated filter) to detect already-deprecated
     result = await db.execute(
         select(ModelMetadata).where(
             and_(
@@ -1285,12 +1282,12 @@ async def deprecate_model_version(
     if not meta:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}/{version}' introuvable ou inactif.",
+            detail=f"Model '{name}/{version}' not found or inactive.",
         )
     if meta.status == "deprecated":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Le modèle '{name}/{version}' est déjà déprécié.",
+            detail=f"Model '{name}/{version}' is already deprecated.",
         )
 
     meta = await DBService.deprecate_model(db, name, version)
@@ -1304,7 +1301,7 @@ async def deprecate_model_version(
         ["status", "is_production", "deprecated_at"],
     )
 
-    logger.info("Modèle déprécié", model=name, version=version, by=user.username)
+    logger.info("Model deprecated", model=name, version=version, by=user.username)
     audit_log("model.deprecate", actor_id=user.id, resource=f"{name}:{version}")
 
     return DeprecateModelResponse(
@@ -1325,20 +1322,20 @@ async def update_model_policy(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Définit ou met à jour la politique d'auto-promotion post-retrain pour un modèle.
+    Sets or updates the auto-promotion policy after retraining for a model.
 
-    La politique est persistée sur toutes les versions actives du modèle.
-    À chaque ré-entraînement, si `auto_promote: true`, la nouvelle version sera
-    automatiquement promue en production lorsque les seuils sont atteints :
+    The policy is persisted on all active versions of the model.
+    On each retraining, if `auto_promote: true`, the new version will be
+    automatically promoted to production when thresholds are met:
 
-    - **min_accuracy** : précision minimale calculée sur les `min_sample_validation`
-      paires (prédiction, résultat observé) les plus récentes.
-    - **max_latency_p95_ms** : latence P95 maximale des prédictions en production.
-    - **min_sample_validation** : nombre minimal de paires de validation requises
-      (défaut : 10).
-    - **auto_promote** : activer ou désactiver l'auto-promotion (défaut : false).
+    - **min_accuracy**: minimum accuracy computed on the `min_sample_validation`
+      most recent (prediction, observed result) pairs.
+    - **max_latency_p95_ms**: maximum P95 latency of production predictions.
+    - **min_sample_validation**: minimum number of validation pairs required
+      (default: 10).
+    - **auto_promote**: enable or disable auto-promotion (default: false).
 
-    Réservé aux administrateurs.
+    Reserved for administrators.
     """
     result = await db.execute(
         select(ModelMetadata).where(
@@ -1349,7 +1346,7 @@ async def update_model_policy(
     if not models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' introuvable ou inactif.",
+            detail=f"Model '{name}' not found or inactive.",
         )
 
     policy_dict = payload.model_dump()
@@ -1359,7 +1356,7 @@ async def update_model_policy(
     await db.commit()
 
     logger.info(
-        "Politique d'auto-promotion mise à jour",
+        "Auto-promotion policy updated",
         model=name,
         policy=policy_dict,
         updated_by=user.username,
@@ -1386,19 +1383,19 @@ async def retrain_model(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Enqueue un ré-entraînement du modèle — retourne immédiatement 202 avec un ``job_id``.
+    Enqueues a model retraining — returns immediately 202 with a ``job_id``.
 
-    Le script train.py est exécuté dans un worker ARQ séparé (hors du processus API).
+    The train.py script is executed in a separate ARQ worker (outside the API process).
 
-    **Suivi du job :**
-    - `GET /jobs/{job_id}` — statut et résultat
-    - `GET /jobs/{job_id}/logs` — logs en temps réel (SSE)
+    **Job tracking:**
+    - `GET /jobs/{job_id}` — status and result
+    - `GET /jobs/{job_id}/logs` — real-time logs (SSE)
 
-    Réservé aux administrateurs.
+    Reserved for administrators.
     """
     import uuid
 
-    # 1. Vérifier le modèle source
+    # 1. Verify the source model
     result = await db.execute(
         select(ModelMetadata)
         .options(selectinload(ModelMetadata.creator))
@@ -1408,18 +1405,18 @@ async def retrain_model(
     if not source_model:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' version '{version}' introuvable.",
+            detail=f"Model '{name}' version '{version}' not found.",
         )
     if not source_model.train_script_object_key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"Le modèle '{name}' v{version} ne possède pas de script d'entraînement. "
-                "Uploadez un train.py via POST /models avec le champ train_file."
+                f"Model '{name}' v{version} has no training script. "
+                "Upload a train.py via POST /models using the train_file field."
             ),
         )
 
-    # 2. Déterminer la nouvelle version et vérifier l'unicité
+    # 2. Determine the new version and check uniqueness
     new_version = payload.new_version
     if not new_version:
         new_version = f"{version}-retrain-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
@@ -1432,10 +1429,10 @@ async def retrain_model(
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"La version '{new_version}' existe déjà pour le modèle '{name}'.",
+            detail=f"Version '{new_version}' already exists for model '{name}'.",
         )
 
-    # 3. Extraire les champs source en mémoire (le worker en a besoin)
+    # 3. Extract source fields into memory (the worker needs them)
     source_fields = {
         "train_script_object_key": source_model.train_script_object_key,
         "description": source_model.description,
@@ -1456,7 +1453,7 @@ async def retrain_model(
         "f1_score": source_model.f1_score,
     }
 
-    # 4. Créer l'entrée TaskRun en DB
+    # 4. Create the TaskRun entry in DB
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     job_id = uuid.uuid4()
     task_run = TaskRun(
@@ -1472,7 +1469,7 @@ async def retrain_model(
     db.add(task_run)
     await db.commit()
 
-    # 5. Enqueue dans ARQ
+    # 5. Enqueue in ARQ
     try:
         arq_pool = await arq_pool_module.get_arq_pool()
         await arq_pool.enqueue_job(
@@ -1486,23 +1483,23 @@ async def retrain_model(
             set_production=payload.set_production,
             triggered_by=user.username,
             source_fields=source_fields,
-            _job_id=str(job_id),  # ARQ job ID = notre task_run ID pour retrouver le résultat
+            _job_id=str(job_id),  # ARQ job ID = our task_run ID to retrieve the result
         )
     except Exception as exc:
-        # Si ARQ est indisponible, passer le job en failed et informer l'utilisateur
-        logger.error("Enqueue ARQ échoué", job_id=str(job_id), error=str(exc))
+        # If ARQ is unavailable, mark the job as failed and inform the user
+        logger.error("ARQ enqueue failed", job_id=str(job_id), error=str(exc))
         async with AsyncSessionLocal() as write_db:
             from sqlalchemy import update
 
             await write_db.execute(
                 update(TaskRun)
                 .where(TaskRun.id == job_id)
-                .values(status="failed", error=f"Enqueue ARQ échoué : {exc}")
+                .values(status="failed", error=f"ARQ enqueue failed: {exc}")
             )
             await write_db.commit()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Worker ARQ indisponible. Le job a été créé (id={job_id}) mais n'a pas pu être enqueued.",
+            detail=f"ARQ worker unavailable. The job was created (id={job_id}) but could not be enqueued.",
         )
 
     audit_log(
@@ -1543,13 +1540,13 @@ async def get_retrain_history(
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Retourne l'historique des ré-entraînements d'un modèle.
+    Returns the retraining history for a model.
 
-    Chaque entrée correspond à une version créée par ré-entraînement (manuel ou planifié).
-    Les champs `accuracy`, `f1_score`, `auto_promoted` et `auto_promote_reason` reflètent
-    les valeurs au moment du ré-entraînement.
+    Each entry corresponds to a version created by retraining (manual or scheduled).
+    The `accuracy`, `f1_score`, `auto_promoted` and `auto_promote_reason` fields reflect
+    the values at the time of retraining.
 
-    Réservé aux utilisateurs authentifiés.
+    Requires a valid Bearer token.
     """
     versions_exist = await db.execute(
         select(ModelMetadata).where(ModelMetadata.name == name).limit(1)
@@ -1557,7 +1554,7 @@ async def get_retrain_history(
     if not versions_exist.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' introuvable.",
+            detail=f"Model '{name}' not found.",
         )
 
     records, total = await DBService.get_retrain_history(db, name, limit=limit, offset=offset)
@@ -1596,14 +1593,14 @@ async def update_retrain_schedule(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Définit ou met à jour la planification de ré-entraînement automatique pour une version.
+    Sets or updates the automatic retraining schedule for a model version.
 
-    - **cron** : expression cron 5 champs (ex : ``"0 3 * * 1"`` = chaque lundi à 03h00 UTC).
-    - **lookback_days** : jours d'historique transmis via ``TRAIN_START_DATE`` / ``TRAIN_END_DATE``.
-    - **auto_promote** : si ``True``, évalue la ``promotion_policy`` du modèle après chaque retrain.
-    - **enabled** : ``False`` pour suspendre le planning sans l'effacer.
+    - **cron**: 5-field cron expression (e.g. ``"0 3 * * 1"`` = every Monday at 03:00 UTC).
+    - **lookback_days**: history window in days passed via ``TRAIN_START_DATE`` / ``TRAIN_END_DATE``.
+    - **auto_promote**: if ``True``, evaluates the model's ``promotion_policy`` after each retrain.
+    - **enabled**: ``False`` to pause the schedule without deleting it.
 
-    Réservé aux administrateurs.
+    Reserved for administrators.
     """
     from apscheduler.triggers.cron import CronTrigger
 
@@ -1613,7 +1610,7 @@ async def update_retrain_schedule(
         remove_retrain_job,
     )
 
-    # 1. Vérifier que la version existe
+    # 1. Verify the version exists
     result = await db.execute(
         select(ModelMetadata).where(
             and_(ModelMetadata.name == name, ModelMetadata.version == version)
@@ -1623,10 +1620,10 @@ async def update_retrain_schedule(
     if not model:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' version '{version}' introuvable.",
+            detail=f"Model '{name}' version '{version}' not found.",
         )
 
-    # 2. Valider l'expression cron
+    # 2. Validate the cron expression
     cron = payload.cron
     next_run_at: Optional[datetime] = None
     if cron:
@@ -1635,16 +1632,16 @@ async def update_retrain_schedule(
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Expression cron invalide : {exc}",
+                detail=f"Invalid cron expression: {exc}",
             )
         next_run_at = _compute_next_run_at(cron)
     elif payload.enabled:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Une expression cron est requise lorsque enabled=True.",
+            detail="A cron expression is required when enabled=True.",
         )
 
-    # 3. Construire le dict de schedule (en préservant last_run_at existant)
+    # 3. Build the schedule dict (preserving existing last_run_at)
     existing = model.retrain_schedule or {}
     schedule_dict = {
         "cron": cron,
@@ -1657,19 +1654,19 @@ async def update_retrain_schedule(
         "next_run_at": next_run_at.isoformat() if next_run_at else None,
     }
 
-    # 4. Persister
+    # 4. Persist
     model.retrain_schedule = schedule_dict
     await db.commit()
     await db.refresh(model)
 
-    # 5. Mettre à jour le scheduler live
+    # 5. Update the live scheduler
     if payload.enabled and cron:
         add_retrain_job(name, version, schedule_dict)
     else:
         remove_retrain_job(name, version)
 
     logger.info(
-        "Planification de ré-entraînement mise à jour",
+        "Retraining schedule updated",
         model=name,
         version=version,
         cron=cron,
@@ -1693,25 +1690,25 @@ async def update_retrain_schedule(
 @router.get("/models/{name}/ab-compare", response_model=ABCompareResponse)
 async def get_ab_comparison(
     name: ModelNamePath,
-    days: int = Query(30, ge=1, le=90, description="Fenêtre d'analyse en jours (max 90)"),
+    days: int = Query(30, ge=1, le=90, description="Analysis window in days (max 90)"),
     metric: Optional[str] = Query(
         None,
-        description="Métrique pour le test de significativité : 'error_rate', 'mae', 'response_time_ms'. "
-        "Par défaut : sélection automatique.",
+        description="Metric for significance test: 'error_rate', 'mae', 'response_time_ms'. "
+        "Default: automatic selection.",
         pattern=r"^(error_rate|mae|response_time_ms)$",
     ),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Comparaison côte-à-côte des versions A/B et shadow d'un modèle sur une fenêtre glissante.
+    Side-by-side comparison of A/B and shadow versions of a model over a sliding window.
 
-    Pour chaque version ayant généré des prédictions : total, prédictions shadow, taux d'erreur,
-    latence (avg / p95), distribution des labels, et taux de concordance shadow/production (si id_obs).
+    For each version that generated predictions: total, shadow predictions, error rate,
+    latency (avg / p95), label distribution, and shadow/production agreement rate (if id_obs).
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
-    # Vérifier que le modèle existe
+    # Verify the model exists
     all_metas_result = await db.execute(
         select(ModelMetadata).where(
             and_(ModelMetadata.name == name, ModelMetadata.is_active.is_(True))
@@ -1721,7 +1718,7 @@ async def get_ab_comparison(
     if not all_metas:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' introuvable ou inactif.",
+            detail=f"Model '{name}' not found or inactive.",
         )
 
     meta_by_version = {m.version: m for m in all_metas}
@@ -1729,7 +1726,7 @@ async def get_ab_comparison(
     raw_stats = await DBService.get_ab_comparison_stats(db, name, days=days)
     agreement_by_version = await DBService.get_shadow_agreement_rate(db, name, days=days)
 
-    # Enrichir chaque version avec les erreurs absolues de prédiction (pour régression)
+    # Enrich each version with absolute prediction errors (for regression)
     def _try_abs_error(pred, obs) -> Optional[float]:
         try:
             return abs(float(pred) - float(obs))
@@ -1802,19 +1799,19 @@ def _shadow_recommendation(
 @router.get("/models/{name}/shadow-compare", response_model=ShadowCompareResponse)
 async def get_shadow_comparison(
     name: ModelNamePath,
-    period_days: int = Query(30, ge=1, le=90, description="Fenêtre d'analyse en jours (max 90)"),
+    period_days: int = Query(30, ge=1, le=90, description="Analysis window in days (max 90)"),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Comparaison enrichie entre la version shadow et la version production d'un modèle.
+    Enriched comparison between the shadow and production versions of a model.
 
-    Retourne : accord des prédictions, delta de confiance, delta de latence,
-    et accuracy shadow vs production si des observed_results sont disponibles.
-    La recommandation (shadow_better / production_better / equivalent / insufficient_data)
-    est calculée automatiquement.
+    Returns: prediction agreement, confidence delta, latency delta,
+    and shadow vs production accuracy if observed_results are available.
+    The recommendation (shadow_better / production_better / equivalent / insufficient_data)
+    is calculated automatically.
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
     all_metas_result = await db.execute(
         select(ModelMetadata).where(
@@ -1825,7 +1822,7 @@ async def get_shadow_comparison(
     if not all_metas:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' introuvable ou inactif.",
+            detail=f"Model '{name}' not found or inactive.",
         )
 
     stats = await DBService.get_shadow_comparison_stats(db, name, period_days=period_days)
@@ -1861,21 +1858,19 @@ async def get_shadow_comparison(
 async def get_model_calibration(
     name: ModelNamePath,
     version: Optional[str] = Query(
-        None, description="Version du modèle (toutes si absent)", pattern=r"^\d+\.\d+(\.\d+)?$"
+        None, description="Model version (all if absent)", pattern=r"^\d+\.\d+(\.\d+)?$"
     ),
-    start: Optional[datetime] = Query(None, description="Début de la plage temporelle"),
-    end: Optional[datetime] = Query(None, description="Fin de la plage temporelle"),
-    n_bins: int = Query(
-        10, ge=2, le=20, description="Nombre de buckets pour la courbe de calibration"
-    ),
+    start: Optional[datetime] = Query(None, description="Start of the time range"),
+    end: Optional[datetime] = Query(None, description="End of the time range"),
+    n_bins: int = Query(10, ge=2, le=20, description="Number of buckets for the calibration curve"),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Analyse la calibration des probabilités d'un modèle de classification.
+    Analyses the probability calibration of a classification model.
 
-    Retourne le Brier score, le gap confiance/accuracy, le statut de calibration
-    et la courbe de fiabilité (reliability diagram) pour diagnostiquer la sur/sous-confiance.
+    Returns the Brier score, confidence/accuracy gap, calibration status
+    and the reliability diagram to diagnose over/under-confidence.
     """
     pairs = await DBService.get_performance_pairs(db, name, start, end, version)
 
@@ -1887,11 +1882,11 @@ async def get_model_calibration(
             calibration_status="insufficient_data",
         )
 
-    # ── Détection du type de modèle ──────────────────────────────────────────
-    # Régression : aucune paire n'a de probabilités
+    # ── Model type detection ──────────────────────────────────────────────────
+    # Regression: no pair has probabilities
     has_proba = any(row.probabilities for row in pairs)
 
-    # ── Branche Régression ───────────────────────────────────────────────────
+    # ── Regression branch ────────────────────────────────────────────────────
     if not has_proba:
         reg_pairs: list[tuple[float, float]] = []
         for row in pairs:
@@ -1924,7 +1919,7 @@ async def get_model_calibration(
         ss_tot = float(np.sum((obs_arr - float(np.mean(obs_arr))) ** 2))
         r2 = float(1.0 - ss_res / ss_tot) if ss_tot > 0 else None
 
-        # Statut : basé sur le biais relatif (en unités d'écart-type observé)
+        # Status: based on relative bias (in units of observed standard deviation)
         obs_std = float(np.std(obs_arr)) if sample_size > 1 else 1.0
         rel_bias = bias / obs_std if obs_std > 0 else 0.0
         if abs(rel_bias) < 0.10:
@@ -1934,7 +1929,7 @@ async def get_model_calibration(
         else:
             reg_status = "biased_low"
 
-        # Scatter data — échantillon aléatoire ≤ 300 points
+        # Scatter data — random sample ≤ 300 points
         rng = np.random.default_rng(42)
         idx = rng.choice(sample_size, min(300, sample_size), replace=False)
         scatter_data = [
@@ -1955,7 +1950,7 @@ async def get_model_calibration(
             scatter_data=scatter_data,
         )
 
-    # ── Branche Classification ────────────────────────────────────────────────
+    # ── Classification branch ─────────────────────────────────────────────────
     valid = [
         (row.prediction_result, row.observed_result, row.probabilities)
         for row in pairs
@@ -2034,7 +2029,7 @@ async def get_model_calibration(
 
 
 # ---------------------------------------------------------------------------
-# Rapport de performance consolidé — helpers privés
+# Consolidated performance report — private helpers
 # ---------------------------------------------------------------------------
 
 
@@ -2333,30 +2328,30 @@ async def _build_feature_importance_section(
 
 
 # ---------------------------------------------------------------------------
-# Rapport de performance consolidé — endpoint
+# Consolidated performance report — endpoint
 # ---------------------------------------------------------------------------
 
 
 @router.get("/models/{name}/performance-report", response_model=PerformanceReportResponse)
 async def get_performance_report(
     name: ModelNamePath,
-    days: int = Query(30, ge=1, le=365, description="Fenêtre d'analyse en jours"),
-    format: str = Query("json", description="Format de sortie (json ; html prévu en phase 2)"),
+    days: int = Query(30, ge=1, le=365, description="Analysis window in days"),
+    format: str = Query("json", description="Output format (json; html planned for phase 2)"),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Rapport de performance consolidé pour un modèle.
+    Consolidated performance report for a model.
 
-    Agrège en un seul appel : performance réelle, drift, feature importance (SHAP),
-    calibration des probabilités et comparaison A/B.
-    Chaque section est indépendamment nullable — une section manquante ne bloque pas les autres.
+    Aggregates in a single call: actual performance, drift, feature importance (SHAP),
+    probability calibration and A/B comparison.
+    Each section is independently nullable — a missing section does not block the others.
     """
     metadata = await DBService.get_model_metadata(db, name)
     if not metadata:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' introuvable.",
+            detail=f"Model '{name}' not found.",
         )
 
     version = metadata.version
@@ -2411,25 +2406,25 @@ async def get_performance_report(
 async def get_confidence_trend(
     name: ModelNamePath,
     version: Optional[str] = Query(
-        None, description="Version du modèle (toutes si absent)", pattern=r"^\d+\.\d+(\.\d+)?$"
+        None, description="Model version (all if absent)", pattern=r"^\d+\.\d+(\.\d+)?$"
     ),
-    days: int = Query(30, ge=1, le=365, description="Fenêtre glissante en jours"),
-    granularity: str = Query("day", description="Granularité temporelle (day)"),
+    days: int = Query(30, ge=1, le=365, description="Sliding window in days"),
+    granularity: str = Query("day", description="Temporal granularity (day)"),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Tendance de confiance du modèle sur une fenêtre glissante.
+    Model confidence trend over a sliding window.
 
-    confidence = max(probabilities) par prédiction — signal précoce de drift
-    sans nécessiter de baseline ni d'observed_results.
-    Si le modèle ne retourne pas de probabilités, la liste trend est vide.
+    confidence = max(probabilities) per prediction — early drift signal
+    without requiring a baseline or observed_results.
+    If the model does not return probabilities, the trend list is empty.
     """
     metadata = await DBService.get_model_metadata(db, name, version)
     if not metadata:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' introuvable.",
+            detail=f"Model '{name}' not found.",
         )
 
     threshold = metadata.confidence_threshold if metadata.confidence_threshold is not None else 0.5
@@ -2474,28 +2469,28 @@ async def get_confidence_trend(
 async def get_confidence_distribution(
     name: ModelNamePath,
     version: Optional[str] = Query(
-        None, description="Version du modèle (toutes si absent)", pattern=r"^\d+\.\d+(\.\d+)?$"
+        None, description="Model version (all if absent)", pattern=r"^\d+\.\d+(\.\d+)?$"
     ),
-    days: int = Query(7, ge=1, le=90, description="Fenêtre glissante en jours"),
-    high_threshold: float = Query(0.80, ge=0.5, le=1.0, description="Seuil confiance élevée"),
+    days: int = Query(7, ge=1, le=90, description="Sliding window in days"),
+    high_threshold: float = Query(0.80, ge=0.5, le=1.0, description="High confidence threshold"),
     uncertain_threshold: float = Query(
-        0.60, ge=0.5, le=1.0, description="Seuil d'alerte incertitude"
+        0.60, ge=0.5, le=1.0, description="Uncertainty alert threshold"
     ),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Histogramme de confiance du modèle sur une fenêtre glissante.
+    Model confidence histogram over a sliding window.
 
-    confidence = max(probabilities) par prédiction — aucune ground truth requise.
-    Retourne 10 bins uniformes dans [0.5, 1.0] plus les métriques globales.
-    Si le modèle ne retourne pas de probabilités, histogram est vide.
+    confidence = max(probabilities) per prediction — no ground truth required.
+    Returns 10 uniform bins in [0.5, 1.0] plus global metrics.
+    If the model does not return probabilities, histogram is empty.
     """
     metadata = await DBService.get_model_metadata(db, name, version)
     if not metadata:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' introuvable.",
+            detail=f"Model '{name}' not found.",
         )
 
     result = await DBService.get_confidence_distribution(
@@ -2536,31 +2531,31 @@ async def compare_model_versions(
     name: ModelNamePath,
     versions: Optional[str] = Query(
         None,
-        description="Versions séparées par des virgules (ex: 1.0.0,2.0.0). Toutes les versions actives si absent.",
+        description="Comma-separated versions (e.g. 1.0.0,2.0.0). All active versions if absent.",
     ),
     days: int = Query(
         7,
         ge=1,
         le=90,
-        description="Fenêtre temporelle pour les stats de latence et les métriques live (jours)",
+        description="Time window for latency stats and live metrics (days)",
     ),
     start_date: Optional[str] = Query(
-        None, description="Date début ISO (YYYY-MM-DD) — prioritaire sur days"
+        None, description="Start date ISO (YYYY-MM-DD) — takes priority over days"
     ),
     end_date: Optional[str] = Query(
-        None, description="Date fin ISO (YYYY-MM-DD) — prioritaire sur days"
+        None, description="End date ISO (YYYY-MM-DD) — takes priority over days"
     ),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Comparaison multi-versions d'un modèle en un seul appel.
+    Multi-version comparison of a model in a single call.
 
-    Agrège pour chaque version : accuracy, F1, latence p50/p95, statut de drift,
-    Brier score, date d'entraînement et nombre de lignes d'entraînement.
+    Aggregates for each version: accuracy, F1, p50/p95 latency, drift status,
+    Brier score, training date and number of training rows.
 
-    Si ?versions est omis, retourne toutes les versions actives du modèle.
-    Nécessite un token Bearer valide.
+    If ?versions is omitted, returns all active versions of the model.
+    Requires a valid Bearer token.
     """
     all_metas_result = await db.execute(
         select(ModelMetadata).where(
@@ -2571,7 +2566,7 @@ async def compare_model_versions(
     if not all_metas:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' introuvable ou inactif.",
+            detail=f"Model '{name}' not found or inactive.",
         )
 
     if versions:
@@ -2580,14 +2575,14 @@ async def compare_model_versions(
         if not filtered_metas:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Aucune des versions demandées ({versions}) n'est active pour '{name}'.",
+                detail=f"None of the requested versions ({versions}) is active for '{name}'.",
             )
     else:
         filtered_metas = list(all_metas)
 
     meta_by_version = {m.version: m for m in filtered_metas}
 
-    # Résoudre la fenêtre temporelle : start_date/end_date prioritaires sur days
+    # Resolve the time window: start_date/end_date take priority over days
     _period_start: Optional[datetime] = None
     _period_end: Optional[datetime] = None
     if start_date:
@@ -2604,7 +2599,7 @@ async def compare_model_versions(
         _period_start = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
         _period_end = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    # Latency stats — single DB query covering all versions, filtré sur la même période
+    # Latency stats — single DB query covering all versions, filtered on the same period
     ab_stats = await DBService.get_ab_comparison_stats(
         db, name, days=days, start=_period_start, end=_period_end
     )
@@ -2649,9 +2644,9 @@ async def compare_model_versions(
         live_r2 = None
         valid_pairs = [(row[0], row[1], row[2]) for row in pairs if row[2]]
         all_pairs = [(row[0], row[1]) for row in pairs]
-        all_probs = [row[2] for row in pairs]  # probabilités de chaque prédiction
+        all_probs = [row[2] for row in pairs]  # probabilities for each prediction
 
-        # Déterminer le type de modèle : model_task en priorité, fallback sur training_metrics
+        # Determine model type: model_task takes priority, fallback to training_metrics
         if meta.model_task == "regression":
             _is_reg = True
         elif meta.model_task in ("classification_binary", "classification_multiclass"):
@@ -2683,7 +2678,7 @@ async def compare_model_versions(
                     )
                 except Exception:
                     pass
-                # AUC live depuis les probabilités stockées
+                # Live AUC from stored probabilities
                 live_auc = compute_auc([obs for _, obs in all_pairs], all_probs, meta.classes)
 
         if len(valid_pairs) >= 30:
@@ -2783,7 +2778,7 @@ def _build_model_card_markdown(card: ModelCardResponse) -> str:
     lines: List[str] = [
         f"# Model Card — {card.model_name} v{card.version}",
         "",
-        f"**Algorithme** : {card.algorithm or '—'}",
+        f"**Algorithm**: {card.algorithm or '—'}",
     ]
     # Performance metrics — prefer live section, fall back to training-time metadata
     if card.performance and card.performance.matched_predictions > 0:
@@ -2795,19 +2790,19 @@ def _build_model_card_markdown(card: ModelCardResponse) -> str:
     elif card.accuracy is not None:
         lines.append(f"**Accuracy** : {card.accuracy} | **F1** : {card.f1_score}")
 
-    lines.append(f"**Production** : {'✅ Oui' if card.is_production else '❌ Non'}")
+    lines.append(f"**Production**: {'✅ Yes' if card.is_production else '❌ No'}")
     if card.created_at:
-        lines.append(f"**Créé le** : {card.created_at.strftime('%Y-%m-%d')}")
+        lines.append(f"**Created at**: {card.created_at.strftime('%Y-%m-%d')}")
     if card.trained_by:
-        lines.append(f"**Entraîné par** : {card.trained_by}")
+        lines.append(f"**Trained by**: {card.trained_by}")
     if card.training_dataset:
-        lines.append(f"**Dataset** : {card.training_dataset}")
+        lines.append(f"**Dataset**: {card.training_dataset}")
     if card.tags:
-        lines.append(f"**Tags** : {', '.join(str(t) for t in card.tags)}")
+        lines.append(f"**Tags**: {', '.join(str(t) for t in card.tags)}")
     if card.classes:
-        lines.append(f"**Classes** : {', '.join(str(c) for c in card.classes)}")
+        lines.append(f"**Classes**: {', '.join(str(c) for c in card.classes)}")
     if card.features_count:
-        lines.append(f"**Nb features** : {card.features_count}")
+        lines.append(f"**Feature count**: {card.features_count}")
 
     lines += ["", "---", ""]
 
@@ -2817,23 +2812,23 @@ def _build_model_card_markdown(card: ModelCardResponse) -> str:
         last = d.last_check_at.strftime("%Y-%m-%d") if d.last_check_at else "—"
         lines.append(f"**Drift** : {emoji} {d.drift_summary.capitalize()} (last check {last})")
         if d.top_drifting_features:
-            lines.append(f"  Features concernées : {', '.join(d.top_drifting_features)}")
+            lines.append(f"  Drifting features: {', '.join(d.top_drifting_features)}")
 
     if card.retrain:
         r = card.retrain
         trained_by = f" ({r.trained_by})" if r.trained_by else ""
         date_str = r.last_retrain_date.strftime("%Y-%m-%d") if r.last_retrain_date else "—"
-        lines.append(f"**Dernier retrain** : {date_str}{trained_by}")
+        lines.append(f"**Last retrain**: {date_str}{trained_by}")
         if r.n_rows_trained:
-            lines.append(f"**Données entraînement** : {r.n_rows_trained:,} lignes")
+            lines.append(f"**Training data**: {r.n_rows_trained:,} rows")
         if r.next_run_at:
-            lines.append(f"**Prochain retrain** : {r.next_run_at.strftime('%Y-%m-%d %H:%M')} UTC")
+            lines.append(f"**Next retrain**: {r.next_run_at.strftime('%Y-%m-%d %H:%M')} UTC")
 
     if card.feature_importance and card.feature_importance.top_features:
         parts = [
             f"{f.feature} ({f.mean_abs_shap:.2f})" for f in card.feature_importance.top_features
         ]
-        lines.append(f"**Features clés** : {', '.join(parts)}")
+        lines.append(f"**Key features**: {', '.join(parts)}")
 
     if card.calibration and card.calibration.brier_score is not None:
         lines.append(
@@ -2844,9 +2839,9 @@ def _build_model_card_markdown(card: ModelCardResponse) -> str:
     if card.coverage:
         cov = card.coverage
         pct = round(cov.coverage_rate * 100, 1)
-        lines.append(f"**Couverture** : {pct}% ({cov.labeled_count}/{cov.total_predictions})")
+        lines.append(f"**Coverage**: {pct}% ({cov.labeled_count}/{cov.total_predictions})")
 
-    lines += ["", "---", f"_Généré le {card.generated_at.strftime('%Y-%m-%d %H:%M')} UTC_"]
+    lines += ["", "---", f"_Generated on {card.generated_at.strftime('%Y-%m-%d %H:%M')} UTC_"]
     return "\n".join(lines)
 
 
@@ -2855,24 +2850,24 @@ async def get_model_card(
     name: ModelNamePath,
     version: ModelVersionPath,
     request: Request,
-    days: int = Query(30, ge=1, le=365, description="Fenêtre d'analyse en jours"),
+    days: int = Query(30, ge=1, le=365, description="Analysis window in days"),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Model Card — résumé structuré d'une version de modèle.
+    Model Card — structured summary of a model version.
 
-    Agrège en un seul appel : métadonnées, performance, drift, calibration,
-    top-5 features SHAP, infos de retrain et couverture ground truth.
+    Aggregates in a single call: metadata, performance, drift, calibration,
+    top-5 SHAP features, retrain info and ground truth coverage.
 
     Accept: application/json  → JSON (ModelCardResponse)
-    Accept: text/markdown     → Markdown téléchargeable
+    Accept: text/markdown     → downloadable Markdown
     """
     metadata = await DBService.get_model_metadata(db, name, version)
     if not metadata:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' version '{version}' introuvable.",
+            detail=f"Model '{name}' version '{version}' not found.",
         )
 
     now = datetime.now(timezone.utc)
@@ -3047,7 +3042,7 @@ async def list_golden_tests(
     _user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_db),
 ):
-    """Liste les cas de test golden enregistrés pour un modèle."""
+    """Lists the registered golden test cases for a model."""
     tests = await GoldenTestService.get_tests(db, name)
     return [
         GoldenTestResponse(
@@ -3070,12 +3065,12 @@ async def get_model(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Retourne les métadonnées complètes d'un modèle (name + version).
+    Returns the full metadata of a model (name + version).
 
-    Tente de charger le modèle en mémoire (depuis MLflow ou MinIO) :
-    - Si le chargement réussit : `model_loaded=true`, `model_type` et `feature_names` renseignés.
-    - Si le chargement échoue : `model_loaded=false` et `load_instructions` contient
-      les informations nécessaires pour charger le modèle manuellement en Python.
+    Attempts to load the model into memory (from MLflow or MinIO):
+    - If loading succeeds: `model_loaded=true`, `model_type` and `feature_names` are set.
+    - If loading fails: `model_loaded=false` and `load_instructions` contains
+      the information needed to load the model manually in Python.
     """
     result = await db.execute(
         select(ModelMetadata)
@@ -3087,10 +3082,10 @@ async def get_model(
     if not model_meta:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' version '{version}' introuvable.",
+            detail=f"Model '{name}' version '{version}' not found.",
         )
 
-    # Tenter de charger le modèle
+    # Attempt to load the model
     model_loaded = False
     model_type = None
     feature_names = None
@@ -3104,7 +3099,7 @@ async def get_model(
         if hasattr(ml_model, "feature_names_in_"):
             feature_names = list(ml_model.feature_names_in_)
     except Exception:
-        # Le modèle n'a pas pu être chargé — construire les instructions manuelles
+        # The model could not be loaded — build manual instructions
         if model_meta.mlflow_run_id:
             load_instructions = {
                 "source": "mlflow",
@@ -3177,27 +3172,27 @@ async def get_model(
 @limiter.limit("10/minute")
 async def create_model(
     request: Request,
-    name: str = Form(..., description="Nom unique du modèle"),
-    version: str = Form(..., description="Version du modèle (ex: 1.0.0)"),
+    name: str = Form(..., description="Unique model name"),
+    version: str = Form(..., description="Model version (e.g. 1.0.0)"),
     file: Optional[UploadFile] = File(
-        None, description="Fichier modèle joblib/pkl (optionnel si mlflow_run_id fourni)"
+        None, description="Model file joblib/pkl (optional if mlflow_run_id is provided)"
     ),
     description: Optional[str] = Form(None),
     algorithm: Optional[str] = Form(None),
     mlflow_run_id: Optional[str] = Form(None),
     accuracy: Optional[float] = Form(None),
-    auc: Optional[float] = Form(None, description="AUC-ROC (0–1, classification uniquement)"),
+    auc: Optional[float] = Form(None, description="AUC-ROC (0–1, classification only)"),
     f1_score: Optional[float] = Form(None),
     features_count: Optional[int] = Form(None),
     classes: Optional[str] = Form(None, description="JSON array ex: [0, 1, 2]"),
     training_params: Optional[str] = Form(None, description="JSON object"),
     training_metrics: Optional[str] = Form(
         None,
-        description="JSON object — métriques d'entraînement (precision, recall, mae, rmse, r2…)",
+        description="JSON object — training metrics (precision, recall, mae, rmse, r2…)",
     ),
     hyperparameters: Optional[str] = Form(
         None,
-        description='JSON object — hyperparamètres du modèle (ex: {"n_estimators": 200, "max_depth": 10})',
+        description='JSON object — model hyperparameters (e.g. {"n_estimators": 200, "max_depth": 10})',
     ),
     training_dataset: Optional[str] = Form(None),
     feature_baseline: Optional[str] = Form(
@@ -3205,64 +3200,62 @@ async def create_model(
         description='JSON: {"feature": {"mean": float, "std": float, "min": float, "max": float}}',
     ),
     tags: Optional[str] = Form(
-        None, description='JSON array de tags ex: ["production", "finance"]'
+        None, description='JSON array of tags e.g. ["production", "finance"]'
     ),
-    webhook_url: Optional[str] = Form(
-        None, description="URL de callback POST après chaque prédiction"
-    ),
+    webhook_url: Optional[str] = Form(None, description="POST callback URL after each prediction"),
     train_file: Optional[UploadFile] = File(
         None,
         description=(
-            "Script Python de ré-entraînement (train.py). "
-            "Doit référencer TRAIN_START_DATE, TRAIN_END_DATE, OUTPUT_MODEL_PATH "
-            "et contenir un appel joblib.dump/save_model."
+            "Python retraining script (train.py). "
+            "Must reference TRAIN_START_DATE, TRAIN_END_DATE, OUTPUT_MODEL_PATH "
+            "and contain a joblib.dump/save_model call."
         ),
     ),
     parent_version: Optional[str] = Form(
         None,
-        description="Version parente dont ce modèle est dérivé (traçabilité de lignée).",
+        description="Parent version this model is derived from (lineage traceability).",
     ),
     auto_baseline: bool = Form(
         False,
         description=(
-            "Si True, calcule et sauvegarde automatiquement la baseline de features "
-            "depuis les prédictions existantes pour ce nom de modèle (fenêtre 30 jours). "
-            "Silencieusement ignoré si moins de 100 prédictions sont disponibles."
+            "If True, automatically computes and saves the feature baseline "
+            "from existing predictions for this model name (30-day window). "
+            "Silently ignored if fewer than 100 predictions are available."
         ),
     ),
     run_training: bool = Form(
         False,
         description=(
-            "Si True, exécute train.py dans un sous-processus lors de l'upload "
-            "pour générer un modèle cohérent avec les versions de librairies de l'API. "
-            "Par défaut False : le fichier uploadé est stocké tel quel sans ré-entraînement."
+            "If True, executes train.py in a subprocess during upload "
+            "to generate a model consistent with the API's library versions. "
+            "Default False: the uploaded file is stored as-is without retraining."
         ),
     ),
     local_dependencies: Optional[str] = Form(
         None,
         description=(
-            "JSON {package: version} capturé depuis l'environnement local d'entraînement "
-            '(ex: {"scikit-learn": "1.6.1", "numpy": "2.2.5"}). '
-            "Utilisé pour générer requirements.txt quand run_training=False, "
-            "reflétant les versions du poste ayant produit le modèle."
+            "JSON {package: version} captured from the local training environment "
+            '(e.g. {"scikit-learn": "1.6.1", "numpy": "2.2.5"}). '
+            "Used to generate requirements.txt when run_training=False, "
+            "reflecting the versions of the machine that produced the model."
         ),
     ),
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Crée un nouveau modèle et l'enregistre en base.
+    Creates a new model and registers it in the database.
 
-    - **name** + **version** doivent être uniques — retourne 409 si la combinaison existe déjà.
-    - **file** : fichier modèle (`.joblib`) requis si `mlflow_run_id` n'est pas fourni.
-      Si `mlflow_run_id` est fourni, MLflow stocke déjà le modèle dans MinIO — pas de doublon.
-    - **mlflow_run_id** : ID du run MLflow. Permet de charger le modèle via MLflow à la prédiction.
-    - **train_file** : script `train.py` optionnel permettant le ré-entraînement automatique.
-      Doit respecter le contrat d'interface (TRAIN_START_DATE, TRAIN_END_DATE, OUTPUT_MODEL_PATH).
+    - **name** + **version** must be unique — returns 409 if the combination already exists.
+    - **file**: model file (`.joblib`) required if `mlflow_run_id` is not provided.
+      If `mlflow_run_id` is provided, MLflow already stores the model in MinIO — no duplication.
+    - **mlflow_run_id**: MLflow run ID. Allows loading the model via MLflow at prediction time.
+    - **train_file**: optional `train.py` script enabling automatic retraining.
+      Must comply with the interface contract (TRAIN_START_DATE, TRAIN_END_DATE, OUTPUT_MODEL_PATH).
 
-    Nécessite un token Bearer admin.
+    Requires an admin Bearer token.
     """
-    # Vérifier l'unicité name + version
+    # Verify name + version uniqueness
     result = await db.execute(
         select(ModelMetadata).where(
             and_(ModelMetadata.name == name, ModelMetadata.version == version)
@@ -3271,7 +3264,7 @@ async def create_model(
     if result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Un modèle '{name}' version '{version}' existe déjà.",
+            detail=f"A model '{name}' version '{version}' already exists.",
         )
 
     minio_bucket = None
@@ -3281,30 +3274,30 @@ async def create_model(
 
     model_bytes: Optional[bytes] = None
     if file is not None:
-        # Lire et valider le fichier (upload différé après subprocess)
+        # Read and validate the file (upload deferred after subprocess)
         model_bytes = await file.read()
         max_bytes = settings.MAX_MODEL_SIZE_MB * 1024 * 1024
         if len(model_bytes) > max_bytes:
             raise HTTPException(
                 status_code=413,
                 detail=(
-                    f"Le fichier dépasse la taille maximale autorisée "
+                    f"File exceeds the maximum allowed size "
                     f"({settings.MAX_MODEL_SIZE_MB} MB). "
-                    f"Taille reçue : {len(model_bytes) / 1024 / 1024:.1f} MB."
+                    f"Received size: {len(model_bytes) / 1024 / 1024:.1f} MB."
                 ),
             )
         if not model_bytes:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Le fichier est vide.",
+                detail="The file is empty.",
             )
     elif not mlflow_run_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Fournir un fichier modèle (.joblib) ou un mlflow_run_id.",
+            detail="Provide a model file (.joblib) or a mlflow_run_id.",
         )
 
-    # --- Traitement du script d'entraînement (optionnel) ---
+    # --- Training script processing (optional) ---
     train_script_object_key = None
     requirements_object_key = None
     subprocess_model_bytes: Optional[bytes] = None
@@ -3313,20 +3306,20 @@ async def create_model(
         if not train_bytes:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Le fichier train.py est vide.",
+                detail="The train.py file is empty.",
             )
         try:
             train_source = train_bytes.decode("utf-8")
         except UnicodeDecodeError:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="train.py doit être un fichier texte UTF-8 valide.",
+                detail="train.py must be a valid UTF-8 text file.",
             )
         validation_error = _validate_train_script(train_source)
         if validation_error:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Script train.py invalide : {validation_error}",
+                detail=f"Invalid train.py script: {validation_error}",
             )
         train_object_name = f"{name}/{version}/train.py"
         _t0 = time.perf_counter()
@@ -3334,7 +3327,7 @@ async def create_model(
             train_bytes, train_object_name, content_type="text/x-python"
         )
         logger.info(
-            "Script train.py uploadé",
+            "train.py script uploaded",
             object_name=train_object_name,
             model=name,
             version=version,
@@ -3345,20 +3338,20 @@ async def create_model(
         from src.services.env_snapshot_service import generate_requirements_txt
 
         if run_training:
-            # Lancer le subprocess pour capturer les dépendances et générer le pkl Docker.
-            # Si le subprocess réussit, son pkl est utilisé à la place du pkl uploadé par l'utilisateur
-            # (le pkl Docker est entraîné dans l'environnement API — versions de librairies cohérentes).
+            # Launch subprocess to capture dependencies and generate the Docker pkl.
+            # If subprocess succeeds, its pkl replaces the user-uploaded pkl
+            # (the Docker pkl is trained in the API environment — consistent library versions).
             req_txt, subprocess_model_bytes = await _run_train_subprocess(train_source)
             if req_txt is None:
                 logger.info(
-                    "Fallback AST pour requirements.txt — subprocess sans 'dependencies'",
+                    "AST fallback for requirements.txt — subprocess without 'dependencies'",
                     model=name,
                     version=version,
                 )
                 req_txt = generate_requirements_txt(train_source)
         else:
             logger.info(
-                "run_training=False — subprocess ignoré, modèle uploadé utilisé tel quel",
+                "run_training=False — subprocess skipped, uploaded model used as-is",
                 model=name,
                 version=version,
             )
@@ -3369,7 +3362,7 @@ async def create_model(
 
                     req_txt = dependencies_to_requirements_txt(local_deps_dict)
                     logger.info(
-                        "requirements.txt généré depuis local_dependencies",
+                        "requirements.txt generated from local_dependencies",
                         packages=list(local_deps_dict.keys()),
                         model=name,
                         version=version,
@@ -3385,7 +3378,7 @@ async def create_model(
             req_txt.encode("utf-8"), req_object_name, content_type="text/plain"
         )
         logger.info(
-            "requirements.txt uploadé",
+            "requirements.txt uploaded",
             object_name=req_object_name,
             model=name,
             version=version,
@@ -3394,7 +3387,7 @@ async def create_model(
         # Fix : sauvegarder la clé MinIO du requirements.txt en DB
         requirements_object_key = req_object_name
 
-    # Si local_dependencies fourni sans train_file, générer quand même requirements.txt
+    # If local_dependencies provided without train_file, still generate requirements.txt
     if local_dependencies and train_file is None and requirements_object_key is None:
         try:
             local_deps_dict = json.loads(local_dependencies)
@@ -3407,7 +3400,7 @@ async def create_model(
             )
             requirements_object_key = req_object_name
             logger.info(
-                "requirements.txt généré depuis local_dependencies (sans train_file)",
+                "requirements.txt generated from local_dependencies (without train_file)",
                 packages=list(local_deps_dict.keys()),
                 model=name,
                 version=version,
@@ -3415,20 +3408,20 @@ async def create_model(
         except Exception:
             pass
 
-    # Choisir les bytes du modèle à stocker : subprocess prioritaire, sinon fichier utilisateur
+    # Choose which model bytes to store: subprocess takes priority, otherwise user file
     model_bytes_to_store = (
         subprocess_model_bytes if subprocess_model_bytes is not None else model_bytes
     )
     if subprocess_model_bytes is not None:
-        logger.info("Modèle subprocess utilisé (Docker env)", model=name, version=version)
+        logger.info("Subprocess model used (Docker env)", model=name, version=version)
     elif model_bytes is not None:
-        logger.info("Modèle utilisateur uploadé (subprocess absent)", model=name, version=version)
+        logger.info("User model uploaded (no subprocess)", model=name, version=version)
 
-    # Uploader le modèle final vers MinIO
+    # Upload the final model to MinIO
     if model_bytes_to_store is not None:
         object_name = f"{name}/{version}/model.joblib"
         logger.info(
-            "Début upload modèle MinIO",
+            "Starting model upload to MinIO",
             model=name,
             version=version,
             size_kb=round(len(model_bytes_to_store) / 1024),
@@ -3436,7 +3429,7 @@ async def create_model(
         _t0 = time.perf_counter()
         model_hmac_signature = compute_model_hmac(model_bytes_to_store)
         logger.info(
-            "HMAC calculé",
+            "HMAC computed",
             model=name,
             version=version,
             duration_ms=round((time.perf_counter() - _t0) * 1000),
@@ -3444,7 +3437,7 @@ async def create_model(
         _t1 = time.perf_counter()
         upload_info = minio_service.upload_model_bytes(model_bytes_to_store, object_name)
         logger.info(
-            "Modèle uploadé MinIO",
+            "Model uploaded to MinIO",
             model=name,
             version=version,
             duration_ms=round((time.perf_counter() - _t1) * 1000),
@@ -3453,12 +3446,12 @@ async def create_model(
         minio_object_key = object_name
         file_size_bytes = upload_info["size"]
 
-    # Détecter le type de tâche depuis les bytes du modèle
+    # Detect task type from model bytes
     detected_task: Optional[str] = None
     if model_bytes_to_store is not None:
         detected_task = _detect_task_type(model_bytes_to_store)
 
-    # Désérialiser les champs JSON optionnels
+    # Deserialize optional JSON fields
     classes_parsed = _parse_json_field(classes, "classes")
     training_params_parsed = _parse_json_field(training_params, "training_params")
     training_metrics_parsed = _parse_json_field(training_metrics, "training_metrics")
@@ -3466,7 +3459,7 @@ async def create_model(
     feature_baseline_parsed = _parse_json_field(feature_baseline, "feature_baseline")
     tags_parsed = _parse_json_field(tags, "tags")
 
-    # Créer l'entrée en base
+    # Create the database entry
     metadata = ModelMetadata(
         name=name,
         version=version,
@@ -3499,7 +3492,7 @@ async def create_model(
         model_task=detected_task,
     )
     db.add(metadata)
-    await db.flush()  # obtenir l'id avant le snapshot
+    await db.flush()  # get the id before the snapshot
     await DBService.log_model_history(
         db, metadata, HistoryActionType.CREATED, user.id, user.username
     )
@@ -3536,14 +3529,14 @@ async def create_model(
                 await db.commit()
                 await db.refresh(metadata)
                 logger.info(
-                    "Baseline auto-calculé à l'upload",
+                    "Baseline auto-computed at upload",
                     model=name,
                     version=version,
                     features=list(computed_baseline.keys()),
                     predictions_used=predictions_used,
                 )
         except Exception:
-            logger.warning("Auto-baseline échoué à l'upload", model=name, version=version)
+            logger.warning("Auto-baseline failed at upload", model=name, version=version)
 
     return ModelCreateResponse(
         **{c.name: getattr(metadata, c.name) for c in metadata.__table__.columns},
@@ -3560,16 +3553,16 @@ async def update_model(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Met à jour les métadonnées d'un modèle (name + version).
+    Updates the metadata of a model (name + version).
 
-    Champs modifiables : `description`, `is_production`, `accuracy`, `features_count`, `classes`.
+    Editable fields: `description`, `is_production`, `accuracy`, `features_count`, `classes`.
 
-    - Si **is_production** passe à `true`, toutes les autres versions du même modèle
-      passent automatiquement à `false`.
+    - If **is_production** is set to `true`, all other versions of the same model
+      are automatically set to `false`.
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
-    # Récupérer le modèle cible avec son créateur
+    # Retrieve the target model with its creator
     result = await db.execute(
         select(ModelMetadata)
         .options(selectinload(ModelMetadata.creator))
@@ -3580,16 +3573,16 @@ async def update_model(
     if not model:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' version '{version}' introuvable.",
+            detail=f"Model '{name}' version '{version}' not found.",
         )
 
-    # Snapshot avant modification (pour détecter les champs réellement modifiés)
+    # Snapshot before modification (to detect actually changed fields)
     pre_snapshot = _build_snapshot(model)
     demoted_versions = []
 
-    # Si is_production passe à True → retirer is_production des autres versions,
-    # sauf celles en ab_test (elles partagent le trafic production simultanément).
-    # La version courante hérite du deployment_mode du payload ou de son état actuel.
+    # If is_production becomes True → remove is_production from other versions,
+    # except those in ab_test (they share production traffic simultaneously).
+    # The current version inherits the deployment_mode from the payload or its current state.
     incoming_mode = (
         payload.deployment_mode if payload.deployment_mode is not None else model.deployment_mode
     )
@@ -3604,8 +3597,8 @@ async def update_model(
             )
         )
         for other in other_versions.scalars().all():
-            # Garder is_production si l'autre version est en ab_test ET que la version
-            # courante sera aussi en ab_test (coexistence A/B légale)
+            # Keep is_production if the other version is in ab_test AND the current
+            # version will also be in ab_test (legal A/B coexistence)
             if (
                 other.deployment_mode == DeploymentMode.AB_TEST
                 and incoming_mode == DeploymentMode.AB_TEST
@@ -3614,11 +3607,11 @@ async def update_model(
             other.is_production = False
             demoted_versions.append(other)
 
-    # Appliquer uniquement les champs fournis (non-None)
+    # Apply only provided fields (non-None)
     update_data = payload.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         if field == "training_stats" and isinstance(value, dict):
-            # Merge avec l'existant pour ne pas écraser les données du dernier retrain
+            # Merge with existing to avoid overwriting last retrain data
             merged = {**(model.training_stats or {}), **value}
             setattr(model, field, merged)
         else:
@@ -3626,7 +3619,7 @@ async def update_model(
 
     await db.flush()
 
-    # Validation : la somme des traffic_weight pour les versions ab_test du modèle doit rester ≤ 1.0
+    # Validation: the sum of traffic_weight for the model's ab_test versions must stay ≤ 1.0
     if "deployment_mode" in update_data or "traffic_weight" in update_data:
         ab_result = await db.execute(
             select(ModelMetadata).where(
@@ -3644,13 +3637,13 @@ async def update_model(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=(
-                    f"La somme des traffic_weight pour les versions A/B de '{name}' "
-                    f"dépasse 1.0 (somme actuelle = {total_weight:.3f}). "
-                    "Réduisez le poids de certaines versions avant d'en augmenter d'autres."
+                    f"The sum of traffic_weight for A/B versions of '{name}' "
+                    f"exceeds 1.0 (current sum = {total_weight:.3f}). "
+                    "Reduce the weight of some versions before increasing others."
                 ),
             )
 
-    # Déterminer les champs réellement modifiés
+    # Determine actually changed fields
     post_snapshot = _build_snapshot(model)
     changed_fields = [k for k in update_data if pre_snapshot.get(k) != post_snapshot.get(k)]
     action = (
@@ -3682,11 +3675,11 @@ async def update_model(
 
 
 def _delete_minio_object(object_key: str) -> bool:
-    """Supprime l'objet MinIO. Retourne False si MinIO est indisponible."""
+    """Deletes the MinIO object. Returns False if MinIO is unavailable."""
     try:
         return minio_service.delete_model(object_key)
     except Exception as e:
-        logger.warning("MinIO suppression impossible", object_key=object_key, error=str(e))
+        logger.warning("MinIO deletion failed", object_key=object_key, error=str(e))
         return False
 
 
@@ -3703,15 +3696,15 @@ async def delete_model_version(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Supprime une version spécifique d'un modèle.
+    Deletes a specific version of a model.
 
-    - Supprime l'entrée en base PostgreSQL.
-    - Supprime le run MLflow associé (si `mlflow_run_id` renseigné).
-    - Supprime l'objet `.joblib` dans MinIO.
-    - **Cascade** : supprime toutes les prédictions de cette version ainsi que
-      les observed_results qui y sont liés.
+    - Deletes the PostgreSQL database entry.
+    - Deletes the associated MLflow run (if `mlflow_run_id` is set).
+    - Deletes the `.joblib` object in MinIO.
+    - **Cascade**: deletes all predictions for this version along with
+      the observed_results linked to them.
 
-    Retourne **204 No Content** en cas de succès. Nécessite un token Bearer admin.
+    Returns **204 No Content** on success. Requires an admin Bearer token.
     """
     result = await db.execute(
         select(ModelMetadata).where(
@@ -3723,7 +3716,7 @@ async def delete_model_version(
     if not model:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' version '{version}' introuvable.",
+            detail=f"Model '{name}' version '{version}' not found.",
         )
 
     if model.mlflow_run_id:
@@ -3732,10 +3725,10 @@ async def delete_model_version(
     if model.minio_object_key:
         _delete_minio_object(model.minio_object_key)
 
-    # Cascade : supprimer prédictions + observed_results de cette version
+    # Cascade: delete predictions + observed_results for this version
     cascade = await DBService.delete_predictions_for_version(db, name, version)
 
-    # Logger la suppression avant de supprimer l'objet ORM
+    # Log the deletion before deleting the ORM object
     was_production = model.is_production
     await DBService.log_model_history(db, model, HistoryActionType.DELETED, user.id, user.username)
     await db.delete(model)
@@ -3762,30 +3755,30 @@ async def validate_model_input(
     _auth: User = Depends(verify_token),
 ):
     """
-    Valide les features d'entrée contre le schéma attendu d'une version de modèle.
+    Validates input features against the expected schema of a model version.
 
-    - Détecte les **features manquantes** (présentes dans le modèle, absentes dans la requête).
-    - Détecte les **features inattendues** (présentes dans la requête, absentes dans le modèle).
-    - Émet des **avertissements de coercition** pour les valeurs string convertibles en float.
+    - Detects **missing features** (present in the model, absent from the request).
+    - Detects **unexpected features** (present in the request, absent from the model).
+    - Emits **coercion warnings** for string values convertible to float.
 
-    La source de vérité est, par ordre de priorité :
-    1. `feature_names_in_` du modèle sklearn chargé (entraîné sur un DataFrame pandas).
-    2. Les clés de `feature_baseline` stockées dans les métadonnées du modèle.
+    The source of truth is, in priority order:
+    1. `feature_names_in_` from the loaded sklearn model (trained on a pandas DataFrame).
+    2. The keys of `feature_baseline` stored in the model metadata.
 
-    Si aucun schéma n'est disponible, retourne `expected_features: null` avec `valid: true`
-    (impossible de valider sans référence).
+    If no schema is available, returns `expected_features: null` with `valid: true`
+    (cannot validate without a reference).
 
-    Nécessite un token Bearer valide.
+    Requires a valid Bearer token.
     """
-    # Récupérer les métadonnées pour accéder au feature_baseline en fallback
+    # Retrieve metadata to access feature_baseline as fallback
     metadata = await DBService.get_model_metadata(db, name, version)
     if not metadata:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' version '{version}' introuvable.",
+            detail=f"Model '{name}' version '{version}' not found.",
         )
 
-    # Résoudre les features attendues : modèle chargé en priorité, baseline en fallback
+    # Resolve expected features: loaded model takes priority, baseline as fallback
     loaded_model = None
     try:
         model_data = await model_service.load_model(db, name, version)
@@ -3795,7 +3788,7 @@ async def validate_model_input(
 
     expected_features = resolve_expected_features(loaded_model, metadata.feature_baseline)
 
-    # Aucun schéma disponible — validation impossible
+    # No schema available — validation not possible
     if expected_features is None:
         return ValidateInputResponse(
             valid=True,
@@ -3822,13 +3815,13 @@ async def warmup_model(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Préchauffe le cache Redis pour un modèle en le chargeant proactivement.
+    Warms up the Redis cache for a model by loading it proactively.
 
-    Élimine la latence de cold-start (download MinIO + désérialisation pickle) sur
-    la première prédiction après un déploiement ou un redémarrage, évitant ainsi
-    une fausse asymétrie de latence dans les comparaisons A/B.
+    Eliminates cold-start latency (MinIO download + pickle deserialization) on
+    the first prediction after a deployment or restart, thus avoiding
+    a false latency asymmetry in A/B comparisons.
 
-    Retourne `already_cached: true` si le modèle était déjà en mémoire cache.
+    Returns `already_cached: true` if the model was already in the memory cache.
     """
     cache_key = f"{name}:{version}"
     cached_before = await model_service.get_cached_models()
@@ -3840,15 +3833,15 @@ async def warmup_model(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Erreur préchauffage modèle", model_name=name, version=version, error=str(e))
+        logger.error("Model warmup error", model_name=name, version=version, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erreur lors du préchauffage du modèle '{name}' v'{version}'.",
+            detail=f"Error warming up model '{name}' v'{version}'.",
         )
     load_time_ms = (time.monotonic() - t0) * 1000
 
     logger.info(
-        "Modèle préchauffé",
+        "Model warmed up",
         model_name=name,
         version=version,
         already_cached=already_cached,
@@ -3871,30 +3864,30 @@ async def warmup_model(
 async def compute_model_baseline(
     name: ModelNamePath,
     version: ModelVersionPath,
-    days: int = Query(30, ge=1, le=180, description="Fenêtre temporelle en jours"),
-    dry_run: bool = Query(True, description="Calculer sans sauvegarder (défaut : True)"),
+    days: int = Query(30, ge=1, le=180, description="Time window in days"),
+    dry_run: bool = Query(True, description="Compute without saving (default: True)"),
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Calcule un baseline de features depuis les prédictions de production récentes.
+    Computes a feature baseline from recent production predictions.
 
-    Utilise les `days` derniers jours de prédictions pour calculer {mean, std, min, max}
-    par feature numérique. Le résultat peut être sauvegardé comme `feature_baseline`
-    du modèle pour activer la détection de drift.
+    Uses the last `days` days of predictions to compute {mean, std, min, max}
+    per numeric feature. The result can be saved as the model's `feature_baseline`
+    to enable drift detection.
 
-    - **dry_run=true** (défaut) : calcule et retourne sans sauvegarder.
-    - **dry_run=false** : sauvegarde le baseline et active le drift monitoring.
+    - **dry_run=true** (default): computes and returns without saving.
+    - **dry_run=false**: saves the baseline and activates drift monitoring.
 
-    Lève une erreur 422 si le nombre de prédictions disponibles est inférieur à 100.
+    Raises a 422 error if the number of available predictions is below 100.
 
-    Réservé aux administrateurs.
+    Reserved for administrators.
     """
     metadata = await DBService.get_model_metadata(db, name, version)
     if not metadata:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' version '{version}' introuvable.",
+            detail=f"Model '{name}' version '{version}' not found.",
         )
 
     production_stats = await DBService.get_feature_production_stats(db, name, version, days)
@@ -3904,9 +3897,9 @@ async def compute_model_baseline(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
-                f"Données insuffisantes pour un baseline fiable : "
-                f"{predictions_used} prédictions disponibles (minimum requis : 100). "
-                f"Augmentez la fenêtre temporelle avec ?days=N ou attendez plus de prédictions."
+                f"Insufficient data for a reliable baseline: "
+                f"{predictions_used} predictions available (minimum required: 100). "
+                f"Increase the time window with ?days=N or wait for more predictions."
             ),
         )
 
@@ -3929,7 +3922,7 @@ async def compute_model_baseline(
         )
         await db.commit()
         logger.info(
-            "Baseline calculé et sauvegardé",
+            "Baseline computed and saved",
             model=name,
             version=version,
             features=list(baseline.keys()),
@@ -3953,9 +3946,9 @@ async def download_model(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Télécharge le fichier .joblib d'un modèle.
+    Downloads the .joblib file of a model.
 
-    Admin uniquement — le .joblib contient la logique interne du modèle.
+    Admin only — the .joblib contains the model's internal logic.
     """
     result = await db.execute(
         select(ModelMetadata).where(
@@ -3967,22 +3960,22 @@ async def download_model(
     if not model_meta:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' version '{version}' introuvable.",
+            detail=f"Model '{name}' version '{version}' not found.",
         )
 
     if not model_meta.minio_object_key:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Aucun fichier modèle disponible pour '{name}' version '{version}'.",
+            detail=f"No model file available for '{name}' version '{version}'.",
         )
 
     try:
         model_bytes = minio_service.download_file_bytes(model_meta.minio_object_key)
     except Exception as e:
-        logger.error("Erreur téléchargement modèle", name=name, version=version, error=str(e))
+        logger.error("Model download error", name=name, version=version, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Erreur lors du téléchargement du modèle.",
+            detail="Error downloading the model.",
         )
 
     filename = f"{name}_{version}.joblib"
@@ -4001,10 +3994,10 @@ async def download_training_dataset(
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Télécharge le dataset d'entraînement stocké dans MinIO pour une version de modèle.
+    Downloads the training dataset stored in MinIO for a model version.
 
-    Le champ `training_dataset` doit contenir le chemin MinIO (ex: `iris-classifier/datasets/…csv`).
-    Retourne 404 si aucun dataset n'est disponible ou si le chemin n'est pas un chemin MinIO.
+    The `training_dataset` field must contain the MinIO path (e.g. `iris-classifier/datasets/…csv`).
+    Returns 404 if no dataset is available or if the path is not a MinIO path.
     """
     result = await db.execute(
         select(ModelMetadata).where(
@@ -4016,21 +4009,21 @@ async def download_training_dataset(
     if not model_meta:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' version '{version}' introuvable.",
+            detail=f"Model '{name}' version '{version}' not found.",
         )
 
     dataset_path = model_meta.training_dataset
     if not dataset_path or "/" not in dataset_path or not dataset_path.endswith(".csv"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Aucun dataset d'entraînement disponible pour cette version (chemin MinIO absent ou invalide).",
+            detail="No training dataset available for this version (missing or invalid MinIO path).",
         )
 
     try:
         csv_bytes = await minio_service.async_download_file_bytes(dataset_path)
     except Exception as e:
         logger.error(
-            "Erreur téléchargement dataset",
+            "Dataset download error",
             name=name,
             version=version,
             path=dataset_path,
@@ -4038,7 +4031,7 @@ async def download_training_dataset(
         )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Dataset introuvable dans MinIO ({dataset_path}).",
+            detail=f"Dataset not found in MinIO ({dataset_path}).",
         )
 
     filename = dataset_path.split("/")[-1]
@@ -4057,9 +4050,9 @@ async def download_train_script(
     db: AsyncSession = Depends(get_read_db),
 ):
     """
-    Télécharge le script train.py stocké dans MinIO pour une version de modèle.
+    Downloads the train.py script stored in MinIO for a model version.
 
-    Retourne 404 si aucun script n'a été uploadé avec ce modèle.
+    Returns 404 if no script was uploaded with this model.
     """
     result = await db.execute(
         select(ModelMetadata).where(
@@ -4071,21 +4064,21 @@ async def download_train_script(
     if not model_meta:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Modèle '{name}' version '{version}' introuvable.",
+            detail=f"Model '{name}' version '{version}' not found.",
         )
 
     script_key = model_meta.train_script_object_key
     if not script_key:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Aucun script d'entraînement disponible pour cette version.",
+            detail="No training script available for this version.",
         )
 
     try:
         script_bytes = await minio_service.async_download_file_bytes(script_key)
     except Exception as e:
         logger.error(
-            "Erreur téléchargement script",
+            "Script download error",
             name=name,
             version=version,
             path=script_key,
@@ -4093,7 +4086,7 @@ async def download_train_script(
         )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Script introuvable dans MinIO ({script_key}).",
+            detail=f"Script not found in MinIO ({script_key}).",
         )
 
     filename = script_key.split("/")[-1]
@@ -4111,14 +4104,14 @@ async def delete_model_all_versions(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Supprime toutes les versions d'un modèle.
+    Deletes all versions of a model.
 
-    - Supprime toutes les entrées PostgreSQL pour ce nom.
-    - Supprime chaque run MLflow associé.
-    - Supprime chaque objet `.joblib` dans MinIO.
-    - **Cascade** : supprime les prédictions et observed_results de chaque version.
+    - Deletes all PostgreSQL entries for this name.
+    - Deletes each associated MLflow run.
+    - Deletes each `.joblib` object in MinIO.
+    - **Cascade**: deletes predictions and observed_results for each version.
 
-    Retourne un résumé des suppressions effectuées. Nécessite un token Bearer admin.
+    Returns a summary of the deletions performed. Requires an admin Bearer token.
     """
     result = await db.execute(select(ModelMetadata).where(ModelMetadata.name == name))
     models = result.scalars().all()
@@ -4126,7 +4119,7 @@ async def delete_model_all_versions(
     if not models:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Aucun modèle trouvé avec le nom '{name}'.",
+            detail=f"No model found with the name '{name}'.",
         )
 
     deleted_versions = []
@@ -4144,7 +4137,7 @@ async def delete_model_all_versions(
         if model.minio_object_key and _delete_minio_object(model.minio_object_key):
             minio_objects_deleted.append(model.minio_object_key)
 
-        # Cascade par version
+        # Cascade per version
         cascade = await DBService.delete_predictions_for_version(db, name, model.version)
         total_cascade_predictions += cascade["deleted_predictions"]
         total_cascade_observed += cascade["deleted_observed_results"]
@@ -4190,10 +4183,10 @@ async def upload_golden_tests_csv(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Importe un lot de cas de test golden depuis un CSV (admin uniquement).
+    Imports a batch of golden test cases from a CSV (admin only).
 
-    Format CSV attendu : colonnes features + ``expected_output`` (requis) + ``description`` (optionnel).
-    Exemple : ``sepal_length,sepal_width,petal_length,petal_width,expected_output,description``
+    Expected CSV format: feature columns + ``expected_output`` (required) + ``description`` (optional).
+    Example: ``sepal_length,sepal_width,petal_length,petal_width,expected_output,description``
     """
     content = await file.read()
     try:
@@ -4235,7 +4228,7 @@ async def create_golden_test(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Crée un cas de test golden pour un modèle (admin uniquement)."""
+    """Creates a golden test case for a model (admin only)."""
     gt = await GoldenTestService.create_test(
         db,
         model_name=name,
@@ -4266,12 +4259,12 @@ async def delete_golden_test(
     _user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Supprime un cas de test golden (admin uniquement)."""
+    """Deletes a golden test case (admin only)."""
     deleted = await GoldenTestService.delete_test(db, test_id, name)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Cas de test {test_id} non trouvé pour le modèle '{name}'.",
+            detail=f"Test case {test_id} not found for model '{name}'.",
         )
     await db.commit()
 
@@ -4287,8 +4280,8 @@ async def run_golden_tests(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Exécute tous les golden tests enregistrés pour un modèle et une version donnés (admin uniquement).
+    Runs all registered golden tests for a given model and version (admin only).
 
-    Charge le modèle, prédit chaque cas de test et compare au résultat attendu.
+    Loads the model, predicts each test case and compares against the expected output.
     """
     return await GoldenTestService.run_tests(db, name, version)

@@ -29,13 +29,13 @@
 
 ## Batch 2 — `src/api/`
 
-- [ ] `src/api/models.py` (heaviest)
-- [ ] `src/api/predict.py`
-- [ ] `src/api/monitoring.py`
-- [ ] `src/api/users.py`
-- [ ] `src/api/observed_results.py`
-- [ ] `src/api/jobs.py`
-- [ ] `src/api/account_requests.py`
+- [x] `src/api/models.py` (heaviest)
+- [x] `src/api/predict.py`
+- [x] `src/api/monitoring.py`
+- [x] `src/api/users.py`
+- [x] `src/api/observed_results.py`
+- [x] `src/api/jobs.py`
+- [x] `src/api/account_requests.py`
 
 ---
 
