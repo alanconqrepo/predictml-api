@@ -1,5 +1,5 @@
 """
-Validation des cas de référence (Golden Test Set) pour les modèles ML
+Validation of reference test cases (Golden Test Set) for ML models
 """
 
 import json
@@ -27,7 +27,7 @@ def reload():
     st.rerun()
 
 
-# ─── Chargement des modèles ───────────────────────────────────────────────────
+# ─── Model loading ───────────────────────────────────────────────────
 try:
     models = get_models_cached(
         st.session_state.get("api_url"), st.session_state.get("api_token")
@@ -40,7 +40,7 @@ if not models:
     st.info(t("golden_tests.no_models"))
     st.stop()
 
-# ─── Section 1 — Sélection du modèle ─────────────────────────────────────────
+# ─── Section 1 — Model selection ─────────────────────────────────────────
 st.subheader(t("golden_tests.section_select_model"))
 
 model_names = sorted({m["name"] for m in models})
@@ -53,7 +53,7 @@ versions = [m["version"] for m in models if m["name"] == selected_name]
 with col_version:
     selected_version = st.selectbox(t("golden_tests.version_label"), versions, key="gt_model_version")
 
-# ─── Section 2 — Cas de tests existants ──────────────────────────────────────
+# ─── Section 2 — Existing test cases ──────────────────────────────────────
 st.markdown("---")
 st.subheader(t("golden_tests.section_existing_tests"))
 
@@ -193,7 +193,7 @@ else:
             except Exception as e:
                 st.error(t("golden_tests.run_error", error=e))
 
-# ─── Section 3 — Ajouter un cas de test (admin uniquement) ───────────────────
+# ─── Section 3 — Add a test case (admin only) ───────────────────────────────────────
 st.markdown("---")
 st.subheader(t("golden_tests.section_add_test"))
 

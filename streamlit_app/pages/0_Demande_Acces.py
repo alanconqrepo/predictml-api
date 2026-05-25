@@ -1,5 +1,5 @@
 """
-Page publique de demande de création de compte — accessible sans authentification
+Public account creation request page — accessible without authentication
 """
 
 import os

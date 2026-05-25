@@ -1,5 +1,5 @@
 """
-Gestion centralisée des ré-entraînements et plannings cron
+Centralized management of retraining jobs and cron schedules
 """
 
 from datetime import date, timedelta
@@ -60,7 +60,7 @@ tab_overview, tab_manual, tab_schedule, tab_policy, tab_history = st.tabs(
     ]
 )
 
-# ─── Onglet 1 — Vue d'ensemble des schedules ──────────────────────────────
+# ─── Tab 1 — Schedule overview ──────────────────────────────
 
 with tab_overview:
     st.subheader(t("retrain.overview.subheader"))
@@ -155,7 +155,7 @@ with tab_overview:
     col2.metric(t("retrain.overview.metric_trainable_models"), trainable_count)
     col3.metric(t("retrain.overview.metric_total_models"), len(models))
 
-# ─── Onglet 2 — Retrain manuel ────────────────────────────────────────────
+# ─── Tab 2 — Manual retrain ────────────────────────────────────────────
 
 with tab_manual:
     st.subheader(t("retrain.manual.subheader"))
@@ -251,7 +251,7 @@ with tab_manual:
                     except Exception as e:
                         st.toast(t("retrain.manual.toast_error", error=e), icon="❌")
 
-# ─── Onglet 3 — Planning cron ─────────────────────────────────────────────
+# ─── Tab 3 — Cron schedule ─────────────────────────────────────────────
 
 with tab_schedule:
     st.subheader(t("retrain.schedule.subheader"))
@@ -334,7 +334,7 @@ with tab_schedule:
             except Exception as e:
                 st.toast(t("retrain.schedule.toast_error", error=e), icon="❌")
 
-# ─── Onglet 4 — Politique d'auto-promotion ───────────────────────────────
+# ─── Tab 4 — Auto-promotion policy ───────────────────────────────
 
 with tab_policy:
     st.subheader(t("retrain.policy.subheader"))
@@ -441,7 +441,7 @@ with tab_policy:
         except Exception as e:
             st.toast(t("retrain.policy.toast_error", error=e), icon="❌")
 
-# ─── Onglet 5 — Historique des retrains ──────────────────────────────────
+# ─── Tab 5 — Retrain history ──────────────────────────────────
 
 with tab_history:
     st.subheader(t("retrain.history.subheader"))
@@ -573,7 +573,7 @@ with tab_history:
         )
         st.caption(t("retrain.history.total_caption", total=total_retrains))
 
-        # Graphique de progression de l'accuracy
+        # Accuracy progression chart
         chart_df = df_hist[df_hist[col_accuracy].notna()].copy()
         if not chart_df.empty:
             st.markdown(t("retrain.history.accuracy_chart_title"))
@@ -581,7 +581,7 @@ with tab_history:
             chart_df = chart_df.rename(columns={col_date: "index"}).set_index("index")
             st.line_chart(chart_df[[col_accuracy, col_f1]].dropna(how="all"))
 
-        # ─── Delta d'importance des features ─────────────────────────────
+        # ─── Feature importance delta ─────────────────────────────
         st.markdown("---")
         st.markdown(t("retrain.history.fi_delta_title"))
         st.caption(t("retrain.history.fi_delta_caption"))

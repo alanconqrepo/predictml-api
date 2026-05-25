@@ -1,5 +1,5 @@
 """
-Gestion des utilisateurs — admin only
+User management — admin only
 """
 
 import pandas as pd
@@ -48,7 +48,7 @@ st.set_page_config(page_title=t("users.page_title"), page_icon="👥", layout="w
 
 require_auth()
 
-# ── Vue non-admin ──────────────────────────────────────────────────────────────
+# ── Non-admin view ──────────────────────────────────────────────────────────────
 if not st.session_state.get("is_admin"):
     client = get_client()
     with st.expander(t("users.my_profile"), expanded=True):
@@ -84,7 +84,7 @@ if not st.session_state.get("is_admin"):
 
     st.stop()
 
-# ── Vue admin ──────────────────────────────────────────────────────────────────
+# ── Admin view ──────────────────────────────────────────────────────────────────
 require_admin()
 
 st.title(t("users.title"))
@@ -112,11 +112,11 @@ def reload():
 tab_users, tab_requests = st.tabs([t("users.tab_users"), t("users.tab_requests")])
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Onglet 1 — Gestion des utilisateurs
+# Tab 1 — User management
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_users:
 
-    # Chargement des utilisateurs (exécuté avant les expanders)
+    # Load users (executed before expanders)
     try:
         users = fetch_users(st.session_state.get("api_url"), st.session_state.get("api_token"))
     except Exception as e:
@@ -154,7 +154,7 @@ with tab_users:
         "created_at": _col_created,
     })
 
-    # 1. Liste des utilisateurs (ouvert) -------------------------------------------
+    # 1. User list (open) -------------------------------------------
     with st.expander(t("users.expander_list"), expanded=True):
         st.dataframe(
             df,
@@ -172,10 +172,10 @@ with tab_users:
             },
         )
 
-    # Le selectbox user est nécessaire ici pour définir `selected` avant Analytics
+    # The user selectbox is needed here to define `selected` before Analytics
     user_options = {f"{u['username']} (id:{u['id']})": u for u in users}
 
-    # 2. Actions (fermé) -----------------------------------------------------------
+    # 2. Actions (closed) -----------------------------------------------------------
     with st.expander(t("users.expander_actions"), expanded=False):
         selected_label = st.selectbox(t("users.select_user"), list(user_options.keys()))
         selected = user_options[selected_label]
@@ -246,15 +246,15 @@ with tab_users:
                 st.session_state.pop("confirm_delete_user", None)
                 st.rerun()
 
-    # `selected` est défini par le selectbox dans le bloc with ci-dessus
-    # (les blocs with expander s'exécutent toujours, même si l'expander est fermé)
+    # `selected` is set by the selectbox in the with block above
+    # (with expander blocks always execute, even when the expander is closed)
     _selected = user_options[st.session_state.get(
         "pm_model_select",
         list(user_options.keys())[0]
     )] if "selected" not in vars() else selected
     selected = _selected if "selected" not in vars() else selected
 
-    # 3. Créer un nouvel utilisateur (fermé) ---------------------------------------
+    # 3. Create a new user (closed) ---------------------------------------
     with st.expander(t("users.expander_create"), expanded=False):
         with st.form("create_user_form"):
             col1, col2 = st.columns(2)
@@ -281,7 +281,7 @@ with tab_users:
                 except Exception as e:
                     st.toast(t("users.error_generic", error=e), icon="❌")
 
-    # 4. Analytics d'usage (fermé) -------------------------------------------------
+    # 4. Usage analytics (closed) -------------------------------------------------
     _default_end   = pd.Timestamp.now().date()
     _default_start = _default_end - pd.Timedelta(days=29)
     with st.expander(t("users.expander_analytics", username=selected['username']), expanded=False):
@@ -419,7 +419,7 @@ with tab_users:
                 st.error(t("users.analytics.error_load", error=e))
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Onglet 2 — Demandes d'accès
+# Tab 2 — Access requests
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_requests:
     try:

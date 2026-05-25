@@ -1,5 +1,5 @@
 """
-Historique des prédictions avec filtres
+Prediction history with filters
 """
 
 import io
@@ -78,10 +78,10 @@ with st.expander(t("predictions.scripts.expander_title"), expanded=False):
 tab_history, tab_batch = st.tabs([t("predictions.tab_history"), t("predictions.tab_batch")])
 
 # ───────────────────────────────────────────────────────────────────────────────
-# TAB 1 — Historique
+# TAB 1 — History
 # ───────────────────────────────────────────────────────────────────────────────
 with tab_history:
-    # --- Couverture du ground truth ---
+    # --- Ground truth coverage ---
     with st.expander(t("predictions.coverage.expander_title"), expanded=True):
         try:
             coverage_data = client.get_observed_results_stats()
@@ -106,11 +106,11 @@ with tab_history:
         except Exception:
             st.caption(t("predictions.coverage.unavailable"))
 
-    # --- Filtres ---
+    # --- Filters ---
     with st.expander(t("predictions.filters.expander_title"), expanded=False):
         col_search, col_model, col2, col3, col4, col5 = st.columns([1.2, 1.8, 1.2, 1.2, 1.2, 1.2])
 
-        # Liste des modèles disponibles
+        # List of available models
         try:
             models = get_models_cached(
                 st.session_state.get("api_url"), st.session_state.get("api_token")
@@ -371,7 +371,7 @@ with tab_history:
                     },
                 )
 
-                # ── Panneau détail (ligne sélectionnée) ───────────────────────────
+                # ── Detail panel (selected row) ───────────────────────────
                 selected_rows = sel.selection.rows if sel.selection else []
                 if selected_rows:
                     import plotly.graph_objects as go
@@ -501,7 +501,7 @@ with tab_history:
                             else:
                                 st.info(t("predictions.detail.shap_no_values"))
 
-                    # Suppression
+                    # Deletion
                     if st.session_state.get("is_admin", False):
                         st.divider()
                         if st.button(
@@ -551,7 +551,7 @@ with tab_history:
                                 st.error(t("predictions.export.error", error=exc))
 
 
-        # --- Activité par utilisateur & modèle (admin uniquement) ---
+        # --- Activity by user & model (admin only) ---
         if st.session_state.get("is_admin", False):
             with st.expander(t("predictions.activity.expander_title"), expanded=False):
                 st.caption(t("predictions.activity.caption"))
@@ -644,7 +644,7 @@ with tab_history:
 
                         st.divider()
 
-                        # ── Tableau synthèse par utilisateur ─────────────────────────
+                        # ── Summary table by user ─────────────────────────
                         st.markdown(t("predictions.activity.summary_header"))
                         _df_disp = df_usumm.copy()
                         _df_disp[t("predictions.activity.col_traffic_share")] = _df_disp["total_calls"].apply(
@@ -698,7 +698,7 @@ with tab_history:
 
                         st.divider()
 
-                        # ── Graphiques ────────────────────────────────────────────────
+                        # ── Charts ────────────────────────────────────────────────
                         _gc1, _gc2 = st.columns([1, 2])
 
                         _fig_top = px.bar(
@@ -782,7 +782,7 @@ with tab_history:
                             )
                             _col_chart.plotly_chart(_fig_stack, use_container_width=True)
 
-        # --- Import / Export résultats observés ---
+        # --- Import / Export observed results ---
         CSV_TEMPLATE = (
             "id_obs,model_name,observed_result,date_time\n"
             "obs-001,iris-classifier,2,2026-05-20 14:32:00\n"
@@ -841,7 +841,7 @@ with tab_history:
                 except Exception as exc:
                     st.error(t("predictions.csv_import.import_error", error=exc))
 
-        # --- Maintenance RGPD (admin uniquement) ---
+        # --- GDPR maintenance (admin only) ---
         if st.session_state.get("is_admin", False):
             with st.expander(t("predictions.purge.expander_title"), expanded=False):
                 st.caption(t("predictions.purge.caption"))
@@ -852,7 +852,7 @@ with tab_history:
                     min_value=7,
                     max_value=365,
                     value=90,
-                    format="%d jours",
+                    format="%d days",
                     key="purge_days_slider",
                 )
                 purge_model_sel = col_m2.selectbox(
@@ -929,7 +929,7 @@ with tab_history:
 
 
 # ───────────────────────────────────────────────────────────────────────────────
-# TAB 2 — Prédictions batch
+# TAB 2 — Batch predictions
 # ───────────────────────────────────────────────────────────────────────────────
 with tab_batch:
     st.subheader(t("predictions.batch.subheader"))
@@ -955,7 +955,7 @@ with tab_batch:
             key="batch_example_download",
         )
 
-    # --- Sélection modèle + version ---
+    # --- Model + version selection ---
     try:
         all_models = get_models_cached(
             st.session_state.get("api_url"), st.session_state.get("api_token")

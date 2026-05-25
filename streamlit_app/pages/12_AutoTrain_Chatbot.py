@@ -1,6 +1,6 @@
 """
-AutoTrain Chatbot — Génération et test de scripts train.py assistés par IA.
-Page réservée aux administrateurs.
+AutoTrain Chatbot — AI-assisted train.py script generation and testing.
+Admin-only page.
 """
 
 import json
@@ -36,40 +36,40 @@ _DEFAULT_END = date.today().isoformat()
 QUICK_TOPICS = [
     (
         t("autotrain.quick_topics.analyze_data"),
-        "Analyse le dataset chargé en session (ou récupère les données disponibles) "
-        "et dis-moi quelles features sont disponibles, la distribution des labels, "
-        "et quel algorithme tu recommandes pour ce problème.",
+        "Analyze the dataset loaded in the session (or fetch available data) "
+        "and tell me which features are available, the label distribution, "
+        "and which algorithm you recommend for this problem.",
     ),
     (
         t("autotrain.quick_topics.random_forest"),
-        "Génère un script train.py complet avec RandomForestClassifier. "
-        "Respecte le contrat PredictML (TRAIN_START_DATE, TRAIN_END_DATE, OUTPUT_MODEL_PATH). "
-        "Inclus la gestion de TRAIN_DATA_PATH avec fallback dataset Iris. "
-        "Puis exécute-le pour valider qu'il fonctionne.",
+        "Generate a complete train.py script using RandomForestClassifier. "
+        "Respect the PredictML contract (TRAIN_START_DATE, TRAIN_END_DATE, OUTPUT_MODEL_PATH). "
+        "Include TRAIN_DATA_PATH handling with Iris dataset fallback. "
+        "Then execute it to validate it works.",
     ),
     (
         t("autotrain.quick_topics.gradient_boosting"),
-        "Génère un script train.py avec GradientBoostingClassifier (100 estimateurs, "
-        "learning_rate=0.1). Respecte le contrat PredictML et inclus feature_stats "
-        "et label_distribution dans la sortie JSON. Exécute-le pour obtenir les métriques.",
+        "Generate a train.py script using GradientBoostingClassifier (100 estimators, "
+        "learning_rate=0.1). Respect the PredictML contract and include feature_stats "
+        "and label_distribution in the JSON output. Execute it to get the metrics.",
     ),
     (
         t("autotrain.quick_topics.compare_versions"),
-        "Compare les scripts déjà testés dans la session. "
-        "Montre un tableau récapitulatif des métriques (accuracy, F1, n_rows) "
-        "et recommande le meilleur à uploader.",
+        "Compare the scripts already tested in the session. "
+        "Show a summary table of metrics (accuracy, F1, n_rows) "
+        "and recommend the best one to upload.",
     ),
     (
         t("autotrain.quick_topics.optimize_script"),
-        "Analyse le dernier script exécuté avec succès et propose des améliorations : "
-        "optimisation des hyperparamètres, normalisation des features, "
-        "ou algorithme alternatif. Génère et teste la version améliorée.",
+        "Analyze the last successfully executed script and suggest improvements: "
+        "hyperparameter optimization, feature normalization, "
+        "or an alternative algorithm. Generate and test the improved version.",
     ),
     (
         t("autotrain.quick_topics.upload_model"),
-        "Uploade le meilleur modèle de la session vers l'API PredictML. "
-        "Vérifie d'abord les métriques disponibles, propose un nom et une version, "
-        "puis exécute l'upload.",
+        "Upload the best model from the session to the PredictML API. "
+        "First check the available metrics, suggest a name and version, "
+        "then perform the upload.",
     ),
 ]
 
@@ -82,7 +82,7 @@ def get_anthropic_client() -> anthropic.Anthropic | None:
     return anthropic.Anthropic(api_key=key) if key else None
 
 
-# ── Boucle agent avec tool use ────────────────────────────────────────────────
+# ── Agent loop with tool use ──────────────────────────────────────────────────
 
 
 def run_agent_turn(
@@ -93,10 +93,10 @@ def run_agent_turn(
     token: str,
 ) -> tuple[str, list]:
     """
-    Exécute un tour complet de l'agent avec support du function calling.
+    Execute a full agent turn with function calling support.
 
-    Render les appels d'outils inline dans le chat_message courant.
-    Retourne (texte_final, liste_de_résumés_d'outils).
+    Renders tool calls inline in the current chat_message.
+    Returns (final_text, list_of_tool_summaries).
     """
     current_messages = list(raw_messages)
     final_text = ""
@@ -158,7 +158,7 @@ def run_agent_turn(
             return final_text, tool_summaries
 
 
-# ── Rendu de l'historique ─────────────────────────────────────────────────────
+# ── Chat history rendering ────────────────────────────────────────────────────
 
 
 def render_chat_history() -> None:
@@ -188,18 +188,18 @@ def render_chat_history() -> None:
             st.markdown(msg["content"])
 
 
-# ── Helpers de gestion de l'état des messages ────────────────────────────────
+# ── Message state management helpers ─────────────────────────────────────────
 
 
 def _sync_raw_from_display() -> list:
-    """Reconstruit raw_messages depuis autotrain_messages."""
+    """Rebuild raw_messages from autotrain_messages."""
     return [
         {"role": msg["role"], "content": msg["content"]}
         for msg in st.session_state["autotrain_messages"]
     ]
 
 
-# ── Initialisation session state ──────────────────────────────────────────────
+# ── Session state initialization ──────────────────────────────────────────────
 
 
 def _init_session_state() -> None:
@@ -219,7 +219,7 @@ def _init_session_state() -> None:
 
 
 def _cleanup_session_temps() -> None:
-    """Supprime les fichiers temporaires de la session (modèles + datasets)."""
+    """Delete temporary session files (models + datasets)."""
     dataset_path = st.session_state.get("autotrain_dataset_path")
     if dataset_path:
         try:
@@ -240,7 +240,7 @@ def _cleanup_session_temps() -> None:
                 pass
 
 
-# ── Page principale ───────────────────────────────────────────────────────────
+# ── Main page ─────────────────────────────────────────────────────────────────
 
 _init_session_state()
 
@@ -250,11 +250,11 @@ anthropic_client = get_anthropic_client()
 _api_url: str = st.session_state.get("api_url", "http://localhost:8000")
 _token: str = st.session_state.get("api_token", "")
 
-# En-tête
+# Header
 st.title(t("autotrain.title"))
 st.markdown(t("autotrain.subtitle"))
 
-# Badges d'état en en-tête
+# Status badges in header
 dataset_info = st.session_state.get("autotrain_dataset_info")
 last_model = st.session_state.get("autotrain_last_model_path")
 badges = []
@@ -273,7 +273,7 @@ if badges:
 
 st.divider()
 
-# ── Layout 3 onglets ──────────────────────────────────────────────────────────
+# ── 3-tab layout ──────────────────────────────────────────────────────────────
 
 tab_chat, tab_data, tab_scripts = st.tabs(
     [
@@ -284,15 +284,15 @@ tab_chat, tab_data, tab_scripts = st.tabs(
 )
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ONGLET 1 — CHAT
+# TAB 1 — CHAT
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab_chat:
     if anthropic_client is None:
         st.warning(t("autotrain.no_api_key"))
 
-    # Dates d'entraînement (contexte pour execute_python)
-    with st.expander("📅 Fenêtre d'entraînement (TRAIN_START/END_DATE)", expanded=False):
+    # Training dates (context for execute_python)
+    with st.expander("📅 Training window (TRAIN_START/END_DATE)", expanded=False):
         col_s, col_e = st.columns(2)
         new_start = col_s.date_input(
             t("autotrain.dates.train_start"),
@@ -307,13 +307,13 @@ with tab_chat:
         st.session_state["autotrain_train_start"] = new_start.isoformat()
         st.session_state["autotrain_train_end"] = new_end.isoformat()
         st.caption(
-            "Ces dates seront injectées automatiquement comme `TRAIN_START_DATE` "
-            "et `TRAIN_END_DATE` lors de l'exécution des scripts."
+            "These dates will be automatically injected as `TRAIN_START_DATE` "
+            "and `TRAIN_END_DATE` when scripts are executed."
         )
 
-    # Sujets rapides
+    # Quick topics
     with st.expander(
-        "⚡ Actions rapides",
+        "⚡ Quick actions",
         expanded=(len(st.session_state["autotrain_messages"]) == 0),
     ):
         cols = st.columns(3)
@@ -321,7 +321,7 @@ with tab_chat:
             if cols[i % 3].button(label, key=f"at_quick_{i}", width="stretch"):
                 st.session_state["autotrain_pending_prompt"] = prompt
 
-    # Boutons de contrôle
+    # Control buttons
     btn_col1, btn_col2 = st.columns([2, 5])
     if btn_col1.button(t("autotrain.new_conversation_btn"), key="at_clear"):
         _cleanup_session_temps()
@@ -340,10 +340,10 @@ with tab_chat:
 
     st.divider()
 
-    # Historique de la conversation
+    # Conversation history
     render_chat_history()
 
-    # ── Traitement du message (prompt rapide ou saisie) ───
+    # ── Message processing (quick prompt or user input) ───
 
     user_input: str | None = None
 
@@ -386,7 +386,7 @@ with tab_chat:
         st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ONGLET 2 — DONNÉES
+# TAB 2 — DATA
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab_data:
@@ -398,7 +398,7 @@ with tab_data:
     )
 
     if source == t("autotrain.data.source_upload"):
-        # ── Upload CSV local ──────────────────────────────────────────────────
+        # ── Local CSV upload ──────────────────────────────────────────────────
         uploaded = st.file_uploader(
             t("autotrain.data.upload_label"),
             type=["csv"],
@@ -411,7 +411,7 @@ with tab_data:
 
                 df_up = pd.read_csv(uploaded)
 
-                # Sauvegarder dans fichier temporaire
+                # Save to temporary file
                 tmp = tempfile.NamedTemporaryFile(
                     suffix=".csv", delete=False, mode="w", encoding="utf-8"
                 )
@@ -421,7 +421,7 @@ with tab_data:
 
                 st.session_state["autotrain_dataset_path"] = csv_path
 
-                # Calculer les infos
+                # Compute info
                 labeled_col = "observed_result"
                 n_labeled = (
                     int(df_up[labeled_col].notna().sum()) if labeled_col in df_up.columns else 0
@@ -461,7 +461,7 @@ with tab_data:
                 st.error(t("autotrain.data.fetch_error", error=str(e)))
 
     else:
-        # ── Récupération depuis l'API ────────────────────────────────────────
+        # ── Fetch from the API ────────────────────────────────────────────────
         try:
             from utils.api_client import get_models
 
@@ -520,12 +520,12 @@ with tab_data:
                     )
                     st.rerun()
 
-    # ── Affichage du dataset chargé ───────────────────────────────────────────
+    # ── Loaded dataset display ────────────────────────────────────────────────
 
     st.divider()
     info = st.session_state.get("autotrain_dataset_info")
     if info:
-        st.subheader("📊 Dataset chargé")
+        st.subheader("📊 Loaded dataset")
         c1, c2, c3 = st.columns(3)
         c1.metric(t("autotrain.data.n_rows"), f"{info['n_rows']:,}")
         c2.metric(t("autotrain.data.n_labeled"), f"{info['n_labeled']:,}")
@@ -543,7 +543,7 @@ with tab_data:
             with st.expander(t("autotrain.data.preview_header"), expanded=True):
                 try:
                     df_preview = pd.DataFrame(preview)
-                    # Tronquer les colonnes JSON longues pour l'affichage
+                    # Truncate long JSON columns for display
                     for col in [
                         "input_features",
                         "prediction_result",
@@ -555,8 +555,8 @@ with tab_data:
                 except Exception:
                     st.json(preview[:3])
 
-        # Bouton pour effacer le dataset
-        if st.button("🗑️ Effacer le dataset", key="at_clear_dataset"):
+        # Button to clear the dataset
+        if st.button("🗑️ Clear dataset", key="at_clear_dataset"):
             dataset_path = st.session_state.get("autotrain_dataset_path")
             if dataset_path:
                 try:
@@ -570,7 +570,7 @@ with tab_data:
         st.info(t("autotrain.data.no_data"))
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ONGLET 3 — SCRIPTS GÉNÉRÉS
+# TAB 3 — GENERATED SCRIPTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab_scripts:
@@ -581,7 +581,7 @@ with tab_scripts:
     else:
         st.subheader(t("autotrain.scripts.title"))
 
-        # Tableau récapitulatif
+        # Summary table
         summary_rows = []
         for s in scripts:
             metrics = s.get("metrics", {})
@@ -594,9 +594,9 @@ with tab_scripts:
                     "F1 Score": (
                         f"{metrics['f1_score']:.4f}" if metrics and "f1_score" in metrics else "—"
                     ),
-                    "Lignes": metrics.get("n_rows", "—") if metrics else "—",
-                    "Temps (ms)": s.get("execution_time_ms", "—"),
-                    "Modèle produit": "✅" if s.get("model_path") else "❌",
+                    "Rows": metrics.get("n_rows", "—") if metrics else "—",
+                    "Time (ms)": s.get("execution_time_ms", "—"),
+                    "Model produced": "✅" if s.get("model_path") else "❌",
                 }
             )
         st.dataframe(
@@ -607,7 +607,7 @@ with tab_scripts:
 
         st.divider()
 
-        # Détail de chaque script
+        # Per-script detail
         for script_entry in reversed(scripts):
             idx = script_entry["id"]
             metrics = script_entry.get("metrics", {})
@@ -624,9 +624,9 @@ with tab_scripts:
 
             with st.expander(
                 f"{t('autotrain.scripts.version', id=idx)} — {summary_str}",
-                expanded=(idx == len(scripts)),  # Dernier script ouvert
+                expanded=(idx == len(scripts)),  # Last script expanded
             ):
-                # Métriques
+                # Metrics
                 if metrics:
                     m_cols = st.columns(3)
                     m_cols[0].metric(
@@ -643,7 +643,7 @@ with tab_scripts:
                 with st.expander(t("autotrain.scripts.code_expander"), expanded=False):
                     st.code(script_entry["code"], language="python")
 
-                # Télécharger le script
+                # Download the script
                 st.download_button(
                     label=t("autotrain.scripts.download_btn"),
                     data=script_entry["code"].encode("utf-8"),
@@ -655,7 +655,7 @@ with tab_scripts:
                 # Upload depuis cet onglet
                 if model_path and os.path.exists(model_path):
                     st.divider()
-                    st.caption("🚀 **Uploader ce modèle vers l'API PredictML**")
+                    st.caption("🚀 **Upload this model to the PredictML API**")
 
                     with st.form(key=f"upload_form_{idx}"):
                         u_col1, u_col2 = st.columns(2)
@@ -679,7 +679,7 @@ with tab_scripts:
                         submitted = st.form_submit_button(t("autotrain.scripts.upload_btn"))
 
                     if submitted and u_name and u_version:
-                        # Pointer temporairement sur ce script/modèle
+                        # Temporarily point to this script/model
                         prev_path = st.session_state.get("autotrain_last_model_path")
                         prev_script = st.session_state.get("autotrain_last_script")
                         prev_scripts = list(st.session_state.get("autotrain_scripts", []))
@@ -687,8 +687,8 @@ with tab_scripts:
                         st.session_state["autotrain_last_model_path"] = model_path
                         st.session_state["autotrain_last_script"] = script_entry["code"]
 
-                        # Mettre à jour les métriques dans la liste des scripts
-                        # pour que _run_upload_model les lise correctement
+                        # Update metrics in the scripts list
+                        # so that _run_upload_model reads them correctly
                         scripts_with_this = [
                             s
                             for s in st.session_state.get("autotrain_scripts", [])
@@ -711,7 +711,7 @@ with tab_scripts:
                                 _token,
                             )
 
-                        # Restaurer les valeurs précédentes
+                        # Restore previous values
                         st.session_state["autotrain_last_model_path"] = prev_path
                         st.session_state["autotrain_last_script"] = prev_script
                         st.session_state["autotrain_scripts"] = prev_scripts
