@@ -2408,3 +2408,67 @@ models:
     confirm_cancel: "❌ Cancel"
     rollback_toast: "Rollback done — entry #{id} created."
     rollback_error: "Rollback error: {error}"
+
+autotrain:
+  page_title: AutoTrain — PredictML
+  title: 🤖 AutoTrain ML Coach
+  subtitle: Generate, test and upload train.py scripts with AI assistance.
+  tab_chat: 💬 Chat
+  tab_data: 📊 Data
+  tab_scripts: 📝 Generated Scripts
+  no_api_key: ANTHROPIC_API_KEY not configured — chatbot is disabled.
+  new_conversation_btn: 🗑️ New Conversation
+  chat_placeholder: Describe the model you want to create…
+  tool_running: Running…
+  tool_summary_request: Request
+  tool_summary_preview: Result preview
+  dataset_badge: "✅ Dataset: {n_rows} rows ({n_labeled} labeled)"
+  model_ready_badge: "✅ Model ready to upload"
+  exchange_count: "{count} exchange(s)"
+  quick_topics:
+    analyze_data: 🔍 Analyze Data
+    random_forest: 🌲 Generate RandomForest
+    gradient_boosting: 📈 GradientBoosting
+    compare_versions: ⚖️ Compare Scripts
+    optimize_script: 🔧 Optimize Script
+    upload_model: 🚀 Upload Model
+  data:
+    source_label: Data source
+    source_upload: 📂 Upload a local CSV
+    source_api: 🌐 Fetch from API
+    upload_label: Training CSV file
+    upload_help: "Expected columns: id_obs, input_features, prediction_result, observed_result,
+      timestamp, model_version, response_time_ms"
+    model_label: Source model
+    date_start_label: Start date
+    date_end_label: End date
+    limit_label: Row limit
+    fetch_btn: 🔄 Load data
+    fetch_spinner: Fetching data from API…
+    fetch_success: "Data loaded: {n_rows} rows ({n_labeled} labeled)"
+    fetch_error: "Error fetching data: {error}"
+    no_models: No models available.
+    no_data: No dataset loaded. Use the Data tab.
+    n_rows: Total rows
+    n_labeled: Labeled
+    n_features: Features
+    preview_header: "**Preview (first 5 rows)**"
+  scripts:
+    title: Scripts generated in this session
+    empty: No scripts generated yet. Start a conversation in the Chat tab.
+    version: "Script #{id}"
+    execution_time: Execution time
+    code_expander: 📄 View code
+    download_btn: ⬇️ Download train.py
+    upload_btn: 🚀 Upload this model to API
+    upload_form_name: Model name
+    upload_form_version: Version
+    upload_form_desc: Description (optional)
+    upload_form_algo: Algorithm
+    upload_spinner: Uploading…
+    upload_success: "Model {name} v{version} uploaded successfully."
+    upload_error: "Upload error: {error}"
+    no_model_file: This script did not produce a model file.
+  dates:
+    train_start: Training start date
+    train_end: Training end date

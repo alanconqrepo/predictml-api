@@ -2634,3 +2634,67 @@ models:
     confirm_cancel: ❌ Annuler
     rollback_toast: 'Rollback effectué — entrée #{id} créée.'
     rollback_error: 'Erreur lors du rollback : {error}'
+
+autotrain:
+  page_title: AutoTrain — PredictML
+  title: 🤖 AutoTrain ML Coach
+  subtitle: Générez, testez et uploadez des scripts train.py avec l'aide de l'IA.
+  tab_chat: 💬 Chat
+  tab_data: 📊 Données
+  tab_scripts: 📝 Scripts générés
+  no_api_key: Clé ANTHROPIC_API_KEY non configurée — le chatbot est désactivé.
+  new_conversation_btn: 🗑️ Nouvelle conversation
+  chat_placeholder: Décrivez le modèle que vous souhaitez créer…
+  tool_running: Exécution en cours…
+  tool_summary_request: Requête
+  tool_summary_preview: Aperçu du résultat
+  dataset_badge: "✅ Dataset : {n_rows} lignes ({n_labeled} labellisées)"
+  model_ready_badge: "✅ Modèle prêt à uploader"
+  exchange_count: "{count} échange(s)"
+  quick_topics:
+    analyze_data: 🔍 Analyser les données
+    random_forest: 🌲 Générer RandomForest
+    gradient_boosting: 📈 GradientBoosting
+    compare_versions: ⚖️ Comparer les scripts
+    optimize_script: 🔧 Optimiser le script
+    upload_model: 🚀 Uploader le modèle
+  data:
+    source_label: Source des données
+    source_upload: 📂 Charger un CSV local
+    source_api: 🌐 Récupérer depuis l'API
+    upload_label: Fichier CSV d'entraînement
+    upload_help: "Colonnes attendues : id_obs, input_features, prediction_result, observed_result,
+      timestamp, model_version, response_time_ms"
+    model_label: Modèle source
+    date_start_label: Date début
+    date_end_label: Date fin
+    limit_label: Limite de lignes
+    fetch_btn: 🔄 Charger les données
+    fetch_spinner: Récupération des données depuis l'API…
+    fetch_success: "Données chargées : {n_rows} lignes ({n_labeled} labellisées)"
+    fetch_error: "Erreur lors de la récupération : {error}"
+    no_models: Aucun modèle disponible.
+    no_data: Aucun dataset chargé. Utilisez l'onglet Données.
+    n_rows: Lignes totales
+    n_labeled: Labellisées
+    n_features: Features
+    preview_header: "**Aperçu (5 premières lignes)**"
+  scripts:
+    title: Scripts générés lors de cette session
+    empty: Aucun script généré. Commencez une conversation dans l'onglet Chat.
+    version: "Script #{id}"
+    execution_time: Temps d'exécution
+    code_expander: 📄 Voir le code
+    download_btn: ⬇️ Télécharger train.py
+    upload_btn: 🚀 Uploader ce modèle vers l'API
+    upload_form_name: Nom du modèle
+    upload_form_version: Version
+    upload_form_desc: Description (optionnelle)
+    upload_form_algo: Algorithme
+    upload_spinner: Upload en cours…
+    upload_success: "Modèle {name} v{version} uploadé avec succès."
+    upload_error: "Erreur lors de l'upload : {error}"
+    no_model_file: Ce script n'a pas produit de fichier modèle.
+  dates:
+    train_start: Date début entraînement
+    train_end: Date fin entraînement
