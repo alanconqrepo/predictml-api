@@ -1,5 +1,5 @@
 """
-Schémas Pydantic pour les prédictions
+Pydantic schemas for predictions
 """
 
 import re
@@ -13,13 +13,13 @@ _VERSION_RE = re.compile(r"^\d+\.\d+(\.\d+)?$")
 
 
 class PredictionInput(BaseModel):
-    """Données d'entrée pour une prédiction"""
+    """Input data for a prediction"""
 
     model_config = ConfigDict(
         json_schema_extra={
             "examples": [
                 {
-                    "summary": "Format dict",
+                    "summary": "Dict format",
                     "value": {
                         "model_name": "iris_model",
                         "features": {
@@ -31,7 +31,7 @@ class PredictionInput(BaseModel):
                     },
                 },
                 {
-                    "summary": "Format dict avec id_obs",
+                    "summary": "Dict format with id_obs",
                     "value": {
                         "model_name": "iris_model",
                         "id_obs": "obs-001",
@@ -49,38 +49,38 @@ class PredictionInput(BaseModel):
 
     model_name: str = Field(
         ...,
-        description="Nom du modèle à utiliser (sans extension .joblib)",
+        description="Name of the model to use (without .joblib extension)",
         json_schema_extra={"example": "iris_model"},
     )
     model_version: Optional[str] = Field(
         None,
         description=(
-            "Version du modèle (ex: '1.0.0'). "
-            "Si absent, utilise la version is_production=True ; "
-            "à défaut, la version la plus récente."
+            "Model version (e.g. '1.0.0'). "
+            "If absent, uses the is_production=True version; "
+            "otherwise, falls back to the most recent version."
         ),
         json_schema_extra={"example": "1.0.0"},
     )
     id_obs: Optional[str] = Field(
         None,
-        description="Identifiant de l'observation (stocké dans la table predictions)",
+        description="Observation identifier (stored in the predictions table)",
         json_schema_extra={"example": "obs-001"},
     )
     timestamp: Optional[datetime] = Field(
         None,
         description=(
-            "Horodatage forcé de la prédiction (UTC). "
-            "Si absent, le serveur utilise l'heure courante. "
-            "Permet d'injecter des prédictions historiques ou futures."
+            "Forced prediction timestamp (UTC). "
+            "If absent, the server uses the current time. "
+            "Allows injecting historical or future predictions."
         ),
         json_schema_extra={"example": "2025-01-15T08:32:00"},
     )
     features: Dict[str, Union[float, int, str]] = Field(
         ...,
         description=(
-            "Features pour la prédiction sous forme de dict nommé "
-            '{"feature1": valeur, "feature2": valeur, ...}. '
-            "Le modèle doit exposer feature_names_in_ (entraîné avec un DataFrame pandas)."
+            "Prediction features as a named dict "
+            '{"feature1": value, "feature2": value, ...}. '
+            "The model must expose feature_names_in_ (trained with a pandas DataFrame)."
         ),
     )
 
@@ -88,56 +88,56 @@ class PredictionInput(BaseModel):
     @classmethod
     def validate_model_name(cls, v: str) -> str:
         if not _NAME_RE.match(v):
-            raise ValueError("Nom de modèle invalide (caractères autorisés : a-z A-Z 0-9 _ -)")
+            raise ValueError("Invalid model name (allowed characters: a-z A-Z 0-9 _ -)")
         return v
 
     @field_validator("model_version")
     @classmethod
     def validate_model_version(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and not _VERSION_RE.match(v):
-            raise ValueError("Version invalide (format attendu : X.Y ou X.Y.Z)")
+            raise ValueError("Invalid version (expected format: X.Y or X.Y.Z)")
         return v
 
 
 class PredictionOutput(BaseModel):
-    """Résultat d'une prédiction"""
+    """Result of a prediction"""
 
-    model_name: str = Field(..., description="Nom du modèle utilisé")
-    model_version: str = Field(..., description="Version du modèle utilisée")
-    id_obs: Optional[str] = Field(None, description="Identifiant de l'observation (si fourni)")
-    prediction: float | int | str = Field(..., description="Prédiction du modèle")
+    model_name: str = Field(..., description="Name of the model used")
+    model_version: str = Field(..., description="Version of the model used")
+    id_obs: Optional[str] = Field(None, description="Observation identifier (if provided)")
+    prediction: float | int | str = Field(..., description="Model prediction")
     probability: Optional[List[float]] = Field(
-        None, description="Probabilités par classe (si disponible)"
+        None, description="Per-class probabilities (if available)"
     )
     low_confidence: Optional[bool] = Field(
         None,
         description=(
-            "True si la probabilité max est en dessous du seuil de confiance du modèle. "
-            "None si le modèle n'a pas de seuil configuré ou ne supporte pas predict_proba."
+            "True if the max probability is below the model's confidence threshold. "
+            "None if the model has no threshold configured or does not support predict_proba."
         ),
     )
     selected_version: Optional[str] = Field(
         None,
         description=(
-            "Version sélectionnée par le routage A/B (uniquement si model_version n'était pas "
-            "spécifié dans la requête et qu'un test A/B est actif)."
+            "Version selected by A/B routing (only if model_version was not "
+            "specified in the request and an A/B test is active)."
         ),
     )
     shap_values: Optional[Dict[str, float]] = Field(
         None,
         description=(
-            "Valeurs SHAP par feature (uniquement si ?explain=true). "
-            "None si le paramètre n'est pas activé ou si le type de modèle n'est pas supporté."
+            "SHAP values per feature (only if ?explain=true). "
+            "None if the parameter is not enabled or the model type is not supported."
         ),
     )
     shap_base_value: Optional[float] = Field(
         None,
-        description="Valeur de base SHAP E[f(X)] (uniquement si ?explain=true et modèle supporté).",
+        description="SHAP base value E[f(X)] (only if ?explain=true and model is supported).",
     )
 
 
 class PredictionResponse(BaseModel):
-    """Une prédiction loggée"""
+    """A logged prediction"""
 
     id: int
     model_name: str
@@ -151,14 +151,14 @@ class PredictionResponse(BaseModel):
     timestamp: datetime
     status: str
     error_message: Optional[str]
-    username: Optional[str]  # depuis la relation User
-    is_shadow: bool = False  # True si prédiction shadow (non retournée au client)
+    username: Optional[str]  # from the User relation
+    is_shadow: bool = False  # True if shadow prediction (not returned to the client)
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class PredictionsListResponse(BaseModel):
-    """Résultat paginé de la liste des prédictions (curseur basé sur l'id)"""
+    """Paginated result of the predictions list (id-based cursor)"""
 
     total: int
     limit: int
@@ -167,147 +167,144 @@ class PredictionsListResponse(BaseModel):
 
 
 class BatchPredictionItem(BaseModel):
-    """Un item d'entrée pour une prédiction batch"""
+    """An input item for a batch prediction"""
 
-    features: Dict[str, Union[float, int, str]] = Field(
-        ..., description="Features sous forme de dict nommé"
-    )
-    id_obs: Optional[str] = Field(None, description="Identifiant de l'observation (optionnel)")
+    features: Dict[str, Union[float, int, str]] = Field(..., description="Features as a named dict")
+    id_obs: Optional[str] = Field(None, description="Observation identifier (optional)")
     timestamp: Optional[datetime] = Field(
         None,
         description=(
-            "Horodatage forcé pour cet item (UTC). "
-            "Si absent, le serveur utilise l'heure courante."
+            "Forced timestamp for this item (UTC). " "If absent, the server uses the current time."
         ),
     )
 
 
 class BatchPredictionInput(BaseModel):
-    """Données d'entrée pour une prédiction batch"""
+    """Input data for a batch prediction"""
 
-    model_name: str = Field(..., description="Nom du modèle à utiliser (sans extension .joblib)")
+    model_name: str = Field(..., description="Name of the model to use (without .joblib extension)")
     model_version: Optional[str] = Field(
-        None, description="Version du modèle (ex: '1.0.0'). Si absent, utilise is_production=True."
+        None, description="Model version (e.g. '1.0.0'). If absent, uses is_production=True."
     )
     inputs: List[BatchPredictionItem] = Field(
-        ..., min_length=1, description="Liste d'observations à scorer"
+        ..., min_length=1, description="List of observations to score"
     )
 
     @field_validator("model_name")
     @classmethod
     def validate_model_name(cls, v: str) -> str:
         if not _NAME_RE.match(v):
-            raise ValueError("Nom de modèle invalide (caractères autorisés : a-z A-Z 0-9 _ -)")
+            raise ValueError("Invalid model name (allowed characters: a-z A-Z 0-9 _ -)")
         return v
 
     @field_validator("model_version")
     @classmethod
     def validate_model_version(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and not _VERSION_RE.match(v):
-            raise ValueError("Version invalide (format attendu : X.Y ou X.Y.Z)")
+            raise ValueError("Invalid version (expected format: X.Y or X.Y.Z)")
         return v
 
 
 class BatchPredictionResultItem(BaseModel):
-    """Résultat d'une prédiction individuelle dans un batch"""
+    """Result of an individual prediction in a batch"""
 
-    id_obs: Optional[str] = Field(None, description="Identifiant de l'observation (si fourni)")
-    prediction: Union[float, int, str] = Field(..., description="Prédiction du modèle")
+    id_obs: Optional[str] = Field(None, description="Observation identifier (if provided)")
+    prediction: Union[float, int, str] = Field(..., description="Model prediction")
     probability: Optional[List[float]] = Field(
-        None, description="Probabilités par classe (si disponible)"
+        None, description="Per-class probabilities (if available)"
     )
     low_confidence: Optional[bool] = Field(
         None,
         description=(
-            "True si la probabilité max est en dessous du seuil de confiance du modèle. "
-            "None si le modèle n'a pas de seuil configuré ou ne supporte pas predict_proba."
+            "True if the max probability is below the model's confidence threshold. "
+            "None if the model has no threshold configured or does not support predict_proba."
         ),
     )
 
 
 class BatchPredictionOutput(BaseModel):
-    """Résultat d'une prédiction batch"""
+    """Result of a batch prediction"""
 
-    model_name: str = Field(..., description="Nom du modèle utilisé")
-    model_version: str = Field(..., description="Version du modèle utilisée")
+    model_name: str = Field(..., description="Name of the model used")
+    model_version: str = Field(..., description="Version of the model used")
     predictions: List[BatchPredictionResultItem] = Field(
-        ..., description="Liste des résultats dans le même ordre que les inputs"
+        ..., description="List of results in the same order as the inputs"
     )
 
 
 class ModelsListResponse(BaseModel):
-    """Liste des modèles disponibles"""
+    """List of available models"""
 
-    models: List[str] = Field(..., description="Liste des noms de modèles")
-    count: int = Field(..., description="Nombre de modèles disponibles")
-    cached: List[str] = Field(..., description="Modèles actuellement en cache")
+    models: List[str] = Field(..., description="List of model names")
+    count: int = Field(..., description="Number of available models")
+    cached: List[str] = Field(..., description="Models currently in cache")
 
 
 class HealthResponse(BaseModel):
-    """Réponse du health check"""
+    """Health check response"""
 
-    status: str = Field(..., description="Statut de l'API")
-    models_available: int = Field(..., description="Nombre de modèles disponibles")
-    models_cached: int = Field(..., description="Nombre de modèles en cache")
+    status: str = Field(..., description="API status")
+    models_available: int = Field(..., description="Number of available models")
+    models_cached: int = Field(..., description="Number of cached models")
 
 
 class ExplainInput(BaseModel):
-    """Données d'entrée pour une explication SHAP"""
+    """Input data for a SHAP explanation"""
 
     model_name: str = Field(
         ...,
-        description="Nom du modèle à utiliser (sans extension .joblib)",
+        description="Name of the model to use (without .joblib extension)",
         json_schema_extra={"example": "iris_model"},
     )
     model_version: Optional[str] = Field(
         None,
-        description="Version du modèle (ex: '1.0.0'). Si absent, utilise is_production=True.",
+        description="Model version (e.g. '1.0.0'). If absent, uses is_production=True.",
         json_schema_extra={"example": "1.0.0"},
     )
     features: Dict[str, Union[float, int, str]] = Field(
         ...,
-        description="Features pour l'explication sous forme de dict nommé.",
+        description="Features for the explanation as a named dict.",
     )
 
     @field_validator("model_name")
     @classmethod
     def validate_model_name(cls, v: str) -> str:
         if not _NAME_RE.match(v):
-            raise ValueError("Nom de modèle invalide (caractères autorisés : a-z A-Z 0-9 _ -)")
+            raise ValueError("Invalid model name (allowed characters: a-z A-Z 0-9 _ -)")
         return v
 
     @field_validator("model_version")
     @classmethod
     def validate_model_version(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and not _VERSION_RE.match(v):
-            raise ValueError("Version invalide (format attendu : X.Y ou X.Y.Z)")
+            raise ValueError("Invalid version (expected format: X.Y or X.Y.Z)")
         return v
 
 
 class ExplainOutput(BaseModel):
-    """Résultat d'une explication SHAP locale"""
+    """Result of a local SHAP explanation"""
 
-    model_name: str = Field(..., description="Nom du modèle utilisé")
-    model_version: str = Field(..., description="Version du modèle utilisée")
+    model_name: str = Field(..., description="Name of the model used")
+    model_version: str = Field(..., description="Version of the model used")
     prediction: Union[float, int, str] = Field(
-        ..., description="Prédiction du modèle pour ces features"
+        ..., description="Model prediction for these features"
     )
     shap_values: Dict[str, float] = Field(
         ...,
         description=(
-            "Valeurs SHAP par feature — contribution de chaque feature à la prédiction. "
-            "Valeur positive = pousse vers la classe prédite, négative = pousse à l'opposé."
+            "SHAP values per feature — contribution of each feature to the prediction. "
+            "Positive value = pushes toward predicted class, negative = pushes away."
         ),
     )
     base_value: float = Field(
         ...,
-        description="Valeur de base du modèle E[f(X)] — prédiction moyenne sur les données d'entraînement.",
+        description="Model base value E[f(X)] — average prediction over the training data.",
     )
-    model_type: str = Field(..., description="Type d'explainer SHAP utilisé : 'tree' ou 'linear'.")
+    model_type: str = Field(..., description="SHAP explainer type used: 'tree' or 'linear'.")
 
 
 class RootResponse(BaseModel):
-    """Réponse de l'endpoint racine"""
+    """Response from the root endpoint"""
 
     message: str
     status: str
@@ -317,7 +314,7 @@ class RootResponse(BaseModel):
 
 
 class PredictionStatsItem(BaseModel):
-    """Statistiques agrégées des prédictions pour un modèle"""
+    """Aggregated prediction statistics for a model"""
 
     model_name: str
     total_predictions: int
@@ -329,7 +326,7 @@ class PredictionStatsItem(BaseModel):
 
 
 class PredictionStatsResponse(BaseModel):
-    """Réponse de GET /predictions/stats"""
+    """Response for GET /predictions/stats"""
 
     days: int
     model_name: Optional[str] = None

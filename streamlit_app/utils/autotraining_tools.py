@@ -1,10 +1,10 @@
 """
-Outils spécialisés pour le chatbot AutoTrain PredictML.
+Specialized tools for the AutoTrain PredictML chatbot.
 
-Trois outils supplémentaires (en plus de query_database et call_api réutilisés) :
-  - execute_python      : exécute un script train.py dans un sous-processus isolé
-  - fetch_training_data : récupère prédictions + résultats observés depuis l'API
-  - upload_model        : uploade le dernier modèle produit vers l'API PredictML
+Three additional tools (in addition to query_database and call_api reused from tools.py):
+  - execute_python      : executes a train.py script in an isolated subprocess
+  - fetch_training_data : fetches predictions + observed results from the API
+  - upload_model        : uploads the last produced model to the PredictML API
 """
 
 import json
@@ -32,11 +32,11 @@ from utils.tools import (
     tool_expander_label,
 )
 
-# ── Chemins de résolution ──────────────────────────────────────────────────────
+# ── Resolution paths ──────────────────────────────────────────────────────────
 
 _PROJECT_ROOT_CANDIDATES = [
-    Path(__file__).parent.parent.parent,  # dev local : predictml-api/
-    Path("/app").parent,  # Docker : /
+    Path(__file__).parent.parent.parent,  # local dev: predictml-api/
+    Path("/app").parent,  # Docker: /
 ]
 
 _EXAMPLE_TRAIN_CANDIDATES = [
@@ -49,10 +49,10 @@ def _load_example_train_script() -> str:
     for path in _EXAMPLE_TRAIN_CANDIDATES:
         if path.exists():
             return path.read_text(encoding="utf-8")
-    return "# (exemple non disponible)"
+    return "# (example not available)"
 
 
-# ── Constantes de date ────────────────────────────────────────────────────────
+# ── Date constants ────────────────────────────────────────────────────────────
 
 
 def _default_train_start() -> str:
@@ -63,29 +63,29 @@ def _default_train_end() -> str:
     return date.today().isoformat()
 
 
-# ── Définitions des outils ────────────────────────────────────────────────────
+# ── Tool definitions ────────────────────────────────────────────────────────
 
 _EXECUTE_PYTHON_DEF: dict = {
     "name": "execute_python",
     "description": (
-        "Exécute un script Python (train.py) dans un sous-processus isolé avec un timeout de 120 secondes. "
-        "Injecte automatiquement les variables d'environnement TRAIN_START_DATE, TRAIN_END_DATE, "
-        "OUTPUT_MODEL_PATH et TRAIN_DATA_PATH (si un dataset est chargé en session). "
-        "Retourne le code de sortie, stdout/stderr tronqués, les métriques JSON extraites "
-        "de la dernière ligne JSON de stdout, et si un fichier .joblib a été produit. "
-        "Utilise ce tool AVANT tout upload pour valider que le script fonctionne correctement. "
-        "Si le script échoue (exit_code != 0), analyse stderr et corrige le script."
+        "Executes a Python script (train.py) in an isolated subprocess with a 120-second timeout. "
+        "Automatically injects the TRAIN_START_DATE, TRAIN_END_DATE, "
+        "OUTPUT_MODEL_PATH and TRAIN_DATA_PATH environment variables (if a dataset is loaded in session). "
+        "Returns the exit code, truncated stdout/stderr, JSON metrics extracted "
+        "from the last JSON line of stdout, and whether a .joblib file was produced. "
+        "Use this tool BEFORE any upload to validate that the script runs correctly. "
+        "If the script fails (exit_code != 0), analyse stderr and fix the script."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "code": {
                 "type": "string",
-                "description": "Code Python complet du script train.py à exécuter.",
+                "description": "Complete Python code of the train.py script to execute.",
             },
             "timeout": {
                 "type": "integer",
-                "description": "Timeout en secondes (défaut : 120).",
+                "description": "Timeout in seconds (default: 120).",
                 "default": 120,
             },
         },
@@ -96,31 +96,31 @@ _EXECUTE_PYTHON_DEF: dict = {
 _FETCH_TRAINING_DATA_DEF: dict = {
     "name": "fetch_training_data",
     "description": (
-        "Récupère les prédictions et résultats observés depuis l'API PredictML, "
-        "les fusionne par id_obs (les prédictions sans observed_result auront une valeur vide), "
-        "et sauvegarde un CSV conforme au format TRAIN_DATA_PATH attendu par train.py. "
-        "Stocke automatiquement le chemin CSV dans la session pour que execute_python puisse l'utiliser. "
-        "Utilise ce tool quand l'utilisateur veut entraîner sur des données de production réelles. "
-        "Retourne n_rows, n_labeled, feature_names et un aperçu des 3 premières lignes."
+        "Fetches predictions and observed results from the PredictML API, "
+        "merges them by id_obs (predictions without an observed_result will have an empty value), "
+        "and saves a CSV conforming to the TRAIN_DATA_PATH format expected by train.py. "
+        "Automatically stores the CSV path in session so that execute_python can use it. "
+        "Use this tool when the user wants to train on real production data. "
+        "Returns n_rows, n_labeled, feature_names and a preview of the first 3 rows."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "model_name": {
                 "type": "string",
-                "description": "Nom du modèle source des prédictions.",
+                "description": "Name of the source model for predictions.",
             },
             "start_date": {
                 "type": "string",
-                "description": "Date début au format YYYY-MM-DD.",
+                "description": "Start date in YYYY-MM-DD format.",
             },
             "end_date": {
                 "type": "string",
-                "description": "Date fin au format YYYY-MM-DD.",
+                "description": "End date in YYYY-MM-DD format.",
             },
             "limit": {
                 "type": "integer",
-                "description": "Nombre max de prédictions à récupérer (défaut : 1000, max : 5000).",
+                "description": "Max number of predictions to fetch (default: 1000, max: 5000).",
                 "default": 1000,
             },
         },
@@ -131,44 +131,44 @@ _FETCH_TRAINING_DATA_DEF: dict = {
 _UPLOAD_MODEL_DEF: dict = {
     "name": "upload_model",
     "description": (
-        "Uploade le dernier modèle .joblib produit par execute_python vers l'API PredictML, "
-        "avec le script train.py source comme train_file (pour activer le ré-entraînement futur). "
-        "Lit automatiquement le fichier modèle depuis la session (autotrain_last_model_path) "
-        "et le script depuis la session (autotrain_last_script). "
-        "N'utilise ce tool QU'APRÈS avoir validé le script avec execute_python "
-        "(exit_code=0 ET model_produced=true). "
-        "Les métriques accuracy et f1_score sont extraites du dernier script exécuté."
+        "Uploads the last .joblib model produced by execute_python to the PredictML API, "
+        "with the source train.py script as train_file (to enable future retraining). "
+        "Automatically reads the model file from session (autotrain_last_model_path) "
+        "and the script from session (autotrain_last_script). "
+        "Only use this tool AFTER validating the script with execute_python "
+        "(exit_code=0 AND model_produced=true). "
+        "The accuracy and f1_score metrics are extracted from the last executed script."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "name": {
                 "type": "string",
-                "description": "Nom du modèle dans PredictML (ex: 'iris_classifier').",
+                "description": "Model name in PredictML (e.g. 'iris_classifier').",
             },
             "version": {
                 "type": "string",
-                "description": "Version sémantique (ex: '1.0.0').",
+                "description": "Semantic version (e.g. '1.0.0').",
             },
             "description": {
                 "type": "string",
-                "description": "Description optionnelle du modèle.",
+                "description": "Optional model description.",
             },
             "algorithm": {
                 "type": "string",
-                "description": "Algorithme utilisé (ex: 'RandomForestClassifier').",
+                "description": "Algorithm used (e.g. 'RandomForestClassifier').",
             },
             "tags": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Tags optionnels (ex: ['classification', 'iris']).",
+                "description": "Optional tags (e.g. ['classification', 'iris']).",
             },
         },
         "required": ["name", "version"],
     },
 }
 
-# Liste complète des 5 outils : 3 nouveaux + 2 réutilisés depuis tools.py
+# Full list of 5 tools: 3 new + 2 reused from tools.py
 AUTOTRAINING_TOOL_DEFINITIONS: list[dict] = [
     _EXECUTE_PYTHON_DEF,
     _FETCH_TRAINING_DATA_DEF,
@@ -177,15 +177,15 @@ AUTOTRAINING_TOOL_DEFINITIONS: list[dict] = [
 ]
 
 
-# ── Implémentations des nouveaux outils ───────────────────────────────────────
+# ── New tool implementations ───────────────────────────────────────────────────
 
 
 def _run_execute_python(tool_input: dict) -> dict[str, Any]:
-    """Exécute un script Python en sous-processus avec injection des env vars."""
+    """Executes a Python script in a subprocess with environment variable injection."""
     code = tool_input["code"]
     timeout = int(tool_input.get("timeout", 120))
 
-    # 1. Écrire le script dans un fichier temporaire
+    # 1. Write the script to a temporary file
     script_path = None
     out_dir = None
     try:
@@ -195,11 +195,11 @@ def _run_execute_python(tool_input: dict) -> dict[str, Any]:
             f.write(code)
             script_path = f.name
 
-        # 2. Répertoire de sortie pour le modèle
+        # 2. Output directory for the model
         out_dir = tempfile.mkdtemp(prefix="autotrain_model_")
         model_path = os.path.join(out_dir, "model.joblib")
 
-        # 3. Variables d'environnement
+        # 3. Environment variables
         env = os.environ.copy()
         env["TRAIN_START_DATE"] = st.session_state.get(
             "autotrain_train_start", _default_train_start()
@@ -211,7 +211,7 @@ def _run_execute_python(tool_input: dict) -> dict[str, Any]:
         if dataset_path and os.path.exists(dataset_path):
             env["TRAIN_DATA_PATH"] = dataset_path
 
-        # 4. Exécution
+        # 4. Execution
         t0 = time.time()
         try:
             proc = subprocess.run(
@@ -225,7 +225,7 @@ def _run_execute_python(tool_input: dict) -> dict[str, Any]:
         except subprocess.TimeoutExpired:
             return {
                 "exit_code": -1,
-                "error": f"Timeout : le script a dépassé {timeout} secondes.",
+                "error": f"Timeout: script exceeded {timeout} seconds.",
                 "execution_time_ms": timeout * 1000,
                 "stdout": "",
                 "stderr": "",
@@ -234,7 +234,7 @@ def _run_execute_python(tool_input: dict) -> dict[str, Any]:
                 "model_path": None,
             }
 
-        # 5. Extraire la dernière ligne JSON de stdout (métriques)
+        # 5. Extract the last JSON line from stdout (metrics)
         metrics: dict = {}
         stdout_lines = proc.stdout.strip().splitlines()
         for line in reversed(stdout_lines):
@@ -246,10 +246,10 @@ def _run_execute_python(tool_input: dict) -> dict[str, Any]:
                 except json.JSONDecodeError:
                     pass
 
-        # 6. Vérifier si le modèle a été produit
+        # 6. Check whether the model was produced
         model_produced = os.path.exists(model_path) and os.path.getsize(model_path) > 0
 
-        # 7. Stocker en session state si succès
+        # 7. Store in session state on success
         if model_produced and proc.returncode == 0:
             st.session_state["autotrain_last_model_path"] = model_path
             st.session_state["autotrain_last_script"] = code
@@ -265,7 +265,7 @@ def _run_execute_python(tool_input: dict) -> dict[str, Any]:
                 }
             )
 
-        # 8. Tronquer stdout/stderr pour éviter des messages trop volumineux
+        # 8. Truncate stdout/stderr to avoid excessively large messages
         stdout_preview = proc.stdout[-4000:] if len(proc.stdout) > 4000 else proc.stdout
         stderr_preview = proc.stderr[-4000:] if len(proc.stderr) > 4000 else proc.stderr
 
@@ -280,7 +280,7 @@ def _run_execute_python(tool_input: dict) -> dict[str, Any]:
         }
 
     finally:
-        # Toujours supprimer le fichier script temporaire
+        # Always delete the temporary script file
         if script_path:
             try:
                 os.unlink(script_path)
@@ -289,7 +289,7 @@ def _run_execute_python(tool_input: dict) -> dict[str, Any]:
 
 
 def _run_fetch_training_data(tool_input: dict, api_url: str, token: str) -> dict[str, Any]:
-    """Récupère prédictions + observed_results et construit un CSV de training."""
+    """Fetches predictions + observed_results and builds a training CSV."""
     model_name = tool_input["model_name"]
     start_date = tool_input["start_date"]
     end_date = tool_input["end_date"]
@@ -298,7 +298,7 @@ def _run_fetch_training_data(tool_input: dict, api_url: str, token: str) -> dict
     headers = {"Authorization": f"Bearer {token}"}
     base = api_url.rstrip("/")
 
-    # Récupérer les prédictions
+    # Fetch predictions
     try:
         r_pred = requests.get(
             f"{base}/predictions",
@@ -320,9 +320,9 @@ def _run_fetch_training_data(tool_input: dict, api_url: str, token: str) -> dict
         else:
             predictions = pred_data
     except Exception as e:
-        return {"error": f"Erreur lors de la récupération des prédictions : {e}"}
+        return {"error": f"Error fetching predictions: {e}"}
 
-    # Récupérer les résultats observés
+    # Fetch observed results
     try:
         r_obs = requests.get(
             f"{base}/observed-results",
@@ -342,12 +342,12 @@ def _run_fetch_training_data(tool_input: dict, api_url: str, token: str) -> dict
         else:
             observed = obs_data
     except Exception as e:
-        return {"error": f"Erreur lors de la récupération des résultats observés : {e}"}
+        return {"error": f"Error fetching observed results: {e}"}
 
     if not predictions:
-        return {"error": "Aucune prédiction trouvée pour cette plage de dates."}
+        return {"error": "No predictions found for this date range."}
 
-    # Construire les DataFrames et fusionner
+    # Build DataFrames and merge
     df_pred = pd.DataFrame(predictions)
     df_obs = (
         pd.DataFrame(observed) if observed else pd.DataFrame(columns=["id_obs", "observed_result"])
@@ -430,16 +430,16 @@ def _run_fetch_training_data(tool_input: dict, api_url: str, token: str) -> dict
 
 
 def _run_upload_model(tool_input: dict, api_url: str, token: str) -> dict[str, Any]:
-    """Uploade le dernier modèle produit vers l'API PredictML."""
+    """Uploads the last produced model to the PredictML API."""
     model_path = st.session_state.get("autotrain_last_model_path")
     script_code = st.session_state.get("autotrain_last_script")
 
     if not model_path or not os.path.exists(model_path):
         return {
             "error": (
-                "Aucun fichier modèle disponible. "
-                "Exécutez d'abord un script avec execute_python et assurez-vous "
-                "que exit_code=0 et model_produced=true."
+                "No model file available. "
+                "First run a script with execute_python and make sure "
+                "exit_code=0 and model_produced=true."
             )
         }
 
