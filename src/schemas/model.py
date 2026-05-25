@@ -1,5 +1,5 @@
 """
-Schémas Pydantic pour la création et la réponse de modèles
+Pydantic schemas for model creation and responses
 """
 
 from datetime import datetime
@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 
 class ModelDeleteResponse(BaseModel):
-    """Résumé de la suppression de toutes les versions d'un modèle"""
+    """Summary of the deletion of all versions of a model"""
 
     name: str
     deleted_versions: List[str]
@@ -18,7 +18,7 @@ class ModelDeleteResponse(BaseModel):
 
 
 class FeatureStats(BaseModel):
-    """Statistiques d'une feature issues des données d'entraînement"""
+    """Statistics for a feature derived from training data"""
 
     mean: float
     std: float
@@ -28,7 +28,7 @@ class FeatureStats(BaseModel):
 
 
 class AlertThresholds(BaseModel):
-    """Seuils d'alerte configurables par modèle (surcharge les variables d'env globales)"""
+    """Per-model configurable alert thresholds (overrides global environment variables)"""
 
     accuracy_min: Optional[float] = Field(None, ge=0.0, le=1.0)
     error_rate_max: Optional[float] = Field(None, ge=0.0, le=1.0)
@@ -36,7 +36,7 @@ class AlertThresholds(BaseModel):
 
 
 class ModelUpdateInput(BaseModel):
-    """Champs modifiables d'un modèle (tous optionnels)"""
+    """Editable fields of a model (all optional)"""
 
     description: Optional[str] = None
     is_production: Optional[bool] = None
@@ -64,7 +64,7 @@ class ModelUpdateInput(BaseModel):
 
 
 class ModelCreateResponse(BaseModel):
-    """Réponse après création ou mise à jour d'un modèle"""
+    """Response after model creation or update"""
 
     id: int
     name: str
@@ -106,14 +106,14 @@ class ModelCreateResponse(BaseModel):
 
 
 class ModelGetResponse(BaseModel):
-    """Réponse détaillée d'un modèle — métadonnées complètes + infos de chargement"""
+    """Detailed model response — full metadata + loading info"""
 
     # Identification
     id: int
     name: str
     version: str
 
-    # Métadonnées
+    # Metadata
     description: Optional[str]
     algorithm: Optional[str]
     features_count: Optional[int]
@@ -133,14 +133,14 @@ class ModelGetResponse(BaseModel):
     recall: Optional[float]
     confidence_threshold: Optional[float] = None
 
-    # Baseline features
+    # Feature baseline
     feature_baseline: Optional[Dict[str, Any]] = None
 
-    # Tags et webhook
+    # Tags and webhook
     tags: Optional[List[str]] = None
     webhook_url: Optional[str] = None
 
-    # Stockage
+    # Storage
     mlflow_run_id: Optional[str]
     minio_bucket: Optional[str]
     minio_object_key: Optional[str]
@@ -149,7 +149,7 @@ class ModelGetResponse(BaseModel):
     train_script_object_key: Optional[str] = None
     requirements_object_key: Optional[str] = None
 
-    # Créateur
+    # Creator
     user_id_creator: Optional[int]
     creator_username: Optional[str]
 
@@ -171,10 +171,10 @@ class ModelGetResponse(BaseModel):
         None  # "regression" | "classification_binary" | "classification_multiclass"
     )
 
-    # Infos de chargement
+    # Loading info
     model_loaded: bool
-    model_type: Optional[str]  # ex: "RandomForestClassifier"
-    feature_names: Optional[List[str]]  # model.feature_names_in_ si disponible
+    model_type: Optional[str]  # e.g. "RandomForestClassifier"
+    feature_names: Optional[List[str]]  # model.feature_names_in_ if available
     load_instructions: Optional[Dict[str, Any]]
 
     model_config = {"from_attributes": True}
@@ -221,7 +221,7 @@ class ModelPerformanceResponse(BaseModel):
     period_end: Optional[datetime]
     total_predictions: int
     matched_predictions: int
-    model_type: str  # "classification" ou "regression"
+    model_type: str  # "classification" or "regression"
 
     # Classification
     accuracy: Optional[float] = None
@@ -233,22 +233,22 @@ class ModelPerformanceResponse(BaseModel):
     classes: Optional[List[Any]] = None
     per_class_metrics: Optional[Dict[str, PerClassMetrics]] = None
 
-    # Courbe ROC (classification binaire avec probabilités disponibles)
+    # ROC curve (binary classification with probabilities available)
     roc_curve_fpr: Optional[List[float]] = None
     roc_curve_tpr: Optional[List[float]] = None
 
-    # Régression
+    # Regression
     mae: Optional[float] = None
     mse: Optional[float] = None
     rmse: Optional[float] = None
     r2: Optional[float] = None
 
-    # Agrégation temporelle
+    # Temporal aggregation
     by_period: Optional[List[PeriodPerformance]] = None
 
 
 class FeatureDriftResult(BaseModel):
-    """Résultat du drift pour une feature individuelle"""
+    """Drift result for an individual feature"""
 
     baseline_mean: Optional[float] = None
     baseline_std: Optional[float] = None
@@ -266,7 +266,7 @@ class FeatureDriftResult(BaseModel):
 
 
 class DriftReportResponse(BaseModel):
-    """Rapport de drift complet pour un modèle"""
+    """Complete drift report for a model"""
 
     model_name: str
     model_version: Optional[str]
@@ -283,7 +283,7 @@ class DriftReportResponse(BaseModel):
 
 
 class OutputDriftClassResult(BaseModel):
-    """Distribution par classe pour le drift de sortie"""
+    """Per-class distribution for output drift"""
 
     label: str
     baseline_ratio: float
@@ -292,7 +292,7 @@ class OutputDriftClassResult(BaseModel):
 
 
 class OutputDriftResponse(BaseModel):
-    """Rapport de drift de distribution de sortie (label shift)"""
+    """Output distribution drift report (label shift)"""
 
     model_name: str
     model_version: Optional[str]
@@ -306,12 +306,12 @@ class OutputDriftResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Historique et rollback
+# History and rollback
 # ---------------------------------------------------------------------------
 
 
 class ModelHistoryEntry(BaseModel):
-    """Une entrée d'historique pour un changement d'état de modèle"""
+    """A history entry for a model state change"""
 
     id: int
     model_name: str
@@ -327,16 +327,16 @@ class ModelHistoryEntry(BaseModel):
 
 
 class ModelHistoryResponse(BaseModel):
-    """Réponse pour GET /models/{name}/history et GET /models/{name}/{version}/history"""
+    """Response for GET /models/{name}/history and GET /models/{name}/{version}/history"""
 
     model_name: str
-    version: Optional[str] = None  # None = toutes les versions
+    version: Optional[str] = None  # None = all versions
     entries: List[ModelHistoryEntry]
     total: int
 
 
 class RollbackResponse(BaseModel):
-    """Réponse pour POST /models/{name}/{version}/rollback/{history_id}"""
+    """Response for POST /models/{name}/{version}/rollback/{history_id}"""
 
     model_name: str
     version: str
@@ -347,7 +347,7 @@ class RollbackResponse(BaseModel):
 
 
 class DeprecateModelResponse(BaseModel):
-    """Réponse pour PATCH /models/{name}/{version}/deprecate"""
+    """Response for PATCH /models/{name}/{version}/deprecate"""
 
     name: str
     version: str
@@ -363,7 +363,7 @@ class DeprecateModelResponse(BaseModel):
 
 
 class ABVersionStats(BaseModel):
-    """Statistiques par version pour un rapport de comparaison A/B"""
+    """Per-version statistics for an A/B comparison report"""
 
     version: str
     deployment_mode: Optional[str] = None
@@ -374,11 +374,11 @@ class ABVersionStats(BaseModel):
     avg_response_time_ms: Optional[float] = None
     p95_response_time_ms: Optional[float] = None
     prediction_distribution: Dict[str, int]
-    agreement_rate: Optional[float] = None  # taux de concordance shadow vs prod (via id_obs)
+    agreement_rate: Optional[float] = None  # shadow vs prod agreement rate (via id_obs)
 
 
 class ABSignificance(BaseModel):
-    """Résultat du test de significativité statistique entre les deux versions A/B principales"""
+    """Result of the statistical significance test between the two main A/B versions"""
 
     metric: str
     test: str
@@ -391,7 +391,7 @@ class ABSignificance(BaseModel):
 
 
 class ABCompareResponse(BaseModel):
-    """Réponse de GET /models/{name}/ab-compare"""
+    """Response for GET /models/{name}/ab-compare"""
 
     model_name: str
     period_days: int
@@ -400,7 +400,7 @@ class ABCompareResponse(BaseModel):
 
 
 class ShadowCompareResponse(BaseModel):
-    """Réponse de GET /models/{name}/shadow-compare"""
+    """Response for GET /models/{name}/shadow-compare"""
 
     model_name: str
     shadow_version: Optional[str] = None
@@ -417,12 +417,12 @@ class ShadowCompareResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Politique d'auto-promotion post-retrain
+# Auto-promotion policy post-retrain
 # ---------------------------------------------------------------------------
 
 
 class PromotionPolicy(BaseModel):
-    """Politique d'auto-promotion appliquée après un ré-entraînement"""
+    """Auto-promotion policy applied after retraining"""
 
     min_accuracy: Optional[float] = Field(None, ge=0.0, le=1.0)
     max_mae: Optional[float] = Field(None, gt=0.0)
@@ -431,7 +431,7 @@ class PromotionPolicy(BaseModel):
     auto_promote: bool = False
     min_golden_test_pass_rate: Optional[float] = Field(None, ge=0.0, le=1.0)
 
-    # Circuit breaker — auto-demotion du modèle en production
+    # Circuit breaker — auto-demotion of the production model
     auto_demote: bool = False
     demote_on_drift: Literal["warning", "critical"] = "critical"
     demote_on_accuracy_below: Optional[float] = Field(None, ge=0.0, le=1.0)
@@ -439,7 +439,7 @@ class PromotionPolicy(BaseModel):
 
 
 class PolicyUpdateResponse(BaseModel):
-    """Réponse de PATCH /models/{name}/policy"""
+    """Response for PATCH /models/{name}/policy"""
 
     model_name: str
     promotion_policy: Optional[PromotionPolicy]
@@ -447,12 +447,12 @@ class PolicyUpdateResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Ré-entraînement
+# Retraining
 # ---------------------------------------------------------------------------
 
 
 class RetrainHistoryEntry(BaseModel):
-    """Une entrée d'historique de ré-entraînement pour un modèle"""
+    """A retraining history entry for a model"""
 
     timestamp: datetime
     source_version: Optional[str]
@@ -471,7 +471,7 @@ class RetrainHistoryEntry(BaseModel):
 
 
 class RetrainHistoryResponse(BaseModel):
-    """Réponse de GET /models/{name}/retrain-history"""
+    """Response for GET /models/{name}/retrain-history"""
 
     model_name: str
     history: List[RetrainHistoryEntry]
@@ -479,7 +479,7 @@ class RetrainHistoryResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Feature importance globale (SHAP agrégé)
+# Global feature importance (aggregated SHAP)
 # ---------------------------------------------------------------------------
 
 
@@ -496,16 +496,16 @@ class FeatureImportanceResponse(BaseModel):
 
 
 class RetrainRequest(BaseModel):
-    """Requête pour POST /models/{name}/{version}/retrain"""
+    """Request body for POST /models/{name}/{version}/retrain"""
 
-    start_date: str  # YYYY-MM-DD — date de début des données d'entraînement
-    end_date: str  # YYYY-MM-DD — date de fin des données d'entraînement
-    new_version: Optional[str] = None  # auto-généré si absent
-    set_production: bool = False  # passer la nouvelle version en production
+    start_date: str  # YYYY-MM-DD — start date of training data
+    end_date: str  # YYYY-MM-DD — end date of training data
+    new_version: Optional[str] = None  # auto-generated if absent
+    set_production: bool = False  # promote the new version to production
 
 
 class RetrainResponse(BaseModel):
-    """Réponse de POST /models/{name}/{version}/retrain"""
+    """Response for POST /models/{name}/{version}/retrain"""
 
     model_name: str
     source_version: str
@@ -521,12 +521,12 @@ class RetrainResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Planification du ré-entraînement automatique
+# Automatic retraining scheduling
 # ---------------------------------------------------------------------------
 
 
 class RetrainScheduleInput(BaseModel):
-    """Payload pour PATCH /models/{name}/{version}/schedule"""
+    """Payload for PATCH /models/{name}/{version}/schedule"""
 
     cron: Optional[str] = None
     lookback_days: int = Field(30, ge=1)
@@ -537,7 +537,7 @@ class RetrainScheduleInput(BaseModel):
 
 
 class ScheduleUpdateResponse(BaseModel):
-    """Réponse de PATCH /models/{name}/{version}/schedule"""
+    """Response for PATCH /models/{name}/{version}/schedule"""
 
     model_name: str
     version: str
@@ -545,19 +545,19 @@ class ScheduleUpdateResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Validation du schéma d'entrée
+# Input schema validation
 # ---------------------------------------------------------------------------
 
 
 class InputValidationError(BaseModel):
-    """Erreur de validation d'une feature d'entrée"""
+    """Validation error for an input feature"""
 
     type: str  # "missing_feature" | "unexpected_feature"
     feature: str
 
 
 class InputValidationWarning(BaseModel):
-    """Avertissement lors de la validation d'une feature d'entrée"""
+    """Warning during input feature validation"""
 
     type: str  # "type_coercion"
     feature: str
@@ -566,7 +566,7 @@ class InputValidationWarning(BaseModel):
 
 
 class ValidateInputResponse(BaseModel):
-    """Réponse de POST /models/{name}/{version}/validate-input"""
+    """Response for POST /models/{name}/{version}/validate-input"""
 
     valid: bool
     errors: List[InputValidationError]
@@ -575,7 +575,7 @@ class ValidateInputResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Tendance de confiance
+# Confidence trend
 # ---------------------------------------------------------------------------
 
 
@@ -604,7 +604,7 @@ class ConfidenceTrendResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Distribution de confiance
+# Confidence distribution
 # ---------------------------------------------------------------------------
 
 
@@ -627,12 +627,12 @@ class ConfidenceDistributionResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Calibration des probabilités
+# Probability calibration
 # ---------------------------------------------------------------------------
 
 
 class ReliabilityBin(BaseModel):
-    """Un bucket de la courbe de calibration (reliability diagram)"""
+    """A bucket of the calibration curve (reliability diagram)"""
 
     confidence_bin: str
     predicted_rate: float
@@ -641,37 +641,37 @@ class ReliabilityBin(BaseModel):
 
 
 class CalibrationResponse(BaseModel):
-    """Réponse de GET /models/{name}/calibration"""
+    """Response for GET /models/{name}/calibration"""
 
     model_name: str
     version: Optional[str]
     sample_size: int
-    # Champ commun — "classification" | "regression"
+    # Common field — "classification" | "regression"
     model_type: str = "classification"
     # ── Classification ──
     brier_score: Optional[float] = None
     calibration_status: str = "insufficient_data"
     # "ok" | "overconfident" | "underconfident" | "insufficient_data"
-    # "biased_high" | "biased_low"  (régression)
+    # "biased_high" | "biased_low"  (regression)
     mean_confidence: Optional[float] = None
     mean_accuracy: Optional[float] = None
     overconfidence_gap: Optional[float] = None
     reliability: List[ReliabilityBin] = []
-    # ── Régression ──
+    # ── Regression ──
     mae: Optional[float] = None  # Mean Absolute Error
     rmse: Optional[float] = None  # Root Mean Square Error
-    r2: Optional[float] = None  # Coefficient de détermination
-    bias: Optional[float] = None  # mean(ŷ − y) : positif = sur-estimation
-    scatter_data: Optional[List[dict]] = None  # [{pred, obs}, …] échantillon ≤ 300
+    r2: Optional[float] = None  # Coefficient of determination
+    bias: Optional[float] = None  # mean(ŷ − y): positive = overestimation
+    scatter_data: Optional[List[dict]] = None  # [{pred, obs}, …] sample ≤ 300
 
 
 # ---------------------------------------------------------------------------
-# Rapport de performance consolidé
+# Consolidated performance report
 # ---------------------------------------------------------------------------
 
 
 class PerformanceReportResponse(BaseModel):
-    """Réponse de GET /models/{name}/performance-report"""
+    """Response for GET /models/{name}/performance-report"""
 
     model_name: str
     generated_at: datetime
@@ -736,7 +736,7 @@ class ModelCardCoverage(BaseModel):
 
 
 class ModelCardResponse(BaseModel):
-    """Réponse de GET /models/{name}/{version}/card"""
+    """Response for GET /models/{name}/{version}/card"""
 
     model_name: str
     version: str
@@ -760,12 +760,12 @@ class ModelCardResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Calcul du baseline depuis la production
+# Baseline computation from production data
 # ---------------------------------------------------------------------------
 
 
 class ComputeBaselineResponse(BaseModel):
-    """Réponse de POST /models/{name}/{version}/compute-baseline"""
+    """Response for POST /models/{name}/{version}/compute-baseline"""
 
     model_name: str
     version: str
@@ -775,12 +775,12 @@ class ComputeBaselineResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Préchauffage du cache (warmup)
+# Cache warmup
 # ---------------------------------------------------------------------------
 
 
 class WarmupResponse(BaseModel):
-    """Réponse de POST /models/{name}/{version}/warmup"""
+    """Response for POST /models/{name}/{version}/warmup"""
 
     model_name: str
     version: str
@@ -790,12 +790,12 @@ class WarmupResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Comparaison multi-versions
+# Multi-version comparison
 # ---------------------------------------------------------------------------
 
 
 class ModelVersionSummary(BaseModel):
-    """Résumé d'une version pour GET /models/{name}/compare"""
+    """Version summary for GET /models/{name}/compare"""
 
     version: str
     is_production: bool
@@ -813,11 +813,11 @@ class ModelVersionSummary(BaseModel):
     n_rows_trained: Optional[int] = None
     prediction_count: Optional[int] = None
     shadow_prediction_count: Optional[int] = None
-    # Métriques eval régression (depuis training_metrics JSON)
+    # Regression eval metrics (from training_metrics JSON)
     mae_eval: Optional[float] = None
     rmse_eval: Optional[float] = None
     r2_eval: Optional[float] = None
-    # Métriques live
+    # Live metrics
     live_accuracy: Optional[float] = None
     live_auc: Optional[float] = None
     live_f1: Optional[float] = None
@@ -827,7 +827,7 @@ class ModelVersionSummary(BaseModel):
 
 
 class ModelCompareResponse(BaseModel):
-    """Réponse de GET /models/{name}/compare"""
+    """Response for GET /models/{name}/compare"""
 
     model_name: str
     compared_at: datetime
@@ -840,7 +840,7 @@ class ModelCompareResponse(BaseModel):
 
 
 class ReadinessCheck(BaseModel):
-    """Résultat d'un check individuel de readiness"""
+    """Result of an individual readiness check"""
 
     model_config = {"populate_by_name": True}
 
@@ -849,7 +849,7 @@ class ReadinessCheck(BaseModel):
 
 
 class ReadinessChecks(BaseModel):
-    """Ensemble des 4 checks de readiness"""
+    """Set of 4 readiness checks"""
 
     is_production: ReadinessCheck
     file_accessible: ReadinessCheck
@@ -858,7 +858,7 @@ class ReadinessChecks(BaseModel):
 
 
 class ReadinessResponse(BaseModel):
-    """Réponse de GET /models/{name}/readiness"""
+    """Response for GET /models/{name}/readiness"""
 
     model_name: str
     version: str
@@ -868,7 +868,7 @@ class ReadinessResponse(BaseModel):
 
 
 class LeaderboardEntry(BaseModel):
-    """Entrée du classement global de performance — GET /models/leaderboard"""
+    """Entry in the global performance leaderboard — GET /models/leaderboard"""
 
     rank: int
     name: str

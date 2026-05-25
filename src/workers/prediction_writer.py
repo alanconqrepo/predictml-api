@@ -1,15 +1,15 @@
 """
-Worker autonome — consomme Redis Stream "predictions:new" et insère en batch dans PostgreSQL.
+Standalone worker — consumes the "predictions:new" Redis Stream and batch-inserts into PostgreSQL.
 
-Lancement : python -m src.workers.prediction_writer
+Launch: python -m src.workers.prediction_writer
 
-Fonctionnement :
-- XREADGROUP avec consumer group "prediction-writers" (at-least-once delivery)
+How it works:
+- XREADGROUP with consumer group "prediction-writers" (at-least-once delivery)
 - Batch INSERT via SQLAlchemy add_all + commit
-- XACK uniquement après succès ; en cas d'erreur DB les messages restent pending
-- XAUTOCLAIM périodique pour récupérer les messages bloqués
-- Dead-Letter Queue (predictions:dlq) après MAX_RETRIES livraisons échouées
-- Arrêt propre sur SIGTERM / SIGINT
+- XACK only on success; on DB error, messages remain pending for retry
+- Periodic XAUTOCLAIM to reclaim stuck messages
+- Dead-Letter Queue (predictions:dlq) after MAX_RETRIES failed deliveries
+- Graceful shutdown on SIGTERM / SIGINT
 """
 
 import asyncio
@@ -26,7 +26,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-# Assure que le package src/ est trouvable quand on lance le script depuis la racine du projet
+# Ensure the src/ package is importable when running the script from the project root
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from src.core.config import settings
@@ -42,9 +42,9 @@ BATCH_SIZE = settings.PREDICTION_STREAM_BATCH_SIZE
 FLUSH_MS = settings.PREDICTION_STREAM_FLUSH_MS
 MAX_RETRIES = settings.PREDICTION_STREAM_MAX_RETRIES
 
-# Délai avant de reconsidérer un message pending comme "orphelin" (ms)
+# Idle time before a pending message is considered "orphaned" (ms)
 PENDING_CLAIM_MIN_IDLE_MS = 30_000
-# Intervalle de vérification des messages pending orphelins (secondes)
+# Interval for checking orphaned pending messages (seconds)
 PENDING_CHECK_INTERVAL = 60
 
 
@@ -53,7 +53,7 @@ def _to_optional_str(value: str) -> Optional[str]:
 
 
 def _decode_fields(fields: dict) -> dict:
-    """Normalise les clés/valeurs bytes → str (redis.asyncio sans decode_responses)."""
+    """Normalise bytes → str keys/values (redis.asyncio without decode_responses)."""
     result = {}
     for k, v in fields.items():
         key = k.decode() if isinstance(k, bytes) else k
@@ -63,7 +63,7 @@ def _decode_fields(fields: dict) -> dict:
 
 
 def _deserialize(fields: dict) -> Prediction:
-    """Convertit les champs bruts du stream en objet ORM Prediction."""
+    """Convert raw stream fields into a Prediction ORM object."""
     fields = _decode_fields(fields)
     raw_proba = fields.get("probabilities", "")
     raw_conf = fields.get("max_confidence", "")
@@ -87,7 +87,7 @@ def _deserialize(fields: dict) -> Prediction:
 
 
 async def _move_to_dlq(redis, msg_id: str, fields: dict, reason: str) -> None:
-    """Déplace un message dans la DLQ et l'acquitte du stream principal."""
+    """Move a message to the DLQ and acknowledge it from the main stream."""
     try:
         dlq_payload = _decode_fields(fields)
         dlq_payload["_dlq_reason"] = reason
@@ -109,7 +109,7 @@ async def _flush_batch(
     redis,
     messages: list[tuple[str, dict]],
 ) -> None:
-    """Insère un batch de messages en DB et acquitte les succès."""
+    """Insert a batch of messages into the DB and acknowledge successful ones."""
     orm_objects: list[Prediction] = []
     valid_ids: list[str] = []
     dlq_items: list[tuple[str, dict, str]] = []
@@ -122,7 +122,7 @@ async def _flush_batch(
         except Exception as exc:
             dlq_items.append((msg_id, fields, f"deserialize_error: {exc}"))
 
-    # Traiter les erreurs de désérialisation → DLQ immédiat
+    # Handle deserialization errors → immediate DLQ
     for msg_id, fields, reason in dlq_items:
         await _move_to_dlq(redis, msg_id, fields, reason)
 
@@ -137,18 +137,18 @@ async def _flush_batch(
             logger.info("Batch inséré", count=len(orm_objects))
         except Exception as exc:
             await db.rollback()
-            # Ne pas XACK : les messages restent pending pour retry via XAUTOCLAIM
+            # Do not XACK: messages remain pending for retry via XAUTOCLAIM
             logger.error(
-                "Erreur DB lors du batch INSERT — messages en attente de retry",
+                "DB error during batch INSERT — messages pending for retry",
                 count=len(orm_objects),
                 error=str(exc),
             )
 
 
 async def _reclaim_pending(session_factory: async_sessionmaker, redis) -> None:
-    """Réclame les messages pending depuis trop longtemps et les retraite ou les envoie en DLQ."""
+    """Reclaim long-pending messages and retry them or send them to the DLQ."""
     try:
-        # XAUTOCLAIM : récupère les messages idle depuis PENDING_CLAIM_MIN_IDLE_MS
+        # XAUTOCLAIM: fetch messages idle for at least PENDING_CLAIM_MIN_IDLE_MS
         result = await redis.xautoclaim(
             STREAM,
             GROUP,
@@ -163,7 +163,7 @@ async def _reclaim_pending(session_factory: async_sessionmaker, redis) -> None:
         if not claimed_messages:
             return
 
-        # Vérifier le nombre de livraisons via XPENDING pour chaque message
+        # Check delivery count via XPENDING for each message
         to_retry: list[tuple[str, dict]] = []
         for msg_id, fields in claimed_messages:
             pending_info = await redis.xpending_range(STREAM, GROUP, msg_id, msg_id, 1)
@@ -174,7 +174,7 @@ async def _reclaim_pending(session_factory: async_sessionmaker, redis) -> None:
                     redis,
                     msg_id,
                     fields,
-                    f"max_retries_exceeded: {delivery_count} livraisons",
+                    f"max_retries_exceeded: {delivery_count} deliveries",
                 )
             else:
                 to_retry.append((msg_id, fields))
@@ -188,27 +188,27 @@ async def _reclaim_pending(session_factory: async_sessionmaker, redis) -> None:
 
 
 async def _ensure_consumer_group(redis) -> None:
-    """Crée le consumer group si inexistant (MKSTREAM crée le stream si nécessaire)."""
+    """Create the consumer group if it does not exist (MKSTREAM creates the stream if needed)."""
     try:
         await redis.xgroup_create(STREAM, GROUP, id="0", mkstream=True)
-        logger.info("Consumer group créé", stream=STREAM, group=GROUP)
+        logger.info("Consumer group created", stream=STREAM, group=GROUP)
     except Exception as exc:
-        # BUSYGROUP = groupe déjà existant → normal au redémarrage
+        # BUSYGROUP = group already exists → normal on restart
         if "BUSYGROUP" in str(exc):
-            logger.debug("Consumer group déjà existant", stream=STREAM, group=GROUP)
+            logger.debug("Consumer group already exists", stream=STREAM, group=GROUP)
         else:
             raise
 
 
 async def _build_redis() -> aioredis.Redis:
     """
-    Connexion Redis directe dédiée au prediction-writer.
+    Dedicated direct Redis connection for the prediction-writer.
 
-    Utilise REDIS_URL (hostname DNS Docker → redis-master) plutôt que le Sentinel.
-    Cela évite les IP périmées stockées par le Sentinel après des redémarrages.
-    socket_timeout doit être > FLUSH_MS (en secondes).
+    Uses REDIS_URL (Docker DNS hostname → redis-master) instead of Sentinel.
+    This avoids stale IPs cached by Sentinel after restarts.
+    socket_timeout must be > FLUSH_MS (in seconds).
     """
-    # Marge ×5 par rapport au block XREADGROUP pour éviter les race conditions
+    # ×5 margin over the XREADGROUP block time to avoid race conditions
     data_socket_timeout = max(2.0, (FLUSH_MS / 1000) * 5)
     return aioredis.Redis.from_url(
         settings.REDIS_URL,
@@ -219,7 +219,7 @@ async def _build_redis() -> aioredis.Redis:
 
 
 async def run() -> None:
-    """Boucle principale du worker."""
+    """Main worker loop."""
     engine = create_async_engine(
         settings.DATABASE_URL,
         poolclass=NullPool,
@@ -235,14 +235,14 @@ async def run() -> None:
 
     def _stop(sig, frame):
         nonlocal running
-        logger.info("Signal d'arrêt reçu", signal=sig)
+        logger.info("Shutdown signal received", signal=sig)
         running = False
 
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
 
     logger.info(
-        "Worker démarré",
+        "Worker started",
         stream=STREAM,
         group=GROUP,
         consumer=CONSUMER,
@@ -264,7 +264,7 @@ async def run() -> None:
                 for _stream_name, messages in results:
                     await _flush_batch(session_factory, redis, messages)
 
-            # Vérification périodique des messages pending orphelins
+            # Periodic check for orphaned pending messages
             now = asyncio.get_event_loop().time()
             if now - last_pending_check >= PENDING_CHECK_INTERVAL:
                 await _reclaim_pending(session_factory, redis)
@@ -276,7 +276,7 @@ async def run() -> None:
             logger.error("Erreur inattendue dans la boucle principale", error=str(exc))
             await asyncio.sleep(1)
 
-    logger.info("Worker arrêté proprement")
+    logger.info("Worker shut down cleanly")
     await engine.dispose()
 
 

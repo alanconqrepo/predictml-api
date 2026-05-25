@@ -1,1 +1,1 @@
-"""Schémas Pydantic"""
+"""Pydantic schemas"""

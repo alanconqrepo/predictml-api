@@ -1,5 +1,5 @@
 """
-Configuration de la base de données
+Database configuration
 """
 
 import uuid
@@ -15,15 +15,15 @@ _ENGINE_KWARGS = dict(
     future=True,
     pool_size=settings.DB_POOL_SIZE,
     max_overflow=settings.DB_MAX_OVERFLOW,
-    # Recycle les connexions toutes les 10 min (évite les connexions mortes)
+    # Recycle connections every 10 min (prevents stale connections)
     pool_recycle=600,
-    # Vérifie la connexion avant usage (détecte les déconnexions silencieuses)
+    # Validate connection before use (detects silent disconnections)
     pool_pre_ping=True,
-    # Délai max pour obtenir une connexion du pool SQLAlchemy.
-    # Doit être > QUERY_WAIT_TIMEOUT PgBouncer (10 s) pour que l'erreur PgBouncer
-    # remonte proprement avant que SQLAlchemy abandonne de son côté.
+    # Max wait time to obtain a connection from the SQLAlchemy pool.
+    # Must be > PgBouncer QUERY_WAIT_TIMEOUT (10 s) so PgBouncer errors
+    # surface cleanly before SQLAlchemy gives up on its side.
     pool_timeout=15,
-    # LIFO : réutilise en priorité les connexions récentes → meilleur cache côté Postgres
+    # LIFO: prefer reusing recent connections → better cache on Postgres side
     pool_use_lifo=True,
     # PgBouncer transaction mode does not support server-side prepared statements.
     # prepared_statement_cache_size=0 disables the LRU cache but asyncpg 0.30+ still
@@ -65,7 +65,7 @@ else:
     ReadAsyncSessionLocal = AsyncSessionLocal
     _separate_read_engine = False
 
-# Base pour les modèles
+# ORM declarative base
 Base = declarative_base()
 
 
@@ -88,9 +88,9 @@ async def get_read_db() -> AsyncSession:
 
 
 async def init_db():
-    """Vérifie la connexion à la base de données.
+    """Verify the database connection.
 
-    La création et l'évolution du schéma sont gérées par Alembic (alembic upgrade head).
+    Schema creation and migrations are managed by Alembic (alembic upgrade head).
     """
     async with engine.connect() as conn:
         await conn.execute(text("SELECT 1"))
@@ -100,7 +100,7 @@ async def init_db():
 
 
 async def close_db():
-    """Ferme les connexions à la base de données"""
+    """Close database connections"""
     await engine.dispose()
     if _separate_read_engine:
         await read_engine.dispose()

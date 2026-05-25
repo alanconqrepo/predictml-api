@@ -1,5 +1,5 @@
 """
-Schémas Pydantic pour les résultats observés
+Pydantic schemas for observed results
 """
 
 from datetime import datetime
@@ -9,22 +9,22 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ObservedResultInput(BaseModel):
-    """Un résultat observé à soumettre"""
+    """An observed result to submit"""
 
-    id_obs: str = Field(..., description="Identifiant de l'observation")
-    model_name: str = Field(..., description="Nom du modèle concerné")
-    date_time: datetime = Field(..., description="Horodatage de l'observation (ISO 8601)")
+    id_obs: str = Field(..., description="Observation identifier")
+    model_name: str = Field(..., description="Name of the model concerned")
+    date_time: datetime = Field(..., description="Observation timestamp (ISO 8601)")
     observed_result: Union[float, int, str] = Field(
-        ..., description="Résultat réellement observé (même type que prediction_result)"
+        ..., description="Actually observed result (same type as prediction_result)"
     )
 
 
 class ObservedResultsUpsertRequest(BaseModel):
-    """Corps de la requête POST /observed-results"""
+    """Request body for POST /observed-results"""
 
     data: List[ObservedResultInput] = Field(
         ...,
-        description="Liste des résultats observés à insérer ou écraser",
+        description="List of observed results to insert or overwrite",
         min_length=1,
     )
 
@@ -51,7 +51,7 @@ class ObservedResultsUpsertRequest(BaseModel):
 
 
 class ObservedResultResponse(BaseModel):
-    """Un résultat observé retourné par l'API"""
+    """An observed result returned by the API"""
 
     id: int
     id_obs: str
@@ -64,13 +64,13 @@ class ObservedResultResponse(BaseModel):
 
 
 class ObservedResultsUpsertResponse(BaseModel):
-    """Réponse après upsert"""
+    """Response after upsert"""
 
-    upserted: int = Field(..., description="Nombre de lignes insérées ou mises à jour")
+    upserted: int = Field(..., description="Number of rows inserted or updated")
 
 
 class ObservedResultsListResponse(BaseModel):
-    """Résultat paginé de la liste des résultats observés"""
+    """Paginated result of the observed results list"""
 
     total: int
     limit: int
@@ -93,7 +93,7 @@ class ObservedResultsStatsModelItem(BaseModel):
 
 
 class ObservedResultsStatsResponse(BaseModel):
-    model_name: Optional[str] = Field(None, description="Nom du modèle, null si global")
+    model_name: Optional[str] = Field(None, description="Model name, null if global")
     total_predictions: int
     labeled_count: int
     coverage_rate: float
@@ -104,12 +104,12 @@ class ObservedResultsStatsResponse(BaseModel):
 
 
 class CSVParseError(BaseModel):
-    row: int = Field(..., description="Numéro de ligne dans le CSV (en-tête = 1)")
-    reason: str = Field(..., description="Raison du rejet")
+    row: int = Field(..., description="Row number in the CSV (header = 1)")
+    reason: str = Field(..., description="Reason for rejection")
 
 
 class CSVUploadResponse(BaseModel):
-    upserted: int = Field(..., description="Nombre de lignes importées avec succès")
-    skipped_rows: int = Field(..., description="Nombre de lignes ignorées pour erreur")
+    upserted: int = Field(..., description="Number of rows successfully imported")
+    skipped_rows: int = Field(..., description="Number of rows skipped due to errors")
     parse_errors: List[CSVParseError] = Field(default_factory=list)
-    filename: str = Field(..., description="Nom du fichier uploadé")
+    filename: str = Field(..., description="Name of the uploaded file")

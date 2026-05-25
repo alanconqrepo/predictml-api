@@ -1,18 +1,18 @@
 """
-Worker ARQ — exécute les tâches longues hors du processus API.
+ARQ Worker — executes long-running tasks outside the API process.
 
-Tâches définies :
-  - retrain_task         : retrain déclenché manuellement via POST /retrain
-  - scheduled_retrain_task : retrain planifié (cron ARQ, remplace APScheduler)
-  - alert_check_task     : vérification des alertes toutes les 6 h
-  - weekly_report_task   : rapport hebdomadaire
+Defined tasks:
+  - retrain_task            : manually triggered retrain via POST /retrain
+  - scheduled_retrain_task  : scheduled retrain (ARQ cron, replaces APScheduler)
+  - alert_check_task        : alert check every 6 h
+  - weekly_report_task      : weekly report
 
-Démarrage :
+Start:
     python -m arq src.tasks.arq_worker.WorkerSettings
 
-Le worker lit les jobs depuis Redis (même instance que l'API).
-Un seul réplica du worker est déployé (pas de Redis lock nécessaire pour
-le scheduling, contrairement à l'ancienne architecture APScheduler × 3 réplicas).
+The worker reads jobs from Redis (same instance as the API).
+A single worker replica is deployed (no Redis lock needed for
+scheduling, unlike the old APScheduler × 3 replicas architecture).
 """
 
 from datetime import datetime, timezone
@@ -27,12 +27,12 @@ logger = structlog.get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Helpers DB
+# DB helpers
 # ---------------------------------------------------------------------------
 
 
 async def _update_task_run(task_run_id: str, **fields) -> None:
-    """Met à jour un TaskRun en DB (status, started_at, completed_at, result, error, logs)."""
+    """Update a TaskRun in the DB (status, started_at, completed_at, result, error, logs)."""
     from sqlalchemy import update
 
     from src.db.database import AsyncSessionLocal
@@ -43,11 +43,11 @@ async def _update_task_run(task_run_id: str, **fields) -> None:
             await db.execute(update(TaskRun).where(TaskRun.id == task_run_id).values(**fields))
             await db.commit()
     except Exception as exc:
-        logger.warning("Mise à jour TaskRun échouée (non bloquant)", id=task_run_id, error=str(exc))
+        logger.warning("TaskRun update failed (non-blocking)", id=task_run_id, error=str(exc))
 
 
 async def _get_redis_logs(redis, job_id: str) -> str:
-    """Récupère tous les logs Redis pour un job et retourne un texte."""
+    """Fetch all Redis logs for a job and return them as a string."""
     try:
         lines = await redis.lrange(f"retrain_logs:{job_id}", 0, -1)
         return "\n".join(
@@ -58,7 +58,7 @@ async def _get_redis_logs(redis, job_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Tâche 1 : retrain manuel (enqueué par POST /models/{name}/{version}/retrain)
+# Task 1: manual retrain (enqueued by POST /models/{name}/{version}/retrain)
 # ---------------------------------------------------------------------------
 
 
@@ -74,16 +74,16 @@ async def retrain_task(
     triggered_by: str,
     source_fields: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Exécute le pipeline de ré-entraînement, met à jour TaskRun en DB."""
+    """Execute the retraining pipeline and update the TaskRun in the DB."""
     from src.services.retrain_service import do_retrain
 
     redis = ctx.get("redis")
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    # Marquer comme running
+    # Mark as running
     await _update_task_run(job_id, status="running", started_at=now)
     logger.info(
-        "retrain_task démarré",
+        "retrain_task started",
         job_id=job_id,
         model=model_name,
         source_version=source_version,
@@ -105,7 +105,7 @@ async def retrain_task(
             redis_client=redis,
         )
     except Exception as exc:
-        logger.error("retrain_task exception inattendue", job_id=job_id, error=str(exc))
+        logger.error("retrain_task unexpected exception", job_id=job_id, error=str(exc))
         result = {"success": False, "error": str(exc), "stdout": "", "stderr": ""}
 
     completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -123,7 +123,7 @@ async def retrain_task(
     )
 
     logger.info(
-        "retrain_task terminé",
+        "retrain_task completed",
         job_id=job_id,
         status=status,
         model=model_name,
@@ -133,7 +133,7 @@ async def retrain_task(
 
 
 # ---------------------------------------------------------------------------
-# Tâche 2 : retrain planifié (déclenché par les cron jobs ARQ ci-dessous)
+# Task 2: scheduled retrain (triggered by ARQ cron jobs below)
 # ---------------------------------------------------------------------------
 
 
@@ -142,17 +142,17 @@ async def scheduled_retrain_task(
     model_name: str,
     source_version: str,
 ) -> None:
-    """Retrain planifié — acquiert un verrou Redis pour éviter les doublons."""
+    """Scheduled retrain — acquires a Redis lock to prevent duplicate runs."""
     from src.services.retrain_service import do_retrain
 
     redis = ctx.get("redis")
     lock_key = f"retrain_lock:{model_name}:{source_version}"
 
-    # Verrou distribué : évite un double-run si un retrain manuel est en cours
+    # Distributed lock: prevents double-run if a manual retrain is in progress
     acquired = await redis.set(lock_key, "1", nx=True, ex=700)
     if not acquired:
         logger.warning(
-            "Retrain planifié ignoré — verrou actif",
+            "Scheduled retrain skipped — lock active",
             model=model_name,
             version=source_version,
         )
@@ -162,7 +162,7 @@ async def scheduled_retrain_task(
     now = datetime.now(timezone.utc)
     timestamp = now.strftime("%Y%m%d%H%M%S")
 
-    # Charger le schedule depuis la DB pour les paramètres
+    # Load schedule from DB to get parameters
     from sqlalchemy import and_, select
 
     from src.db.database import AsyncSessionLocal
@@ -181,7 +181,7 @@ async def scheduled_retrain_task(
             src = result.scalar_one_or_none()
             if not src:
                 logger.error(
-                    "Modèle source introuvable pour scheduled_retrain",
+                    "Source model not found for scheduled_retrain",
                     model=model_name,
                     version=source_version,
                 )
@@ -190,7 +190,7 @@ async def scheduled_retrain_task(
 
             schedule = src.retrain_schedule or {}
             if not schedule.get("enabled", True):
-                logger.info("Schedule désactivé — job ignoré", model=model_name)
+                logger.info("Schedule disabled — job skipped", model=model_name)
                 await redis.delete(lock_key)
                 return
 
@@ -202,11 +202,11 @@ async def scheduled_retrain_task(
             new_version = f"{source_version}-sched-{timestamp}"
 
     except Exception as exc:
-        logger.error("Erreur lecture DB scheduled_retrain", error=str(exc))
+        logger.error("DB read error in scheduled_retrain", error=str(exc))
         await redis.delete(lock_key)
         return
 
-    # Créer le TaskRun en DB pour le tracking
+    # Create the TaskRun in DB for tracking
     from src.db.database import AsyncSessionLocal
     from src.db.models.task_run import TaskRun
 
@@ -225,7 +225,7 @@ async def scheduled_retrain_task(
             db.add(task_run)
             await db.commit()
     except Exception as exc:
-        logger.warning("Création TaskRun échouée (non bloquant)", error=str(exc))
+        logger.warning("TaskRun creation failed (non-blocking)", error=str(exc))
 
     try:
         result = await do_retrain(
@@ -250,7 +250,7 @@ async def scheduled_retrain_task(
     finally:
         await redis.delete(lock_key)
 
-    # Mise à jour finale du TaskRun
+    # Final TaskRun update
     completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     status = "success" if result.get("success") else "failed"
     final_logs = await _get_redis_logs(redis, job_id)
@@ -267,76 +267,76 @@ async def scheduled_retrain_task(
 
 
 # ---------------------------------------------------------------------------
-# Tâche 3 : vérification des alertes (toutes les 6 h)
+# Task 3: alert check (every 6 h)
 # ---------------------------------------------------------------------------
 
 
 async def alert_check_task(ctx: Dict[str, Any]) -> None:
-    """Délègue à la logique existante de supervision_reporter."""
+    """Delegate to existing supervision_reporter logic."""
     from src.tasks.supervision_reporter import run_alert_check
 
-    logger.info("alert_check_task démarré")
+    logger.info("alert_check_task started")
     await run_alert_check()
-    logger.info("alert_check_task terminé")
+    logger.info("alert_check_task completed")
 
 
 # ---------------------------------------------------------------------------
-# Tâche 4 : rapport hebdomadaire
+# Task 4: weekly report
 # ---------------------------------------------------------------------------
 
 
 async def weekly_report_task(ctx: Dict[str, Any]) -> None:
-    """Délègue à la logique existante de supervision_reporter."""
+    """Delegate to existing supervision_reporter logic."""
     from src.tasks.supervision_reporter import run_weekly_report
 
-    logger.info("weekly_report_task démarré")
+    logger.info("weekly_report_task started")
     await run_weekly_report()
-    logger.info("weekly_report_task terminé")
+    logger.info("weekly_report_task completed")
 
 
 # ---------------------------------------------------------------------------
-# Startup / Shutdown du worker
+# Worker startup / shutdown
 # ---------------------------------------------------------------------------
 
 
 async def startup(ctx: Dict[str, Any]) -> None:
-    """Initialise la DB et charge les crons retrain depuis la DB."""
+    """Initialize the DB and load retrain cron jobs from the DB."""
     from src.core.config import settings
     from src.core.logging import setup_logging
     from src.db.database import init_db
 
     setup_logging(debug=settings.DEBUG)
-    logger.info("ARQ worker démarré")
+    logger.info("ARQ worker started")
 
     try:
         await init_db()
-        logger.info("DB connectée (worker)")
+        logger.info("DB connected (worker)")
     except Exception as exc:
-        logger.warning("DB connexion échouée au démarrage worker", error=str(exc))
+        logger.warning("DB connection failed at worker startup", error=str(exc))
 
-    # Les cron jobs retrain sont chargés dynamiquement via _load_retrain_crons()
-    # (appelé après startup par WorkerSettings.cron_jobs via la factory ci-dessous)
+    # Retrain cron jobs are loaded dynamically via _load_retrain_crons()
+    # (called after startup by WorkerSettings.cron_jobs via the factory below)
 
 
 async def shutdown(ctx: Dict[str, Any]) -> None:
-    """Ferme la DB."""
+    """Close the DB connection."""
     from src.db.database import close_db
 
     await close_db()
-    logger.info("ARQ worker arrêté")
+    logger.info("ARQ worker stopped")
 
 
 # ---------------------------------------------------------------------------
-# Chargement dynamique des cron jobs retrain depuis la DB
+# Dynamic loading of retrain cron jobs from the DB
 # ---------------------------------------------------------------------------
 
 
 async def _build_retrain_cron_jobs():
     """
-    Charge les modèles avec retrain_schedule.enabled=True et retourne
-    une liste de cron jobs ARQ, un par version active.
+    Load models with retrain_schedule.enabled=True and return
+    a list of ARQ cron jobs, one per active version.
 
-    Appelé une seule fois au démarrage du worker (WorkerSettings.cron_jobs).
+    Called once at worker startup (WorkerSettings.cron_jobs).
     """
     from sqlalchemy import select
 
@@ -358,8 +358,8 @@ async def _build_retrain_cron_jobs():
             try:
                 from arq import cron as arq_cron
 
-                # ARQ attend minute, hour, day, month, weekday comme entiers/sets
-                # On utilise la représentation crontab directe (sched["cron"] ex: "0 3 * * 1")
+                # ARQ expects minute, hour, day, month, weekday as integers/sets
+                # We use the direct crontab representation (sched["cron"] e.g. "0 3 * * 1")
                 cron_jobs.append(
                     arq_cron(
                         scheduled_retrain_task,
@@ -368,18 +368,18 @@ async def _build_retrain_cron_jobs():
                             "model_name": model.name,
                             "source_version": model.version,
                         },
-                        # ARQ supporte un paramètre `cron` natif
+                        # ARQ supports a native `cron` parameter
                     )
                 )
             except Exception as exc:
                 logger.warning(
-                    "Cron retrain ignoré (erreur)",
+                    "Retrain cron skipped (error)",
                     model=model.name,
                     version=model.version,
                     error=str(exc),
                 )
     except Exception as exc:
-        logger.warning("Chargement crons retrain échoué", error=str(exc))
+        logger.warning("Failed to load retrain crons", error=str(exc))
     return cron_jobs
 
 
@@ -389,9 +389,9 @@ async def _build_retrain_cron_jobs():
 
 
 class WorkerSettings:
-    """Configuration du worker ARQ.
+    """ARQ worker configuration.
 
-    Démarrage :
+    Start:
         python -m arq src.tasks.arq_worker.WorkerSettings
     """
 
@@ -402,26 +402,26 @@ class WorkerSettings:
         weekly_report_task,
     ]
 
-    # Cron jobs fixes (alertes + rapport hebdo)
-    # Les crons retrain dynamiques sont ajoutés au démarrage via on_startup
+    # Fixed cron jobs (alerts + weekly report)
+    # Dynamic retrain crons are added at startup via on_startup
     cron_jobs = [
-        # Vérification alertes toutes les 6 h (0h, 6h, 12h, 18h UTC)
+        # Alert check every 6 h (0h, 6h, 12h, 18h UTC)
         cron(alert_check_task, hour={0, 6, 12, 18}, minute=0, run_at_startup=False),
-        # Rapport hebdomadaire — lundi 8h UTC
+        # Weekly report — Monday at 8h UTC
         cron(weekly_report_task, weekday=0, hour=8, minute=0, run_at_startup=False),
     ]
 
     on_startup = startup
     on_shutdown = shutdown
 
-    # Concurrence max : 5 jobs simultanés (le retrain lourd prend 1 slot)
+    # Max concurrency: 5 simultaneous jobs (the heavy retrain takes 1 slot)
     max_jobs = 5
 
-    # Timeout global d'un job (légèrement > timeout subprocess 600 s)
+    # Global job timeout (slightly > subprocess timeout of 600 s)
     job_timeout = 720
 
-    # Grace time pour les jobs manqués (ex: worker redémarré)
-    keep_result = 3600  # conserver le résultat 1 h dans Redis
+    # Grace time for missed jobs (e.g. worker restarted)
+    keep_result = 3600  # keep result 1 h in Redis
 
     @classmethod
     def redis_settings(cls) -> RedisSettings:

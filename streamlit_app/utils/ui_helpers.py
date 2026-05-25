@@ -1,5 +1,5 @@
 """
-Composants UI partagés entre les pages Streamlit
+Shared UI components across Streamlit pages
 """
 
 import streamlit as st
@@ -8,7 +8,7 @@ from utils.i18n import t
 
 
 def show_token_with_copy(token: str) -> None:
-    """Affiche un token avec un bouton copier en un clic."""
+    """Display a token with a one-click copy button."""
     st.code(token, language=None)
     st.iframe(
         f"""data:text/html,<button onclick="navigator.clipboard.writeText('{token}').then(() => {{
