@@ -1,14 +1,14 @@
 """
-Utilitaires partagés du projet
+Shared project utilities
 """
 
 from datetime import datetime, timezone
 
 
 def _utcnow() -> datetime:
-    """Retourne la date/heure UTC courante sans information de timezone.
+    """Return the current UTC datetime without timezone information.
 
     Returns:
-        datetime: Date/heure UTC courante, naive (sans tzinfo).
+        datetime: Current UTC datetime, naive (no tzinfo).
     """
     return datetime.now(timezone.utc).replace(tzinfo=None)

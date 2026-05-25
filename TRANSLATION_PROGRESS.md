@@ -1,0 +1,221 @@
+# Translation Progress — French → English
+
+## Method
+
+- **One logical batch per session** — small, focused commits.
+- Only translate: docstrings, inline comments, markdown text, UI labels.
+- Do NOT change: variable names, function names, log keys, API field names, test assertions.
+- After each batch: `ruff check` + `black --check` + baseline test run.
+- Commit format: `i18n: translate <group> comments/docstrings to English`
+- Branch: `claude/internationalize-to-english-Jnqxr`
+
+---
+
+## Batch 1 — Bootstrap + `src/core/` + `src/main.py`
+
+- [x] Create `TRANSLATION_PROGRESS.md`
+- [x] `src/main.py`
+- [x] `src/core/config.py`
+- [x] `src/core/security.py`
+- [x] `src/core/logging.py`
+- [x] `src/core/arq_pool.py`
+- [x] `src/core/ml_metrics.py`
+- [x] `src/core/platform_limits.py`
+- [x] `src/core/telemetry.py`
+- [x] `src/core/utils.py`
+- [x] `src/core/__init__.py`
+
+---
+
+## Batch 2 — `src/api/`
+
+- [ ] `src/api/models.py` (heaviest)
+- [ ] `src/api/predict.py`
+- [ ] `src/api/monitoring.py`
+- [ ] `src/api/users.py`
+- [ ] `src/api/observed_results.py`
+- [ ] `src/api/jobs.py`
+- [ ] `src/api/account_requests.py`
+
+---
+
+## Batch 3 — `src/services/`
+
+- [ ] `src/services/db_service.py`
+- [ ] `src/services/retrain_service.py`
+- [ ] `src/services/model_service.py`
+- [ ] `src/services/auto_promotion_service.py`
+- [ ] `src/services/email_service.py`
+- [ ] `src/services/minio_service.py`
+- [ ] `src/services/mlflow_service.py`
+- [ ] `src/services/drift_service.py`
+- [ ] `src/services/metrics_service.py`
+- [ ] `src/services/shap_service.py`
+- [ ] `src/services/golden_test_service.py`
+- [ ] `src/services/ab_significance_service.py`
+- [ ] `src/services/input_validation_service.py`
+- [ ] `src/services/__init__.py`
+
+---
+
+## Batch 4 — `src/schemas/` + `src/tasks/` + `src/db/` + `src/workers/`
+
+- [ ] `src/schemas/prediction.py`
+- [ ] `src/schemas/model.py`
+- [ ] `src/schemas/observed_result.py`
+- [ ] `src/schemas/user.py`
+- [ ] `src/schemas/golden_test.py`
+- [ ] `src/schemas/task_run.py`
+- [ ] `src/schemas/monitoring.py`
+- [ ] `src/schemas/__init__.py`
+- [ ] `src/tasks/retrain_scheduler.py`
+- [ ] `src/tasks/arq_worker.py`
+- [ ] `src/tasks/supervision_reporter.py`
+- [ ] `src/db/database.py`
+- [ ] `src/workers/prediction_writer.py`
+
+---
+
+## Batch 5 — `streamlit_app/utils/`
+
+- [ ] `streamlit_app/utils/autotraining_tools.py` (heaviest)
+- [ ] `streamlit_app/utils/metrics_help.py`
+- [ ] `streamlit_app/utils/docs_loader.py`
+- [ ] `streamlit_app/utils/tools.py`
+- [ ] `streamlit_app/utils/api_client.py`
+- [ ] `streamlit_app/utils/auth.py`
+- [ ] `streamlit_app/utils/i18n.py`
+- [ ] `streamlit_app/utils/ui_helpers.py`
+
+---
+
+## Batch 6 — `streamlit_app/` pages + `app.py`
+
+- [ ] `streamlit_app/app.py`
+- [ ] `streamlit_app/pages/10_Aide.py`
+- [ ] `streamlit_app/pages/12_AutoTrain_Chatbot.py`
+- [ ] `streamlit_app/pages/2_Models.py`
+- [ ] `streamlit_app/pages/6_AB_Testing.py`
+- [ ] `streamlit_app/pages/4_Stats.py`
+- [ ] `streamlit_app/pages/7_Supervision.py`
+- [ ] `streamlit_app/pages/5_Code_Example.py`
+- [ ] `streamlit_app/pages/1_Users.py`
+- [ ] `streamlit_app/pages/3_Predictions.py`
+- [ ] `streamlit_app/pages/11_Services.py`
+- [ ] `streamlit_app/pages/9_Golden_Tests.py`
+- [ ] `streamlit_app/pages/8_Retrain.py`
+- [ ] `streamlit_app/pages/0_Demande_Acces.py`
+
+---
+
+## Batch 7 — `tests/` part A
+
+- [ ] `tests/conftest.py`
+- [ ] `tests/test_api.py`
+- [ ] `tests/test_predict_post.py`
+- [ ] `tests/test_predictions_get.py`
+- [ ] `tests/test_predictions_purge.py`
+- [ ] `tests/test_export_endpoint.py`
+- [ ] `tests/test_prediction_stats.py`
+- [ ] `tests/test_models_create.py`
+- [ ] `tests/test_models_get.py`
+- [ ] `tests/test_models_update.py`
+- [ ] `tests/test_models_delete.py`
+
+---
+
+## Batch 8 — `tests/` part B
+
+- [ ] `tests/test_retrain.py`
+- [ ] `tests/test_scheduled_retraining.py`
+- [ ] `tests/test_auto_promotion_policy.py`
+- [ ] `tests/test_ab_shadow.py`
+- [ ] `tests/test_ab_significance.py`
+- [ ] `tests/test_feature_importance.py`
+- [ ] `tests/test_observed_results.py`
+- [ ] `tests/test_users.py`
+- [ ] `tests/test_security.py`
+- [ ] `tests/test_rate_limit.py`
+- [ ] `tests/test_drift.py`
+
+---
+
+## Batch 9 — `tests/` part C (remaining)
+
+- [ ] `tests/test_db_service_crud.py`
+- [ ] `tests/test_monitoring_api.py`
+- [ ] `tests/test_input_validation.py`
+- [ ] All remaining test files (integration/, e2e/, unit/ subdirs if present)
+
+---
+
+## Batch 10 — Root markdown files
+
+- [ ] `README.md`
+- [ ] `CODING_STANDARDS.md`
+- [ ] `CLAUDE.md`
+- [ ] `CODE_QUALITY_PLAN.md`
+- [ ] `CONTRIBUTING.md`
+- [ ] `PROMPTS.md`
+- [ ] `SKILLS.md`
+
+---
+
+## Batch 11 — `documentation/` markdown
+
+- [ ] `documentation/API_REFERENCE.md` (heaviest)
+- [ ] `documentation/KPIS_REFERENCE.md`
+- [ ] `documentation/ARCHITECTURE.md`
+- [ ] `documentation/TRAIN_SCRIPT_GUIDE.md`
+- [ ] `documentation/BEGINNER_GUIDE.md`
+- [ ] `documentation/DASHBOARD_GUIDE.md`
+- [ ] `documentation/DATABASE.md`
+- [ ] `documentation/DOCKER.md`
+- [ ] `documentation/FAQ.md`
+- [ ] `documentation/QUICKSTART.md`
+- [ ] `documentation/GRAFANA_OTEL.md`
+- [ ] `documentation/SECURITY_MODEL_VALIDATION.md`
+
+---
+
+## Batch 12 — `road_maps/` markdown (18 files)
+
+- [ ] `road_maps/ROADMAP_V8.md`
+- [ ] `road_maps/ROADMAP_V9.md`
+- [ ] `road_maps/ROADMAP_V10.md`
+- [ ] `road_maps/ROADMAP_V11.md`
+- [ ] `road_maps/ROADMAP_V12.md`
+- [ ] `road_maps/ROADMAP_V13.md`
+- [ ] `road_maps/ROADMAP_V14.md`
+- [ ] `road_maps/ROADMAP_V7.md`
+- [ ] `road_maps/ROADMAP_V6.md`
+- [ ] `road_maps/ROADMAP_V5.md`
+- [ ] `road_maps/ROADMAP_V4.md`
+- [ ] `road_maps/ROADMAP_V3.md`
+- [ ] `road_maps/ROADMAP_SECURITY.md`
+- [ ] `road_maps/ROADMAP_Scalability.md`
+- [ ] `road_maps/roadmap_scalabilty_n2.md`
+- [ ] `road_maps/ROADMAP.md`
+- [ ] `road_maps/ROADMAP_4_PERPLEXITY.md`
+- [ ] `road_maps/ideas.md`
+
+---
+
+## Batch 13 — `init_data/` + `smoke-tests/` + `alembic/` + `documentation/Scripts/`
+
+- [ ] `init_data/example_train.py`
+- [ ] `init_data/seed_sample_data.py`
+- [ ] `init_data/resign_models.py`
+- [ ] `init_data/create_multiple_advanced_models.py`
+- [ ] `init_data/init_db.py`
+- [ ] `init_data/create_multiple_models.py`
+- [ ] `init_data/migrate_add_feature_baseline.py`
+- [ ] `init_data/README.md`
+- [ ] `smoke-tests/test_multimodel_api.py`
+- [ ] `smoke-tests/README.md`
+- [ ] `alembic/versions/*.py` (3 files)
+- [ ] `documentation/Scripts/cancer/` (11 files)
+- [ ] `documentation/Scripts/iris/` (11 files)
+- [ ] `documentation/Scripts/titanic/` (5 files)
+- [ ] `documentation/Scripts/wine/` (12 files)
+- [ ] `Models/README.md`

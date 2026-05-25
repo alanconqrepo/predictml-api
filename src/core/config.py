@@ -1,12 +1,12 @@
 """
-Configuration de l'application
+Application configuration
 """
 
 import os
 
 from dotenv import load_dotenv
 
-# Charger les variables d'environnement
+# Load environment variables
 load_dotenv()
 
 _INSECURE_DEFAULTS = {"change-this-secret-key", "minioadmin", "minioadmin"}
@@ -17,17 +17,17 @@ _MISSING = object()
 def _require_env(
     name: str, default: object = _MISSING, insecure_values: set[str] | None = None
 ) -> str:
-    """Retourne la valeur de la variable d'env.
+    """Return the value of an environment variable.
 
-    Si la variable n'est pas définie et qu'aucun default n'est fourni, lève
-    EnvironmentError — utilisé pour les variables obligatoires comme SECRET_KEY.
+    If the variable is not set and no default is provided, raises
+    EnvironmentError — used for mandatory variables such as SECRET_KEY.
     """
     raw = os.getenv(name)
     if raw is None:
         if default is _MISSING:
             raise EnvironmentError(
-                f"[CONFIG] La variable d'environnement '{name}' est obligatoire mais non définie. "
-                f'Générez une valeur avec : python -c "import secrets; print(secrets.token_urlsafe(32))"'
+                f"[CONFIG] Required environment variable '{name}' is not defined. "
+                f'Generate a value with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
             )
         value = str(default)
     else:
@@ -37,21 +37,21 @@ def _require_env(
             import warnings
 
             warnings.warn(
-                f"[SECURITY] {name} utilise une valeur par défaut non sécurisée. "
-                f"Définissez {name} via variable d'environnement avant le déploiement en production.",
+                f"[SECURITY] {name} is using an insecure default value. "
+                f"Set {name} via environment variable before deploying to production.",
                 stacklevel=2,
             )
         else:
             raise EnvironmentError(
-                f"[SECURITY] {name} utilise une valeur non sécurisée interdite en production. "
-                f"Définissez {name} avec une valeur forte avant le déploiement. "
-                f'Générez-en une avec : python -c "import secrets; print(secrets.token_urlsafe(32))"'
+                f"[SECURITY] {name} is using an insecure value that is forbidden in production. "
+                f"Set {name} to a strong value before deploying. "
+                f'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
             )
     return value
 
 
 class Settings:
-    """Configuration de l'application"""
+    """Application settings"""
 
     # API
     API_TITLE: str = "PredictML API - Multi Models"
@@ -74,10 +74,10 @@ class Settings:
     )
     # Empty string = no replica configured; falls back to DATABASE_URL
     DATABASE_READ_REPLICA_URL: str = os.getenv("DATABASE_READ_REPLICA_URL", "")
-    # Avec asyncpg + PgBouncer transaction mode, les connexions sont libérées
-    # immédiatement après chaque appel SQL — un petit pool suffit pour une très
-    # haute concurrence. pool_size + max_overflow doit rester ≤ DEFAULT_POOL_SIZE
-    # de PgBouncer pour éviter les query_wait_timeout.
+    # With asyncpg + PgBouncer transaction mode, connections are released
+    # immediately after each SQL call — a small pool is sufficient for very
+    # high concurrency. pool_size + max_overflow must stay ≤ DEFAULT_POOL_SIZE
+    # in PgBouncer to avoid query_wait_timeout.
     DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "5"))
     DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "10"))
 
@@ -114,7 +114,7 @@ class Settings:
     MLFLOW_REGISTER_MODELS: bool = os.getenv("MLFLOW_REGISTER_MODELS", "true").lower() == "true"
     MLFLOW_ENABLE: bool = os.getenv("MLFLOW_ENABLE", "true").lower() == "true"
 
-    # Prometheus metrics — obligatoire en production (DEBUG=False) ; vide interdit hors dev
+    # Prometheus metrics — required in production (DEBUG=False); empty string not allowed outside dev
     METRICS_TOKEN: str = os.getenv("METRICS_TOKEN", "")
 
     # OpenTelemetry
@@ -124,7 +124,7 @@ class Settings:
         "http://localhost:{}".format(os.getenv("GRAFANA_GRPC_PORT", "4317"))
     )
 
-    # SMTP / Alertes e-mail (désactivées par défaut — configurer via variables d'env)
+    # SMTP / Email alerts (disabled by default — configure via environment variables)
     SMTP_HOST: str = os.getenv("SMTP_HOST", "")
     SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
     SMTP_USER: str = os.getenv("SMTP_USER", "")
@@ -142,20 +142,20 @@ class Settings:
     WEEKLY_REPORT_DAY: str = os.getenv("WEEKLY_REPORT_DAY", "monday")
     WEEKLY_REPORT_HOUR: int = int(os.getenv("WEEKLY_REPORT_HOUR", "8"))
 
-    # Token expiration (days) — 0 = pas d'expiration
+    # Token expiration (days) — 0 = no expiration
     TOKEN_LIFETIME_DAYS: int = int(os.getenv("TOKEN_LIFETIME_DAYS", "90"))
-    # Seuil de baisse d'accuracy (ex: 0.10 = chute de 10 pts → alerte)
+    # Accuracy drop threshold (e.g. 0.10 = 10-point drop → alert)
     PERFORMANCE_DRIFT_ALERT_THRESHOLD: float = float(
         os.getenv("PERFORMANCE_DRIFT_ALERT_THRESHOLD", "0.10")
     )
-    # Taux d'erreur déclenchant une alerte (ex: 0.10 = 10 %)
+    # Error rate that triggers an alert (e.g. 0.10 = 10%)
     ERROR_RATE_ALERT_THRESHOLD: float = float(os.getenv("ERROR_RATE_ALERT_THRESHOLD", "0.10"))
 
     # Analytics safety caps — protect aggregation queries from full-table scans
     MAX_ROWS_ANALYTICS: int = int(os.getenv("MAX_ROWS_ANALYTICS", "50000"))
     ANALYTICS_MAX_DAYS: int = int(os.getenv("ANALYTICS_MAX_DAYS", "90"))
 
-    # Redis Streams — queue asynchrone des writes de prédictions
+    # Redis Streams — async write queue for predictions
     PREDICTION_STREAM_ENABLED: bool = (
         os.getenv("PREDICTION_STREAM_ENABLED", "false").lower() == "true"
     )

@@ -1,5 +1,5 @@
 """
-Configuration OpenTelemetry — traces, métriques, logs.
+OpenTelemetry configuration — traces, metrics, logs.
 """
 
 import logging
@@ -22,7 +22,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 
 def setup_telemetry(app, engine=None):
-    """Configure OpenTelemetry : traces, métriques, logs."""
+    """Configure OpenTelemetry: traces, metrics, logs."""
     from src.core.config import settings
 
     resource = Resource.create(
@@ -40,7 +40,7 @@ def setup_telemetry(app, engine=None):
     )
     trace.set_tracer_provider(tracer_provider)
 
-    # --- Métriques ---
+    # --- Metrics ---
     metric_reader = PeriodicExportingMetricReader(
         OTLPMetricExporter(endpoint=endpoint, insecure=True)
     )
@@ -53,7 +53,7 @@ def setup_telemetry(app, engine=None):
         BatchLogRecordProcessor(OTLPLogExporter(endpoint=endpoint, insecure=True))
     )
     set_logger_provider(logger_provider)
-    # Bridger le logging Python standard vers OTEL Logs
+    # Bridge the standard Python logging into OTEL Logs
     handler = LoggingHandler(level=logging.NOTSET, logger_provider=logger_provider)
     logging.getLogger().addHandler(handler)
 
@@ -64,7 +64,7 @@ def setup_telemetry(app, engine=None):
         SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
 
     logging.getLogger(__name__).info(
-        "OpenTelemetry activé — endpoint: %s, service: %s",
+        "OpenTelemetry enabled — endpoint: %s, service: %s",
         endpoint,
         settings.OTEL_SERVICE_NAME,
     )
