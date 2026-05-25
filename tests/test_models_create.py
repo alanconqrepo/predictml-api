@@ -1,5 +1,5 @@
 """
-Tests pour l'endpoint POST /models
+Tests for the POST /models endpoint
 """
 
 import asyncio
@@ -23,7 +23,7 @@ TEST_MODEL_NAME = "test_model_post_models"
 
 
 def make_pkl_bytes() -> bytes:
-    """Crée un modèle sklearn minimal sérialisé."""
+    """Create a minimal serialized sklearn model."""
     X, y = load_iris(return_X_y=True)
     model = LogisticRegression(max_iter=200).fit(X, y)
     _jbuf = io.BytesIO()
@@ -62,7 +62,7 @@ asyncio.run(_setup())
 
 
 def test_create_model_without_auth():
-    """POST /models sans header Authorization → 401/403"""
+    """POST /models without Authorization header → 401/403."""
     response = client.post(
         "/models",
         files={"file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream")},
@@ -72,7 +72,7 @@ def test_create_model_without_auth():
 
 
 def test_create_model_with_invalid_token():
-    """POST /models avec token invalide → 401"""
+    """POST /models with invalid token → 401."""
     response = client.post(
         "/models",
         headers={"Authorization": "Bearer invalid-token"},
@@ -83,7 +83,7 @@ def test_create_model_with_invalid_token():
 
 
 def test_create_model_non_admin_forbidden():
-    """POST /models avec token non-admin → 403"""
+    """POST /models with non-admin token → 403."""
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {USER_TOKEN}"},
@@ -94,12 +94,12 @@ def test_create_model_non_admin_forbidden():
 
 
 # ---------------------------------------------------------------------------
-# Cas nominaux
+# Happy path
 # ---------------------------------------------------------------------------
 
 
 def test_create_model_success():
-    """POST /models avec token admin + fichier pkl → 201 + champs attendus"""
+    """POST /models with admin token + pkl file → 201 + expected fields."""
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -131,7 +131,7 @@ def test_create_model_success():
 
 
 def test_create_model_with_mlflow_run_id():
-    """POST /models avec mlflow_run_id → bien enregistré dans la réponse"""
+    """POST /models with mlflow_run_id → correctly stored in the response."""
     run_id = "abc123def456abc123def456abc123de"
     response = client.post(
         "/models",
@@ -148,7 +148,7 @@ def test_create_model_with_mlflow_run_id():
 
 
 def test_create_model_with_classes_and_training_params():
-    """POST /models avec classes JSON et training_params JSON → bien désérialisés"""
+    """POST /models with classes JSON and training_params JSON → correctly deserialized."""
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -168,13 +168,13 @@ def test_create_model_with_classes_and_training_params():
 
 
 # ---------------------------------------------------------------------------
-# Cas d'erreur
+# Error cases
 # ---------------------------------------------------------------------------
 
 
 def test_create_model_duplicate_name():
-    """POST /models avec un nom déjà existant → 409"""
-    # Premier enregistrement
+    """POST /models with an already existing name → 409."""
+    # First registration
     client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -182,7 +182,7 @@ def test_create_model_duplicate_name():
         data={"name": f"{TEST_MODEL_NAME}_dup", "version": "1.0.0"},
     )
 
-    # Deuxième enregistrement avec le même name + même version → 409
+    # Second registration with the same name + same version → 409
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -194,7 +194,7 @@ def test_create_model_duplicate_name():
 
 
 def test_create_model_empty_file():
-    """POST /models avec fichier vide → 400"""
+    """POST /models with empty file → 400."""
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -205,7 +205,7 @@ def test_create_model_empty_file():
 
 
 def test_create_model_missing_name():
-    """POST /models sans name → 422"""
+    """POST /models without name → 422."""
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -216,7 +216,7 @@ def test_create_model_missing_name():
 
 
 def test_create_model_missing_version():
-    """POST /models sans version → 422"""
+    """POST /models without version → 422."""
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -227,7 +227,7 @@ def test_create_model_missing_version():
 
 
 def test_create_model_no_file_no_mlflow_run_id():
-    """POST /models sans fichier ni mlflow_run_id → 400"""
+    """POST /models without file or mlflow_run_id → 400."""
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -237,7 +237,7 @@ def test_create_model_no_file_no_mlflow_run_id():
 
 
 def test_create_model_with_mlflow_run_id_only():
-    """POST /models avec mlflow_run_id uniquement (sans fichier) → 201"""
+    """POST /models with mlflow_run_id only (no file) → 201."""
     run_id = "mlflowonly123abc456def789abc456de"
     response = client.post(
         "/models",
@@ -262,7 +262,7 @@ def test_create_model_with_mlflow_run_id_only():
 
 
 def test_create_model_auto_baseline_no_predictions():
-    """auto_baseline=True sans prédictions → 201, feature_baseline reste null."""
+    """auto_baseline=True without predictions → 201, feature_baseline stays null."""
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -280,7 +280,7 @@ def test_create_model_auto_baseline_no_predictions():
 
 
 def test_create_model_auto_baseline_false():
-    """auto_baseline absent (défaut False) → 201, feature_baseline null."""
+    """auto_baseline absent (default False) → 201, feature_baseline null."""
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -296,7 +296,7 @@ def test_create_model_auto_baseline_false():
     ["classes", "feature_baseline", "training_params", "tags"],
 )
 def test_create_model_invalid_json_field(field):
-    """JSON malformé dans un champ optionnel → 400 avec message explicite."""
+    """Malformed JSON in an optional field → 400 with an explicit message."""
     response = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},

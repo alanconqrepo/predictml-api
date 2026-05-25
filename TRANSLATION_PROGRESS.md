@@ -110,17 +110,17 @@
 
 ## Batch 7 — `tests/` part A
 
-- [ ] `tests/conftest.py`
-- [ ] `tests/test_api.py`
-- [ ] `tests/test_predict_post.py`
-- [ ] `tests/test_predictions_get.py`
-- [ ] `tests/test_predictions_purge.py`
-- [ ] `tests/test_export_endpoint.py`
-- [ ] `tests/test_prediction_stats.py`
-- [ ] `tests/test_models_create.py`
-- [ ] `tests/test_models_get.py`
-- [ ] `tests/test_models_update.py`
-- [ ] `tests/test_models_delete.py`
+- [x] `tests/conftest.py`
+- [x] `tests/test_api.py`
+- [x] `tests/test_predict_post.py`
+- [x] `tests/test_predictions_get.py`
+- [x] `tests/test_predictions_purge.py`
+- [x] `tests/test_export_endpoint.py`
+- [x] `tests/test_prediction_stats.py`
+- [x] `tests/test_models_create.py`
+- [x] `tests/test_models_get.py`
+- [x] `tests/test_models_update.py`
+- [x] `tests/test_models_delete.py`
 
 ---
 

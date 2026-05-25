@@ -1,5 +1,5 @@
 """
-Configuration pytest - Fixes pour asyncpg + TestClient sur Windows
+pytest configuration - Fixes for asyncpg + TestClient on Windows
 """
 import asyncio
 import io
@@ -11,25 +11,25 @@ import joblib
 
 
 def make_model_bytes(model) -> bytes:
-    """Sérialise un modèle sklearn en bytes joblib."""
+    """Serialize a sklearn model to joblib bytes."""
     buf = io.BytesIO()
     joblib.dump(model, buf)
     return buf.getvalue()
 
-# Fix event loop sur Windows (requis par asyncpg)
+# Fix event loop on Windows (required by asyncpg)
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-# Forcer les endpoints locaux pour les tests
-os.environ.setdefault("RATELIMIT_ENABLED", "0")  # désactiver le rate limit par IP en tests
+# Force local endpoints for tests
+os.environ.setdefault("RATELIMIT_ENABLED", "0")  # disable IP-based rate limit in tests
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest-do-not-use-in-production")
 os.environ.setdefault("MINIO_ENDPOINT", "localhost:9002")
 os.environ.setdefault("MINIO_ACCESS_KEY", "test-minio-access-key")
 os.environ.setdefault("MINIO_SECRET_KEY", "test-minio-secret-key-safe-value")
-os.environ.setdefault("REDIS_URL", "redis://localhost:6399/0")  # port fantaisiste — jamais contacté
+os.environ.setdefault("REDIS_URL", "redis://localhost:6399/0")  # bogus port — never contacted
 os.environ.setdefault("METRICS_TOKEN", "test-metrics-token-for-pytest")
 
-# Mock MinIO globalement — les tests ne nécessitent pas de vrai serveur MinIO
+# Mock MinIO globally — tests do not require a real MinIO server
 _minio_mock = MagicMock()
 _upload_return = {
     "bucket": "models",
@@ -41,30 +41,30 @@ _minio_mock.upload_model_bytes.return_value = _upload_return
 _minio_mock.upload_file_bytes.return_value = _upload_return
 _minio_mock.delete_model.return_value = True
 _minio_mock.download_model.side_effect = Exception("MinIO non disponible en tests")
-# Versions async des méthodes MinIO (utilisées depuis les contextes async)
+# Async versions of MinIO methods (used from async contexts)
 _minio_mock.async_upload_model_bytes = AsyncMock(return_value=_upload_return)
 _minio_mock.async_upload_file_bytes = AsyncMock(return_value=_upload_return)
 _minio_mock.async_download_file_bytes = AsyncMock(return_value=b"fake-model-bytes")
 
-import src.api.models  # noqa: E402 — doit être importé avant le patch
-import src.tasks.retrain_scheduler  # noqa: E402 — doit être importé avant le patch
+import src.api.models  # noqa: E402 — must be imported before patching
+import src.tasks.retrain_scheduler  # noqa: E402 — must be imported before patching
 patch("src.api.models.minio_service", _minio_mock).start()
-# Couvre les imports lazy du scheduler et de retrain_service
+# Covers lazy imports from the scheduler and retrain_service
 patch("src.services.minio_service.minio_service", _minio_mock).start()
 
-# Mock MLflow service globalement — les tests ne nécessitent pas de serveur MLflow
+# Mock MLflow service globally — tests do not require an MLflow server
 _mlflow_mock = MagicMock()
 _mlflow_mock.log_retrain_run.return_value = "mock-mlflow-run-id-abc123"
 _mlflow_mock.update_run_tags.return_value = True
 _mlflow_mock.delete_run.return_value = True
 _mlflow_mock.log_production_snapshot.return_value = "mock-monitoring-run-id"
 
-# Patch dans le namespace de api.models (import module-level déjà lié)
+# Patch in the api.models namespace (module-level import already bound)
 patch("src.api.models.mlflow_service", _mlflow_mock).start()
-# Patch dans le module source : couvre les imports lazy du scheduler et retrain_service
+# Patch in the source module: covers lazy imports from the scheduler and retrain_service
 patch("src.services.mlflow_service.mlflow_service", _mlflow_mock).start()
 
-# Mock ARQ pool — les tests ne nécessitent pas de serveur ARQ/Redis pour les jobs
+# Mock ARQ pool — tests do not require an ARQ/Redis server for jobs
 _arq_mock_pool = MagicMock()
 _arq_mock_pool.enqueue_job = AsyncMock(return_value=MagicMock(job_id="test-arq-job-id-abc123"))
 
@@ -73,11 +73,11 @@ async def _fake_get_arq_pool():
 
 import src.core.arq_pool as _arq_pool_module  # noqa: E402
 patch.object(_arq_pool_module, "get_arq_pool", side_effect=_fake_get_arq_pool).start()
-# Patch dans le namespace de api.models où get_arq_pool est utilisé via module
+# Patch in the api.models namespace where get_arq_pool is used via module
 patch("src.api.models.arq_pool_module", _arq_pool_module).start()
 
-# Remplacer le client Redis du singleton par un FakeRedis en mémoire
-# (aucun serveur Redis requis pour les tests)
+# Replace the singleton Redis client with an in-memory FakeRedis
+# (no Redis server required for tests)
 import fakeredis  # noqa: E402
 import fakeredis.aioredis  # noqa: E402
 from src.services.model_service import model_service, _sign_for_cache  # noqa: E402
@@ -85,17 +85,16 @@ from src.services.model_service import model_service, _sign_for_cache  # noqa: E
 
 class _SigningFakeRedis:
     """
-    Wrapper autour de FakeRedis qui signe automatiquement les entrées du cache modèle.
+    FakeRedis wrapper that automatically signs model cache entries.
 
-    Toute écriture sur une clé ``model:*`` (via set ou setex) est transparentement
-    enveloppée avec un HMAC-SHA256 avant le stockage, de la même façon que le fait
-    model_service.load_model() en production. Cela permet aux fonctions _inject_cache()
-    des tests de continuer à écrire des données non-signées (elles sont signées ici).
+    Any write to a ``model:*`` key (via set or setex) is transparently
+    wrapped with an HMAC-SHA256 before storage, exactly as model_service.load_model()
+    does in production. This allows test _inject_cache() functions to keep writing
+    unsigned data (they are signed here).
 
-    Utilise un FakeServer partagé entre toutes les instances FakeRedis, ce qui permet
-    de créer un client distinct par event loop (évite l'erreur "bound to a different
-    event loop" quand plusieurs asyncio.run() sont appelés depuis différents modules
-    de test).
+    Uses a shared FakeServer across all FakeRedis instances, enabling a separate
+    client per event loop (avoids the "bound to a different event loop" error when
+    multiple asyncio.run() calls are made from different test modules).
     """
 
     def __init__(self, server: "fakeredis.FakeServer"):
@@ -103,7 +102,7 @@ class _SigningFakeRedis:
         self._clients: dict = {}  # id(event_loop) -> FakeRedis instance
 
     def _get_client(self) -> "fakeredis.aioredis.FakeRedis":
-        """Retourne (ou crée) un client FakeRedis lié à l'event loop courant."""
+        """Return (or create) a FakeRedis client bound to the current event loop."""
         try:
             loop = asyncio.get_running_loop()
             loop_id = id(loop)
@@ -138,8 +137,8 @@ class _SigningFakeRedis:
         return await self._get_client().delete(*keys)
 
     def __getattr__(self, name):
-        # Délègue au client de la boucle courante via un wrapper async.
-        # N'utilise PAS un client d'une autre boucle (évite "bound to a different event loop").
+        # Delegate to the current-loop client via an async wrapper.
+        # Do NOT use a client from another loop (avoids "bound to a different event loop").
         async def method(*args, **kwargs):
             return await getattr(self._get_client(), name)(*args, **kwargs)
 
@@ -155,13 +154,13 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.pool import NullPool
 
 from src.db.database import get_db, get_read_db, Base
-from src.db.models import AccountRequest, GoldenTest, User, Prediction, ModelMetadata, ObservedResult, TaskRun  # noqa: F401 — enregistre les modèles dans Base
+from src.db.models import AccountRequest, GoldenTest, User, Prediction, ModelMetadata, ObservedResult, TaskRun  # noqa: F401 — registers models in Base
 from src.main import app
 
 
-# SQLite fichier temporaire — évite l'invalidation de connexion aiosqlite/StaticPool
-# en Python 3.13 où asyncio.run() ferme l'executor et tue le thread aiosqlite.
-# Avec NullPool + fichier, chaque session ouvre une connexion fraîche au même fichier.
+# Temporary SQLite file — avoids connection invalidation with aiosqlite/StaticPool
+# in Python 3.13 where asyncio.run() closes the executor and kills the aiosqlite thread.
+# With NullPool + file, each session opens a fresh connection to the same file.
 _test_db_file = os.path.join(tempfile.gettempdir(), f"predictml_test_{os.getpid()}.db")
 
 _test_engine = create_async_engine(
@@ -181,7 +180,7 @@ _TestSessionLocal = async_sessionmaker(
 
 
 async def _setup():
-    """Recrée les tables depuis zéro pour garantir un schéma à jour"""
+    """Recreate all tables from scratch to ensure an up-to-date schema."""
     async with _test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
@@ -198,11 +197,11 @@ async def _override_get_db():
             await session.close()
 
 
-# Remplacer les dépendances DB par la version NullPool (lecture + écriture → même SQLite)
+# Override DB dependencies with the NullPool version (read + write → same SQLite)
 app.dependency_overrides[get_db] = _override_get_db
 app.dependency_overrides[get_read_db] = _override_get_db
 
-# Rediriger AsyncSessionLocal vers la DB de test (SQLite).
-# Nécessaire pour les sessions directes (non injectées via Depends) dans le code retrain.
+# Redirect AsyncSessionLocal to the test DB (SQLite).
+# Needed for direct sessions (not injected via Depends) in retrain code.
 patch("src.db.database.AsyncSessionLocal", new=_TestSessionLocal).start()
 patch("src.api.models.AsyncSessionLocal", new=_TestSessionLocal).start()

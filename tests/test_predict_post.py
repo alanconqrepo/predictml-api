@@ -1,11 +1,11 @@
 """
-Tests pour l'endpoint POST /predict — exécution réelle avec modèles sklearn en cache.
+Tests for the POST /predict endpoint — real execution with sklearn models in cache.
 
-Stratégie de mock :
-  - Injecter le modèle directement dans le cache Redis via model_service._redis (clé "model:name:version")
-  - Créer les entrées ModelMetadata en DB dans _setup()
-  - Chaque test nettoie le cache avec try/finally pour éviter les interférences
-  - Pas de Docker requis (SQLite in-memory + modèles créés à la volée)
+Mock strategy:
+  - Inject the model directly into the Redis cache via model_service._redis (key "model:name:version")
+  - Create ModelMetadata entries in DB in _setup()
+  - Each test cleans up the cache with try/finally to avoid interference
+  - No Docker required (SQLite in-memory + models created on the fly)
 """
 
 import asyncio
@@ -27,23 +27,23 @@ from tests.conftest import _TestSessionLocal
 
 client = TestClient(app)
 
-# Tokens et noms de modèles uniques à ce fichier de test
+# Tokens and model names unique to this test file
 TEST_TOKEN = "test-token-predict-post-xq7z"
 PP_IRIS_MODEL = "pp_iris_model"  # LogisticRegression, 3 features, predict_proba
-PP_REGRESSOR_MODEL = "pp_reg_model"  # DecisionTreeRegressor, 2 features, pas de predict_proba
-PP_NOFEAT_MODEL = "pp_nofeat_model"  # LogisticRegression sans feature_names_in_
-PP_VERSIONED_MODEL = "pp_versioned"  # Pour tester model_version explicite
+PP_REGRESSOR_MODEL = "pp_reg_model"  # DecisionTreeRegressor, 2 features, no predict_proba
+PP_NOFEAT_MODEL = "pp_nofeat_model"  # LogisticRegression without feature_names_in_
+PP_VERSIONED_MODEL = "pp_versioned"  # For testing explicit model_version
 MODEL_VERSION = "1.0.0"
 MODEL_VERSION_V2 = "2.0.0"
 
 
 # ---------------------------------------------------------------------------
-# Helpers — construction de modèles
+# Helpers — model construction
 # ---------------------------------------------------------------------------
 
 
 def _make_iris_model() -> LogisticRegression:
-    """LogisticRegression sur DataFrame → feature_names_in_ + predict_proba."""
+    """LogisticRegression on DataFrame → feature_names_in_ + predict_proba."""
     x = pd.DataFrame(
         {"f1": [1.0, 2.0, 3.0, 4.0], "f2": [2.0, 3.0, 4.0, 5.0], "f3": [0.1, 0.2, 0.3, 0.4]}
     )
@@ -52,21 +52,21 @@ def _make_iris_model() -> LogisticRegression:
 
 
 def _make_regressor_model() -> DecisionTreeRegressor:
-    """DecisionTreeRegressor sur DataFrame → feature_names_in_ mais PAS predict_proba."""
+    """DecisionTreeRegressor on DataFrame → feature_names_in_ but NO predict_proba."""
     x = pd.DataFrame({"f1": [1.0, 2.0, 3.0], "f2": [4.0, 5.0, 6.0]})
     y = [0.5, 1.5, 2.5]
     return DecisionTreeRegressor().fit(x, y)
 
 
 def _make_model_no_feature_names() -> LogisticRegression:
-    """LogisticRegression sur numpy array → PAS de feature_names_in_."""
+    """LogisticRegression on numpy array → NO feature_names_in_."""
     x = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]])
     y = [0, 1, 0, 1]
     return LogisticRegression(max_iter=1000).fit(x, y)
 
 
 def _inject_cache(model_name: str, version: str, model) -> str:
-    """Injecte un modèle dans le cache Redis ; retourne la clé pour le nettoyage."""
+    """Inject a model into the Redis cache; return the key for cleanup."""
     key = f"{model_name}:{version}"
     data = {
         "model": model,
@@ -81,13 +81,13 @@ def _inject_cache(model_name: str, version: str, model) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Setup module-level : user + entrées ModelMetadata en DB
+# Module-level setup: user + ModelMetadata entries in DB
 # ---------------------------------------------------------------------------
 
 
 async def _setup():
     async with _TestSessionLocal() as db:
-        # Créer l'utilisateur de test
+        # Create the test user
         if not await DBService.get_user_by_token(db, TEST_TOKEN):
             await DBService.create_user(
                 db,
@@ -98,8 +98,8 @@ async def _setup():
                 rate_limit=10000,
             )
 
-        # Créer les entrées ModelMetadata (un seul enregistrement par nom de modèle
-        # pour éviter MultipleResultsFound dans get_model_metadata sans version)
+        # Create ModelMetadata entries (one record per model name
+        # to avoid MultipleResultsFound in get_model_metadata without version)
         models_to_create = [
             (PP_IRIS_MODEL, MODEL_VERSION, True),
             (PP_REGRESSOR_MODEL, MODEL_VERSION, True),
@@ -129,7 +129,7 @@ asyncio.run(_setup())
 
 
 def test_predict_post_without_auth():
-    """POST /predict sans header Authorization → 401/403."""
+    """POST /predict without Authorization header → 401/403."""
     response = client.post(
         "/predict",
         json={"model_name": PP_IRIS_MODEL, "features": {"f1": 1.0, "f2": 2.0, "f3": 0.1}},
@@ -138,7 +138,7 @@ def test_predict_post_without_auth():
 
 
 def test_predict_post_with_invalid_token():
-    """POST /predict avec token invalide → 401."""
+    """POST /predict with invalid token → 401."""
     response = client.post(
         "/predict",
         headers={"Authorization": "Bearer invalid-token-xyz"},
@@ -153,7 +153,7 @@ def test_predict_post_with_invalid_token():
 
 
 def test_predict_success_happy_path():
-    """POST /predict — prédiction réussie : 200 avec tous les champs attendus."""
+    """POST /predict — successful prediction: 200 with all expected fields."""
     model = _make_iris_model()
     key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
     try:
@@ -173,7 +173,7 @@ def test_predict_success_happy_path():
 
 
 def test_predict_response_structure():
-    """POST /predict — la réponse contient tous les champs du PredictionOutput."""
+    """POST /predict — the response contains all fields from PredictionOutput."""
     model = _make_iris_model()
     key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
     try:
@@ -194,7 +194,7 @@ def test_predict_response_structure():
 
 
 def test_predict_with_id_obs():
-    """POST /predict avec id_obs — le champ id_obs est retourné dans la réponse."""
+    """POST /predict with id_obs — the id_obs field is returned in the response."""
     model = _make_iris_model()
     key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
     try:
@@ -214,7 +214,7 @@ def test_predict_with_id_obs():
 
 
 def test_predict_with_explicit_version():
-    """POST /predict avec model_version explicite — la version retournée correspond."""
+    """POST /predict with explicit model_version — the returned version matches."""
     model = _make_iris_model()
     key = _inject_cache(PP_VERSIONED_MODEL, MODEL_VERSION_V2, model)
     try:
@@ -234,7 +234,7 @@ def test_predict_with_explicit_version():
 
 
 def test_predict_saves_to_db():
-    """POST /predict — la prédiction est persistée en base de données."""
+    """POST /predict — the prediction is persisted to the database."""
     model = _make_iris_model()
     key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
     id_obs_value = "db-save-test-obs"
@@ -252,8 +252,8 @@ def test_predict_saves_to_db():
     finally:
         asyncio.run(model_service.clear_cache(key))
 
-    # Vérifier la persistance en DB via GET /predictions
-    # Utiliser params= pour encoder correctement les caractères spéciaux (+, :) dans les datetimes
+    # Verify persistence in DB via GET /predictions
+    # Use params= to correctly encode special characters (+, :) in datetimes
     start = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     end = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
     history = client.get(
@@ -274,7 +274,7 @@ def test_predict_saves_to_db():
 
 
 def test_predict_with_predict_proba():
-    """Modèle avec predict_proba → probability est une liste de floats."""
+    """Model with predict_proba → probability is a list of floats."""
     model = _make_iris_model()
     key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
     try:
@@ -293,7 +293,7 @@ def test_predict_with_predict_proba():
 
 
 def test_predict_without_predict_proba():
-    """Modèle sans predict_proba (régresseur) → probability est None."""
+    """Model without predict_proba (regressor) → probability is None."""
     model = _make_regressor_model()
     key = _inject_cache(PP_REGRESSOR_MODEL, MODEL_VERSION, model)
     try:
@@ -309,16 +309,16 @@ def test_predict_without_predict_proba():
 
 
 # ---------------------------------------------------------------------------
-# Erreurs métier (422 / 404)
+# Business errors (422 / 404)
 # ---------------------------------------------------------------------------
 
 
 def test_predict_missing_features_returns_422():
-    """Features manquantes dans la requête → 422 avec message explicatif."""
+    """Missing features in the request → 422 with an explanatory message."""
     model = _make_iris_model()
     key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
     try:
-        # Envoie seulement f1, manque f2 et f3
+        # Only sends f1, missing f2 and f3
         response = client.post(
             "/predict",
             headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -334,7 +334,7 @@ def test_predict_missing_features_returns_422():
 
 
 def test_predict_model_without_feature_names_in_returns_422():
-    """Modèle sans feature_names_in_ (entraîné sur numpy) → 422 avec message explicatif."""
+    """Model without feature_names_in_ (trained on numpy) → 422 with an explanatory message."""
     model = _make_model_no_feature_names()
     key = _inject_cache(PP_NOFEAT_MODEL, MODEL_VERSION, model)
     try:
@@ -350,7 +350,7 @@ def test_predict_model_without_feature_names_in_returns_422():
 
 
 def test_predict_model_not_found_returns_404():
-    """Modèle inexistant en DB → 404."""
+    """Non-existent model in DB → 404."""
     response = client.post(
         "/predict",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -365,7 +365,7 @@ def test_predict_model_not_found_returns_404():
 
 
 def test_predict_batch_success_happy_path():
-    """POST /predict-batch — batch de 2 observations → 200 avec liste de résultats."""
+    """POST /predict-batch — batch of 2 observations → 200 with a list of results."""
     model = _make_iris_model()
     key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
     try:
@@ -393,7 +393,7 @@ def test_predict_batch_success_happy_path():
 
 
 def test_predict_batch_with_id_obs():
-    """POST /predict-batch — les id_obs sont retournés dans le même ordre."""
+    """POST /predict-batch — id_obs values are returned in the same order."""
     model = _make_iris_model()
     key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
     try:
@@ -417,7 +417,7 @@ def test_predict_batch_with_id_obs():
 
 
 def test_predict_batch_without_auth():
-    """POST /predict-batch sans header Authorization → 401/403."""
+    """POST /predict-batch without Authorization header → 401/403."""
     response = client.post(
         "/predict-batch",
         json={
@@ -429,7 +429,7 @@ def test_predict_batch_without_auth():
 
 
 def test_predict_batch_missing_features_returns_422():
-    """POST /predict-batch — features manquantes sur un item → 422."""
+    """POST /predict-batch — missing features on one item → 422."""
     model = _make_iris_model()
     key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
     try:
@@ -439,7 +439,7 @@ def test_predict_batch_missing_features_returns_422():
             json={
                 "model_name": PP_IRIS_MODEL,
                 "inputs": [
-                    {"features": {"f1": 1.0}},  # manque f2 et f3
+                    {"features": {"f1": 1.0}},  # missing f2 and f3
                 ],
             },
         )
@@ -449,7 +449,7 @@ def test_predict_batch_missing_features_returns_422():
 
 
 def test_predict_batch_model_not_found_returns_404():
-    """POST /predict-batch — modèle inexistant → 404."""
+    """POST /predict-batch — non-existent model → 404."""
     response = client.post(
         "/predict-batch",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -462,7 +462,7 @@ def test_predict_batch_model_not_found_returns_404():
 
 
 def test_predict_batch_without_predict_proba():
-    """POST /predict-batch — régresseur sans predict_proba → probability=None pour chaque item."""
+    """POST /predict-batch — regressor without predict_proba → probability=None for each item."""
     model = _make_regressor_model()
     key = _inject_cache(PP_REGRESSOR_MODEL, MODEL_VERSION, model)
     try:
@@ -485,7 +485,7 @@ def test_predict_batch_without_predict_proba():
 
 
 def test_predict_batch_saves_to_db():
-    """POST /predict-batch — toutes les prédictions sont persistées en base de données."""
+    """POST /predict-batch — all predictions are persisted to the database."""
     model = _make_iris_model()
     key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
     id_obs_a = "batch-db-obs-001"
@@ -521,7 +521,7 @@ def test_predict_batch_saves_to_db():
 
 
 def test_predict_batch_empty_inputs_returns_422():
-    """POST /predict-batch avec liste vide → 422 (min_length=1)."""
+    """POST /predict-batch with empty list → 422 (min_length=1)."""
     response = client.post(
         "/predict-batch",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -531,7 +531,7 @@ def test_predict_batch_empty_inputs_returns_422():
 
 
 def test_predict_batch_strict_validation_rejects_unexpected_features():
-    """POST /predict-batch?strict_validation=true — feature inattendue sur un item → 422."""
+    """POST /predict-batch?strict_validation=true — unexpected feature on one item → 422."""
     model = _make_iris_model()
     key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
     try:
@@ -554,7 +554,7 @@ def test_predict_batch_strict_validation_rejects_unexpected_features():
 
 
 def test_predict_batch_strict_validation_false_allows_unexpected_features():
-    """POST /predict-batch sans strict_validation — feature inattendue ignorée silencieusement → 200."""
+    """POST /predict-batch without strict_validation — unexpected feature silently ignored → 200."""
     model = _make_iris_model()
     key = _inject_cache(PP_IRIS_MODEL, MODEL_VERSION, model)
     try:

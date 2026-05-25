@@ -1,5 +1,5 @@
 """
-Tests pour les endpoints DELETE /models/{name}/{version} et DELETE /models/{name}
+Tests for the DELETE /models/{name}/{version} and DELETE /models/{name} endpoints
 """
 import asyncio
 import io
@@ -64,7 +64,7 @@ def _create_model(name: str, version: str = "1.0.0") -> dict:
 
 
 def _create_mlflow_only_model(name: str, version: str = "1.0.0", run_id: str = "fakerunid123") -> dict:
-    """Crée un modèle avec mlflow_run_id uniquement (pas de fichier → minio_object_key=None)."""
+    """Create a model with mlflow_run_id only (no file → minio_object_key=None)."""
     r = client.post(
         "/models",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -84,14 +84,14 @@ def _model_exists(name: str, version: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def test_delete_version_without_auth():
-    """DELETE /models/{name}/{version} sans auth → 401/403"""
+    """DELETE /models/{name}/{version} without auth → 401/403."""
     _create_model(f"{MODEL_PREFIX}_noauth_v")
     r = client.delete(f"/models/{MODEL_PREFIX}_noauth_v/1.0.0")
     assert r.status_code in [401, 403]
 
 
 def test_delete_version_with_invalid_token():
-    """DELETE /models/{name}/{version} avec token invalide → 401"""
+    """DELETE /models/{name}/{version} with invalid token → 401."""
     _create_model(f"{MODEL_PREFIX}_badtoken_v")
     r = client.delete(
         f"/models/{MODEL_PREFIX}_badtoken_v/1.0.0",
@@ -101,7 +101,7 @@ def test_delete_version_with_invalid_token():
 
 
 def test_delete_version_non_admin_forbidden():
-    """DELETE /models/{name}/{version} avec token non-admin → 403"""
+    """DELETE /models/{name}/{version} with non-admin token → 403."""
     _create_model(f"{MODEL_PREFIX}_nonadmin_v")
     r = client.delete(
         f"/models/{MODEL_PREFIX}_nonadmin_v/1.0.0",
@@ -115,14 +115,14 @@ def test_delete_version_non_admin_forbidden():
 # ---------------------------------------------------------------------------
 
 def test_delete_all_without_auth():
-    """DELETE /models/{name} sans auth → 401/403"""
+    """DELETE /models/{name} without auth → 401/403."""
     _create_model(f"{MODEL_PREFIX}_noauth_all")
     r = client.delete(f"/models/{MODEL_PREFIX}_noauth_all")
     assert r.status_code in [401, 403]
 
 
 def test_delete_all_with_invalid_token():
-    """DELETE /models/{name} avec token invalide → 401"""
+    """DELETE /models/{name} with invalid token → 401."""
     _create_model(f"{MODEL_PREFIX}_badtoken_all")
     r = client.delete(
         f"/models/{MODEL_PREFIX}_badtoken_all",
@@ -132,7 +132,7 @@ def test_delete_all_with_invalid_token():
 
 
 def test_delete_all_non_admin_forbidden():
-    """DELETE /models/{name} avec token non-admin → 403"""
+    """DELETE /models/{name} with non-admin token → 403."""
     _create_model(f"{MODEL_PREFIX}_nonadmin_all")
     r = client.delete(
         f"/models/{MODEL_PREFIX}_nonadmin_all",
@@ -142,11 +142,11 @@ def test_delete_all_non_admin_forbidden():
 
 
 # ---------------------------------------------------------------------------
-# DELETE version spécifique
+# DELETE specific version
 # ---------------------------------------------------------------------------
 
 def test_delete_specific_version_success():
-    """DELETE version → 204, modèle absent de la liste"""
+    """DELETE version → 204, model absent from the list."""
     name = f"{MODEL_PREFIX}_specific"
     _create_model(name, version="1.0.0")
     _create_model(name, version="2.0.0")
@@ -157,13 +157,13 @@ def test_delete_specific_version_success():
     )
     assert r.status_code == 204
 
-    # v1 supprimée, v2 toujours présente
+    # v1 deleted, v2 still present
     assert not _model_exists(name, "1.0.0")
     assert _model_exists(name, "2.0.0")
 
 
 def test_delete_specific_version_not_found():
-    """DELETE version inexistante → 404"""
+    """DELETE non-existent version → 404."""
     r = client.delete(
         f"/models/inexistant_model/9.9.9",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -172,7 +172,7 @@ def test_delete_specific_version_not_found():
 
 
 def test_delete_specific_version_twice():
-    """DELETE la même version deux fois → 204 puis 404"""
+    """DELETE the same version twice → 204 then 404."""
     name = f"{MODEL_PREFIX}_twice"
     _create_model(name)
 
@@ -184,11 +184,11 @@ def test_delete_specific_version_twice():
 
 
 # ---------------------------------------------------------------------------
-# DELETE toutes les versions
+# DELETE all versions
 # ---------------------------------------------------------------------------
 
 def test_delete_all_versions_success():
-    """DELETE all → 200 avec résumé, toutes les versions supprimées"""
+    """DELETE all → 200 with summary, all versions deleted."""
     name = f"{MODEL_PREFIX}_all"
     _create_model(name, version="1.0.0")
     _create_model(name, version="2.0.0")
@@ -209,7 +209,7 @@ def test_delete_all_versions_success():
 
 
 def test_delete_all_versions_not_found():
-    """DELETE all sur nom inexistant → 404"""
+    """DELETE all on non-existent name → 404."""
     r = client.delete(
         "/models/inexistant_model_all",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -218,7 +218,7 @@ def test_delete_all_versions_not_found():
 
 
 def test_delete_all_versions_single_version():
-    """DELETE all sur modèle avec une seule version → 200, 1 version supprimée"""
+    """DELETE all on a model with a single version → 200, 1 version deleted."""
     name = f"{MODEL_PREFIX}_single"
     _create_model(name)
 
@@ -229,11 +229,11 @@ def test_delete_all_versions_single_version():
 
 
 # ---------------------------------------------------------------------------
-# DELETE modèles mlflow-only (minio_object_key=None)
+# DELETE mlflow-only models (minio_object_key=None)
 # ---------------------------------------------------------------------------
 
 def test_delete_mlflow_only_version_success():
-    """DELETE version d'un modèle mlflow-only → 204, pas d'appel MinIO delete"""
+    """DELETE version of an mlflow-only model → 204, no MinIO delete call."""
     from tests.conftest import _minio_mock
 
     name = f"{MODEL_PREFIX}_mlflow_only_v"
@@ -244,13 +244,13 @@ def test_delete_mlflow_only_version_success():
     r = client.delete(f"/models/{name}/1.0.0", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
     assert r.status_code == 204
 
-    # minio_object_key est None → delete_model ne doit pas être appelé
+    # minio_object_key is None → delete_model must not be called
     _minio_mock.delete_model.assert_not_called()
     assert not _model_exists(name, "1.0.0")
 
 
 def test_delete_mlflow_only_all_versions():
-    """DELETE all sur modèle mlflow-only → minio_objects_deleted vide"""
+    """DELETE all on mlflow-only model → minio_objects_deleted empty."""
     name = f"{MODEL_PREFIX}_mlflow_only_all"
     _create_mlflow_only_model(name, version="1.0.0", run_id="mlflowrun002")
     _create_mlflow_only_model(name, version="2.0.0", run_id="mlflowrun003")
@@ -260,7 +260,7 @@ def test_delete_mlflow_only_all_versions():
 
     data = r.json()
     assert sorted(data["deleted_versions"]) == ["1.0.0", "2.0.0"]
-    # Aucun objet MinIO à supprimer pour des modèles mlflow-only
+    # No MinIO objects to delete for mlflow-only models
     assert data["minio_objects_deleted"] == []
     assert not _model_exists(name, "1.0.0")
     assert not _model_exists(name, "2.0.0")

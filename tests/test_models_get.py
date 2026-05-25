@@ -1,5 +1,5 @@
 """
-Tests pour l'endpoint GET /models/{name}/{version}
+Tests for the GET /models/{name}/{version} endpoint
 """
 import asyncio
 import io
@@ -64,7 +64,7 @@ def test_get_model_not_found():
 
 
 def test_get_model_returns_metadata():
-    """La route retourne les métadonnées correctes."""
+    """The route returns the correct metadata."""
     _create_model(TEST_MODEL_NAME, "1.0.0")
     response = client.get(f"/models/{TEST_MODEL_NAME}/1.0.0")
     assert response.status_code == 200
@@ -78,7 +78,7 @@ def test_get_model_returns_metadata():
 
 
 def test_get_model_returns_creator_fields():
-    """La route retourne user_id_creator et creator_username."""
+    """The route returns user_id_creator and creator_username."""
     _create_model(TEST_MODEL_NAME, "2.0.0")
     response = client.get(f"/models/{TEST_MODEL_NAME}/2.0.0")
     assert response.status_code == 200
@@ -88,7 +88,7 @@ def test_get_model_returns_creator_fields():
 
 
 def test_get_model_not_loaded_returns_load_instructions():
-    """MinIO mocké → model_loaded=False + load_instructions MinIO présent."""
+    """Mocked MinIO → model_loaded=False + MinIO load_instructions present."""
     _create_model(TEST_MODEL_NAME, "3.0.0")
     response = client.get(f"/models/{TEST_MODEL_NAME}/3.0.0")
     assert response.status_code == 200
@@ -100,7 +100,7 @@ def test_get_model_not_loaded_returns_load_instructions():
 
 
 def test_get_model_mlflow_only_returns_load_instructions():
-    """Modèle MLflow uniquement → instructions MLflow."""
+    """MLflow-only model → MLflow instructions."""
     client.post(
         "/models",
         data={"name": TEST_MODEL_NAME, "version": "4.0.0", "mlflow_run_id": "abc123run"},

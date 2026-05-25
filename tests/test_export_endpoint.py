@@ -1,5 +1,5 @@
 """
-Tests pour l'endpoint GET /predictions/export
+Tests for the GET /predictions/export endpoint
 """
 
 import asyncio
@@ -84,7 +84,7 @@ def test_export_requires_auth():
 
 
 # ---------------------------------------------------------------------------
-# Validation des paramètres
+# Parameter validation
 # ---------------------------------------------------------------------------
 
 
@@ -113,7 +113,7 @@ def test_export_invalid_status():
 
 
 # ---------------------------------------------------------------------------
-# Format CSV (défaut)
+# CSV format (default)
 # ---------------------------------------------------------------------------
 
 
@@ -174,7 +174,7 @@ def test_export_csv_values():
 
 
 # ---------------------------------------------------------------------------
-# Format JSONL
+# JSONL format
 # ---------------------------------------------------------------------------
 
 
@@ -250,7 +250,7 @@ def test_export_jsonl_without_features():
 
 
 # ---------------------------------------------------------------------------
-# Filtre status
+# Status filter
 # ---------------------------------------------------------------------------
 
 
@@ -276,7 +276,7 @@ def test_export_status_filter_error():
 
 
 # ---------------------------------------------------------------------------
-# model_name optionnel (tous les modèles)
+# Optional model_name (all models)
 # ---------------------------------------------------------------------------
 
 
@@ -287,12 +287,12 @@ def test_export_without_model_name_returns_all():
     )
     assert r.status_code == 200
     rows = list(csv.DictReader(io.StringIO(r.text)))
-    # Au moins nos 4 prédictions de test
+    # At least our 4 test predictions
     assert len(rows) >= 4
 
 
 # ---------------------------------------------------------------------------
-# Résultat vide — CSV avec seulement l'en-tête
+# Empty result — CSV with header only
 # ---------------------------------------------------------------------------
 
 
@@ -303,7 +303,7 @@ def test_export_empty_result_csv():
     )
     assert r.status_code == 200
     lines = [ln for ln in r.text.strip().split("\n") if ln]
-    assert len(lines) == 1  # seulement l'en-tête
+    assert len(lines) == 1  # header only
     assert lines[0].startswith("id,")
 
 
@@ -317,7 +317,7 @@ def test_export_empty_result_jsonl():
 
 
 # ---------------------------------------------------------------------------
-# Format Parquet
+# Parquet format
 # ---------------------------------------------------------------------------
 
 
