@@ -1390,15 +1390,15 @@ class DBService:
         dry_run: bool = True,
     ) -> dict:
         """
-        Purge les prédictions et leurs observed_results associés.
+        Purge predictions and their associated observed_results.
 
-        older_than_days=0 supprime tout (pas de seuil temporel).
-        En mode dry_run=True : comptage sans suppression.
-        En mode dry_run=False : suppression des observed_results liés puis des prédictions, puis commit.
+        older_than_days=0 deletes everything (no time threshold).
+        In dry_run=True mode: count without deleting.
+        In dry_run=False mode: delete linked observed_results then predictions, then commit.
 
         Returns:
-            dict avec dry_run, deleted_count, deleted_observed_results_count,
-            oldest_remaining, models_affected et linked_observed_results_count.
+            dict with dry_run, deleted_count, deleted_observed_results_count,
+            oldest_remaining, models_affected and linked_observed_results_count.
         """
         cutoff = _utcnow() - timedelta(days=older_than_days)
 
@@ -1474,15 +1474,15 @@ class DBService:
         model_version: str,
     ) -> dict:
         """
-        Supprime toutes les prédictions (et observed_results liés) d'une version précise.
+        Delete all predictions (and linked observed_results) for a specific version.
 
-        Appelé en cascade depuis DELETE /models/{name}/{version} et
-        DELETE /models/{name} (par version) pour éviter les enregistrements orphelins.
+        Called in cascade from DELETE /models/{name}/{version} and
+        DELETE /models/{name} (per version) to avoid orphaned records.
 
         Returns:
-            dict avec deleted_predictions et deleted_observed_results.
+            dict with deleted_predictions and deleted_observed_results.
         """
-        # Collecter les (id_obs, model_name) pour nettoyer les observed_results associés
+        # Collect (id_obs, model_name) pairs to clean up associated observed_results
         pairs_result = await db.execute(
             select(Prediction.id_obs, Prediction.model_name)
             .where(
@@ -1584,7 +1584,7 @@ class DBService:
         deployment_mode: Optional[str] = None,
         search: Optional[str] = None,
     ) -> List[ModelMetadata]:
-        """Récupère tous les modèles actifs avec leur créateur"""
+        """Retrieve all active models with their creator"""
         query = (
             select(ModelMetadata)
             .options(selectinload(ModelMetadata.creator))
@@ -1612,7 +1612,7 @@ class DBService:
 
     @staticmethod
     async def get_models_last_seen(db: AsyncSession) -> dict[str, datetime]:
-        """Retourne la date de dernière prédiction réussie par nom de modèle."""
+        """Return the last successful prediction timestamp per model name."""
         result = await db.execute(
             select(Prediction.model_name, func.max(Prediction.timestamp).label("last_seen"))
             .where(Prediction.status == "success")
@@ -1622,7 +1622,7 @@ class DBService:
 
     @staticmethod
     async def deactivate_model(db: AsyncSession, name: str, version: str) -> bool:
-        """Désactive un modèle"""
+        """Deactivate a model"""
         metadata = await DBService.get_model_metadata(db, name, version)
         if metadata:
             metadata.is_active = False
@@ -1633,7 +1633,7 @@ class DBService:
 
     @staticmethod
     async def deprecate_model(db: AsyncSession, name: str, version: str) -> Optional[ModelMetadata]:
-        """Marque un modèle comme déprécié (status=deprecated, is_production=False)."""
+        """Mark a model as deprecated (status=deprecated, is_production=False)."""
         result = await db.execute(
             select(ModelMetadata).where(
                 and_(
@@ -1661,17 +1661,17 @@ class DBService:
         records: list[dict],
     ) -> int:
         """
-        Insère ou écrase des résultats observés.
+        Insert or overwrite observed results.
 
-        La clé d'unicité est (id_obs, model_name) — si la paire existe déjà,
-        observed_result, date_time et user_id sont mis à jour.
+        The uniqueness key is (id_obs, model_name) — if the pair already exists,
+        observed_result, date_time and user_id are updated.
 
         Args:
-            records: liste de dicts avec les clés id_obs, model_name,
+            records: list of dicts with keys id_obs, model_name,
                      observed_result, date_time, user_id
 
         Returns:
-            Nombre de lignes affectées
+            Number of rows affected
         """
         stmt = pg_insert(ObservedResult).values(records)
         stmt = stmt.on_conflict_do_update(
@@ -1697,10 +1697,10 @@ class DBService:
         offset: int = 0,
     ) -> tuple[list, int]:
         """
-        Récupère les résultats observés avec filtres optionnels.
+        Retrieve observed results with optional filters.
 
         Returns:
-            Tuple (liste d'ObservedResult avec relation user chargée, total sans pagination)
+            Tuple (list of ObservedResult with user relation loaded, total without pagination)
         """
         filters = []
         if model_name:
@@ -1736,7 +1736,7 @@ class DBService:
         cursor: Optional[int] = None,
     ) -> List[ObservedResult]:
         """
-        Récupère une page de résultats observés pour l'export streaming (cursor keyset DESC).
+        Retrieve a page of observed results for streaming export (cursor keyset DESC).
         """
         filters = [
             ObservedResult.date_time >= start,
@@ -1763,11 +1763,11 @@ class DBService:
         db: AsyncSession,
         model_name: Optional[str] = None,
     ) -> dict:
-        """Taux de couverture du ground truth : combien de prédictions ont un résultat observé.
+        """Ground truth coverage rate: how many predictions have an observed result.
 
-        Compatible SQLite (tests) et PostgreSQL (production).
-        Retourne total_predictions, labeled_count, coverage_rate, oldest/newest label,
-        et un breakdown by_version (si model_name fourni) ou by_model (si global).
+        Compatible with SQLite (tests) and PostgreSQL (production).
+        Returns total_predictions, labeled_count, coverage_rate, oldest/newest label,
+        and a breakdown by_version (if model_name given) or by_model (if global).
         """
         pred_filters = []
         if model_name:
@@ -1929,8 +1929,8 @@ class DBService:
         username: Optional[str],
         changed_fields: Optional[List[str]] = None,
     ) -> ModelHistory:
-        """Crée une entrée d'historique avec un snapshot complet de l'état actuel du modèle.
-        L'appelant est responsable du commit."""
+        """Create a history entry with a full snapshot of the current model state.
+        The caller is responsible for committing."""
         entry = ModelHistory(
             model_name=model.name,
             model_version=model.version,
@@ -1951,10 +1951,10 @@ class DBService:
         limit: int = 100,
         offset: int = 0,
     ) -> tuple:
-        """Récupère l'historique d'un modèle (toutes versions ou une version spécifique).
+        """Retrieve the history of a model (all versions or a specific version).
 
         Returns:
-            Tuple (liste d'entrées triées par timestamp DESC, total sans pagination)
+            Tuple (list of entries sorted by timestamp DESC, total without pagination)
         """
         filters = [ModelHistory.model_name == model_name]
         if model_version:
@@ -1977,13 +1977,13 @@ class DBService:
         limit: int = 20,
         offset: int = 0,
     ) -> tuple:
-        """Retourne l'historique des ré-entraînements d'un modèle.
+        """Return the retraining history of a model.
 
-        Une entrée correspond à toute version dont parent_version IS NOT NULL,
-        triée par created_at DESC (retrain le plus récent en premier).
+        An entry corresponds to any version where parent_version IS NOT NULL,
+        sorted by created_at DESC (most recent retrain first).
 
         Returns:
-            Tuple (liste de ModelMetadata, total sans pagination)
+            Tuple (list of ModelMetadata, total without pagination)
         """
         filters = [
             ModelMetadata.name == model_name,
@@ -2005,7 +2005,7 @@ class DBService:
         db: AsyncSession,
         history_id: int,
     ) -> Optional[ModelHistory]:
-        """Récupère une entrée d'historique par son id."""
+        """Retrieve a history entry by its id."""
         result = await db.execute(select(ModelHistory).where(ModelHistory.id == history_id))
         return result.scalar_one_or_none()
 
@@ -2020,11 +2020,11 @@ class DBService:
         end: Optional[datetime] = None,
     ) -> list[dict]:
         """
-        Retourne les statistiques par version pour une comparaison A/B.
+        Return per-version statistics for an A/B comparison.
 
-        PostgreSQL : 3 requêtes SQL (agrégats, distribution labels, temps de réponse).
-        GROUP BY et PERCENTILE_CONT côté serveur — pas de LIMIT bloquant.
-        SQLite (tests) : agrégation Python-side avec LIMIT de sécurité.
+        PostgreSQL: 3 SQL queries (aggregates, label distribution, response times).
+        GROUP BY and PERCENTILE_CONT server-side — no blocking LIMIT.
+        SQLite (tests): Python-side aggregation with safety LIMIT.
         """
         if start is not None:
             cutoff = start
@@ -2038,7 +2038,7 @@ class DBService:
             if end is not None:
                 params["end_ts"] = end
 
-            # 1. Agrégats principaux par (version, is_shadow)
+            # 1. Main aggregates by (version, is_shadow)
             agg_sql = text(f"""
                 SELECT
                     COALESCE(model_version, 'unknown')            AS version,
@@ -2057,7 +2057,7 @@ class DBService:
                 ORDER BY model_version, is_shadow
             """)
 
-            # 2. Distribution des labels (production + shadow)
+            # 2. Label distribution (production + shadow)
             dist_sql = text(f"""
                 SELECT
                     COALESCE(model_version, 'unknown') AS version,
@@ -2071,7 +2071,7 @@ class DBService:
                 GROUP BY model_version, prediction_result::text
             """)
 
-            # 3. Temps de réponse — toutes prédictions (prod + shadow) pour p50
+            # 3. Response times — all predictions (prod + shadow) for p50
             times_sql = text(f"""
                 SELECT version, response_time_ms
                 FROM (
@@ -2125,7 +2125,7 @@ class DBService:
                 shadow = agg[ver]["shadow"]
                 if prod is None and shadow is None:
                     continue
-                # Pour les versions shadow-only, utiliser leurs stats propres
+                # For shadow-only versions, use their own stats
                 row = prod if prod is not None else shadow
                 is_shadow_only = prod is None
                 total = int(row.total)
@@ -2194,7 +2194,7 @@ class DBService:
                 if row.response_time_ms is not None:
                     g["times"].append(row.response_time_ms)
                 if row.prediction_result is not None:
-                    # Distribution inclut prod + shadow
+                    # Distribution includes prod + shadow
                     g["dist"][str(row.prediction_result)] += 1
 
         def _p95(data: list) -> Optional[float]:
@@ -2236,10 +2236,10 @@ class DBService:
         days: int = 30,
     ) -> dict[str, float]:
         """
-        Pour chaque version shadow, calcule le taux de concordance des prédictions
-        shadow vs production sur les mêmes id_obs.
+        For each shadow version, compute the agreement rate between shadow predictions
+        and production predictions on the same id_obs.
 
-        Retourne {shadow_version: agreement_rate} — dict vide si aucun id_obs renseigné.
+        Returns {shadow_version: agreement_rate} — empty dict if no id_obs recorded.
         """
         from sqlalchemy.orm import aliased
 
@@ -2297,10 +2297,10 @@ class DBService:
         period_days: int = 30,
     ) -> dict:
         """
-        Calcule les métriques comparatives entre la version shadow et la version production
-        sur les paires id_obs communs dans la fenêtre glissante.
+        Compute comparative metrics between the shadow version and the production version
+        on common id_obs pairs within the sliding window.
 
-        Retourne un dict avec : shadow_version, production_version, n_comparable,
+        Returns a dict with: shadow_version, production_version, n_comparable,
         agreement_rate, shadow_confidence_delta, shadow_latency_delta_ms,
         shadow_accuracy, production_accuracy, accuracy_available.
         """
@@ -2440,10 +2440,10 @@ class DBService:
         end: datetime,
     ) -> list[dict]:
         """
-        Retourne les statistiques agrégées par model_name sur une plage calendaire.
+        Return aggregated statistics per model_name over a calendar range.
 
-        PostgreSQL : GROUP BY + PERCENTILE_CONT + ARRAY_AGG côté serveur, sans LIMIT bloquant.
-        SQLite (tests) : agrégation Python-side avec LIMIT de sécurité.
+        PostgreSQL: GROUP BY + PERCENTILE_CONT + ARRAY_AGG server-side, no blocking LIMIT.
+        SQLite (tests): Python-side aggregation with safety LIMIT.
         """
         max_start = end - timedelta(days=settings.ANALYTICS_MAX_DAYS)
         if start < max_start:
@@ -2594,9 +2594,9 @@ class DBService:
         end: datetime,
     ) -> list[dict]:
         """
-        Retourne l'évolution quotidienne des prédictions (non-shadow) pour un modèle.
+        Return the daily evolution of predictions (non-shadow) for a model.
 
-        Retourne une liste de dicts triée par date asc :
+        Returns a list of dicts sorted by date asc:
         [{date, total_predictions, error_count, error_rate, avg/p50/p95_latency_ms}]
         """
         max_start = end - timedelta(days=settings.ANALYTICS_MAX_DAYS)
@@ -2664,9 +2664,9 @@ class DBService:
         end: datetime,
     ) -> list[dict]:
         """
-        Retourne les statistiques par version (et shadow/non-shadow) sur une plage calendaire.
+        Return per-version statistics (and shadow/non-shadow) over a calendar range.
 
-        Retourne une liste de dicts : un par version (non-shadow + shadow séparément).
+        Returns a list of dicts: one per version (non-shadow + shadow separately).
         """
         max_start = end - timedelta(days=settings.ANALYTICS_MAX_DAYS)
         if start < max_start:
@@ -2747,7 +2747,7 @@ class DBService:
         limit: int = 5,
     ) -> list[str]:
         """
-        Retourne les derniers messages d'erreur distincts pour un modèle sur la période.
+        Return the most recent distinct error messages for a model over the period.
         """
         stmt = (
             select(Prediction.error_message)
@@ -2765,7 +2765,7 @@ class DBService:
         )
         result = await db.execute(stmt)
         rows = result.scalars().all()
-        # déduplique en conservant l'ordre
+        # deduplicate while preserving order
         seen: list[str] = []
         for msg in rows:
             if msg not in seen:
@@ -2870,7 +2870,7 @@ class DBService:
 
 
 # ===========================================================================
-# Helpers snapshot (module-level, utilisables aussi depuis api/models.py)
+# Snapshot helpers (module-level, also usable from api/models.py)
 # ===========================================================================
 
 _SNAPSHOT_FIELDS = [
@@ -2900,8 +2900,8 @@ _SNAPSHOT_FIELDS = [
     "parent_version",
 ]
 
-# Champs restaurables lors d'un rollback (is_active et deprecated_at exclus :
-# gérés explicitement par les opérations métier)
+# Fields restorable during a rollback (is_active and deprecated_at excluded:
+# managed explicitly by business operations)
 _ROLLBACK_FIELDS = [
     "description",
     "algorithm",
@@ -2928,7 +2928,7 @@ _ROLLBACK_FIELDS = [
 
 
 def _build_snapshot(model: ModelMetadata) -> dict:
-    """Construit un dict JSON-sérialisable des champs mutables d'un modèle."""
+    """Build a JSON-serializable dict of the mutable fields of a model."""
     result: dict = {}
     for field in _SNAPSHOT_FIELDS:
         value = getattr(model, field, None)
@@ -2938,5 +2938,5 @@ def _build_snapshot(model: ModelMetadata) -> dict:
     return result
 
 
-# Instance globale (optionnel)
+# Global instance (optional)
 db_service = DBService()

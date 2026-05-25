@@ -1,9 +1,9 @@
 """
-Service Golden Test Set — exécution de cas de test de régression pré-déploiement.
+Golden Test Set service — execution of pre-deployment regression test cases.
 
-Chaque GoldenTest stocke un (input_features, expected_output) pour un modèle.
-Lors d'un run, le service charge le modèle, exécute les prédictions et compare
-les sorties aux valeurs attendues.
+Each GoldenTest stores a (input_features, expected_output) pair for a model.
+During a run, the service loads the model, executes predictions and compares
+outputs to expected values.
 """
 
 import csv
@@ -80,12 +80,12 @@ class GoldenTestService:
         from src.services.db_service import DBService
         from src.services.model_service import model_service
 
-        # Vérifier que le modèle existe avant de procéder
+        # Verify that the model exists before proceeding
         metadata = await DBService.get_model_metadata(db, model_name, version)
         if not metadata:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Modèle '{model_name}' version '{version}' non trouvé.",
+                detail=f"Model '{model_name}' version '{version}' not found.",
             )
 
         tests = await GoldenTestService.get_tests(db, model_name)
@@ -106,7 +106,7 @@ class GoldenTestService:
 
         details: List[GoldenTestRunDetail] = []
 
-        # Classes du modèle pour résoudre index → label (ex: 0 → "setosa")
+        # Model classes to resolve index → label (e.g. 0 → "setosa")
         classes_list: list = metadata.classes or []
         if not classes_list and hasattr(model, "classes_"):
             classes_list = [str(c) for c in model.classes_]
@@ -200,8 +200,8 @@ class GoldenTestService:
 
         if reader.fieldnames is None or "expected_output" not in reader.fieldnames:
             raise ValueError(
-                "Le CSV doit contenir une colonne 'expected_output'. "
-                "Format attendu : feature1,feature2,...,expected_output[,description]"
+                "The CSV must contain an 'expected_output' column. "
+                "Expected format: feature1,feature2,...,expected_output[,description]"
             )
 
         reserved = {"expected_output", "description"}
@@ -226,10 +226,10 @@ class GoldenTestService:
                 }
             )
             if not rows[-1]["expected_output"]:
-                raise ValueError(f"Ligne {i} : 'expected_output' vide.")
+                raise ValueError(f"Row {i}: 'expected_output' is empty.")
 
         if not rows:
-            raise ValueError("Le CSV ne contient aucune ligne de données.")
+            raise ValueError("The CSV contains no data rows.")
 
         return rows
 
@@ -257,5 +257,5 @@ class GoldenTestService:
             )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erreur lors de l'exécution des golden tests : {exc}",
+                detail=f"Error executing golden tests: {exc}",
             )

@@ -1,12 +1,12 @@
 """
-Service d'auto-promotion post-retrain et circuit breaker d'auto-demotion.
+Post-retrain auto-promotion service and auto-demotion circuit breaker.
 
-Évalue si un modèle récemment entraîné satisfait la politique de promotion
-configurée. L'évaluation repose sur les paires (prédiction, résultat observé)
-historiques du modèle et sur les temps de réponse enregistrés en production.
+Evaluates whether a recently trained model satisfies the configured promotion
+policy. Evaluation relies on historical (prediction, observed_result) pairs
+and on response times recorded in production.
 
-Le circuit breaker d'auto-demotion évalue périodiquement si un modèle en
-production doit être retiré sur la base du drift ou d'une chute d'accuracy.
+The auto-demotion circuit breaker periodically evaluates whether a production
+model should be demoted based on drift or an accuracy drop.
 """
 
 import asyncio
@@ -29,9 +29,9 @@ logger = structlog.get_logger(__name__)
 
 
 def _is_regression_pairs(pairs: list) -> bool:
-    """Retourne True si les paires semblent provenir d'un modèle de régression.
+    """Return True if the pairs appear to come from a regression model.
 
-    Heuristique : au moins une valeur (prédiction ou observé) est un float non-entier.
+    Heuristic: at least one value (prediction or observed) is a non-integer float.
     """
     for pred, obs, _, _ in pairs:
         for val in (pred, obs):
@@ -51,26 +51,26 @@ async def evaluate_auto_promotion(
     version: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """
-    Évalue si le modèle ``model_name`` doit être promu automatiquement
-    en production selon ``policy``.
+    Evaluate whether model ``model_name`` should be automatically promoted
+    to production according to ``policy``.
 
-    Retourne ``(should_promote, reason)``.
+    Returns ``(should_promote, reason)``.
 
-    Logique :
-    1. Récupère toutes les paires (prediction, observed_result) pour le modèle.
-    2. Si le nombre de paires < ``min_sample_validation`` → non promu.
-    3. Détecte automatiquement le type (classification / régression) :
-       - Régression : si ``max_mae`` est défini, vérifie la MAE sur les N dernières paires.
-       - Classification : si ``min_accuracy`` est défini, vérifie l'accuracy (égalité exacte).
-    4. Si ``max_latency_p95_ms`` est défini : calcule le P95 des temps de
-       réponse des prédictions réussies → non promu si P95 > seuil.
+    Logic:
+    1. Retrieve all (prediction, observed_result) pairs for the model.
+    2. If the number of pairs < ``min_sample_validation`` → not promoted.
+    3. Automatically detect type (classification / regression):
+       - Regression: if ``max_mae`` is set, check MAE on the last N pairs.
+       - Classification: if ``min_accuracy`` is set, check accuracy (exact equality).
+    4. If ``max_latency_p95_ms`` is set: compute P95 of response times for
+       successful predictions → not promoted if P95 > threshold.
     """
     min_accuracy: Optional[float] = policy.get("min_accuracy")
     max_mae: Optional[float] = policy.get("max_mae")
     max_latency_p95_ms: Optional[float] = policy.get("max_latency_p95_ms")
     min_sample_validation: int = int(policy.get("min_sample_validation", 10))
 
-    # --- Paires de validation (toutes versions confondues, triées par timestamp) ---
+    # --- Validation pairs (all versions combined, sorted by timestamp) ---
     pairs = await DBService.get_performance_pairs(db, model_name)
     n_samples = len(pairs)
 
@@ -78,15 +78,15 @@ async def evaluate_auto_promotion(
         return (
             False,
             (
-                f"Échantillons insuffisants pour la validation : "
-                f"{n_samples}/{min_sample_validation} requis."
+                f"Insufficient samples for validation: "
+                f"{n_samples}/{min_sample_validation} required."
             ),
         )
 
     recent = pairs[-min_sample_validation:]
     is_regression = _is_regression_pairs(recent)
 
-    # --- Vérification de la métrique de performance ---
+    # --- Performance metric check ---
     if is_regression:
         if max_mae is not None:
             try:
@@ -96,7 +96,7 @@ async def evaluate_auto_promotion(
             if mae is not None and mae > max_mae:
                 return (
                     False,
-                    (f"MAE trop élevée : {mae:.4f} > {max_mae:.4f} requis."),
+                    (f"MAE too high: {mae:.4f} > {max_mae:.4f} required."),
                 )
     else:
         if min_accuracy is not None:
@@ -105,10 +105,10 @@ async def evaluate_auto_promotion(
             if accuracy < min_accuracy:
                 return (
                     False,
-                    (f"Précision insuffisante : {accuracy:.4f} " f"< {min_accuracy:.4f} requis."),
+                    (f"Insufficient accuracy: {accuracy:.4f} " f"< {min_accuracy:.4f} required."),
                 )
 
-    # --- Vérification de la latence P95 ---
+    # --- P95 latency check ---
     if max_latency_p95_ms is not None:
         stmt = select(Prediction.response_time_ms).where(
             and_(
@@ -125,13 +125,10 @@ async def evaluate_auto_promotion(
             if p95 > max_latency_p95_ms:
                 return (
                     False,
-                    (
-                        f"Latence P95 trop élevée : {p95:.1f}ms "
-                        f"> {max_latency_p95_ms:.1f}ms max."
-                    ),
+                    (f"P95 latency too high: {p95:.1f}ms " f"> {max_latency_p95_ms:.1f}ms max."),
                 )
 
-    # --- Vérification des golden tests ---
+    # --- Golden tests check ---
     min_golden_test_pass_rate: Optional[float] = policy.get("min_golden_test_pass_rate")
     if min_golden_test_pass_rate is not None and version is not None:
         from src.services.golden_test_service import GoldenTestService
@@ -141,13 +138,13 @@ async def evaluate_auto_promotion(
             return (
                 False,
                 (
-                    f"Tests de régression insuffisants : {result.pass_rate:.2%} "
-                    f"< {min_golden_test_pass_rate:.2%} requis "
-                    f"({result.failed}/{result.total_tests} échecs)."
+                    f"Insufficient regression tests: {result.pass_rate:.2%} "
+                    f"< {min_golden_test_pass_rate:.2%} required "
+                    f"({result.failed}/{result.total_tests} failures)."
                 ),
             )
 
-    return True, "Tous les critères de promotion sont satisfaits."
+    return True, "All promotion criteria are satisfied."
 
 
 # ---------------------------------------------------------------------------
@@ -167,27 +164,27 @@ async def evaluate_auto_demotion(
     policy: dict,
 ) -> Tuple[bool, str]:
     """
-    Évalue si le modèle ``model_name`` en production doit être automatiquement
-    retiré selon la politique ``policy``.
+    Evaluate whether the production model ``model_name`` should be automatically
+    demoted according to ``policy``.
 
-    Garde-fous :
-    - N'agit que si au moins une autre version active (non-production) existe.
-    - Respecte le cooldown pour éviter les oscillations.
+    Guardrails:
+    - Only acts if at least one other active (non-production) version exists.
+    - Respects the cooldown to avoid oscillations.
 
-    Retourne ``(demoted, reason)``.
+    Returns ``(demoted, reason)``.
     """
     from src.services.webhook_service import send_webhook
 
     auto_demote: bool = policy.get("auto_demote", False)
     if not auto_demote:
-        return False, "Auto-demotion désactivée."
+        return False, "Auto-demotion disabled."
 
     demote_on_drift: str = policy.get("demote_on_drift", "critical")
     demote_on_accuracy_below: Optional[float] = policy.get("demote_on_accuracy_below")
     demote_cooldown_hours: int = int(policy.get("demote_cooldown_hours", 24))
     min_sample_validation: int = int(policy.get("min_sample_validation", 10))
 
-    # --- Trouver le modèle en production ---
+    # --- Find the production model ---
     prod_result = await db.execute(
         select(ModelMetadata).where(
             and_(
@@ -199,9 +196,9 @@ async def evaluate_auto_demotion(
     )
     prod_meta = prod_result.scalars().first()
     if prod_meta is None:
-        return False, "Aucune version en production."
+        return False, "No version in production."
 
-    # --- Garde-fou : version de fallback ---
+    # --- Guardrail: fallback version ---
     fallback_result = await db.execute(
         select(ModelMetadata).where(
             and_(
@@ -215,7 +212,7 @@ async def evaluate_auto_demotion(
     fallback_versions = fallback_result.scalars().all()
     if not fallback_versions:
         logger.critical(
-            "Auto-demotion impossible : aucun fallback disponible",
+            "Auto-demotion impossible: no fallback available",
             model=model_name,
             version=prod_meta.version,
         )
@@ -223,9 +220,9 @@ async def evaluate_auto_demotion(
             email_service.send_auto_demotion_alert(
                 model_name, prod_meta.version, "Drift ou dégradation détectée", no_fallback=True
             )
-        return False, "Aucune version de fallback disponible — demotion annulée."
+        return False, "No fallback version available — demotion cancelled."
 
-    # --- Garde-fou : cooldown ---
+    # --- Guardrail: cooldown ---
     if demote_cooldown_hours > 0:
         cooldown_since = _utcnow() - timedelta(hours=demote_cooldown_hours)
         recent_demote_result = await db.execute(
@@ -245,13 +242,13 @@ async def evaluate_auto_demotion(
             until = recent_demote.timestamp + timedelta(hours=demote_cooldown_hours)
             return (
                 False,
-                f"Cooldown actif jusqu'à {until.strftime('%Y-%m-%dT%H:%M')} UTC.",
+                f"Cooldown active until {until.strftime('%Y-%m-%dT%H:%M')} UTC.",
             )
 
-    # --- Collecter les raisons de demotion ---
+    # --- Collect demotion reasons ---
     reasons: list[str] = []
 
-    # Vérification du drift (features + output)
+    # Drift check (features + output)
     if prod_meta.feature_baseline:
         production_stats = await DBService.get_feature_production_stats(
             db, model_name, prod_meta.version, days=1
@@ -274,11 +271,11 @@ async def evaluate_auto_demotion(
         output_level = _DRIFT_ORDER.get(output_status, -1)
 
         if feature_level >= trigger_level > 0:
-            reasons.append(f"Drift features {feature_summary} détecté.")
+            reasons.append(f"Feature drift {feature_summary} detected.")
         if output_level >= trigger_level > 0:
-            reasons.append(f"Drift de sortie {output_status} détecté.")
+            reasons.append(f"Output drift {output_status} detected.")
 
-    # Vérification de l'accuracy
+    # Accuracy check
     if demote_on_accuracy_below is not None:
         pairs = await DBService.get_performance_pairs(db, model_name)
         if len(pairs) >= min_sample_validation:
@@ -289,11 +286,11 @@ async def evaluate_auto_demotion(
                 accuracy = correct / len(recent)
                 if accuracy < demote_on_accuracy_below:
                     reasons.append(
-                        f"Accuracy insuffisante : {accuracy:.4f} < {demote_on_accuracy_below:.4f}."
+                        f"Insufficient accuracy: {accuracy:.4f} < {demote_on_accuracy_below:.4f}."
                     )
 
     if not reasons:
-        return False, "Aucun critère de demotion déclenché."
+        return False, "No demotion criterion triggered."
 
     # --- Demotion ---
     combined_reason = " ".join(reasons)
@@ -311,7 +308,7 @@ async def evaluate_auto_demotion(
     await db.commit()
 
     logger.warning(
-        "Modèle auto-démis",
+        "Model auto-demoted",
         model=model_name,
         version=prod_meta.version,
         reason=combined_reason,

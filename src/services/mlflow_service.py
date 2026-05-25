@@ -1,14 +1,14 @@
 """
-Service d'intégration MLflow.
+MLflow integration service.
 
-Toutes les méthodes publiques encapsulent les appels MLflow dans un try/except et
-retournent None au lieu de lever une exception, de façon à ne jamais bloquer un
-ré-entraînement si le serveur MLflow est indisponible (dégradation gracieuse).
+All public methods wrap MLflow calls in a try/except and return None instead of
+raising an exception, so as to never block a retraining if the MLflow server is
+unavailable (graceful degradation).
 
-Principe de stockage :
-  - MinIO (bucket «models») est la source de vérité opérationnelle pour les binaires.
-  - MLflow stocke uniquement les métadonnées (métriques, params, lignée) et un lien
-    vers le chemin MinIO — jamais une copie du binaire.
+Storage principle:
+  - MinIO (bucket "models") is the operational source of truth for binaries.
+  - MLflow stores only metadata (metrics, params, lineage) and a link
+    to the MinIO path — never a copy of the binary.
 """
 
 import os
@@ -26,7 +26,7 @@ logger = structlog.get_logger(__name__)
 
 class MLflowService:
     def _configure(self) -> bool:
-        """Configure l'URI MLflow et les variables d'env S3 MinIO."""
+        """Configure the MLflow URI and MinIO S3 environment variables."""
         if not settings.MLFLOW_ENABLE:
             return False
         try:
@@ -37,7 +37,7 @@ class MLflowService:
                 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", settings.MINIO_SECRET_KEY)
             return True
         except Exception as exc:
-            logger.warning("MLflow configuration échouée", error=str(exc))
+            logger.warning("MLflow configuration failed", error=str(exc))
             return False
 
     def _experiment_name(self, model_name: str) -> str:
@@ -69,24 +69,24 @@ class MLflowService:
         lookback_days: Optional[int] = None,
     ) -> Optional[str]:
         """
-        Crée un run MLflow pour un ré-entraînement.
+        Create an MLflow run for a retraining.
 
-        MinIO est la source de vérité pour le binaire ; MLflow stocke uniquement
-        les métriques, paramètres et la lignée (+ un lien vers le chemin MinIO).
+        MinIO is the source of truth for the binary; MLflow stores only
+        metrics, parameters and lineage (+ a link to the MinIO path).
 
-        Retourne le run_id si succès, None si MLflow est indisponible.
+        Returns the run_id if successful, None if MLflow is unavailable.
         """
         if not self._configure():
             return None
         try:
             mlflow.set_experiment(self._experiment_name(model_name))
 
-            # Nom du run enrichi : modèle + version + date + trigger
+            # Enriched run name: model + version + date + trigger
             _date = datetime.now(timezone.utc).strftime("%Y%m%d")
             run_name = f"{model_name}_v{new_version}_{_date}_{trigger}"
 
             with mlflow.start_run(run_name=run_name) as run:
-                # Params — informations de lignée et de configuration
+                # Params — lineage and configuration information
                 params: dict = {
                     "model_name": model_name,
                     "new_version": new_version,
@@ -100,7 +100,7 @@ class MLflowService:
                     params["algorithm"] = algorithm
                 if lookback_days is not None:
                     params["lookback_days"] = str(lookback_days)
-                # Lien MinIO — source de vérité du binaire
+                # MinIO link — source of truth for the binary
                 if minio_object_key:
                     params["minio_bucket"] = minio_bucket
                     params["minio_object_key"] = minio_object_key
@@ -112,7 +112,7 @@ class MLflowService:
                         params[f"hparam_{k}"] = str(v)
                 mlflow.log_params(params)
 
-                # Metrics scalaires
+                # Scalar metrics
                 if accuracy is not None:
                     mlflow.log_metric("accuracy", accuracy)
                 if auc is not None:
@@ -122,7 +122,7 @@ class MLflowService:
                 if n_rows is not None:
                     mlflow.log_metric("n_rows_train", float(n_rows))
 
-                # Feature stats — une metric par feature × statistique
+                # Feature stats — one metric per feature × statistic
                 if feature_stats:
                     for feat_name, stats_dict in feature_stats.items():
                         if not isinstance(stats_dict, dict):
@@ -136,7 +136,7 @@ class MLflowService:
                                 except Exception:
                                     pass
 
-                # Label distribution — ratio par classe
+                # Label distribution — ratio per class
                 if label_distribution:
                     total = sum(float(v) for v in label_distribution.values() if v is not None)
                     for label, count in label_distribution.items():
@@ -149,7 +149,7 @@ class MLflowService:
                         except Exception:
                             pass
 
-                # Tags — pour filtrage dans l'UI MLflow
+                # Tags — for filtering in MLflow UI
                 mlflow.set_tags(
                     {
                         "run_type": "training",
@@ -162,7 +162,7 @@ class MLflowService:
                 run_id = run.info.run_id
 
             logger.info(
-                "Run MLflow créé",
+                "MLflow run created",
                 model=model_name,
                 version=new_version,
                 run_id=run_id,
@@ -173,7 +173,7 @@ class MLflowService:
 
         except Exception as exc:
             logger.warning(
-                "MLflow log_retrain_run échoué — dégradation gracieuse",
+                "MLflow log_retrain_run failed — graceful degradation",
                 model=model_name,
                 version=new_version,
                 error=str(exc),
@@ -181,7 +181,7 @@ class MLflowService:
             return None
 
     def update_run_tags(self, run_id: str, tags: dict) -> bool:
-        """Met à jour les tags d'un run existant (ex: auto_promoted après promotion)."""
+        """Update tags on an existing run (e.g. auto_promoted after promotion)."""
         if not self._configure():
             return False
         try:
@@ -190,7 +190,7 @@ class MLflowService:
                 client.set_tag(run_id, key, str(value))
             return True
         except Exception as exc:
-            logger.warning("MLflow update_run_tags échoué", run_id=run_id, error=str(exc))
+            logger.warning("MLflow update_run_tags failed", run_id=run_id, error=str(exc))
             return False
 
     def log_production_snapshot(
@@ -201,15 +201,15 @@ class MLflowService:
         metrics: dict,
     ) -> Optional[str]:
         """
-        Logue un snapshot de métriques de production.
+        Log a production metrics snapshot.
 
-        Utilise la même expérience que le training (predictml/{model_name})
-        avec le tag run_type=monitoring pour distinguer les deux types de runs.
+        Uses the same experiment as training (predictml/{model_name})
+        with the tag run_type=monitoring to distinguish the two run types.
         """
         if not self._configure():
             return None
         try:
-            # Même expérience que le training — distingué par le tag run_type
+            # Same experiment as training — distinguished by the run_type tag
             mlflow.set_experiment(self._experiment_name(model_name))
             _date = datetime.now(timezone.utc).strftime("%Y%m%d")
             run_name = f"{model_name}_v{version}_monitoring_{_date}"
@@ -232,7 +232,7 @@ class MLflowService:
 
         except Exception as exc:
             logger.warning(
-                "MLflow log_production_snapshot échoué",
+                "MLflow log_production_snapshot failed",
                 model=model_name,
                 version=version,
                 error=str(exc),
@@ -240,15 +240,15 @@ class MLflowService:
             return None
 
     def delete_run(self, run_id: str) -> bool:
-        """Supprime un run MLflow. Retourne False si MLflow est indisponible."""
+        """Delete an MLflow run. Returns False if MLflow is unavailable."""
         if not self._configure():
             return False
         try:
             MlflowClient().delete_run(run_id)
-            logger.info("Run MLflow supprimé", run_id=run_id)
+            logger.info("MLflow run deleted", run_id=run_id)
             return True
         except Exception as exc:
-            logger.warning("MLflow delete_run échoué", run_id=run_id, error=str(exc))
+            logger.warning("MLflow delete_run failed", run_id=run_id, error=str(exc))
             return False
 
 

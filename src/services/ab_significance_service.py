@@ -1,5 +1,5 @@
 """
-Service de calcul de significativité statistique pour les comparaisons A/B.
+Statistical significance computation service for A/B comparisons.
 """
 
 import math
@@ -10,16 +10,16 @@ from scipy.stats import norm
 
 
 def _cohen_h(p1: float, p2: float) -> float:
-    """Effet de taille de Cohen h pour comparer deux proportions."""
+    """Cohen h effect size for comparing two proportions."""
     return 2 * math.asin(math.sqrt(p2)) - 2 * math.asin(math.sqrt(p1))
 
 
 def _min_samples_proportions(p1: float, p2: float, alpha: float = 0.05, power: float = 0.80) -> int:
     """
-    Calcule le nombre minimal d'observations par groupe pour détecter la différence observée.
+    Compute the minimum number of observations per group to detect the observed difference.
 
-    Formule basée sur l'effet de taille de Cohen h (comparaison de proportions).
-    Puissance cible : 80 % (z_beta = 0.84).
+    Formula based on Cohen h effect size (proportion comparison).
+    Target power: 80% (z_beta = 0.84).
     """
     h = abs(_cohen_h(p1, p2))
     if h < 1e-10:
@@ -30,7 +30,7 @@ def _min_samples_proportions(p1: float, p2: float, alpha: float = 0.05, power: f
 
 
 def _cohen_d(mean1: float, mean2: float, std1: float, std2: float, n1: int, n2: int) -> float:
-    """Cohen d (pooled) pour comparer deux distributions continues."""
+    """Cohen d (pooled) for comparing two continuous distributions."""
     if n1 + n2 <= 2:
         return 0.0
     pooled_var = ((n1 - 1) * std1**2 + (n2 - 1) * std2**2) / (n1 + n2 - 2)
@@ -42,10 +42,10 @@ def _cohen_d(mean1: float, mean2: float, std1: float, std2: float, n1: int, n2: 
 
 def _min_samples_continuous(d: float, alpha: float = 0.05, power: float = 0.80) -> int:
     """
-    Calcule le nombre minimal d'observations par groupe pour détecter la différence observée.
+    Compute the minimum number of observations per group to detect the observed difference.
 
-    Formule basée sur Cohen d (distributions continues).
-    Puissance cible : 80 % (z_beta = 0.84).
+    Formula based on Cohen d (continuous distributions).
+    Target power: 80% (z_beta = 0.84).
     """
     if d < 1e-10:
         return 0
@@ -57,7 +57,7 @@ def _min_samples_continuous(d: float, alpha: float = 0.05, power: float = 0.80) 
 def _run_chi2_error_rate(
     va: dict, vb: dict, alpha: float, confidence_level: float
 ) -> Optional[dict]:
-    """Chi-² sur le taux d'erreur API (métrique catégorielle)."""
+    """Chi-squared on the API error rate (categorical metric)."""
     n_a = va["total_predictions"]
     n_b = vb["total_predictions"]
     err_a = va.get("error_count", 0)
@@ -83,7 +83,7 @@ def _run_chi2_error_rate(
 def _run_mann_whitney_mae(
     va: dict, vb: dict, alpha: float, confidence_level: float
 ) -> Optional[dict]:
-    """Mann-Whitney U sur les résidus de prédiction (MAE — régression)."""
+    """Mann-Whitney U on prediction residuals (MAE — regression)."""
     errors_a: list[float] = va.get("prediction_errors", [])
     errors_b: list[float] = vb.get("prediction_errors", [])
     if len(errors_a) < 2 or len(errors_b) < 2:
@@ -109,7 +109,7 @@ def _run_mann_whitney_mae(
 def _run_mann_whitney_latency(
     va: dict, vb: dict, alpha: float, confidence_level: float
 ) -> Optional[dict]:
-    """Mann-Whitney U sur les temps de réponse (latence)."""
+    """Mann-Whitney U on response times (latency)."""
     times_a: list[float] = va.get("response_times", [])
     times_b: list[float] = vb.get("response_times", [])
     if len(times_a) < 2 or len(times_b) < 2:
@@ -147,12 +147,12 @@ def compute_ab_significance(
     metric: Optional[str] = None,
 ) -> Optional[dict]:
     """
-    Calcule la significativité statistique entre les deux versions A/B les plus actives.
+    Compute statistical significance between the two most active A/B versions.
 
-    - ``metric=None`` (défaut) : sélection automatique par priorité (error_rate → mae → response_time_ms).
-    - ``metric="error_rate"`` | ``"mae"`` | ``"response_time_ms"`` : force la métrique choisie.
+    - ``metric=None`` (default): automatic selection by priority (error_rate → mae → response_time_ms).
+    - ``metric="error_rate"`` | ``"mae"`` | ``"response_time_ms"``: forces the chosen metric.
 
-    Retourne None si moins de 2 versions disponibles ou données insuffisantes pour la métrique demandée.
+    Returns None if fewer than 2 versions are available or data is insufficient for the requested metric.
     """
     active = [s for s in version_stats if s.get("total_predictions", 0) >= 1]
     if len(active) < 2:
@@ -164,7 +164,7 @@ def compute_ab_significance(
     if metric and metric in _METRIC_RUNNERS:
         return _METRIC_RUNNERS[metric](va, vb, alpha, confidence_level)
 
-    # Mode auto : essaie dans l'ordre jusqu'à trouver des données suffisantes
+    # Auto mode: try in order until sufficient data is found
     for m in _AUTO_ORDER:
         result = _METRIC_RUNNERS[m](va, vb, alpha, confidence_level)
         if result is not None:

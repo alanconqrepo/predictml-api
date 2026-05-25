@@ -1,5 +1,5 @@
 """
-Service de gestion du stockage MinIO
+MinIO storage management service
 """
 
 import asyncio
@@ -17,7 +17,7 @@ logger = structlog.get_logger(__name__)
 
 
 class MinIOService:
-    """Service pour gérer les modèles dans MinIO"""
+    """Service for managing models in MinIO"""
 
     def __init__(self):
         self.client = Minio(
@@ -30,30 +30,30 @@ class MinIOService:
         self._bucket_ready = False
 
     def _ensure_bucket_exists(self):
-        """Crée le bucket s'il n'existe pas (appelé au premier accès)"""
+        """Create the bucket if it does not exist (called on first access)"""
         if self._bucket_ready:
             return
         try:
             if not self.client.bucket_exists(self.bucket):
                 self.client.make_bucket(self.bucket)
-                logger.info("Bucket MinIO créé", bucket=self.bucket)
+                logger.info("MinIO bucket created", bucket=self.bucket)
             else:
-                logger.info("Bucket MinIO existant", bucket=self.bucket)
+                logger.info("MinIO bucket already exists", bucket=self.bucket)
             self._bucket_ready = True
         except S3Error as e:
-            logger.error("Erreur MinIO lors de la création du bucket", error=str(e))
+            logger.error("MinIO error while creating bucket", error=str(e))
 
     def upload_model(self, model: Any, object_name: str, metadata: Optional[dict] = None) -> dict:
         """
-        Upload un modèle vers MinIO
+        Upload a model to MinIO
 
         Args:
-            model: Le modèle scikit-learn
-            object_name: Nom de l'objet dans MinIO (ex: "iris_model/v1.0.0.joblib")
-            metadata: Métadonnées optionnelles
+            model: The scikit-learn model
+            object_name: Object name in MinIO (e.g. "iris_model/v1.0.0.joblib")
+            metadata: Optional metadata
 
         Returns:
-            dict avec les informations de l'upload
+            dict with upload information
         """
         self._ensure_bucket_exists()
         try:
@@ -71,7 +71,7 @@ class MinIOService:
                 metadata=metadata,
             )
 
-            logger.info("Modèle uploadé", object_name=object_name, size_bytes=file_size)
+            logger.info("Model uploaded", object_name=object_name, size_bytes=file_size)
 
             return {
                 "bucket": self.bucket,
@@ -82,19 +82,19 @@ class MinIOService:
             }
 
         except S3Error as e:
-            logger.error("Erreur lors de l'upload", error=str(e))
+            logger.error("Upload error", error=str(e))
             raise
 
     def upload_model_bytes(self, model_bytes: bytes, object_name: str) -> dict:
         """
-        Upload des bytes pkl bruts vers MinIO (sans re-sérialisation)
+        Upload raw pkl bytes to MinIO (without re-serialization)
 
         Args:
-            model_bytes: Contenu pkl déjà sérialisé
-            object_name: Nom de l'objet dans MinIO
+            model_bytes: Already serialized pkl content
+            object_name: Object name in MinIO
 
         Returns:
-            dict avec les informations de l'upload
+            dict with upload information
         """
         self._ensure_bucket_exists()
         try:
@@ -105,7 +105,7 @@ class MinIOService:
                 model_stream,
                 length=len(model_bytes),
             )
-            logger.info("Modèle uploadé", object_name=object_name, size_bytes=len(model_bytes))
+            logger.info("Model uploaded", object_name=object_name, size_bytes=len(model_bytes))
             return {
                 "bucket": self.bucket,
                 "object_name": object_name,
@@ -113,18 +113,18 @@ class MinIOService:
                 "etag": result.etag,
             }
         except S3Error as e:
-            logger.error("Erreur lors de l'upload", error=str(e))
+            logger.error("Upload error", error=str(e))
             raise
 
     def download_model(self, object_name: str) -> Any:
         """
-        Télécharge et désérialise un modèle depuis MinIO
+        Download and deserialize a model from MinIO
 
         Args:
-            object_name: Nom de l'objet dans MinIO
+            object_name: Object name in MinIO
 
         Returns:
-            Le modèle scikit-learn désérialisé
+            The deserialized scikit-learn model
         """
         self._ensure_bucket_exists()
         try:
@@ -135,62 +135,62 @@ class MinIOService:
 
             model = joblib.load(io.BytesIO(model_bytes))
 
-            logger.info("Modèle téléchargé", object_name=object_name)
+            logger.info("Model downloaded", object_name=object_name)
             return model
 
         except S3Error as e:
-            logger.error("Erreur lors du téléchargement", error=str(e))
+            logger.error("Download error", error=str(e))
             raise
 
     def list_models(self, prefix: str = "") -> List[str]:
         """
-        Liste tous les modèles disponibles
+        List all available models
 
         Args:
-            prefix: Préfixe pour filtrer les objets
+            prefix: Prefix to filter objects
 
         Returns:
-            Liste des noms d'objets
+            List of object names
         """
         self._ensure_bucket_exists()
         try:
             objects = self.client.list_objects(self.bucket, prefix=prefix)
             return [obj.object_name for obj in objects]
         except S3Error as e:
-            logger.error("Erreur lors du listing", error=str(e))
+            logger.error("Listing error", error=str(e))
             return []
 
     def delete_model(self, object_name: str) -> bool:
         """
-        Supprime un modèle de MinIO
+        Delete a model from MinIO
 
         Args:
-            object_name: Nom de l'objet à supprimer
+            object_name: Object name to delete
 
         Returns:
-            True si succès
+            True if successful
         """
         try:
             self.client.remove_object(self.bucket, object_name)
-            logger.info("Modèle supprimé", object_name=object_name)
+            logger.info("Model deleted", object_name=object_name)
             return True
         except S3Error as e:
-            logger.error("Erreur lors de la suppression", error=str(e))
+            logger.error("Deletion error", error=str(e))
             return False
 
     def upload_file_bytes(
         self, content: bytes, object_name: str, content_type: str = "text/plain"
     ) -> dict:
         """
-        Upload des bytes bruts (ex: script Python, JSON, CSV) dans MinIO.
+        Upload raw bytes (e.g. Python script, JSON, CSV) to MinIO.
 
         Args:
-            content: Contenu brut à uploader
-            object_name: Nom de l'objet dans MinIO
-            content_type: Type MIME de l'objet
+            content: Raw content to upload
+            object_name: Object name in MinIO
+            content_type: MIME type of the object
 
         Returns:
-            dict avec les informations de l'upload
+            dict with upload information
         """
         self._ensure_bucket_exists()
         try:
@@ -201,21 +201,21 @@ class MinIOService:
                 length=len(content),
                 content_type=content_type,
             )
-            logger.info("Fichier uploadé", object_name=object_name, size_bytes=len(content))
+            logger.info("File uploaded", object_name=object_name, size_bytes=len(content))
             return {"bucket": self.bucket, "object_name": object_name, "size": len(content)}
         except S3Error as e:
-            logger.error("Erreur lors de l'upload du fichier", error=str(e))
+            logger.error("File upload error", error=str(e))
             raise
 
     def download_file_bytes(self, object_name: str) -> bytes:
         """
-        Télécharge et retourne le contenu brut d'un objet MinIO (sans désérialisation).
+        Download and return the raw content of a MinIO object (without deserialization).
 
         Args:
-            object_name: Nom de l'objet dans MinIO
+            object_name: Object name in MinIO
 
         Returns:
-            Contenu brut en bytes
+            Raw content in bytes
         """
         self._ensure_bucket_exists()
         try:
@@ -223,26 +223,26 @@ class MinIOService:
             content = response.read()
             response.close()
             response.release_conn()
-            logger.info("Fichier téléchargé", object_name=object_name, size_bytes=len(content))
+            logger.info("File downloaded", object_name=object_name, size_bytes=len(content))
             return content
         except S3Error as e:
-            logger.error("Erreur lors du téléchargement du fichier", error=str(e))
+            logger.error("File download error", error=str(e))
             raise
 
     async def async_download_file_bytes(self, object_name: str) -> bytes:
-        """Version async de download_file_bytes — n'occupe pas l'event loop pendant l'I/O réseau."""
+        """Async version of download_file_bytes — does not block the event loop during network I/O."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.download_file_bytes, object_name)
 
     async def async_upload_model_bytes(self, model_bytes: bytes, object_name: str) -> dict:
-        """Version async de upload_model_bytes — n'occupe pas l'event loop pendant l'I/O réseau."""
+        """Async version of upload_model_bytes — does not block the event loop during network I/O."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.upload_model_bytes, model_bytes, object_name)
 
     async def async_upload_file_bytes(
         self, content: bytes, object_name: str, content_type: str = "text/plain"
     ) -> dict:
-        """Version async de upload_file_bytes — n'occupe pas l'event loop pendant l'I/O réseau."""
+        """Async version of upload_file_bytes — does not block the event loop during network I/O."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, self.upload_file_bytes, content, object_name, content_type
@@ -250,13 +250,13 @@ class MinIOService:
 
     def get_object_info(self, object_name: str) -> Optional[dict]:
         """
-        Récupère les informations d'un objet
+        Retrieve information about an object
 
         Args:
-            object_name: Nom de l'objet
+            object_name: Object name
 
         Returns:
-            Dict avec les informations de l'objet
+            Dict with object information
         """
         try:
             stat = self.client.stat_object(self.bucket, object_name)
@@ -268,9 +268,9 @@ class MinIOService:
                 "metadata": stat.metadata,
             }
         except S3Error as e:
-            logger.error("Erreur lors de la récupération des infos", error=str(e))
+            logger.error("Error retrieving object info", error=str(e))
             return None
 
 
-# Instance globale
+# Global instance
 minio_service = MinIOService()

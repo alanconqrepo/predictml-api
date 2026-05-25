@@ -1,5 +1,5 @@
 """
-Fonctions de calcul de métriques ML partagées entre l'API et les services.
+ML metric computation functions shared between the API and services.
 """
 
 from __future__ import annotations
@@ -14,27 +14,27 @@ def compute_auc(
     y_prob: list,
     classes: Optional[list] = None,
 ) -> Optional[float]:
-    """Calcule l'AUC-ROC à partir des probabilités prédites.
+    """Compute AUC-ROC from predicted probabilities.
 
-    - Binaire  : utilise la probabilité de la classe positive (index 1).
-    - Multiclasse : OvR pondéré (weighted average).
-    - Retourne ``None`` si les probabilités sont absentes ou si le calcul échoue
-      (e.g. une seule classe dans ``y_true``, probas malformées…).
+    - Binary: uses the positive class probability (index 1).
+    - Multiclass: weighted OvR (weighted average).
+    - Returns ``None`` if probabilities are absent or if computation fails
+      (e.g. only one class in ``y_true``, malformed probabilities...).
 
     Parameters
     ----------
     y_true : list
-        Valeurs observées (labels).
+        Observed values (labels).
     y_prob : list
-        Liste de listes de probabilités par classe (une entrée par prédiction).
-        Peut contenir des ``None`` si la prédiction n'avait pas de probabilités.
+        List of per-class probability lists (one entry per prediction).
+        May contain ``None`` if the prediction had no probabilities.
     classes : list | None
-        Classes connues du modèle (optionnel, utilisé pour lever l'ambiguïté).
+        Known model classes (optional, used to disambiguate).
 
     Returns
     -------
     float | None
-        AUC arrondie à 4 décimales, ou ``None``.
+        AUC rounded to 4 decimal places, or ``None``.
     """
     if not y_prob or not any(p is not None for p in y_prob):
         return None
@@ -46,18 +46,18 @@ def compute_auc(
             return None
 
         if n_classes == 2:
-            # Classification binaire : prob de la 2e classe (index 1, ordre alphabétique)
+            # Binary classification: probability of the 2nd class (index 1, alphabetical order)
             probs = [p[1] if isinstance(p, (list, tuple)) and len(p) >= 2 else None for p in y_prob]
             if any(v is None for v in probs):
                 return None
             return round(float(roc_auc_score(y_true_s, probs)), 4)
         else:
-            # Classification multiclasse : OvR pondéré
+            # Multiclass classification: weighted OvR
             if not all(isinstance(p, (list, tuple)) for p in y_prob):
                 return None
             n_cols = len(y_prob[0])
             if n_cols != n_classes:
-                # Dimensions incohérentes → abandon
+                # Inconsistent dimensions → abort
                 return None
             return round(
                 float(
@@ -79,22 +79,22 @@ def compute_roc_curve(
     y_true: list,
     y_prob: list,
 ) -> tuple[Optional[list[float]], Optional[list[float]]]:
-    """Calcule les points (FPR, TPR) de la courbe ROC pour la classification binaire.
+    """Compute (FPR, TPR) points of the ROC curve for binary classification.
 
-    Retourne ``(None, None)`` si les probabilités sont absentes, si ce n'est pas
-    un problème binaire, ou si le calcul échoue.
+    Returns ``(None, None)`` if probabilities are absent, if it is not a
+    binary problem, or if computation fails.
 
     Parameters
     ----------
     y_true : list
-        Valeurs observées.
+        Observed values.
     y_prob : list
-        Liste de listes de probabilités (une par prédiction).
+        List of probability lists (one per prediction).
 
     Returns
     -------
     tuple[list[float] | None, list[float] | None]
-        (fpr, tpr) arrondis à 4 décimales, ou (None, None).
+        (fpr, tpr) rounded to 4 decimal places, or (None, None).
     """
     if not y_prob or not any(p is not None for p in y_prob):
         return None, None

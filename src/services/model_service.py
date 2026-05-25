@@ -1,5 +1,5 @@
 """
-Service de gestion des modèles ML (v3 - cache Redis distribué)
+ML model management service (v3 - distributed Redis cache)
 """
 
 import asyncio
@@ -26,8 +26,8 @@ logger = structlog.get_logger(__name__)
 _CACHE_PREFIX = "model:"
 _HMAC_HEX_LEN = 64  # SHA-256 hex digest = 64 chars
 
-# Verrous intra-process par clé cache — évite les téléchargements MinIO simultanés
-# dans le même worker lors d'un cache miss (thundering herd).
+# Intra-process locks per cache key — avoids concurrent MinIO downloads
+# within the same worker on a cache miss (thundering herd).
 _LOAD_LOCKS: Dict[str, asyncio.Lock] = {}
 
 
@@ -82,23 +82,23 @@ def _verify_minio_hmac(raw_bytes: bytes, metadata: Any, model_name: str) -> None
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(
-                f"Le modèle '{model_name}' v{metadata.version} n'a pas de signature HMAC. "
-                "Exécutez init_data/resign_models.py pour re-signer les modèles existants "
-                "avant de pouvoir les charger."
+                f"Model '{model_name}' v{metadata.version} has no HMAC signature. "
+                "Run init_data/resign_models.py to re-sign existing models "
+                "before they can be loaded."
             ),
         )
     expected = compute_model_hmac(raw_bytes)
     if not _hmac_mod.compare_digest(expected, metadata.model_hmac_signature):
         logger.error(
-            "Signature HMAC invalide — chargement refusé",
+            "Invalid HMAC signature — loading refused",
             model=model_name,
             version=str(metadata.version),
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=(
-                f"Signature du modèle '{model_name}' v{metadata.version} invalide — "
-                "chargement refusé (possible falsification du fichier modèle)."
+                f"Model '{model_name}' v{metadata.version} signature invalid — "
+                "loading refused (possible model file tampering)."
             ),
         )
 
@@ -120,14 +120,14 @@ def _extract_model_from_payload(payload: bytes) -> Any:
 
 
 class ModelService:
-    """Service pour charger et gérer les modèles ML depuis MinIO/MLflow, avec cache Redis."""
+    """Service for loading and managing ML models from MinIO/MLflow, with Redis cache."""
 
     def __init__(self):
-        # Connexion Redis initialisée paresseusement au premier accès
+        # Redis connection lazily initialized on first access
         self._redis: Optional[aioredis.Redis] = None
 
     async def _get_redis(self) -> aioredis.Redis:
-        """Retourne le client Redis (direct ou via Sentinel), en le créant si nécessaire."""
+        """Return the Redis client (direct or via Sentinel), creating it if necessary."""
         if self._redis is None:
             if settings.REDIS_SENTINEL_HOSTS:
                 self._redis = _build_sentinel_redis()
@@ -145,18 +145,18 @@ class ModelService:
         search: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Retourne la liste des modèles disponibles depuis la base de données
+        Return the list of available models from the database.
 
         Args:
-            db: Session de base de données
-            is_production: filtre sur is_production
-            algorithm: filtre exact sur l'algorithme
-            min_accuracy: filtre accuracy >= valeur
-            deployment_mode: filtre sur le mode de déploiement
-            search: recherche textuelle sur name et description (ILIKE)
+            db: Database session
+            is_production: filter on is_production
+            algorithm: exact filter on algorithm
+            min_accuracy: filter accuracy >= value
+            deployment_mode: filter on deployment mode
+            search: text search on name and description (ILIKE)
 
         Returns:
-            Liste des modèles actifs avec leurs métadonnées
+            List of active models with their metadata
         """
         models = await DBService.get_all_active_models(
             db,
@@ -216,30 +216,30 @@ class ModelService:
         version: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Charge un modèle depuis le cache Redis ou depuis MinIO/MLflow en cas de cache miss.
+        Load a model from the Redis cache or from MinIO/MLflow on a cache miss.
 
-        Sécurité :
-        - Cache Redis : vérifie l'enveloppe HMAC-SHA256 (64 octets ASCII) avant joblib.load().
-          Protège contre l'empoisonnement du cache Redis (l'attaquant ne connaît pas SECRET_KEY).
-        - MinIO : vérifie la signature HMAC stockée en DB avant joblib.load().
-          Protège contre la falsification du fichier .joblib dans MinIO.
+        Security:
+        - Redis cache: verifies the HMAC-SHA256 envelope (64 ASCII bytes) before joblib.load().
+          Protects against Redis cache poisoning (attacker does not know SECRET_KEY).
+        - MinIO: verifies the HMAC signature stored in DB before joblib.load().
+          Protects against tampering of the .joblib file in MinIO.
 
-        Format Redis : HMAC_HEX(64 octets ASCII) + payload_bytes
+        Redis format: HMAC_HEX(64 ASCII bytes) + payload_bytes
 
         Args:
-            db: Session de base de données
-            model_name: Nom du modèle
-            version: Version spécifique (optionnel, prend la plus récente sinon)
+            db: Database session
+            model_name: Model name
+            version: Specific version (optional, takes most recent otherwise)
 
         Returns:
-            Dict contenant le modèle et ses métadonnées
+            Dict containing the model and its metadata
 
         Raises:
-            HTTPException 403: Modèle MinIO sans signature HMAC (modèle legacy non signé)
-            HTTPException 500: Signature HMAC invalide (falsification détectée)
-            HTTPException 404: Modèle introuvable
+            HTTPException 403: MinIO model without HMAC signature (unsigned legacy model)
+            HTTPException 500: Invalid HMAC signature (tampering detected)
+            HTTPException 404: Model not found
         """
-        # 1. Récupérer les métadonnées depuis la DB (source de vérité pour la signature)
+        # 1. Retrieve metadata from DB (source of truth for the signature)
         metadata = await DBService.get_model_metadata(db, model_name, version)
 
         if not metadata:
@@ -247,11 +247,11 @@ class ModelService:
             available_names = [m["name"] for m in available]
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Modèle '{model_name}' (version '{version or 'latest'}') non trouvé. "
-                f"Modèles disponibles: {available_names}",
+                detail=f"Model '{model_name}' (version '{version or 'latest'}') not found. "
+                f"Available models: {available_names}",
             )
 
-        # 2. Vérifier le cache Redis (première vérification rapide sans lock)
+        # 2. Check Redis cache (quick first check without lock)
         cache_key = f"{_CACHE_PREFIX}{model_name}:{metadata.version}"
         redis = await self._get_redis()
 
@@ -262,7 +262,7 @@ class ModelService:
             except ValueError:
                 # Tampered or old-format (unsigned) cache entry — reject and reload from source
                 logger.warning(
-                    "Cache Redis HMAC invalide — entrée invalidée",
+                    "Invalid Redis cache HMAC — entry invalidated",
                     cache_key=cache_key,
                     model=model_name,
                     version=str(metadata.version),
@@ -270,7 +270,7 @@ class ModelService:
                 await redis.delete(cache_key)
             else:
                 logger.info(
-                    "Modèle chargé depuis le cache Redis",
+                    "Model loaded from Redis cache",
                     model_name=model_name,
                     version=str(metadata.version),
                 )
@@ -278,15 +278,15 @@ class ModelService:
                 model = _extract_model_from_payload(payload)
                 return {"model": model, "metadata": metadata}
 
-        # 3. Cache miss — acquérir le verrou intra-process pour éviter le thundering herd.
-        # Plusieurs coroutines concurrentes dans le même worker ne déclencheront qu'un seul
-        # téléchargement MinIO grâce au double-checked locking.
+        # 3. Cache miss — acquire intra-process lock to avoid thundering herd.
+        # Multiple concurrent coroutines in the same worker will only trigger one
+        # MinIO download thanks to double-checked locking.
         if cache_key not in _LOAD_LOCKS:
             _LOAD_LOCKS[cache_key] = asyncio.Lock()
         lock = _LOAD_LOCKS[cache_key]
 
         async with lock:
-            # Double-check après acquisition du lock (un autre coroutine a peut-être déjà chargé)
+            # Double-check after lock acquisition (another coroutine may have already loaded)
             cached_signed = await redis.get(cache_key)
             if cached_signed:
                 try:
@@ -297,13 +297,13 @@ class ModelService:
                     model = _extract_model_from_payload(payload)
                     return {"model": model, "metadata": metadata}
 
-            # 4. Charger le modèle depuis MinIO (source de vérité opérationnelle).
-            #    mlflow_run_id reste en DB comme lien de traçabilité (UI MLflow) mais
-            #    n'est plus utilisé pour le chargement — garantit le fonctionnement même
-            #    si MLflow est désactivé, inaccessible ou absent lors de l'upload initial.
+            # 4. Load the model from MinIO (operational source of truth).
+            #    mlflow_run_id remains in DB as a traceability link (MLflow UI) but
+            #    is no longer used for loading — ensures operation even if MLflow is
+            #    disabled, unreachable, or absent at the time of initial upload.
             try:
                 logger.info(
-                    "Téléchargement du modèle depuis MinIO",
+                    "Downloading model from MinIO",
                     model_name=model_name,
                     version=str(metadata.version),
                     minio_object_key=metadata.minio_object_key,
@@ -314,12 +314,12 @@ class ModelService:
                 model = joblib.load(io.BytesIO(raw_bytes))  # HMAC verified above
                 cache_payload = raw_bytes
 
-                # 5. Stocker en cache Redis avec enveloppe HMAC (TTL configurable)
+                # 5. Store in Redis cache with HMAC envelope (configurable TTL)
                 signed = _sign_for_cache(cache_payload)
                 await redis.setex(cache_key, settings.REDIS_CACHE_TTL, signed)
 
                 logger.info(
-                    "Modèle chargé et mis en cache Redis",
+                    "Model loaded and cached in Redis",
                     model_name=model_name,
                     version=str(metadata.version),
                     ttl=settings.REDIS_CACHE_TTL,
@@ -331,15 +331,15 @@ class ModelService:
             except Exception as e:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Erreur lors du chargement du modèle '{model_name}': {str(e)}",
+                    detail=f"Error loading model '{model_name}': {str(e)}",
                 )
 
     async def get_cached_models(self) -> List[str]:
         """
-        Retourne la liste des modèles actuellement en cache Redis.
+        Return the list of models currently in the Redis cache.
 
         Returns:
-            Liste de clés au format ``name:version``
+            List of keys in the format ``name:version``
         """
         redis = await self._get_redis()
         keys = await redis.keys(f"{_CACHE_PREFIX}*")
@@ -347,41 +347,41 @@ class ModelService:
 
     async def invalidate_model_cache(self, model_name: str, version: Optional[str] = None) -> None:
         """
-        Invalide les entrées Redis pour un modèle donné.
+        Invalidate Redis entries for a given model.
 
         Args:
-            model_name: Nom du modèle.
-            version: Si fournie, n'invalide que cette version.
-                     Si None, invalide toutes les versions du modèle.
+            model_name: Model name.
+            version: If provided, only invalidates this version.
+                     If None, invalidates all versions of the model.
         """
         redis = await self._get_redis()
         if version:
             key = f"{_CACHE_PREFIX}{model_name}:{version}"
             await redis.delete(key)
-            logger.info("Cache modèle invalidé", model=model_name, version=version)
+            logger.info("Model cache invalidated", model=model_name, version=version)
         else:
             keys = await redis.keys(f"{_CACHE_PREFIX}{model_name}:*")
             if keys:
                 await redis.delete(*keys)
-            logger.info("Cache modèle invalidé (toutes versions)", model=model_name)
+            logger.info("Model cache invalidated (all versions)", model=model_name)
 
     async def clear_cache(self, cache_key: Optional[str] = None):
         """
-        Invalide le cache Redis.
+        Invalidate the Redis cache.
 
         Args:
-            cache_key: Si fourni (``name:version``), invalide uniquement cette entrée.
-                       Si None, invalide toutes les entrées ``model:*``.
+            cache_key: If provided (``name:version``), invalidates only that entry.
+                       If None, invalidates all ``model:*`` entries.
         """
         redis = await self._get_redis()
         if cache_key:
             await redis.delete(f"{_CACHE_PREFIX}{cache_key}")
-            logger.info("Cache Redis invalidé", cache_key=cache_key)
+            logger.info("Redis cache invalidated", cache_key=cache_key)
         else:
             keys = await redis.keys(f"{_CACHE_PREFIX}*")
             if keys:
                 await redis.delete(*keys)
-            logger.info("Cache Redis complet invalidé")
+            logger.info("Full Redis cache invalidated")
 
     async def select_routing_versions(
         self,
@@ -389,20 +389,20 @@ class ModelService:
         model_name: str,
     ) -> Tuple[Optional[ModelMetadata], List[ModelMetadata]]:
         """
-        Détermine quelle(s) version(s) utiliser pour un appel sans version explicite.
+        Determine which version(s) to use for a call without an explicit version.
 
-        Règles de sélection :
-        1. Les versions avec deployment_mode="ab_test" et traffic_weight > 0 participent
-           au routage pondéré (random.choices) → version primaire.
-           Les candidats A/B non sélectionnés tournent automatiquement en shadow,
-           permettant de comparer toutes les versions sur les mêmes inputs.
-        2. Les versions avec deployment_mode="shadow" s'ajoutent à la liste des shadows.
-        3. Si aucune version A/B : fallback sur get_model_metadata() (is_production=True
-           ou la plus récente).
+        Selection rules:
+        1. Versions with deployment_mode="ab_test" and traffic_weight > 0 participate
+           in weighted routing (random.choices) → primary version.
+           Unselected A/B candidates run automatically as shadow,
+           allowing comparison of all versions on the same inputs.
+        2. Versions with deployment_mode="shadow" are added to the shadow list.
+        3. If no A/B version: fallback to get_model_metadata() (is_production=True
+           or most recent).
 
-        Retourne:
+        Returns:
             (primary_metadata, shadow_list)
-            shadow_list peut contenir : candidats A/B non sélectionnés + version shadow dédiée.
+            shadow_list may contain: unselected A/B candidates + dedicated shadow version.
         """
         result = await db.execute(
             select(ModelMetadata).where(
@@ -430,29 +430,29 @@ class ModelService:
             # Les autres candidats A/B non sélectionnés tournent en shadow
             ab_shadows = [m for m in ab_candidates if m.version != primary_metadata.version]
             logger.info(
-                "Routage A/B",
+                "A/B routing",
                 model_name=model_name,
                 selected_version=primary_metadata.version,
                 candidates=[m.version for m in ab_candidates],
                 ab_shadows=[m.version for m in ab_shadows],
             )
         else:
-            # Fallback legacy : is_production=True ou plus récent
+            # Legacy fallback: is_production=True or most recent
             primary_metadata = await DBService.get_model_metadata(db, model_name, version=None)
             ab_shadows = []
 
-        # Shadow dédié (deployment_mode="shadow") + candidats A/B non sélectionnés
+        # Dedicated shadow (deployment_mode="shadow") + unselected A/B candidates
         shadow_list = ab_shadows + shadow_candidates
 
         return primary_metadata, shadow_list
 
     async def close(self):
-        """Ferme proprement la connexion Redis (à appeler au shutdown de l'app)."""
+        """Cleanly close the Redis connection (to be called at app shutdown)."""
         if self._redis:
             await self._redis.aclose()
             self._redis = None
-            logger.info("Connexion Redis fermée")
+            logger.info("Redis connection closed")
 
 
-# Instance globale du service
+# Global service instance
 model_service = ModelService()

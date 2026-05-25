@@ -1,16 +1,16 @@
 """
-Service pour l'explication SHAP des prédictions (feature importances locales).
+SHAP explanation service for predictions (local feature importances).
 
-Supporte :
-  - TreeExplainer : RandomForest, GradientBoosting, DecisionTree, ExtraTrees, HistGradientBoosting
-  - LinearExplainer : LogisticRegression, LinearRegression, Ridge, Lasso, ElasticNet, SGD
+Supports:
+  - TreeExplainer: RandomForest, GradientBoosting, DecisionTree, ExtraTrees, HistGradientBoosting
+  - LinearExplainer: LogisticRegression, LinearRegression, Ridge, Lasso, ElasticNet, SGD
 """
 
 import numpy as np
 import shap
 from fastapi import HTTPException, status
 
-# Types sklearn compatibles avec shap.TreeExplainer (pas de données background requises)
+# sklearn types compatible with shap.TreeExplainer (no background data required)
 _TREE_TYPES = frozenset(
     [
         "RandomForestClassifier",
@@ -26,7 +26,7 @@ _TREE_TYPES = frozenset(
     ]
 )
 
-# Types sklearn compatibles avec shap.LinearExplainer (nécessite des données background)
+# sklearn types compatible with shap.LinearExplainer (requires background data)
 _LINEAR_TYPES = frozenset(
     [
         "LogisticRegression",
@@ -50,19 +50,19 @@ def compute_shap_explanation(
     feature_baseline: dict | None,
 ) -> dict:
     """
-    Calcule les valeurs SHAP locales pour une observation.
+    Compute local SHAP values for one observation.
 
-    Paramètres
+    Parameters
     ----------
-    model : objet sklearn
-    feature_names : liste ordonnée des noms de features
-    x : array numpy de shape (1, n_features)
-    prediction_result : résultat de model.predict(x)[0] (pour résoudre l'index de classe)
-    feature_baseline : dict {feature: {mean, std, min, max}} issu de model_metadata.feature_baseline
+    model : sklearn object
+    feature_names : ordered list of feature names
+    x : numpy array of shape (1, n_features)
+    prediction_result : result of model.predict(x)[0] (to resolve class index)
+    feature_baseline : dict {feature: {mean, std, min, max}} from model_metadata.feature_baseline
 
-    Retourne
-    --------
-    dict avec les clés :
+    Returns
+    -------
+    dict with keys:
       - shap_values : dict {feature_name: float}
       - base_value  : float
       - model_type  : "tree" | "linear"
@@ -78,16 +78,16 @@ def compute_shap_explanation(
     raise HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         detail=(
-            f"Type de modèle '{model_class}' non supporté pour l'explication SHAP. "
-            "Types supportés — arbres : RandomForest, GradientBoosting, DecisionTree, ExtraTrees,"
-            " HistGradientBoosting. Linéaires : LogisticRegression, LinearRegression, Ridge,"
+            f"Model type '{model_class}' not supported for SHAP explanation. "
+            "Supported types — trees: RandomForest, GradientBoosting, DecisionTree, ExtraTrees,"
+            " HistGradientBoosting. Linear: LogisticRegression, LinearRegression, Ridge,"
             " Lasso, ElasticNet, SGD."
         ),
     )
 
 
 def _resolve_class_index(model, prediction_result) -> int:
-    """Retourne l'index de la classe prédite dans model.classes_, ou 0 par défaut."""
+    """Return the index of the predicted class in model.classes_, or 0 by default."""
     if hasattr(model, "classes_"):
         classes = model.classes_.tolist()
         if prediction_result in classes:
@@ -97,26 +97,26 @@ def _resolve_class_index(model, prediction_result) -> int:
 
 def _extract_vals_and_base(shap_vals, base_vals, class_idx: int):
     """
-    Extrait les valeurs SHAP et la base value pour une classe donnée.
+    Extract SHAP values and base value for a given class.
 
-    Compatible avec les différents formats de sortie selon la version de SHAP :
-      - list[ndarray]         → classificateur multi-classe (une array par classe)
-      - ndarray 3D            → (n_samples, n_features, n_classes) — format SHAP récent
-      - ndarray 2D            → (n_samples, n_features) — régresseur ou binaire compressé
-    base_vals peut être un scalaire, un array 0D, ou un array 1D (une valeur par classe).
+    Compatible with the different output formats depending on the SHAP version:
+      - list[ndarray]         → multi-class classifier (one array per class)
+      - ndarray 3D            → (n_samples, n_features, n_classes) — recent SHAP format
+      - ndarray 2D            → (n_samples, n_features) — regressor or compressed binary
+    base_vals can be a scalar, a 0D array, or a 1D array (one value per class).
     """
     b = np.asarray(base_vals)
 
     if isinstance(shap_vals, list):
-        # Format liste : list[array(n_samples, n_features)], un par classe
+        # List format: list[array(n_samples, n_features)], one per class
         vals = shap_vals[class_idx][0]
         base = float(b[class_idx]) if b.ndim > 0 and len(b) > 1 else float(b.ravel()[0])
     elif shap_vals.ndim == 3:
-        # Format 3D : (n_samples, n_features, n_classes)
+        # 3D format: (n_samples, n_features, n_classes)
         vals = shap_vals[0, :, class_idx]
         base = float(b[class_idx]) if b.ndim > 0 and len(b) > class_idx else float(b.ravel()[0])
     else:
-        # Format 2D : (n_samples, n_features) — régresseur ou classificateur binaire
+        # 2D format: (n_samples, n_features) — regressor or binary classifier
         vals = shap_vals[0]
         if b.ndim > 0 and len(b) > 1:
             base = float(b[class_idx]) if class_idx < len(b) else float(b[0])
@@ -144,7 +144,7 @@ def _explain_tree(model, feature_names: list, x: np.ndarray, prediction_result) 
 def _explain_linear(
     model, feature_names: list, x: np.ndarray, prediction_result, feature_baseline: dict | None
 ) -> dict:
-    # Construire une donnée de background : moyenne des features de training, ou zéros
+    # Build background data: mean of training features, or zeros
     if feature_baseline:
         background = np.array(
             [[feature_baseline.get(f, {}).get("mean", 0.0) for f in feature_names]],
