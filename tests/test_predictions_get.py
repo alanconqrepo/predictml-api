@@ -1,5 +1,5 @@
 """
-Tests pour l'endpoint GET /predictions
+Tests for the GET /predictions endpoint
 """
 import asyncio
 import io
@@ -65,7 +65,7 @@ def test_get_predictions_start_after_end():
 
 
 def test_get_predictions_empty_result():
-    """Aucune prédiction en base pour ce modèle → total=0, liste vide, next_cursor=None."""
+    """No predictions in DB for this model → total=0, empty list, next_cursor=None."""
     response = client.get(
         f"/predictions?name=modele_inexistant&start={START}&end={END}",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -78,7 +78,7 @@ def test_get_predictions_empty_result():
 
 
 def test_get_predictions_pagination_fields():
-    """La réponse contient bien total, limit, next_cursor et predictions."""
+    """The response contains total, limit, next_cursor and predictions."""
     response = client.get(
         f"/predictions?name={TEST_MODEL_NAME}&start={START}&end={END}&limit=10",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -108,7 +108,7 @@ def test_get_predictions_missing_start():
 
 
 def test_get_predictions_with_version_filter():
-    """Filtre version — ne plante pas même si aucun résultat."""
+    """Version filter — does not crash even with no results."""
     response = client.get(
         f"/predictions?name={TEST_MODEL_NAME}&version=9.9.9&start={START}&end={END}",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -118,7 +118,7 @@ def test_get_predictions_with_version_filter():
 
 
 def test_get_predictions_with_user_filter():
-    """Filtre user — ne plante pas même si aucun résultat."""
+    """User filter — does not crash even with no results."""
     response = client.get(
         f"/predictions?name={TEST_MODEL_NAME}&user=nobody&start={START}&end={END}",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -129,8 +129,8 @@ def test_get_predictions_with_user_filter():
 
 def test_get_predictions_cursor_navigation():
     """
-    Insère 3 prédictions, pagine avec limit=2, vérifie que next_cursor est défini
-    sur la première page et qu'on obtient le reste sans doublons sur la seconde.
+    Insert 3 predictions, paginate with limit=2, verify that next_cursor is set
+    on the first page and that the rest is obtained without duplicates on the second.
     """
     cursor_model = "test_cursor_model"
 
@@ -157,7 +157,7 @@ def test_get_predictions_cursor_navigation():
 
     headers = {"Authorization": f"Bearer {TEST_TOKEN}"}
 
-    # Première page : limit=2, pas de curseur
+    # First page: limit=2, no cursor
     r1 = client.get(
         f"/predictions?name={cursor_model}&start={START}&end={END}&limit=2",
         headers=headers,
@@ -169,7 +169,7 @@ def test_get_predictions_cursor_navigation():
 
     ids_page1 = {p["id"] for p in d1["predictions"]}
 
-    # Deuxième page : on passe next_cursor
+    # Second page: passing next_cursor
     r2 = client.get(
         f"/predictions?name={cursor_model}&start={START}&end={END}&limit=2&cursor={d1['next_cursor']}",
         headers=headers,
@@ -180,8 +180,8 @@ def test_get_predictions_cursor_navigation():
 
     ids_page2 = {p["id"] for p in d2["predictions"]}
 
-    # Aucun doublon entre les deux pages
+    # No duplicates between the two pages
     assert ids_page1.isdisjoint(ids_page2)
 
-    # Les ids retournés sont bien parmi ceux insérés
+    # The returned ids are among those inserted
     assert ids_page1 | ids_page2 <= set(inserted_ids)

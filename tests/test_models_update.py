@@ -1,5 +1,5 @@
 """
-Tests pour l'endpoint PATCH /models/{name}/{version}
+Tests for the PATCH /models/{name}/{version} endpoint
 """
 import asyncio
 import io
@@ -45,7 +45,7 @@ asyncio.run(_setup())
 
 
 def _create_model(name: str, version: str = "1.0.0", **extra_data) -> dict:
-    """Crée un modèle via POST /models et retourne la réponse JSON."""
+    """Create a model via POST /models and return the JSON response."""
     data = {"name": name, "version": version, **extra_data}
     r = client.post(
         "/models",
@@ -62,7 +62,7 @@ def _create_model(name: str, version: str = "1.0.0", **extra_data) -> dict:
 # ---------------------------------------------------------------------------
 
 def test_update_model_without_auth():
-    """PATCH /models sans auth → 401/403"""
+    """PATCH /models without auth → 401/403."""
     _create_model(f"{MODEL_A}_noauth")
     response = client.patch(
         f"/models/{MODEL_A}_noauth/1.0.0",
@@ -72,7 +72,7 @@ def test_update_model_without_auth():
 
 
 def test_update_model_with_invalid_token():
-    """PATCH /models avec token invalide → 401"""
+    """PATCH /models with invalid token → 401."""
     _create_model(f"{MODEL_A}_badtoken")
     response = client.patch(
         f"/models/{MODEL_A}_badtoken/1.0.0",
@@ -83,11 +83,11 @@ def test_update_model_with_invalid_token():
 
 
 # ---------------------------------------------------------------------------
-# Cas nominaux
+# Happy path
 # ---------------------------------------------------------------------------
 
 def test_update_description():
-    """PATCH → description mise à jour"""
+    """PATCH → description updated."""
     _create_model(f"{MODEL_A}_desc")
     response = client.patch(
         f"/models/{MODEL_A}_desc/1.0.0",
@@ -99,7 +99,7 @@ def test_update_description():
 
 
 def test_update_accuracy_and_features_count():
-    """PATCH → accuracy et features_count mis à jour"""
+    """PATCH → accuracy and features_count updated."""
     _create_model(f"{MODEL_A}_metrics")
     response = client.patch(
         f"/models/{MODEL_A}_metrics/1.0.0",
@@ -113,7 +113,7 @@ def test_update_accuracy_and_features_count():
 
 
 def test_update_classes():
-    """PATCH → classes mis à jour"""
+    """PATCH → classes updated."""
     _create_model(f"{MODEL_A}_classes")
     response = client.patch(
         f"/models/{MODEL_A}_classes/1.0.0",
@@ -125,7 +125,7 @@ def test_update_classes():
 
 
 def test_update_partial_fields_only():
-    """PATCH → seuls les champs fournis sont modifiés, les autres restent inchangés"""
+    """PATCH → only the provided fields are modified, others remain unchanged."""
     _create_model(f"{MODEL_A}_partial", description="originale", accuracy="0.80")
     response = client.patch(
         f"/models/{MODEL_A}_partial/1.0.0",
@@ -135,15 +135,15 @@ def test_update_partial_fields_only():
     assert response.status_code == 200
     data = response.json()
     assert data["accuracy"] == pytest.approx(0.99)
-    assert data["description"] == "originale"  # inchangé
+    assert data["description"] == "originale"  # unchanged
 
 
 # ---------------------------------------------------------------------------
-# is_production — exclusivité par modèle
+# is_production — exclusivity per model
 # ---------------------------------------------------------------------------
 
 def test_set_is_production_true():
-    """PATCH is_production=true → modèle marqué production"""
+    """PATCH is_production=true → model marked as production."""
     _create_model(f"{MODEL_B}_prod_single")
     response = client.patch(
         f"/models/{MODEL_B}_prod_single/1.0.0",
@@ -156,12 +156,12 @@ def test_set_is_production_true():
 
 def test_is_production_exclusive_across_versions():
     """
-    Quand v2.0.0 passe is_production=True,
-    v1.0.0 (qui était production) doit passer à False automatiquement.
+    When v2.0.0 is set to is_production=True,
+    v1.0.0 (which was production) must automatically switch to False.
     """
     model_name = f"{MODEL_B}_exclusive"
 
-    # Créer v1 et la passer en production
+    # Create v1 and set it to production
     _create_model(model_name, version="1.0.0")
     client.patch(
         f"/models/{model_name}/1.0.0",
@@ -169,7 +169,7 @@ def test_is_production_exclusive_across_versions():
         json={"is_production": True},
     )
 
-    # Créer v2 et la passer en production
+    # Create v2 and set it to production
     _create_model(model_name, version="2.0.0")
     r2 = client.patch(
         f"/models/{model_name}/2.0.0",
@@ -179,7 +179,7 @@ def test_is_production_exclusive_across_versions():
     assert r2.status_code == 200
     assert r2.json()["is_production"] is True
 
-    # Vérifier que v1 n'est plus en production
+    # Verify that v1 is no longer in production
     r1 = client.get("/models")
     models = {m["name"] + "_" + m["version"]: m for m in r1.json()}
     assert models[f"{model_name}_1.0.0"]["is_production"] is False
@@ -187,7 +187,7 @@ def test_is_production_exclusive_across_versions():
 
 
 def test_set_is_production_false():
-    """PATCH is_production=false → modèle retiré de la production"""
+    """PATCH is_production=false → model removed from production."""
     _create_model(f"{MODEL_B}_unprod")
     client.patch(
         f"/models/{MODEL_B}_unprod/1.0.0",
@@ -204,11 +204,11 @@ def test_set_is_production_false():
 
 
 # ---------------------------------------------------------------------------
-# Cas d'erreur
+# Error cases
 # ---------------------------------------------------------------------------
 
 def test_update_model_not_found():
-    """PATCH sur un modèle inexistant → 404"""
+    """PATCH on a non-existent model → 404."""
     response = client.patch(
         "/models/inexistant_model/9.9.9",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -218,7 +218,7 @@ def test_update_model_not_found():
 
 
 def test_update_model_empty_body():
-    """PATCH avec body vide → 200, aucun champ modifié"""
+    """PATCH with empty body → 200, no fields modified."""
     _create_model(f"{MODEL_A}_emptybody", description="stable")
     response = client.patch(
         f"/models/{MODEL_A}_emptybody/1.0.0",
@@ -230,7 +230,7 @@ def test_update_model_empty_body():
 
 
 def test_update_returns_creator_fields():
-    """PATCH retourne user_id_creator et creator_username dans la réponse."""
+    """PATCH returns user_id_creator and creator_username in the response."""
     _create_model(f"{MODEL_A}_creator")
     response = client.patch(
         f"/models/{MODEL_A}_creator/1.0.0",

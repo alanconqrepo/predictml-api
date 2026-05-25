@@ -1,7 +1,7 @@
 """
-Tests pour GET /predictions/stats — #18
+Tests for GET /predictions/stats — #18
 
-Vérifie : auth, stats vides, counts, error_rate, filtre model_name, filtre days.
+Checks: auth, empty stats, counts, error_rate, model_name filter, days filter.
 """
 import asyncio
 from datetime import datetime, timezone, timedelta
@@ -41,7 +41,7 @@ async def _setup():
             )
             user = result.scalar_one()
 
-        # Créer les entrées ModelMetadata
+        # Create ModelMetadata entries
         for name in [STATS_MODEL_A, STATS_MODEL_B]:
             if not await DBService.get_model_metadata(db, name, MODEL_VERSION):
                 await DBService.create_model_metadata(
@@ -54,7 +54,7 @@ async def _setup():
                     is_production=True,
                 )
 
-        # Insérer 3 prédictions succès + 1 erreur pour STATS_MODEL_A
+        # Insert 3 success + 1 error predictions for STATS_MODEL_A
         for i in range(3):
             await DBService.create_prediction(
                 db,
@@ -85,7 +85,7 @@ async def _setup():
             id_obs=None,
         )
 
-        # Insérer 2 prédictions succès pour STATS_MODEL_B
+        # Insert 2 success predictions for STATS_MODEL_B
         for i in range(2):
             await DBService.create_prediction(
                 db,
@@ -111,17 +111,17 @@ asyncio.run(_setup())
 # ---------------------------------------------------------------------------
 
 def test_prediction_stats_requires_auth():
-    """GET /predictions/stats sans token → 401/403."""
+    """GET /predictions/stats without token → 401/403."""
     r = client.get("/predictions/stats")
     assert r.status_code in [401, 403]
 
 
 # ---------------------------------------------------------------------------
-# Stats de base
+# Basic stats
 # ---------------------------------------------------------------------------
 
 def test_prediction_stats_returns_stats():
-    """GET /predictions/stats retourne les deux modèles avec les bons counts."""
+    """GET /predictions/stats returns both models with correct counts."""
     r = client.get(
         "/predictions/stats",
         headers={"Authorization": f"Bearer {STATS_TOKEN}"},
@@ -148,7 +148,7 @@ def test_prediction_stats_returns_stats():
 
 
 def test_prediction_stats_response_time_percentiles():
-    """p50 et p95 sont calculés uniquement sur les succès de STATS_MODEL_A."""
+    """p50 and p95 are computed only on successes for STATS_MODEL_A."""
     r = client.get(
         "/predictions/stats",
         headers={"Authorization": f"Bearer {STATS_TOKEN}"},
@@ -159,18 +159,18 @@ def test_prediction_stats_response_time_percentiles():
     stats = body["stats"]
     assert len(stats) == 1
     s = stats[0]
-    # 3 succès avec response_time_ms = 10, 15, 20
+    # 3 successes with response_time_ms = 10, 15, 20
     assert s["p50_response_time_ms"] is not None
     assert s["p95_response_time_ms"] is not None
     assert s["avg_response_time_ms"] is not None
 
 
 # ---------------------------------------------------------------------------
-# Filtre model_name
+# model_name filter
 # ---------------------------------------------------------------------------
 
 def test_prediction_stats_model_filter():
-    """?model_name= limite les résultats à un seul modèle."""
+    """?model_name= limits the results to a single model."""
     r = client.get(
         "/predictions/stats",
         headers={"Authorization": f"Bearer {STATS_TOKEN}"},
@@ -184,7 +184,7 @@ def test_prediction_stats_model_filter():
 
 
 def test_prediction_stats_unknown_model_returns_empty():
-    """Modèle inexistant → stats liste vide, pas d'erreur."""
+    """Non-existent model → empty stats list, no error."""
     r = client.get(
         "/predictions/stats",
         headers={"Authorization": f"Bearer {STATS_TOKEN}"},
@@ -195,7 +195,7 @@ def test_prediction_stats_unknown_model_returns_empty():
 
 
 # ---------------------------------------------------------------------------
-# Filtre days
+# days filter
 # ---------------------------------------------------------------------------
 
 def test_prediction_stats_days_validation():

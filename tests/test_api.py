@@ -1,5 +1,5 @@
 """
-Tests pour les endpoints de l'API
+Tests for the API endpoints
 """
 import asyncio
 import io
@@ -36,7 +36,7 @@ _ADMIN_HEADERS = {"Authorization": f"Bearer {_ADMIN_TOKEN}"}
 
 
 def test_root_endpoint():
-    """Test de l'endpoint racine"""
+    """Test the root endpoint."""
     response = client.get("/")
     assert response.status_code == 200
 
@@ -49,7 +49,7 @@ def test_root_endpoint():
 
 
 def test_health_endpoint():
-    """Test du health check - retourne healthy si DB connectée, degraded sinon"""
+    """Test the health check — returns healthy if DB is connected, degraded otherwise."""
     response = client.get("/health")
     assert response.status_code == 200
 
@@ -59,7 +59,7 @@ def test_health_endpoint():
 
 
 def test_models_endpoint():
-    """Test de l'endpoint /models - retourne une liste de modèles"""
+    """Test the /models endpoint — returns a list of models."""
     response = client.get("/models")
     assert response.status_code == 200
 
@@ -68,17 +68,17 @@ def test_models_endpoint():
 
 
 def test_predict_without_auth():
-    """Test de prédiction sans authentification - HTTPBearer retourne 401"""
+    """Test prediction without authentication — HTTPBearer returns 401."""
     response = client.post(
         "/predict",
         json={"model_name": "iris_model", "features": {"sepal_length": 5.1, "sepal_width": 3.5}}
     )
-    # HTTPBearer sans header Authorization retourne 401 ou 403 selon la version de Starlette
+    # HTTPBearer without an Authorization header returns 401 or 403 depending on the Starlette version
     assert response.status_code in [401, 403]
 
 
 def test_predict_with_invalid_token():
-    """Test de prédiction avec un token invalide - doit retourner 401"""
+    """Test prediction with an invalid token — must return 401."""
     response = client.post(
         "/predict",
         headers={"Authorization": "Bearer invalid-token"},
@@ -89,9 +89,9 @@ def test_predict_with_invalid_token():
 
 def test_predict_valid_payload_returns_auth_error_not_schema_error():
     """
-    Le format dict {nom: valeur} doit passer la validation Pydantic
-    et retourner 401 (auth), pas 422 (schema error).
-    FastAPI évalue l'auth avant le body — vérifie que le pipeline est bien auth > schema.
+    The dict {name: value} format must pass Pydantic validation
+    and return 401 (auth), not 422 (schema error).
+    FastAPI evaluates auth before the body — verifies that the pipeline is auth > schema.
     """
     response = client.post(
         "/predict",
@@ -106,13 +106,13 @@ def test_predict_valid_payload_returns_auth_error_not_schema_error():
             }
         }
     )
-    assert response.status_code == 401  # Auth fail, pas 422 validation error
+    assert response.status_code == 401  # Auth fail, not 422 validation error
 
 
 def test_predict_payload_with_id_obs_returns_auth_error_not_schema_error():
     """
-    Format dict avec id_obs doit passer la validation Pydantic
-    et retourner 401 (auth), pas 422 (schema error).
+    Dict format with id_obs must pass Pydantic validation
+    and return 401 (auth), not 422 (schema error).
     """
     response = client.post(
         "/predict",
@@ -128,11 +128,11 @@ def test_predict_payload_with_id_obs_returns_auth_error_not_schema_error():
             }
         }
     )
-    assert response.status_code == 401  # Auth fail, pas 422 validation error
+    assert response.status_code == 401  # Auth fail, not 422 validation error
 
 
 def test_predict_payload_with_model_version_returns_auth_error_not_schema_error():
-    """model_version dans le body doit passer la validation Pydantic et retourner 401 (auth), pas 422."""
+    """model_version in the body must pass Pydantic validation and return 401 (auth), not 422."""
     response = client.post(
         "/predict",
         headers={"Authorization": "Bearer invalid-token"},
@@ -146,7 +146,7 @@ def test_predict_payload_with_model_version_returns_auth_error_not_schema_error(
 
 
 def test_cached_models_endpoint_returns_structure():
-    """GET /models/cached — pas d'auth requise, retourne cached_models (liste) et count (int)."""
+    """GET /models/cached — no auth required, returns cached_models (list) and count (int)."""
     response = client.get("/models/cached")
     assert response.status_code == 200
     data = response.json()
@@ -157,12 +157,12 @@ def test_cached_models_endpoint_returns_structure():
 
 
 def test_cached_models_count_reflects_injected_model():
-    """Après injection d'un modèle dans le cache Redis, GET /models/cached le reflète."""
+    """After injecting a model into the Redis cache, GET /models/cached reflects it."""
     from src.services.model_service import model_service
 
     key = "cached_test_model:9.9.9"
     data = {
-        "model": SimpleNamespace(),  # MagicMock n'est pas picklable
+        "model": SimpleNamespace(),  # MagicMock is not picklable
         "metadata": SimpleNamespace(name="cached_test_model", version="9.9.9"),
     }
     _jbuf = io.BytesIO()
@@ -183,25 +183,25 @@ def test_cached_models_count_reflects_injected_model():
 # ---------------------------------------------------------------------------
 
 def test_health_dependencies_requires_admin():
-    """L'endpoint doit retourner 401/403 sans authentification."""
+    """The endpoint must return 401/403 without authentication."""
     response = client.get("/health/dependencies")
     assert response.status_code in (401, 403)
 
 
 def test_health_dependencies_requires_admin_token_not_user():
-    """Un token non-admin doit retourner 403."""
+    """A non-admin token must return 403."""
     response = client.get("/health/dependencies", headers={"Authorization": "Bearer invalid-token"})
     assert response.status_code in (401, 403)
 
 
 def test_health_dependencies_returns_200():
-    """L'endpoint répond 200 pour un admin quelle que soit l'état des dépendances."""
+    """The endpoint responds 200 for an admin regardless of dependency status."""
     response = client.get("/health/dependencies", headers=_ADMIN_HEADERS)
     assert response.status_code == 200
 
 
 def test_health_dependencies_response_structure():
-    """La réponse contient status, checked_at et les quatre dépendances."""
+    """The response contains status, checked_at and the four dependencies."""
     response = client.get("/health/dependencies", headers=_ADMIN_HEADERS)
     data = response.json()
 
@@ -217,17 +217,17 @@ def test_health_dependencies_response_structure():
 
 
 def test_health_dependencies_db_ok(monkeypatch):
-    """Quand la DB répond, database.status == 'ok' et latency_ms est un nombre."""
+    """When the DB responds, database.status == 'ok' and latency_ms is a number."""
     response = client.get("/health/dependencies", headers=_ADMIN_HEADERS)
     data = response.json()
-    # La DB est SQLite en mémoire — elle doit toujours répondre en test
+    # The DB is in-memory SQLite — it must always respond in tests
     assert data["dependencies"]["database"]["status"] == "ok"
     assert data["dependencies"]["database"]["latency_ms"] is not None
     assert data["dependencies"]["database"]["latency_ms"] >= 0
 
 
 def test_health_dependencies_redis_ok():
-    """Avec FakeRedis, redis.status == 'ok'."""
+    """With FakeRedis, redis.status == 'ok'."""
     response = client.get("/health/dependencies", headers=_ADMIN_HEADERS)
     data = response.json()
     assert data["dependencies"]["redis"]["status"] == "ok"
@@ -235,7 +235,7 @@ def test_health_dependencies_redis_ok():
 
 
 def test_health_dependencies_global_status_critical_when_db_fails(monkeypatch):
-    """Si la DB échoue, le statut global est 'critical'."""
+    """If the DB fails, the global status is 'critical'."""
     from unittest.mock import AsyncMock, patch
 
     from src.schemas.health import DependencyDetail
@@ -254,7 +254,7 @@ def test_health_dependencies_global_status_critical_when_db_fails(monkeypatch):
 
 
 def test_health_dependencies_global_status_degraded_when_non_db_fails(monkeypatch):
-    """Si MinIO échoue (mais pas la DB), le statut global est 'degraded'."""
+    """If MinIO fails (but not the DB), the global status is 'degraded'."""
     from unittest.mock import AsyncMock, patch
 
     from src.schemas.health import DependencyDetail
@@ -273,7 +273,7 @@ def test_health_dependencies_global_status_degraded_when_non_db_fails(monkeypatc
 
 
 def test_health_dependencies_global_status_ok_when_all_pass(monkeypatch):
-    """Quand toutes les dépendances répondent, le statut global est 'ok'."""
+    """When all dependencies respond, the global status is 'ok'."""
     from unittest.mock import AsyncMock, patch
 
     from src.schemas.health import DependencyDetail
@@ -291,7 +291,7 @@ def test_health_dependencies_global_status_ok_when_all_pass(monkeypatch):
 
 
 def test_health_dependencies_error_detail_included():
-    """Quand une dépendance échoue, le champ detail est présent."""
+    """When a dependency fails, the detail field is present."""
     from unittest.mock import AsyncMock, patch
 
     from src.schemas.health import DependencyDetail

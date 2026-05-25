@@ -1,5 +1,5 @@
 """
-Tests pour DELETE /predictions/purge
+Tests for DELETE /predictions/purge
 """
 
 import asyncio
@@ -149,7 +149,7 @@ def test_purge_missing_older_than_days_returns_422():
 
 
 def test_purge_older_than_days_zero_is_valid():
-    """older_than_days=0 est désormais autorisé — purge tout (dry_run par défaut)."""
+    """older_than_days=0 is now allowed — purges everything (dry_run by default)."""
     response = client.delete(
         "/predictions/purge?older_than_days=0",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -166,7 +166,7 @@ def test_purge_older_than_days_zero_is_valid():
 
 
 def test_purge_dry_run_true_by_default():
-    """dry_run=true par défaut — aucune suppression, réponse cohérente."""
+    """dry_run=true by default — no deletion, coherent response."""
     response = client.delete(
         "/predictions/purge?older_than_days=90",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -182,7 +182,7 @@ def test_purge_dry_run_true_by_default():
 
 
 def test_purge_dry_run_does_not_delete():
-    """Après un dry_run, les prédictions doivent toujours exister."""
+    """After a dry_run, predictions must still exist."""
     client.delete(
         "/predictions/purge?older_than_days=90&dry_run=true",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -197,7 +197,7 @@ def test_purge_dry_run_does_not_delete():
 
 
 def test_purge_response_schema():
-    """La réponse contient tous les champs attendus."""
+    """The response contains all expected fields."""
     response = client.delete(
         "/predictions/purge?older_than_days=90",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -216,7 +216,7 @@ def test_purge_response_schema():
 
 
 def test_purge_oldest_remaining_points_to_recent_prediction():
-    """oldest_remaining doit pointer vers la prédiction récente (pas supprimée)."""
+    """oldest_remaining must point to the recent prediction (not deleted)."""
     response = client.delete(
         f"/predictions/purge?older_than_days=90&model_name={MODEL_A}",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -224,13 +224,13 @@ def test_purge_oldest_remaining_points_to_recent_prediction():
     data = response.json()
     assert data["oldest_remaining"] is not None
     oldest_dt = datetime.fromisoformat(data["oldest_remaining"])
-    # La prédiction récente est à RECENT_TS (~10 jours) — bien après la cutoff
+    # The recent prediction is at RECENT_TS (~10 days) — well after the cutoff
     assert oldest_dt > NOW - timedelta(days=90)
 
 
 def test_purge_oldest_remaining_none_when_all_would_be_deleted():
-    """Si toutes les prédictions du modèle seraient supprimées, oldest_remaining est None."""
-    # MODEL_B n'a qu'une prédiction ancienne, aucune récente
+    """If all predictions for the model would be deleted, oldest_remaining is None."""
+    # MODEL_B has only one old prediction, none recent
     response = client.delete(
         f"/predictions/purge?older_than_days=90&model_name={MODEL_B}",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -245,18 +245,18 @@ def test_purge_oldest_remaining_none_when_all_would_be_deleted():
 
 
 def test_purge_warns_linked_observed_results():
-    """linked_observed_results_count > 0 si des prédictions liées à des observed_results sont supprimées."""
+    """linked_observed_results_count > 0 if predictions linked to observed_results are deleted."""
     response = client.delete(
         f"/predictions/purge?older_than_days=90&model_name={MODEL_A}",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     )
     data = response.json()
-    # obs-old-0 sur MODEL_A est lié à un ObservedResult
+    # obs-old-0 on MODEL_A is linked to an ObservedResult
     assert data["linked_observed_results_count"] >= 1
 
 
 def test_purge_no_linked_observed_results_for_model_b():
-    """Aucun observed_result lié à MODEL_B → linked_observed_results_count == 0."""
+    """No observed_result linked to MODEL_B → linked_observed_results_count == 0."""
     response = client.delete(
         f"/predictions/purge?older_than_days=90&model_name={MODEL_B}",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -271,7 +271,7 @@ def test_purge_no_linked_observed_results_for_model_b():
 
 
 def test_purge_model_name_filter_limits_scope():
-    """Avec model_name, seul le modèle ciblé apparaît dans models_affected."""
+    """With model_name, only the targeted model appears in models_affected."""
     response = client.delete(
         f"/predictions/purge?older_than_days=90&model_name={MODEL_B}",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -282,13 +282,13 @@ def test_purge_model_name_filter_limits_scope():
 
 
 def test_purge_model_name_filter_counts_only_target_model():
-    """Avec model_name=MODEL_B, deleted_count correspond uniquement à ce modèle."""
+    """With model_name=MODEL_B, deleted_count corresponds only to that model."""
     response = client.delete(
         f"/predictions/purge?older_than_days=90&model_name={MODEL_B}",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     )
     data = response.json()
-    # MODEL_B a 1 vieille prédiction
+    # MODEL_B has 1 old prediction
     assert data["deleted_count"] == 1
 
 
@@ -298,15 +298,15 @@ def test_purge_model_name_filter_counts_only_target_model():
 
 
 def test_purge_dry_run_false_deletes_predictions():
-    """dry_run=false supprime réellement les prédictions et retourne le bon compte."""
-    # Vérifier d'abord le dry_run
+    """dry_run=false actually deletes predictions and returns the correct count."""
+    # First verify with dry_run
     dry = client.delete(
         f"/predictions/purge?older_than_days=90&model_name={MODEL_B}&dry_run=true",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     )
     assert dry.json()["deleted_count"] == 1
 
-    # Supprimer réellement
+    # Actually delete
     real = client.delete(
         f"/predictions/purge?older_than_days=90&model_name={MODEL_B}&dry_run=false",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -315,7 +315,7 @@ def test_purge_dry_run_false_deletes_predictions():
     assert real.json()["dry_run"] is False
     assert real.json()["deleted_count"] == 1
 
-    # Après suppression, plus rien à supprimer pour MODEL_B
+    # After deletion, nothing left to delete for MODEL_B
     after = client.delete(
         f"/predictions/purge?older_than_days=90&model_name={MODEL_B}&dry_run=true",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -325,19 +325,19 @@ def test_purge_dry_run_false_deletes_predictions():
 
 
 def test_purge_dry_run_false_preserves_recent_predictions():
-    """dry_run=false ne supprime pas les prédictions récentes (< older_than_days)."""
-    # Purger MODEL_A (3 vieilles + 1 récente)
+    """dry_run=false does not delete recent predictions (< older_than_days)."""
+    # Purge MODEL_A (3 old + 1 recent)
     response = client.delete(
         f"/predictions/purge?older_than_days=90&model_name={MODEL_A}&dry_run=false",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
     )
     data = response.json()
-    # Seules les 3 vieilles sont supprimées (MODEL_B a déjà été supprimé dans le test précédent)
+    # Only the 3 old ones are deleted (MODEL_B was already deleted in the previous test)
     assert data["deleted_count"] == 3
-    # oldest_remaining pointe vers la prédiction récente
+    # oldest_remaining points to the recent prediction
     assert data["oldest_remaining"] is not None
 
-    # Plus de vieilles prédictions sur MODEL_A
+    # No more old predictions on MODEL_A
     after = client.delete(
         f"/predictions/purge?older_than_days=90&model_name={MODEL_A}&dry_run=true",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -346,7 +346,7 @@ def test_purge_dry_run_false_preserves_recent_predictions():
 
 
 def test_purge_dry_run_false_returns_false_in_response():
-    """Le champ dry_run dans la réponse reflète bien le paramètre passé."""
+    """The dry_run field in the response correctly reflects the passed parameter."""
     response = client.delete(
         f"/predictions/purge?older_than_days=1&model_name={MODEL_A}&dry_run=false",
         headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
