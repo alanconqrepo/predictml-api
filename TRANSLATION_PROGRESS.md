@@ -126,17 +126,17 @@
 
 ## Batch 8 — `tests/` part B
 
-- [ ] `tests/test_retrain.py`
-- [ ] `tests/test_scheduled_retraining.py`
-- [ ] `tests/test_auto_promotion_policy.py`
-- [ ] `tests/test_ab_shadow.py`
-- [ ] `tests/test_ab_significance.py`
-- [ ] `tests/test_feature_importance.py`
-- [ ] `tests/test_observed_results.py`
-- [ ] `tests/test_users.py`
-- [ ] `tests/test_security.py`
-- [ ] `tests/test_rate_limit.py`
-- [ ] `tests/test_drift.py`
+- [x] `tests/test_retrain.py`
+- [x] `tests/test_scheduled_retraining.py`
+- [x] `tests/test_auto_promotion_policy.py`
+- [x] `tests/test_ab_shadow.py`
+- [x] `tests/test_ab_significance.py`
+- [x] `tests/test_feature_importance.py`
+- [x] `tests/test_observed_results.py`
+- [x] `tests/test_users.py`
+- [x] `tests/test_security.py`
+- [x] `tests/test_rate_limit.py`
+- [x] `tests/test_drift.py`
 
 ---
 

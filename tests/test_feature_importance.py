@@ -1,10 +1,10 @@
 """
-Tests pour GET /models/{name}/feature-importance — SHAP agrégé global.
+Tests for GET /models/{name}/feature-importance — global aggregated SHAP.
 
-Stratégie :
-  - Modèles injectés directement dans le cache Redis via model_service._redis
-  - Prédictions créées en DB pour alimenter l'agrégation SHAP
-  - Pas de Docker requis (SQLite in-memory)
+Strategy:
+  - Models injected directly into the Redis cache via model_service._redis
+  - Predictions created in DB to feed the SHAP aggregation
+  - No Docker required (SQLite in-memory)
 """
 
 import asyncio

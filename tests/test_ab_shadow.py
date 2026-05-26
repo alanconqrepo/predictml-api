@@ -1,12 +1,12 @@
 """
-Tests A/B Testing & Shadow Deployment.
+A/B Testing & Shadow Deployment Tests.
 
-Stratégie :
+Strategy:
   - SQLite in-memory (conftest) + FakeRedis (model_service._redis)
-  - Modèles sklearn créés à la volée, injectés dans le cache
-  - Le shadow background task est patché pour utiliser _TestSessionLocal
-    (AsyncSessionLocal de production pointe sur PostgreSQL — indisponible en tests)
-  - Chaque test nettoie le cache avec try/finally
+  - sklearn models created on the fly, injected into the cache
+  - The shadow background task is patched to use _TestSessionLocal
+    (production AsyncSessionLocal points to PostgreSQL — unavailable in tests)
+  - Each test cleans up the cache with try/finally
 """
 import asyncio
 import io
@@ -28,7 +28,7 @@ from tests.conftest import _TestSessionLocal
 
 client = TestClient(app)
 
-# Tokens et noms uniques à ce fichier
+# Tokens and names unique to this file
 TEST_TOKEN = "test-token-ab-shadow-xr9k"
 AB_MODEL = "ab_test_model"
 SHADOW_MODEL = "shadow_test_model"
@@ -42,14 +42,14 @@ V2 = "2.0.0"
 
 
 def _make_lr_model() -> LogisticRegression:
-    """Crée un LogisticRegression minimal avec feature_names_in_."""
+    """Create a minimal LogisticRegression with feature_names_in_."""
     X = pd.DataFrame({"f1": [1.0, 2.0, 3.0, 4.0], "f2": [2.0, 3.0, 4.0, 5.0]})
     y = [0, 1, 0, 1]
     return LogisticRegression(max_iter=1000).fit(X, y)
 
 
 def _inject_cache(model_name: str, version: str, model) -> str:
-    """Injecte un modèle sklearn dans le cache FakeRedis."""
+    """Inject a sklearn model into the FakeRedis cache."""
     key = f"{model_name}:{version}"
     data = {
         "model": model,
@@ -71,13 +71,13 @@ def _headers():
 
 
 # ---------------------------------------------------------------------------
-# Setup : utilisateur + ModelMetadata
+# Setup: user + ModelMetadata
 # ---------------------------------------------------------------------------
 
 
 async def _setup():
     async with _TestSessionLocal() as db:
-        # Utilisateur de test
+        # Test user
         if not await DBService.get_user_by_token(db, TEST_TOKEN):
             await DBService.create_user(
                 db,
@@ -88,7 +88,7 @@ async def _setup():
                 rate_limit=99999,
             )
 
-        # Versions A/B pour AB_MODEL
+        # A/B versions for AB_MODEL
         for ver, mode, weight, is_prod in [
             (V1, "ab_test", 0.8, False),
             (V2, "ab_test", 0.2, False),
@@ -106,7 +106,7 @@ async def _setup():
                     traffic_weight=weight,
                 )
 
-        # Versions production + shadow pour SHADOW_MODEL
+        # Production + shadow versions for SHADOW_MODEL
         for ver, mode, weight, is_prod in [
             (V1, None, None, True),    # production (legacy)
             (V2, "shadow", None, False),
@@ -129,15 +129,15 @@ asyncio.run(_setup())
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — A/B routing : distribution pondérée du trafic
+# Test 1 — A/B routing: weighted traffic distribution
 # ---------------------------------------------------------------------------
 
 
 def test_ab_routing_distributes_traffic():
     """
-    Avec v1 (80%) et v2 (20%), sur N appels sans version explicite,
-    les deux versions doivent être sélectionnées avec le ratio attendu.
-    Tolérance ±20 points de pourcentage (probabiliste).
+    With v1 (80%) and v2 (20%), over N calls without explicit version,
+    both versions must be selected with the expected ratio.
+    Tolerance ±20 percentage points (probabilistic).
     """
     model = _make_lr_model()
     key_v1 = _inject_cache(AB_MODEL, V1, model)
@@ -155,25 +155,25 @@ def test_ab_routing_distributes_traffic():
             data = r.json()
             version_counts[data["model_version"]] += 1
 
-        # Les deux versions doivent être sélectionnées
-        assert V1 in version_counts, "v1 n'a jamais été sélectionnée"
-        assert V2 in version_counts, "v2 n'a jamais été sélectionnée"
+        # Both versions must be selected
+        assert V1 in version_counts, "v1 was never selected"
+        assert V2 in version_counts, "v2 was never selected"
 
-        # Ratio approximatif (±25 pp de tolérance pour N=100)
+        # Approximate ratio (±25 pp tolerance for N=100)
         v1_ratio = version_counts[V1] / n
-        assert 0.55 <= v1_ratio <= 1.0, f"v1 ratio trop loin de 80% : {v1_ratio:.0%}"
+        assert 0.55 <= v1_ratio <= 1.0, f"v1 ratio too far from 80%: {v1_ratio:.0%}"
     finally:
         asyncio.run(model_service.clear_cache(key_v1))
         asyncio.run(model_service.clear_cache(key_v2))
 
 
 # ---------------------------------------------------------------------------
-# Test 2 — A/B routing : selected_version est présent dans la réponse
+# Test 2 — A/B routing: selected_version is present in the response
 # ---------------------------------------------------------------------------
 
 
 def test_ab_routing_returns_selected_version():
-    """Lors d'un routage A/B, selected_version est renseigné dans la réponse."""
+    """During A/B routing, selected_version is populated in the response."""
     model = _make_lr_model()
     key_v1 = _inject_cache(AB_MODEL, V1, model)
     key_v2 = _inject_cache(AB_MODEL, V2, model)
@@ -185,7 +185,7 @@ def test_ab_routing_returns_selected_version():
         )
         assert r.status_code == 200
         data = r.json()
-        # selected_version doit être présent (non-None) lors d'un routage automatique
+        # selected_version must be present (non-None) during automatic routing
         assert data.get("selected_version") is not None
         assert data["selected_version"] in [V1, V2]
     finally:
@@ -194,12 +194,12 @@ def test_ab_routing_returns_selected_version():
 
 
 # ---------------------------------------------------------------------------
-# Test 3 — Version explicite contourne le routage A/B
+# Test 3 — Explicit version bypasses A/B routing
 # ---------------------------------------------------------------------------
 
 
 def test_explicit_version_bypasses_ab_routing():
-    """POST /predict avec model_version explicite → toujours la version demandée."""
+    """POST /predict with explicit model_version → always the requested version."""
     model = _make_lr_model()
     key_v1 = _inject_cache(AB_MODEL, V1, model)
     key_v2 = _inject_cache(AB_MODEL, V2, model)
@@ -216,7 +216,7 @@ def test_explicit_version_bypasses_ab_routing():
             )
             assert r.status_code == 200
             assert r.json()["model_version"] == V1
-            # selected_version est None quand la version est explicite
+            # selected_version is None when version is explicit
             assert r.json()["selected_version"] is None
     finally:
         asyncio.run(model_service.clear_cache(key_v1))
@@ -224,20 +224,20 @@ def test_explicit_version_bypasses_ab_routing():
 
 
 # ---------------------------------------------------------------------------
-# Test 4 — Shadow : la réponse vient du modèle production
+# Test 4 — Shadow: response comes from the production model
 # ---------------------------------------------------------------------------
 
 
 def test_shadow_primary_response_is_production():
     """
-    Avec v1 (production) et v2 (shadow), POST /predict sans version
-    → la réponse vient de v1 (pas du shadow).
+    With v1 (production) and v2 (shadow), POST /predict without version
+    → the response comes from v1 (not the shadow).
     """
     model = _make_lr_model()
     key_v1 = _inject_cache(SHADOW_MODEL, V1, model)
     key_v2 = _inject_cache(SHADOW_MODEL, V2, model)
     try:
-        # Patcher AsyncSessionLocal pour que le shadow task utilise la DB de test
+        # Patch AsyncSessionLocal so the shadow task uses the test DB
         with patch("src.api.predict.AsyncSessionLocal", _TestSessionLocal):
             r = client.post(
                 "/predict",
@@ -246,7 +246,7 @@ def test_shadow_primary_response_is_production():
             )
         assert r.status_code == 200
         data = r.json()
-        # La réponse client doit venir de v1 (production / is_production=True)
+        # Client response must come from v1 (production / is_production=True)
         assert data["model_version"] == V1
     finally:
         asyncio.run(model_service.clear_cache(key_v1))
@@ -254,13 +254,13 @@ def test_shadow_primary_response_is_production():
 
 
 # ---------------------------------------------------------------------------
-# Test 5 — Shadow : prédiction shadow enregistrée avec is_shadow=True
+# Test 5 — Shadow: shadow prediction logged with is_shadow=True
 # ---------------------------------------------------------------------------
 
 
 def test_shadow_prediction_logged_with_is_shadow_flag():
     """
-    Après un appel avec shadow actif, une prédiction is_shadow=True est en DB pour v2.
+    After a call with active shadow, a prediction with is_shadow=True is in DB for v2.
     """
     model = _make_lr_model()
     key_v1 = _inject_cache(SHADOW_MODEL, V1, model)
@@ -282,7 +282,7 @@ def test_shadow_prediction_logged_with_is_shadow_flag():
         asyncio.run(model_service.clear_cache(key_v1))
         asyncio.run(model_service.clear_cache(key_v2))
 
-    # Vérifier en DB : il doit exister une prédiction shadow pour v2
+    # Verify in DB: a shadow prediction for v2 must exist
     async def _check():
         async with _TestSessionLocal() as db:
             start = datetime.now(timezone.utc) - timedelta(minutes=5)
@@ -301,21 +301,21 @@ def test_shadow_prediction_logged_with_is_shadow_flag():
     shadow_rows = [r for r in rows if r.is_shadow]
     prod_rows = [r for r in rows if not r.is_shadow]
 
-    assert len(prod_rows) >= 1, "Prédiction production absente de la DB"
-    assert len(shadow_rows) >= 1, "Prédiction shadow absente de la DB"
+    assert len(prod_rows) >= 1, "Production prediction missing from DB"
+    assert len(shadow_rows) >= 1, "Shadow prediction missing from DB"
     assert prod_rows[0].model_version == V1
     assert shadow_rows[0].model_version == V2
 
 
 # ---------------------------------------------------------------------------
-# Test 6 — Validation des poids : somme > 1.0 → 422
+# Test 6 — Weight validation: sum > 1.0 → 422
 # ---------------------------------------------------------------------------
 
 
 def test_patch_ab_weight_sum_exceeds_one_returns_422():
     """
-    PATCH d'une version avec un traffic_weight qui ferait dépasser 1.0 → 422.
-    v1 est déjà à 0.8 → tenter de mettre v2 à 0.9 doit échouer.
+    PATCH of a version with traffic_weight that would exceed 1.0 → 422.
+    v1 is already at 0.8 → trying to set v2 to 0.9 must fail.
     """
     r = client.patch(
         f"/models/{AB_MODEL}/{V2}",
@@ -327,13 +327,13 @@ def test_patch_ab_weight_sum_exceeds_one_returns_422():
 
 
 # ---------------------------------------------------------------------------
-# Test 7 — PATCH valide : mise à jour du deployment_mode
+# Test 7 — Valid PATCH: update deployment_mode
 # ---------------------------------------------------------------------------
 
 
 def test_patch_deployment_mode_valid():
-    """PATCH avec traffic_weight ≤ 1.0 − 0.8 = 0.2 → 200."""
-    # v1 pèse 0.8, on met v2 à 0.2 → somme = 1.0 : acceptable
+    """PATCH with traffic_weight ≤ 1.0 − 0.8 = 0.2 → 200."""
+    # v1 weighs 0.8, set v2 to 0.2 → sum = 1.0: acceptable
     r = client.patch(
         f"/models/{AB_MODEL}/{V2}",
         headers=_headers(),
@@ -346,12 +346,12 @@ def test_patch_deployment_mode_valid():
 
 
 # ---------------------------------------------------------------------------
-# Test 8 — GET /models/{name}/ab-compare : structure de réponse
+# Test 8 — GET /models/{name}/ab-compare: response structure
 # ---------------------------------------------------------------------------
 
 
 def test_get_ab_compare_structure():
-    """GET /models/{name}/ab-compare → ABCompareResponse avec champs attendus."""
+    """GET /models/{name}/ab-compare → ABCompareResponse with expected fields."""
     r = client.get(
         f"/models/{AB_MODEL}/ab-compare",
         headers=_headers(),
@@ -363,14 +363,14 @@ def test_get_ab_compare_structure():
     assert "period_days" in data
     assert "versions" in data
     assert isinstance(data["versions"], list)
-    # Chaque version doit avoir les champs attendus
+    # Each version must have the expected fields
     for vs in data["versions"]:
         assert "version" in vs
         assert "total_predictions" in vs
         assert "shadow_predictions" in vs
         assert "error_rate" in vs
         assert "prediction_distribution" in vs
-    # Le champ ab_significance doit être présent (None ou objet valide)
+    # The ab_significance field must be present (None or valid object)
     assert "ab_significance" in data
     sig = data["ab_significance"]
     if sig is not None:
@@ -382,12 +382,12 @@ def test_get_ab_compare_structure():
 
 
 # ---------------------------------------------------------------------------
-# Test 9 — GET /models/{name}/ab-compare : modèle inexistant → 404
+# Test 9 — GET /models/{name}/ab-compare: non-existent model → 404
 # ---------------------------------------------------------------------------
 
 
 def test_get_ab_compare_unknown_model_returns_404():
-    """GET /models/{name}/ab-compare pour un modèle inexistant → 404."""
+    """GET /models/{name}/ab-compare for a non-existent model → 404."""
     r = client.get(
         "/models/nonexistent_model_ab_xyz/ab-compare",
         headers=_headers(),
@@ -396,12 +396,12 @@ def test_get_ab_compare_unknown_model_returns_404():
 
 
 # ---------------------------------------------------------------------------
-# Test 10 — Fallback legacy : aucun mode configuré → is_production utilisé
+# Test 10 — Legacy fallback: no mode configured → is_production used
 # ---------------------------------------------------------------------------
 
 
 async def _create_legacy_model():
-    """Crée un modèle avec comportement legacy (is_production, pas de deployment_mode)."""
+    """Create a model with legacy behavior (is_production, no deployment_mode)."""
     async with _TestSessionLocal() as db:
         name = "legacy_model_ab_test"
         if not await DBService.get_model_metadata(db, name, V1):
@@ -421,7 +421,7 @@ async def _create_legacy_model():
 
 def test_legacy_fallback_uses_production_version():
     """
-    Sans deployment_mode configuré, le routage fallback utilise is_production=True.
+    Without configured deployment_mode, fallback routing uses is_production=True.
     """
     legacy_model_name = asyncio.run(_create_legacy_model())
     model = _make_lr_model()
@@ -439,12 +439,12 @@ def test_legacy_fallback_uses_production_version():
 
 
 # ---------------------------------------------------------------------------
-# Test 11 — GET /models/{name}/shadow-compare : structure de réponse
+# Test 11 — GET /models/{name}/shadow-compare: response structure
 # ---------------------------------------------------------------------------
 
 
 def test_get_shadow_compare_structure():
-    """GET /models/{name}/shadow-compare → ShadowCompareResponse avec champs attendus."""
+    """GET /models/{name}/shadow-compare → ShadowCompareResponse with expected fields."""
     r = client.get(
         f"/models/{SHADOW_MODEL}/shadow-compare",
         headers=_headers(),
@@ -476,12 +476,12 @@ def test_get_shadow_compare_structure():
 
 
 # ---------------------------------------------------------------------------
-# Test 12 — GET /models/{name}/shadow-compare : modèle inexistant → 404
+# Test 12 — GET /models/{name}/shadow-compare: non-existent model → 404
 # ---------------------------------------------------------------------------
 
 
 def test_get_shadow_compare_unknown_model_returns_404():
-    """GET /models/{name}/shadow-compare pour un modèle inexistant → 404."""
+    """GET /models/{name}/shadow-compare for a non-existent model → 404."""
     r = client.get(
         "/models/nonexistent_shadow_model_xyz/shadow-compare",
         headers=_headers(),
@@ -490,12 +490,12 @@ def test_get_shadow_compare_unknown_model_returns_404():
 
 
 # ---------------------------------------------------------------------------
-# Test 13 — GET /models/{name}/shadow-compare : sans version shadow → n_comparable=0
+# Test 13 — GET /models/{name}/shadow-compare: no shadow version → n_comparable=0
 # ---------------------------------------------------------------------------
 
 
 def test_get_shadow_compare_no_shadow_version():
-    """Modèle sans version shadow → shadow_version=None, n_comparable=0, insufficient_data."""
+    """Model without shadow version → shadow_version=None, n_comparable=0, insufficient_data."""
     r = client.get(
         f"/models/{AB_MODEL}/shadow-compare",
         headers=_headers(),
@@ -510,7 +510,7 @@ def test_get_shadow_compare_no_shadow_version():
 
 
 # ---------------------------------------------------------------------------
-# Test 14 — GET /models/{name}/shadow-compare : avec paires en DB → métriques calculées
+# Test 14 — GET /models/{name}/shadow-compare: with pairs in DB → computed metrics
 # ---------------------------------------------------------------------------
 
 
@@ -518,7 +518,7 @@ SHADOW_PAIRS_MODEL = "shadow_pairs_test_model"
 
 
 async def _setup_shadow_pairs_model():
-    """Crée un modèle dédié avec version shadow + production pour le test de paires."""
+    """Create a dedicated model with shadow + production versions for the pairs test."""
     async with _TestSessionLocal() as db:
         for ver, mode, is_prod in [
             (V1, None, True),
@@ -572,7 +572,7 @@ asyncio.run(_setup_shadow_pairs_model())
 
 
 def test_get_shadow_compare_with_pairs():
-    """Avec 15 paires en DB → n_comparable=15, agreement_rate calculé, recommendation."""
+    """With 15 pairs in DB → n_comparable=15, agreement_rate computed, recommendation."""
     r = client.get(
         f"/models/{SHADOW_PAIRS_MODEL}/shadow-compare",
         headers=_headers(),
@@ -583,7 +583,7 @@ def test_get_shadow_compare_with_pairs():
     assert data["n_comparable"] == 15
     assert data["agreement_rate"] is not None
     assert 0.0 <= data["agreement_rate"] <= 1.0
-    # Les deux prédisent 0 → accord = 100 %
+    # Both predict 0 → 100% agreement
     assert data["agreement_rate"] == 1.0
     # shadow_confidence_delta = 0.90 - 0.75 = +0.15
     assert data["shadow_confidence_delta"] is not None
@@ -591,9 +591,9 @@ def test_get_shadow_compare_with_pairs():
     # shadow_latency_delta_ms = 8 - 10 = -2.0
     assert data["shadow_latency_delta_ms"] is not None
     assert abs(data["shadow_latency_delta_ms"] - (-2.0)) < 0.5
-    # Pas d'observed_results → accuracy_available=False
+    # No observed_results → accuracy_available=False
     assert data["accuracy_available"] is False
     assert data["shadow_accuracy"] is None
     assert data["production_accuracy"] is None
-    # recommendation : confidence_delta = 0.15 > 0.05 → shadow_better
+    # recommendation: confidence_delta = 0.15 > 0.05 → shadow_better
     assert data["recommendation"] == "shadow_better"

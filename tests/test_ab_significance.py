@@ -1,9 +1,9 @@
 """
-Tests pour le service de significativité statistique A/B.
+Tests for the A/B statistical significance service.
 
-Stratégie :
-  - Tests unitaires du service compute_ab_significance (sans DB, sans réseau)
-  - Test d'intégration minimal via l'endpoint /ab-compare (SQLite in-memory)
+Strategy:
+  - Unit tests for compute_ab_significance service (no DB, no network)
+  - Minimal integration test via the /ab-compare endpoint (SQLite in-memory)
 """
 
 import asyncio
@@ -20,54 +20,54 @@ from src.services.ab_significance_service import (
 )
 
 # ---------------------------------------------------------------------------
-# Helpers internes
+# Internal helpers
 # ---------------------------------------------------------------------------
 
 
 def test_cohen_h_equal_proportions():
-    """Cohen h = 0 quand les deux proportions sont égales."""
+    """Cohen h = 0 when both proportions are equal."""
     assert abs(_cohen_h(0.1, 0.1)) < 1e-10
 
 
 def test_cohen_h_different_proportions():
-    """Cohen h > 0 quand les proportions diffèrent."""
+    """Cohen h > 0 when proportions differ."""
     assert abs(_cohen_h(0.1, 0.3)) > 0
 
 
 def test_cohen_d_equal_means():
-    """Cohen d = 0 quand les moyennes sont identiques."""
+    """Cohen d = 0 when means are identical."""
     assert _cohen_d(10.0, 10.0, 2.0, 2.0, 20, 20) == 0.0
 
 
 def test_cohen_d_different_means():
-    """Cohen d > 0 quand les moyennes diffèrent."""
+    """Cohen d > 0 when means differ."""
     assert _cohen_d(10.0, 15.0, 2.0, 2.0, 20, 20) > 0.0
 
 
 def test_min_samples_proportions_equal():
-    """Proportions égales → 0 échantillons (pas d'effet à détecter)."""
+    """Equal proportions → 0 samples (no effect to detect)."""
     assert _min_samples_proportions(0.1, 0.1) == 0
 
 
 def test_min_samples_proportions_large_gap():
-    """Grande différence de proportions → échantillon minimal faible."""
+    """Large difference between proportions → small minimum sample."""
     n = _min_samples_proportions(0.05, 0.30)
     assert 0 < n < 100
 
 
 def test_min_samples_continuous_zero_effect():
-    """Cohen d = 0 → 0 échantillons."""
+    """Cohen d = 0 → 0 samples."""
     assert _min_samples_continuous(0.0) == 0
 
 
 def test_min_samples_continuous_small_effect():
-    """Petit effet (d=0.2) → échantillon minimal raisonnable (> 100)."""
+    """Small effect (d=0.2) → reasonable minimum sample (> 100)."""
     n = _min_samples_continuous(0.2)
     assert n > 100
 
 
 # ---------------------------------------------------------------------------
-# compute_ab_significance — cas Chi-²
+# compute_ab_significance — Chi-squared cases
 # ---------------------------------------------------------------------------
 
 
@@ -81,25 +81,25 @@ def _make_stats(version, n_total, n_errors, times=None):
 
 
 def test_significance_returns_none_with_single_version():
-    """Une seule version → None (test impossible)."""
+    """Single version → None (test impossible)."""
     result = compute_ab_significance([_make_stats("v1", 100, 5)])
     assert result is None
 
 
 def test_significance_returns_none_with_no_data():
-    """Aucune version avec prédictions → None."""
+    """No version with predictions → None."""
     result = compute_ab_significance([_make_stats("v1", 0, 0), _make_stats("v2", 0, 0)])
     assert result is None
 
 
 def test_significance_chi2_with_clear_winner():
     """
-    v1 a 5 % d'erreur, v2 a 40 % d'erreur sur 500 prédictions chacun.
-    Le test Chi-² doit être significatif et désigner v1 comme gagnant.
+    v1 has 5% error rate, v2 has 40% error rate over 500 predictions each.
+    The Chi-squared test must be significant and designate v1 as winner.
     """
     stats = [
-        _make_stats("v1", 500, 25),  # 5 % erreur
-        _make_stats("v2", 500, 200),  # 40 % erreur
+        _make_stats("v1", 500, 25),  # 5% error rate
+        _make_stats("v2", 500, 200),  # 40% error rate
     ]
     result = compute_ab_significance(stats)
 
@@ -116,7 +116,7 @@ def test_significance_chi2_with_clear_winner():
 
 def test_significance_chi2_no_errors_fallback():
     """
-    Aucune erreur dans les deux groupes → pas de Chi-², fallback Mann-Whitney U si temps dispo.
+    No errors in either group → no Chi-squared, fallback to Mann-Whitney U if times available.
     """
     times_v1 = [10.0, 11.0, 10.5, 9.8, 10.2]
     times_v2 = [50.0, 55.0, 52.0, 48.0, 51.0]
@@ -132,7 +132,7 @@ def test_significance_chi2_no_errors_fallback():
 
 
 def test_significance_no_data_at_all_returns_none():
-    """Aucune erreur et aucun temps de réponse → None."""
+    """No errors and no response times → None."""
     stats = [_make_stats("v1", 5, 0), _make_stats("v2", 5, 0)]
     result = compute_ab_significance(stats)
     assert result is None
@@ -140,7 +140,7 @@ def test_significance_no_data_at_all_returns_none():
 
 def test_significance_picks_two_most_active_versions():
     """
-    Trois versions disponibles : le test utilise les deux avec le plus de prédictions.
+    Three versions available: the test uses the two with the most predictions.
     """
     stats = [
         _make_stats("v1", 50, 2),
@@ -155,7 +155,7 @@ def test_significance_picks_two_most_active_versions():
 
 
 def test_significance_confidence_level_respected():
-    """Le seuil de confiance est répercuté dans la réponse."""
+    """The confidence threshold is reflected in the response."""
     stats = [_make_stats("v1", 200, 10), _make_stats("v2", 200, 80)]
     result = compute_ab_significance(stats, confidence_level=0.99)
     assert result is not None
@@ -163,13 +163,13 @@ def test_significance_confidence_level_respected():
 
 
 def test_significance_tied_winner_is_none():
-    """Taux d'erreur identiques → winner=None."""
+    """Identical error rates → winner=None."""
     stats = [
-        _make_stats("v1", 200, 20),  # 10 %
-        _make_stats("v2", 200, 20),  # 10 %
+        _make_stats("v1", 200, 20),  # 10%
+        _make_stats("v2", 200, 20),  # 10%
     ]
     result = compute_ab_significance(stats)
-    # Peut être None (pas de test possible avec h=0) ou winner=None
+    # May be None (test impossible with h=0) or winner=None
     if result is not None:
         assert result["winner"] is None
 
@@ -180,7 +180,7 @@ def test_significance_tied_winner_is_none():
 
 
 def test_significance_mann_whitney_significant():
-    """Deux distributions très différentes → Mann-Whitney significatif."""
+    """Two very different distributions → Mann-Whitney significant."""
     times_a = [10.0] * 30
     times_b = [100.0] * 30
     stats = [
@@ -196,7 +196,7 @@ def test_significance_mann_whitney_significant():
 
 
 def test_significance_mann_whitney_not_significant():
-    """Distributions identiques → Mann-Whitney non significatif."""
+    """Identical distributions → Mann-Whitney not significant."""
     times = [10.0, 11.0, 10.5, 9.8, 10.2, 10.1, 9.9, 10.3]
     stats = [
         _make_stats("v1", 8, 0, list(times)),
@@ -208,7 +208,7 @@ def test_significance_mann_whitney_not_significant():
 
 
 def test_significance_response_fields_complete():
-    """La réponse contient tous les champs requis."""
+    """The response contains all required fields."""
     stats = [
         _make_stats("v1", 300, 15),
         _make_stats("v2", 300, 60),
@@ -229,7 +229,7 @@ def test_significance_response_fields_complete():
 
 
 # ---------------------------------------------------------------------------
-# Test d'intégration : endpoint GET /models/{name}/ab-compare
+# Integration test: GET /models/{name}/ab-compare endpoint
 # ---------------------------------------------------------------------------
 
 _SIG_TOKEN = "test-token-ab-sig-e1hQw"
@@ -271,7 +271,7 @@ asyncio.run(_create_sig_fixtures())
 
 
 def test_ab_compare_endpoint_includes_significance_field():
-    """GET /ab-compare → réponse contient le champ ab_significance (None ou objet valide)."""
+    """GET /ab-compare → response contains the ab_significance field (None or valid object)."""
     headers = {"Authorization": f"Bearer {_SIG_TOKEN}"}
     r = _client.get(f"/models/{_SIG_MODEL}/ab-compare", headers=headers, params={"days": 30})
     assert r.status_code == 200
@@ -289,12 +289,12 @@ def test_ab_compare_endpoint_includes_significance_field():
 
 
 # ---------------------------------------------------------------------------
-# compute_ab_significance — chemin régression (résidus de prédiction)
+# compute_ab_significance — regression path (prediction residuals)
 # ---------------------------------------------------------------------------
 
 
 def _make_stats_regression(version, n_total, prediction_errors, times=None):
-    """Crée un dict version_stats avec prediction_errors pour tester la régression."""
+    """Create a version_stats dict with prediction_errors to test regression."""
     return {
         "version": version,
         "total_predictions": n_total,
@@ -305,8 +305,8 @@ def _make_stats_regression(version, n_total, prediction_errors, times=None):
 
 
 def test_significance_regression_mae_significant():
-    """Régression : résidus très différents → Mann-Whitney U significatif, metric=mae."""
-    # v1 : erreurs faibles, v2 : erreurs élevées
+    """Regression: very different residuals → Mann-Whitney U significant, metric=mae."""
+    # v1: low errors, v2: high errors
     errors_v1 = [0.1] * 30
     errors_v2 = [5.0] * 30
     stats = [
@@ -318,14 +318,14 @@ def test_significance_regression_mae_significant():
     assert result["metric"] == "mae"
     assert result["test"] == "mann_whitney_u"
     assert result["significant"] is True
-    assert result["winner"] == "v1"  # v1 a MAE plus faible
+    assert result["winner"] == "v1"  # v1 has lower MAE
     assert result["p_value"] < 0.05
     assert result["current_samples"]["v1"] == 30
     assert result["current_samples"]["v2"] == 30
 
 
 def test_significance_regression_mae_not_significant():
-    """Régression : résidus identiques → Mann-Whitney non significatif."""
+    """Regression: identical residuals → Mann-Whitney not significant."""
     errors = [1.0, 1.1, 0.9, 1.0, 1.05, 0.95, 1.0, 1.0]
     stats = [
         _make_stats_regression("v1", 8, list(errors)),
@@ -338,10 +338,10 @@ def test_significance_regression_mae_not_significant():
 
 
 def test_significance_regression_prioritized_over_response_times():
-    """Si prediction_errors disponibles, on les utilise en priorité sur response_times."""
+    """If prediction_errors available, they take priority over response_times."""
     errors_v1 = [0.1] * 20
     errors_v2 = [5.0] * 20
-    # Aussi des temps de réponse très différents (ne doivent pas être utilisés)
+    # Also very different response times (must not be used)
     times_v1 = [100.0] * 20
     times_v2 = [10.0] * 20
     stats = [
@@ -350,12 +350,12 @@ def test_significance_regression_prioritized_over_response_times():
     ]
     result = compute_ab_significance(stats)
     assert result is not None
-    assert result["metric"] == "mae"  # Pas response_time_ms
-    assert result["winner"] == "v1"  # Basé sur MAE, pas latence
+    assert result["metric"] == "mae"  # Not response_time_ms
+    assert result["winner"] == "v1"  # Based on MAE, not latency
 
 
 def test_significance_regression_no_errors_fallback_to_none():
-    """Régression sans résidus ni temps de réponse → None."""
+    """Regression without residuals or response times → None."""
     stats = [
         _make_stats_regression("v1", 5, []),
         _make_stats_regression("v2", 5, []),
@@ -365,7 +365,7 @@ def test_significance_regression_no_errors_fallback_to_none():
 
 
 def test_significance_regression_fields_complete():
-    """La réponse régression contient tous les champs requis."""
+    """Regression response contains all required fields."""
     stats = [
         _make_stats_regression("v1", 30, [0.5] * 30),
         _make_stats_regression("v2", 30, [2.0] * 30),

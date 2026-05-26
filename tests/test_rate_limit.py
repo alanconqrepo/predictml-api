@@ -1,16 +1,16 @@
 """
-Tests pour l'enforcement du rate limiting sur POST /predict.
+Tests for rate limiting enforcement on POST /predict.
 
-Stratégie :
-  - Créer un utilisateur avec rate_limit_per_day = 2
-  - Injecter des prédictions en DB pour simuler le quota atteint
-  - Vérifier que POST /predict retourne 429 quand le quota est dépassé
-  - Vérifier que les autres endpoints (GET /models) restent accessibles après quota atteint
+Strategy:
+  - Create a user with rate_limit_per_day = 2
+  - Inject predictions in DB to simulate a reached quota
+  - Verify that POST /predict returns 429 when the quota is exceeded
+  - Verify that other endpoints (GET /models) remain accessible after quota is reached
 
-Rate limiting par IP (slowapi) :
-  - Utiliser unittest.mock pour patcher le limiter et déclencher RateLimitExceeded
-  - Vérifier que POST /predict, POST /models et POST /users retournent 429 quand la
-    limite par minute est atteinte
+IP rate limiting (slowapi):
+  - Use unittest.mock to patch the limiter and trigger RateLimitExceeded
+  - Verify that POST /predict, POST /models and POST /users return 429 when the
+    per-minute limit is reached
 """
 import asyncio
 import io
@@ -80,7 +80,7 @@ asyncio.run(_setup())
 
 
 async def _seed_predictions(count: int) -> None:
-    """Insère `count` prédictions today pour l'utilisateur RL_TOKEN."""
+    """Insert `count` predictions today for RL_TOKEN user."""
     async with _TestSessionLocal() as db:
         user = await DBService.get_user_by_token(db, RL_TOKEN)
         for _ in range(count):
@@ -98,7 +98,7 @@ async def _seed_predictions(count: int) -> None:
 
 
 async def _delete_predictions() -> None:
-    """Supprime toutes les prédictions de l'utilisateur RL_TOKEN."""
+    """Delete all predictions for RL_TOKEN user."""
     from sqlalchemy import delete
     from src.db.models import Prediction
 
@@ -113,7 +113,7 @@ async def _delete_predictions() -> None:
 # ---------------------------------------------------------------------------
 
 def test_rate_limit_not_exceeded_returns_200():
-    """Avec 0 prédictions aujourd'hui (quota 2), POST /predict doit réussir."""
+    """With 0 predictions today (quota 2), POST /predict must succeed."""
     asyncio.run(_delete_predictions())
     model = _make_model()
     key = _inject_cache(RL_MODEL, RL_MODEL_VERSION, model)
@@ -130,7 +130,7 @@ def test_rate_limit_not_exceeded_returns_200():
 
 
 def test_rate_limit_exceeded_returns_429():
-    """Avec rate_limit=2 et 2 prédictions déjà enregistrées, la suivante doit retourner 429."""
+    """With rate_limit=2 and 2 predictions already recorded, the next one must return 429."""
     asyncio.run(_delete_predictions())
     asyncio.run(_seed_predictions(2))
     model = _make_model()
@@ -143,7 +143,7 @@ def test_rate_limit_exceeded_returns_429():
         )
         assert response.status_code == 429
         detail = response.json()["detail"]
-        assert "Rate limit dépassé" in detail
+        assert "Rate limit" in detail
         assert "2" in detail
     finally:
         asyncio.run(model_service.clear_cache(key))
@@ -151,7 +151,7 @@ def test_rate_limit_exceeded_returns_429():
 
 
 def test_rate_limit_error_message_contains_quota_and_count():
-    """Le message 429 doit indiquer le quota journalier et le nombre de prédictions effectuées."""
+    """The 429 message must indicate the daily quota and the number of predictions made."""
     asyncio.run(_delete_predictions())
     asyncio.run(_seed_predictions(2))
     model = _make_model()
@@ -164,19 +164,19 @@ def test_rate_limit_error_message_contains_quota_and_count():
         )
         assert response.status_code == 429
         detail = response.json()["detail"]
-        assert "2 requêtes/jour" in detail
-        assert "2 prédictions" in detail
+        assert "2 requests/day" in detail or "2 requêtes/jour" in detail
+        assert "2 predictions" in detail or "2 prédictions" in detail
     finally:
         asyncio.run(model_service.clear_cache(key))
         asyncio.run(_delete_predictions())
 
 
 def test_rate_limit_does_not_block_models_endpoint():
-    """Quand le quota est atteint, GET /models reste accessible (auth uniquement, pas de rate limit)."""
+    """When the quota is reached, GET /models remains accessible (auth only, no rate limit)."""
     asyncio.run(_delete_predictions())
     asyncio.run(_seed_predictions(2))
     try:
-        # GET /models ne nécessite pas d'auth — vérifie qu'il répond bien malgré le quota atteint
+        # GET /models does not require auth — verifies it responds correctly despite the quota being reached
         response = client.get("/models")
         assert response.status_code == 200
     finally:
@@ -184,7 +184,7 @@ def test_rate_limit_does_not_block_models_endpoint():
 
 
 def test_rate_limit_count_today_only():
-    """get_user_prediction_count_today ne doit compter que les prédictions du jour (UTC)."""
+    """get_user_prediction_count_today must only count today's predictions (UTC)."""
     asyncio.run(_delete_predictions())
 
     async def _seed_yesterday():
@@ -194,7 +194,7 @@ def test_rate_limit_count_today_only():
 
         async with _TestSessionLocal() as db:
             user = await DBService.get_user_by_token(db, RL_TOKEN)
-            # Créer une prédiction puis la rétrodater à hier
+            # Create a prediction then backdate it to yesterday
             pred = await DBService.create_prediction(
                 db=db,
                 user_id=user.id,
@@ -227,11 +227,11 @@ def test_rate_limit_count_today_only():
 
 
 # ---------------------------------------------------------------------------
-# Tests rate limiting par IP (slowapi — 60/min /predict, 10/min /models et /users)
+# Tests IP rate limiting (slowapi — 60/min /predict, 10/min /models and /users)
 # ---------------------------------------------------------------------------
 
 def test_ip_rate_limit_predict_returns_429_when_exceeded():
-    """Quand la limite par IP est atteinte sur une route, slowapi retourne 429."""
+    """When the per-IP limit is reached on a route, slowapi returns 429."""
     import os
     from unittest.mock import patch
     from fastapi import FastAPI, Request as _Request
@@ -261,7 +261,7 @@ def test_ip_rate_limit_predict_returns_429_when_exceeded():
 
 
 def test_ip_rate_limit_predict_allows_requests_under_limit():
-    """/predict répond 200 pour des requêtes bien en-dessous de la limite par minute."""
+    """/predict returns 200 for requests well below the per-minute limit."""
     asyncio.run(_delete_predictions())
     model = _make_model()
     key = _inject_cache(RL_MODEL, RL_MODEL_VERSION, model)
@@ -271,11 +271,11 @@ def test_ip_rate_limit_predict_allows_requests_under_limit():
             headers={"Authorization": f"Bearer {RL_TOKEN}"},
             json={"model_name": RL_MODEL, "features": {"f1": 1.0, "f2": 2.0}},
         )
-        # Vérifie que la limite par minute ne bloque pas une requête unique
+        # Verify that the per-minute limit does not block a single request
         assert response.status_code in (200, 429)
         if response.status_code == 429:
             detail = response.json().get("detail", "")
-            # 429 doit venir du rate limit journalier (quota) ou du rate limit par IP
+            # 429 must come from the daily rate limit (quota) or the per-IP rate limit
             assert "Rate limit" in detail or "minute" in detail or "per" in detail
     finally:
         asyncio.run(model_service.clear_cache(key))
@@ -283,30 +283,30 @@ def test_ip_rate_limit_predict_allows_requests_under_limit():
 
 
 def test_ip_rate_limit_models_endpoint_has_limiter_configured():
-    """Vérifie que POST /models a bien le décorateur @limiter.limit configuré."""
+    """Verify that POST /models has the @limiter.limit decorator configured."""
     from src.api.models import create_model
 
-    # slowapi stocke les limites dans l'attribut _rate_limits ou via les wrappers
-    # La présence de __wrapped__ ou _limits confirme que le décorateur est actif
+    # slowapi stores limits in the _rate_limits attribute or via wrappers
+    # The presence of __wrapped__ or _limits confirms the decorator is active
     assert hasattr(create_model, "__wrapped__") or callable(create_model)
 
 
 def test_ip_rate_limit_users_endpoint_has_limiter_configured():
-    """Vérifie que POST /users a bien le décorateur @limiter.limit configuré."""
+    """Verify that POST /users has the @limiter.limit decorator configured."""
     from src.api.users import create_user
 
     assert hasattr(create_user, "__wrapped__") or callable(create_user)
 
 
 def test_ip_rate_limit_predict_endpoint_has_limiter_configured():
-    """Vérifie que POST /predict a bien le décorateur @limiter.limit configuré."""
+    """Verify that POST /predict has the @limiter.limit decorator configured."""
     from src.api.predict import predict
 
     assert hasattr(predict, "__wrapped__") or callable(predict)
 
 
 def test_ip_rate_limit_exception_handler_registered():
-    """Vérifie que le handler RateLimitExceeded est bien enregistré sur l'application."""
+    """Verify that the RateLimitExceeded handler is registered on the application."""
     from slowapi.errors import RateLimitExceeded
     from src.main import app
 
@@ -314,7 +314,7 @@ def test_ip_rate_limit_exception_handler_registered():
 
 
 def test_ip_rate_limit_limiter_attached_to_app():
-    """Vérifie que le limiter slowapi est bien attaché à app.state."""
+    """Verify that the slowapi limiter is properly attached to app.state."""
     from src.core.rate_limit import limiter
     from src.main import app
 
@@ -322,18 +322,18 @@ def test_ip_rate_limit_limiter_attached_to_app():
 
 
 # ---------------------------------------------------------------------------
-# Tests rate limiting et taille de batch sur POST /predict-batch
+# Tests rate limiting and batch size on POST /predict-batch
 # ---------------------------------------------------------------------------
 
 def test_ip_rate_limit_predict_batch_endpoint_has_limiter_configured():
-    """Vérifie que POST /predict-batch a bien le décorateur @limiter.limit configuré."""
+    """Verify that POST /predict-batch has the @limiter.limit decorator configured."""
     from src.api.predict import predict_batch
 
     assert hasattr(predict_batch, "__wrapped__") or callable(predict_batch)
 
 
 def test_predict_batch_max_batch_size_env_default():
-    """MAX_BATCH_SIZE doit valoir 500 par défaut (variable d'env non définie)."""
+    """MAX_BATCH_SIZE must be 500 by default (env variable not defined)."""
     import importlib
     import os
     from unittest.mock import patch
@@ -346,7 +346,7 @@ def test_predict_batch_max_batch_size_env_default():
 
 
 def test_predict_batch_max_batch_size_env_override():
-    """MAX_BATCH_SIZE doit lire la variable d'env MAX_BATCH_SIZE."""
+    """MAX_BATCH_SIZE must read the MAX_BATCH_SIZE env variable."""
     import importlib
     import os
     from unittest.mock import patch
@@ -358,7 +358,7 @@ def test_predict_batch_max_batch_size_env_override():
 
 
 def test_predict_batch_rejects_oversized_batch():
-    """Un batch dépassant MAX_BATCH_SIZE doit retourner 422."""
+    """A batch exceeding MAX_BATCH_SIZE must return 422."""
     import os
     from unittest.mock import patch
 
@@ -379,7 +379,7 @@ def test_predict_batch_rejects_oversized_batch():
             )
         assert response.status_code == 422
         detail = response.json()["detail"]
-        assert "Batch trop grand" in detail
+        assert "Batch too large" in detail or "Batch trop grand" in detail
         assert "max 2" in detail
     finally:
         asyncio.run(model_service.clear_cache(key))
@@ -387,7 +387,7 @@ def test_predict_batch_rejects_oversized_batch():
 
 
 def test_predict_batch_accepts_batch_within_limit():
-    """Un batch dans la limite de MAX_BATCH_SIZE ne doit pas être rejeté pour taille."""
+    """A batch within the MAX_BATCH_SIZE limit must not be rejected for size."""
     from unittest.mock import patch
 
     model = _make_model()
@@ -405,8 +405,11 @@ def test_predict_batch_accepts_batch_within_limit():
                     "inputs": inputs,
                 },
             )
-        # Peut retourner 200 (succès) ou 429 (quota journalier) mais pas 422 pour taille
-        assert response.status_code != 422 or "Batch trop grand" not in response.json().get("detail", "")
+        # May return 200 (success) or 429 (daily quota) but not 422 for size
+        assert response.status_code != 422 or (
+            "Batch too large" not in response.json().get("detail", "")
+            and "Batch trop grand" not in response.json().get("detail", "")
+        )
     finally:
         asyncio.run(model_service.clear_cache(key))
         asyncio.run(_delete_predictions())

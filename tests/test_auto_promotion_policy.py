@@ -1,21 +1,21 @@
 """
-Tests pour la fonctionnalité d'auto-promotion post-retrain.
+Tests for the auto-promotion post-retrain feature.
 
-Couvre :
+Covers:
 - PATCH /models/{name}/policy
   - Auth / permissions
-  - Modèle inexistant
-  - Succès : policy stockée sur toutes les versions actives
-  - Validation des champs (min_accuracy, max_latency_p95_ms)
-  - Désactivation (auto_promote=False)
-- POST /models/{name}/{version}/retrain avec auto-promotion
-  - Sans policy → auto_promoted=None
-  - Policy auto_promote=False → non évaluée
-  - Policy auto_promote=True, échantillons insuffisants → auto_promoted=False
-  - Policy auto_promote=True, accuracy OK → auto_promoted=True, promu
-  - Policy auto_promote=True, accuracy insuffisante → auto_promoted=False
-  - Policy auto_promote=True, latence P95 trop élevée → auto_promoted=False
-  - set_production=True (manuel) prend la main sur l'auto-promotion
+  - Non-existent model
+  - Success: policy stored on all active versions
+  - Field validation (min_accuracy, max_latency_p95_ms)
+  - Disable (auto_promote=False)
+- POST /models/{name}/{version}/retrain with auto-promotion
+  - Without policy → auto_promoted=None
+  - Policy auto_promote=False → not evaluated
+  - Policy auto_promote=True, insufficient samples → auto_promoted=False
+  - Policy auto_promote=True, accuracy OK → auto_promoted=True, promoted
+  - Policy auto_promote=True, insufficient accuracy → auto_promoted=False
+  - Policy auto_promote=True, P95 latency too high → auto_promoted=False
+  - set_production=True (manual) overrides auto-promotion
 - evaluate_auto_promotion() (unit tests)
 """
 
@@ -94,7 +94,7 @@ def _create_model(name: str, version: str = "1.0.0", with_train_script: bool = F
 
 
 # ---------------------------------------------------------------------------
-# Setup utilisateurs
+# User setup
 # ---------------------------------------------------------------------------
 
 
@@ -136,7 +136,7 @@ _minio_mock.upload_file_bytes.return_value = {
 
 
 async def _mock_exec_success(*args, **kwargs):
-    """Mock subprocess pour retrain_service — readline() + stderr.read()."""
+    """Mock subprocess for retrain_service — readline() + stderr.read()."""
     env = kwargs.get("env", {})
     output_path = env.get("OUTPUT_MODEL_PATH", "")
     if output_path:
@@ -160,7 +160,7 @@ async def _mock_exec_success(*args, **kwargs):
 
 
 def _auto_promo_source_fields(train_script_key="mock_train.py", promotion_policy=None):
-    """Crée source_fields minimal pour les tests do_retrain() avec auto-promotion."""
+    """Creates minimal source_fields for do_retrain() tests with auto-promotion."""
     return {
         "train_script_object_key": train_script_key,
         "description": None,
@@ -188,7 +188,7 @@ def _auto_promo_source_fields(train_script_key="mock_train.py", promotion_policy
 
 
 class TestPolicyEndpoint:
-    """Tests pour PATCH /models/{name}/policy."""
+    """Tests for PATCH /models/{name}/policy."""
 
     @classmethod
     def setup_class(cls):
@@ -239,7 +239,7 @@ class TestPolicyEndpoint:
         assert data["promotion_policy"]["auto_promote"] is True
 
     def test_patch_policy_updates_all_active_versions(self):
-        """La policy doit être propagée à toutes les versions actives."""
+        """The policy must be propagated to all active versions."""
         r = client.patch(
             f"/models/{self.model_name}/policy",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -249,7 +249,7 @@ class TestPolicyEndpoint:
         assert r.json()["updated_versions"] == 2
 
     def test_patch_policy_min_accuracy_out_of_range_returns_422(self):
-        """min_accuracy doit être dans [0.0, 1.0]."""
+        """min_accuracy must be in [0.0, 1.0]."""
         r = client.patch(
             f"/models/{self.model_name}/policy",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -258,7 +258,7 @@ class TestPolicyEndpoint:
         assert r.status_code == 422
 
     def test_patch_policy_max_latency_negative_returns_422(self):
-        """max_latency_p95_ms doit être > 0."""
+        """max_latency_p95_ms must be > 0."""
         r = client.patch(
             f"/models/{self.model_name}/policy",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -267,7 +267,7 @@ class TestPolicyEndpoint:
         assert r.status_code == 422
 
     def test_patch_policy_min_sample_validation_zero_returns_422(self):
-        """min_sample_validation doit être >= 1."""
+        """min_sample_validation must be >= 1."""
         r = client.patch(
             f"/models/{self.model_name}/policy",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -276,7 +276,7 @@ class TestPolicyEndpoint:
         assert r.status_code == 422
 
     def test_patch_policy_defaults_auto_promote_false(self):
-        """Sans auto_promote explicite, la valeur par défaut est False."""
+        """Without explicit auto_promote, the default value is False."""
         r = client.patch(
             f"/models/{self.model_name}/policy",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -286,7 +286,7 @@ class TestPolicyEndpoint:
         assert r.json()["promotion_policy"]["auto_promote"] is False
 
     def test_patch_policy_persisted_on_model_get(self):
-        """La policy est visible dans GET /models/{name}/{version}."""
+        """The policy is visible in GET /models/{name}/{version}."""
         client.patch(
             f"/models/{self.model_name}/policy",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -304,16 +304,16 @@ class TestPolicyEndpoint:
 
 
 # ---------------------------------------------------------------------------
-# Tests — auto-promotion dans retrain
+# Tests — auto-promotion in retrain
 # ---------------------------------------------------------------------------
 
 
 class TestAutoPromotionInRetrain:
-    """Tests de l'auto-promotion déclenchée par retrain_service.do_retrain().
+    """Tests for auto-promotion triggered by retrain_service.do_retrain().
 
-    Le retrain est maintenant asynchrone (ARQ) : l'endpoint retourne 202 et
-    l'auto-promotion est évaluée par le worker. Ces tests valident la logique
-    via do_retrain() directement.
+    Retraining is now asynchronous (ARQ): the endpoint returns 202 and
+    auto-promotion is evaluated by the worker. These tests validate the logic
+    via do_retrain() directly.
     """
 
     @classmethod
@@ -327,7 +327,7 @@ class TestAutoPromotionInRetrain:
         _create_model(cls.model_policy_on, "1.0.0", with_train_script=True)
 
     def test_retrain_without_policy_auto_promoted_is_none(self):
-        """Sans policy, auto_promoted est None."""
+        """Without policy, auto_promoted is None."""
         from src.services.retrain_service import do_retrain
 
         async def _run():
@@ -346,7 +346,7 @@ class TestAutoPromotionInRetrain:
         assert result["auto_promoted"] is None
 
     def test_retrain_policy_auto_promote_false_not_evaluated(self):
-        """Policy présente mais auto_promote=False → auto_promoted=None (non évalué)."""
+        """Policy present but auto_promote=False → auto_promoted=None (not evaluated)."""
         from src.services.retrain_service import do_retrain
 
         async def _run():
@@ -364,11 +364,11 @@ class TestAutoPromotionInRetrain:
 
         result = asyncio.run(_run())
         assert result["success"] is True
-        # auto_promote=False → branche non déclenchée → auto_promoted=None
+        # auto_promote=False → branch not triggered → auto_promoted=None
         assert result["auto_promoted"] is None
 
     def test_retrain_auto_promote_insufficient_samples(self):
-        """Policy active, échantillons insuffisants → auto_promoted=False."""
+        """Active policy, insufficient samples → auto_promoted=False."""
         from src.services.retrain_service import do_retrain
 
         async def _run():
@@ -397,7 +397,7 @@ class TestAutoPromotionInRetrain:
         assert result["is_production"] is False
 
     def test_retrain_auto_promote_success(self):
-        """Policy active, critères satisfaits → auto_promoted=True, version en production."""
+        """Active policy, all criteria met → auto_promoted=True, version in production."""
         from src.services.retrain_service import do_retrain
 
         async def _run():
@@ -426,7 +426,7 @@ class TestAutoPromotionInRetrain:
         assert result["is_production"] is True
 
     def test_retrain_auto_promote_accuracy_fails(self):
-        """Policy active, accuracy insuffisante → auto_promoted=False, non promu."""
+        """Active policy, insufficient accuracy → auto_promoted=False, not promoted."""
         from src.services.retrain_service import do_retrain
 
         async def _run():
@@ -457,7 +457,7 @@ class TestAutoPromotionInRetrain:
         assert result["is_production"] is False
 
     def test_retrain_auto_promote_latency_fails(self):
-        """Policy active, latence P95 trop élevée → auto_promoted=False."""
+        """Active policy, P95 latency too high → auto_promoted=False."""
         from src.services.retrain_service import do_retrain
 
         async def _run():
@@ -486,7 +486,7 @@ class TestAutoPromotionInRetrain:
         assert "latence" in result["auto_promote_reason"].lower()
 
     def test_retrain_set_production_overrides_auto_promotion(self):
-        """set_production=True : promotion manuelle, auto_promoted est None."""
+        """set_production=True: manual promotion, auto_promoted is None."""
         from src.services.retrain_service import do_retrain
 
         async def _run():
@@ -506,21 +506,21 @@ class TestAutoPromotionInRetrain:
         result = asyncio.run(_run())
         assert result["success"] is True
         assert result["is_production"] is True
-        # set_production=True → branche auto-promotion non empruntée
+        # set_production=True → auto-promotion branch not taken
         assert result["auto_promoted"] is None
 
 
 # ---------------------------------------------------------------------------
-# Tests unitaires — evaluate_auto_promotion()
+# Unit tests — evaluate_auto_promotion()
 # ---------------------------------------------------------------------------
 
 
 class TestEvaluateAutoPromotion:
-    """Tests unitaires pour src/services/auto_promotion_service.evaluate_auto_promotion."""
+    """Unit tests for src/services/auto_promotion_service.evaluate_auto_promotion."""
 
     def _make_pairs(self, n: int, correct_ratio: float = 1.0):
-        """Génère n paires (prediction, observed_result, probs, timestamp).
-        correct_ratio : fraction de prédictions correctes (pred == obs)."""
+        """Generate n pairs (prediction, observed_result, probs, timestamp).
+        correct_ratio: fraction of correct predictions (pred == obs)."""
         pairs = []
         for i in range(n):
             pred = "A" if i / n < correct_ratio else "B"
@@ -529,7 +529,7 @@ class TestEvaluateAutoPromotion:
         return pairs
 
     def _make_db(self, pairs, latency_times=None):
-        """Crée un mock AsyncSession pour evaluate_auto_promotion."""
+        """Create a mock AsyncSession for evaluate_auto_promotion."""
         db = MagicMock()
         # Mock get_performance_pairs
         get_pairs_mock = AsyncMock(return_value=pairs)
@@ -589,16 +589,16 @@ class TestEvaluateAutoPromotion:
         assert "précision" in reason.lower()
 
     def test_no_accuracy_threshold_skips_accuracy_check(self):
-        """Sans min_accuracy, pas de vérification d'accuracy."""
-        pairs = self._make_pairs(10, correct_ratio=0.1)  # accuracy très basse
+        """Without min_accuracy, no accuracy check is performed."""
+        pairs = self._make_pairs(10, correct_ratio=0.1)  # very low accuracy
         db, pairs_mock = self._make_db(pairs)
-        policy = {"min_sample_validation": 5, "auto_promote": True}  # pas de min_accuracy
+        policy = {"min_sample_validation": 5, "auto_promote": True}  # no min_accuracy
         with patch(
             "src.services.auto_promotion_service.DBService.get_performance_pairs",
             new=pairs_mock,
         ):
             ok, _ = self._run(evaluate_auto_promotion(db, "m", policy))
-        assert ok is True  # Aucun critère à vérifier → promotion acceptée
+        assert ok is True  # No criteria to check → promotion accepted
 
     def test_latency_ok_returns_true(self):
         pairs = self._make_pairs(10, correct_ratio=1.0)
@@ -636,9 +636,9 @@ class TestEvaluateAutoPromotion:
         assert "latence" in reason.lower()
 
     def test_no_latency_data_skips_latency_check(self):
-        """Aucune donnée de latence → critère latence ignoré."""
+        """No latency data → latency criterion ignored."""
         pairs = self._make_pairs(10, correct_ratio=1.0)
-        db, pairs_mock = self._make_db(pairs, latency_times=[])  # liste vide
+        db, pairs_mock = self._make_db(pairs, latency_times=[])  # empty list
         policy = {
             "min_accuracy": 0.80,
             "max_latency_p95_ms": 200.0,
@@ -653,11 +653,11 @@ class TestEvaluateAutoPromotion:
         assert ok is True
 
     def test_uses_most_recent_n_pairs_for_accuracy(self):
-        """L'accuracy est calculée sur les min_sample_validation paires les plus récentes."""
-        # 10 paires : les 5 premières fausses, les 5 dernières correctes
+        """Accuracy is computed on the most recent min_sample_validation pairs."""
+        # 10 pairs: first 5 wrong, last 5 correct
         pairs = [("B", "A", None, None)] * 5 + [("A", "A", None, None)] * 5
         db, pairs_mock = self._make_db(pairs)
-        # min_sample_validation=5 → utilise les 5 dernières (toutes correctes → accuracy=1.0)
+        # min_sample_validation=5 → uses last 5 (all correct → accuracy=1.0)
         policy = {"min_accuracy": 0.90, "min_sample_validation": 5, "auto_promote": True}
         with patch(
             "src.services.auto_promotion_service.DBService.get_performance_pairs",
@@ -666,10 +666,10 @@ class TestEvaluateAutoPromotion:
             ok, _ = self._run(evaluate_auto_promotion(db, "m", policy))
         assert ok is True
 
-    # --- Tests régression ---
+    # --- Regression tests ---
 
     def _make_regression_pairs(self, n: int, base: float = 10.0, noise: float = 0.5):
-        """Génère n paires (prediction, observed_result) avec valeurs float (régression)."""
+        """Generate n pairs (prediction, observed_result) with float values (regression)."""
         import random
         random.seed(42)
         pairs = []
@@ -680,10 +680,10 @@ class TestEvaluateAutoPromotion:
         return pairs
 
     def test_regression_max_mae_ok_returns_true(self):
-        """Régression : MAE < seuil → promu."""
+        """Regression: MAE < threshold → promoted."""
         pairs = self._make_regression_pairs(10, base=10.0, noise=0.3)
         db, pairs_mock = self._make_db(pairs)
-        # Avec noise=0.3, MAE attendu ≈ 0.3 → max_mae=1.0 largement suffisant
+        # With noise=0.3, expected MAE ≈ 0.3 → max_mae=1.0 easily met
         policy = {"max_mae": 1.0, "min_sample_validation": 5, "auto_promote": True}
         with patch(
             "src.services.auto_promotion_service.DBService.get_performance_pairs",
@@ -693,10 +693,10 @@ class TestEvaluateAutoPromotion:
         assert ok is True
 
     def test_regression_max_mae_too_high_returns_false(self):
-        """Régression : MAE > seuil → non promu."""
+        """Regression: MAE > threshold → not promoted."""
         pairs = self._make_regression_pairs(10, base=10.0, noise=2.0)
         db, pairs_mock = self._make_db(pairs)
-        # Avec noise=2.0, MAE attendu ≈ 1.3 → max_mae=0.1 trop strict
+        # With noise=2.0, expected MAE ≈ 1.3 → max_mae=0.1 too strict
         policy = {"max_mae": 0.1, "min_sample_validation": 5, "auto_promote": True}
         with patch(
             "src.services.auto_promotion_service.DBService.get_performance_pairs",
@@ -707,7 +707,7 @@ class TestEvaluateAutoPromotion:
         assert "mae" in reason.lower()
 
     def test_regression_no_mae_policy_returns_true(self):
-        """Régression : sans max_mae dans la policy → promu (pas de critère à vérifier)."""
+        """Regression: without max_mae in policy → promoted (no criteria to check)."""
         pairs = self._make_regression_pairs(10, base=10.0, noise=5.0)
         db, pairs_mock = self._make_db(pairs)
         policy = {"min_sample_validation": 5, "auto_promote": True}
@@ -719,31 +719,31 @@ class TestEvaluateAutoPromotion:
         assert ok is True
 
     def test_regression_min_accuracy_ignored_for_float_values(self):
-        """Régression : min_accuracy ignoré pour des floats → ne bloque pas la promotion.
+        """Regression: min_accuracy ignored for floats → does not block promotion.
 
-        Des floats non-entiers déclenchent la branche régression, donc min_accuracy
-        est ignoré même si défini (on n'a pas de max_mae ici).
+        Non-integer floats trigger the regression branch, so min_accuracy
+        is ignored even if defined (no max_mae here).
         """
         pairs = self._make_regression_pairs(10, base=100.0, noise=10.0)
         db, pairs_mock = self._make_db(pairs)
-        # min_accuracy avec valeur impossible pour régression, mais ignoré
+        # min_accuracy with impossible value for regression, but ignored
         policy = {"min_accuracy": 0.99, "min_sample_validation": 5, "auto_promote": True}
         with patch(
             "src.services.auto_promotion_service.DBService.get_performance_pairs",
             new=pairs_mock,
         ):
             ok, _ = self._run(evaluate_auto_promotion(db, "m", policy))
-        # La branche régression est détectée → min_accuracy ignoré → promu
+        # Regression branch detected → min_accuracy ignored → promoted
         assert ok is True
 
 
 # ---------------------------------------------------------------------------
-# Tests unitaires — evaluate_auto_demotion()
+# Unit tests — evaluate_auto_demotion()
 # ---------------------------------------------------------------------------
 
 
 class TestAutoDemotion:
-    """Tests unitaires pour src/services/auto_promotion_service.evaluate_auto_demotion."""
+    """Unit tests for src/services/auto_promotion_service.evaluate_auto_demotion."""
 
     def _run(self, coro):
         loop = asyncio.new_event_loop()
@@ -770,30 +770,30 @@ class TestAutoDemotion:
         return meta
 
     def _make_db(self, prod_meta=None, fallback_metas=None, history_entries=None):
-        """Crée un mock AsyncSession pour evaluate_auto_demotion.
+        """Create a mock AsyncSession for evaluate_auto_demotion.
 
-        Les appels db.execute(select(...)) sont séquentiels :
-        1. Requête production model
-        2. Requête fallback versions
-        3. Requête cooldown (ModelHistory)
+        db.execute(select(...)) calls are sequential:
+        1. Production model query
+        2. Fallback versions query
+        3. Cooldown query (ModelHistory)
         """
         db = MagicMock()
 
         responses = []
 
-        # Réponse 1 : prod model
+        # Response 1: production model
         r1 = MagicMock()
         r1.scalars.return_value.first.return_value = prod_meta
         responses.append(r1)
 
         if prod_meta is not None:
-            # Réponse 2 : fallback
+            # Response 2: fallback
             r2 = MagicMock()
             r2.scalars.return_value.all.return_value = fallback_metas or []
             responses.append(r2)
 
             if fallback_metas:
-                # Réponse 3 : cooldown history
+                # Response 3: cooldown history
                 r3 = MagicMock()
                 r3.scalars.return_value.first.return_value = (
                     history_entries[0] if history_entries else None
@@ -822,7 +822,7 @@ class TestAutoDemotion:
         policy.update(overrides)
         return policy
 
-    # --- Cas de base ---
+    # --- Basic cases ---
 
     def test_auto_demote_disabled_returns_false(self):
         db = MagicMock()
@@ -838,7 +838,7 @@ class TestAutoDemotion:
         assert ok is False
         assert "production" in reason.lower()
 
-    # --- Garde-fou fallback ---
+    # --- Fallback safeguard ---
 
     def test_no_fallback_returns_false_and_sends_email(self):
         prod = self._make_prod_meta()
@@ -882,31 +882,31 @@ class TestAutoDemotion:
         assert "cooldown" in reason.lower()
 
     def test_cooldown_expired_allows_demotion(self):
-        """Entrée de cooldown plus ancienne que la fenêtre → la demotion peut procéder.
+        """Cooldown entry older than the window → demotion can proceed.
 
-        Le mock retourne [] pour la requête cooldown (aucun AUTO_DEMOTE dans la fenêtre),
-        ce qui simule un cooldown expiré.
+        The mock returns [] for the cooldown query (no AUTO_DEMOTE within the window),
+        simulating an expired cooldown.
         """
-        prod = self._make_prod_meta()  # sans feature_baseline → drift skippé
+        prod = self._make_prod_meta()  # without feature_baseline → drift skipped
         fallback = self._make_fallback_meta()
-        # history_entries=None → cooldown query returns None (aucun match dans la fenêtre)
+        # history_entries=None → cooldown query returns None (no match within window)
         db = self._make_db(prod_meta=prod, fallback_metas=[fallback], history_entries=None)
         policy = self._base_policy(demote_cooldown_hours=24)
-        # Pas de baseline → drift skippé, pas d'accuracy check → aucun critère → pas de demotion
+        # No baseline → drift skipped, no accuracy check → no criteria → no demotion
         ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
         assert ok is False
         assert "cooldown" not in reason.lower()
 
     def test_zero_cooldown_skips_history_check(self):
-        """demote_cooldown_hours=0 → pas de requête cooldown."""
+        """demote_cooldown_hours=0 → no cooldown query."""
         prod = self._make_prod_meta()
         fallback = self._make_fallback_meta()
-        # Avec cooldown=0, la requête history ne devrait pas être émise
-        # On mock uniquement 2 réponses (prod + fallback)
+        # With cooldown=0, the history query should not be issued
+        # Mock only 2 responses (prod + fallback)
         db = self._make_db(prod_meta=prod, fallback_metas=[fallback], history_entries=None)
         policy = self._base_policy(demote_cooldown_hours=0)
         ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
-        # Aucun critère actif → pas de demotion, mais pas de crash non plus
+        # No active criteria → no demotion, but no crash either
         assert ok is False
         assert "cooldown" not in reason.lower()
 
@@ -1028,7 +1028,7 @@ class TestAutoDemotion:
         assert "drift" in reason.lower()
 
     def test_no_feature_baseline_skips_drift_check(self):
-        """Sans feature_baseline → drift skippé, aucune demotion si pas d'autres critères."""
+        """Without feature_baseline → drift skipped, no demotion if no other criteria."""
         prod = self._make_prod_meta(feature_baseline=None)
         fallback = self._make_fallback_meta()
         db = self._make_db(prod_meta=prod, fallback_metas=[fallback])
@@ -1042,7 +1042,7 @@ class TestAutoDemotion:
         fallback = self._make_fallback_meta()
         db = self._make_db(prod_meta=prod, fallback_metas=[fallback])
 
-        # 10 paires à 50% accuracy
+        # 10 pairs at 50% accuracy
         pairs = [("A", "A", None, None)] * 5 + [("B", "A", None, None)] * 5
         with (
             patch(
@@ -1076,12 +1076,12 @@ class TestAutoDemotion:
         assert ok is False
 
     def test_accuracy_insufficient_samples_skips_check(self):
-        """Moins de min_sample_validation paires → check accuracy ignoré."""
+        """Fewer than min_sample_validation pairs → accuracy check skipped."""
         prod = self._make_prod_meta(feature_baseline=None)
         fallback = self._make_fallback_meta()
         db = self._make_db(prod_meta=prod, fallback_metas=[fallback])
 
-        pairs = [("B", "A", None, None)] * 3  # 3 paires, accuracy 0%, mais min=5
+        pairs = [("B", "A", None, None)] * 3  # 3 pairs, 0% accuracy, but min=5
         with patch(
             "src.services.auto_promotion_service.DBService.get_performance_pairs",
             new=AsyncMock(return_value=pairs),
@@ -1089,9 +1089,9 @@ class TestAutoDemotion:
             policy = self._base_policy(demote_on_accuracy_below=0.80, min_sample_validation=5)
             ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
 
-        assert ok is False  # check skippé → aucun critère déclenché
+        assert ok is False  # check skipped → no criteria triggered
 
-    # --- Combiné ---
+    # --- Combined ---
 
     def test_both_drift_and_accuracy_combined_reason(self):
         baseline = {"feat1": {"mean": 5.0, "std": 1.0, "min": 0.0, "max": 10.0}}
@@ -1138,13 +1138,13 @@ class TestAutoDemotion:
             ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
 
         assert ok is True
-        # La raison combinée contient les deux déclencheurs
+        # Combined reason contains both triggers
         assert "drift" in reason.lower()
 
     # --- Audit trail ---
 
     def test_history_logged_with_auto_demote_action_and_reason(self):
-        """Après demotion, log_model_history appelé avec AUTO_DEMOTE et raison dans snapshot."""
+        """After demotion, log_model_history called with AUTO_DEMOTE and reason in snapshot."""
         from src.db.models.model_history import HistoryActionType
 
         baseline = {"feat1": {"mean": 5.0, "std": 1.0, "min": 0.0, "max": 10.0}}
@@ -1193,7 +1193,7 @@ class TestAutoDemotion:
         assert "auto_demote_reason" in captured_entry.snapshot
 
     def test_webhook_called_after_demotion(self):
-        """Webhook envoyé avec event_type='auto_demote' après une demotion."""
+        """Webhook sent with event_type='auto_demote' after a demotion."""
         baseline = {"feat1": {"mean": 5.0, "std": 1.0, "min": 0.0, "max": 10.0}}
         prod = self._make_prod_meta(feature_baseline=baseline, webhook_url="http://hook.example/cb")
         fallback = self._make_fallback_meta()
@@ -1230,5 +1230,5 @@ class TestAutoDemotion:
         assert ok is True
         mock_task.assert_called_once()
         webhook_call_args = mock_task.call_args[0][0]
-        # La coroutine send_webhook est passée à create_task — vérifier son nom
+        # The send_webhook coroutine is passed to create_task — verify its name
         assert "send_webhook" in str(type(webhook_call_args)) or hasattr(webhook_call_args, "cr_frame")
