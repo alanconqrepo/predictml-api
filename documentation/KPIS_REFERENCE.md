@@ -1,340 +1,340 @@
-# Référence des KPIs et Métriques — PredictML
+# KPIs and Metrics Reference — PredictML
 
-Ce document explique chaque indicateur affiché dans le dashboard Streamlit et retourné par l'API.
-
----
-
-## Métriques de performance (classification)
-
-### Accuracy (Précision globale)
-**Ce que c'est** : proportion de prédictions correctes sur le total.
-
-```
-accuracy = (vrais positifs + vrais négatifs) / total
-```
-
-**Interprétation** :
-- `1.0` = 100% de bonnes prédictions (parfait)
-- `0.9` = 90% de bonnes prédictions
-- Valeur naïve (prédire toujours la classe majoritaire) : proportion de la classe majoritaire
-
-**Quand agir** : baisse de plus de 5% par rapport à la baseline → investigation. Baisse > 10% → ré-entraînement.
-
-**Limites** : trompeuse sur les jeux déséquilibrés (ex : 98% de "non-fraude" → accuracy de 98% en prédisant toujours "non-fraude").
+This document explains each indicator displayed in the Streamlit dashboard and returned by the API.
 
 ---
 
-### F1 Score (Score F1)
-**Ce que c'est** : moyenne harmonique de la précision et du rappel. Résiste aux classes déséquilibrées.
+## Performance Metrics (Classification)
+
+### Accuracy (Overall Accuracy)
+**What it is**: the proportion of correct predictions out of the total.
+
+```
+accuracy = (true positives + true negatives) / total
+```
+
+**Interpretation**:
+- `1.0` = 100% correct predictions (perfect)
+- `0.9` = 90% correct predictions
+- Naive baseline (always predicting the majority class): proportion of the majority class
+
+**When to act**: a drop of more than 5% compared to the baseline → investigate. Drop > 10% → retrain.
+
+**Limitations**: misleading on imbalanced datasets (e.g. 98% "non-fraud" → 98% accuracy by always predicting "non-fraud").
+
+---
+
+### F1 Score
+**What it is**: harmonic mean of precision and recall. Robust to class imbalance.
 
 ```
 F1 = 2 × (precision × recall) / (precision + recall)
 ```
 
-**Interprétation** :
-- `1.0` = précision et rappel parfaits
-- `0.8+` = bon pour la plupart des cas
-- Plus utile que l'accuracy quand les classes sont déséquilibrées
+**Interpretation**:
+- `1.0` = perfect precision and recall
+- `0.8+` = good for most use cases
+- More useful than accuracy when classes are imbalanced
 
-**`f1_weighted`** : moyenne pondérée par le support de chaque classe — recommandé comme métrique principale.
-
----
-
-### Precision (Précision)
-**Ce que c'est** : parmi les prédictions positives, quelle proportion est réellement positive.
-
-```
-precision = vrais positifs / (vrais positifs + faux positifs)
-```
-
-**Quand privilégier** : quand un faux positif est coûteux (ex : alarme incendie déclenchée à tort).
+**`f1_weighted`**: weighted average by class support — recommended as the primary metric.
 
 ---
 
-### Recall (Rappel / Sensibilité)
-**Ce que c'est** : parmi les cas positifs réels, quelle proportion est détectée.
+### Precision
+**What it is**: among positive predictions, what proportion is actually positive.
 
 ```
-recall = vrais positifs / (vrais positifs + faux négatifs)
+precision = true positives / (true positives + false positives)
 ```
 
-**Quand privilégier** : quand un faux négatif est coûteux (ex : cancer non détecté).
+**When to prefer**: when a false positive is costly (e.g. a fire alarm triggered incorrectly).
 
 ---
 
-### Taux d'erreur
-**Ce que c'est** : proportion de prédictions incorrectes.
+### Recall (Sensitivity)
+**What it is**: among actual positive cases, what proportion is detected.
 
 ```
-taux_erreur = 1 - accuracy
+recall = true positives / (true positives + false negatives)
 ```
 
-**Interprétation** : `0.05` = 5% des prédictions sont incorrectes.
+**When to prefer**: when a false negative is costly (e.g. undetected cancer).
 
 ---
 
-## Métriques de performance (régression)
+### Error Rate
+**What it is**: proportion of incorrect predictions.
+
+```
+error_rate = 1 - accuracy
+```
+
+**Interpretation**: `0.05` = 5% of predictions are incorrect.
+
+---
+
+## Performance Metrics (Regression)
 
 ### MAE (Mean Absolute Error)
-**Ce que c'est** : écart moyen absolu entre la prédiction et la valeur réelle.
+**What it is**: average absolute difference between the prediction and the actual value.
 
 ```
 MAE = mean(|y_pred - y_real|)
 ```
 
-**Interprétation** : dans l'unité de la variable cible. Un MAE de 500 sur un prix d'appartement = erreur moyenne de 500 €.
+**Interpretation**: in the target variable's unit. An MAE of 500 on an apartment price = average error of 500.
 
 ---
 
 ### RMSE (Root Mean Square Error)
-**Ce que c'est** : écart quadratique moyen — pénalise davantage les grandes erreurs.
+**What it is**: root mean square error — penalises large errors more heavily.
 
 ```
 RMSE = sqrt(mean((y_pred - y_real)²))
 ```
 
-**Interprétation** : toujours supérieur ou égal au MAE. Si RMSE >> MAE, il y a des prédictions très éloignées.
+**Interpretation**: always greater than or equal to MAE. If RMSE >> MAE, there are predictions that are very far off.
 
 ---
 
-### R² (Coefficient de détermination)
-**Ce que c'est** : proportion de variance de la variable cible expliquée par le modèle.
+### R² (Coefficient of Determination)
+**What it is**: proportion of the target variable's variance explained by the model.
 
 ```
-R² = 1 - (SS_résiduel / SS_total)
+R² = 1 - (SS_residual / SS_total)
 ```
 
-**Interprétation** :
-- `1.0` = modèle parfait (explique 100% de la variance)
-- `0.0` = modèle équivalent à prédire la moyenne
-- Négatif = le modèle est pire que prédire la moyenne
+**Interpretation**:
+- `1.0` = perfect model (explains 100% of the variance)
+- `0.0` = model equivalent to predicting the mean
+- Negative = the model is worse than predicting the mean
 
 ---
 
-## Métriques de latence
+## Latency Metrics
 
-### Latence moyenne
-**Ce que c'est** : temps de réponse moyen de l'API pour une prédiction.
+### Average Latency
+**What it is**: average API response time for a prediction.
 
-**Valeurs typiques** : 10–50 ms pour un modèle sklearn simple. Plus si le modèle est volumineux (RandomForest avec 500 arbres) ou si Redis est froid.
-
----
-
-### Latence P95 (95e percentile)
-**Ce que c'est** : 95% des prédictions sont traitées en moins de cette durée.
-
-**Pourquoi P95 plutôt que la moyenne** : la moyenne masque les outliers. Si P95 = 200ms, les 5% de requêtes les plus lentes prennent plus de 200ms.
-
-**Seuil recommandé** : définissez `max_latency_p95_ms` dans votre politique d'auto-promotion (ex : 500ms).
+**Typical values**: 10–50 ms for a simple sklearn model. Higher if the model is large (RandomForest with 500 trees) or if Redis is cold.
 
 ---
 
-### Latence médiane (P50)
-**Ce que c'est** : 50% des prédictions sont traitées en moins de cette durée.
+### P95 Latency (95th Percentile)
+**What it is**: 95% of predictions are processed in less than this duration.
+
+**Why P95 rather than the mean**: the mean hides outliers. If P95 = 200ms, the slowest 5% of requests take more than 200ms.
+
+**Recommended threshold**: set `max_latency_p95_ms` in your auto-promotion policy (e.g. 500ms).
 
 ---
 
-## Métriques de drift (dérive)
+### Median Latency (P50)
+**What it is**: 50% of predictions are processed in less than this duration.
 
-### Z-Score (par feature)
-**Ce que c'est** : écart entre la valeur moyenne en production et la baseline, exprimé en nombre d'écarts-types.
+---
+
+## Drift Metrics
+
+### Z-Score (per feature)
+**What it is**: the difference between the production mean value and the baseline, expressed in number of standard deviations.
 
 ```
 Z-score = (mean_production - mean_baseline) / std_baseline
 ```
 
-**Seuils** :
+**Thresholds**:
 - `|Z| < 2` → `ok`
-- `2 ≤ |Z| < 3` → `warning` (dérive modérée)
-- `|Z| ≥ 3` → `critical` (dérive forte)
+- `2 ≤ |Z| < 3` → `warning` (moderate drift)
+- `|Z| ≥ 3` → `critical` (strong drift)
 
-**Interprétation** : un Z-score de 3 signifie que la distribution de production s'est décalée de 3 écarts-types — statistiquement très peu probable sans changement réel.
+**Interpretation**: a Z-score of 3 means the production distribution has shifted by 3 standard deviations — statistically very unlikely without a real change.
 
 ---
 
 ### PSI (Population Stability Index)
-**Ce que c'est** : mesure le décalage de distribution entre deux populations (entraînement vs production).
+**What it is**: measures the distribution shift between two populations (training vs production).
 
 ```
 PSI = Σ (% prod - % train) × ln(% prod / % train)
 ```
 
-**Seuils standards** :
-- `PSI < 0.1` → `ok` (distribution stable)
-- `0.1 ≤ PSI < 0.2` → `warning` (légère dérive)
-- `PSI ≥ 0.2` → `critical` (dérive significative — ré-entraînement recommandé)
+**Standard thresholds**:
+- `PSI < 0.1` → `ok` (stable distribution)
+- `0.1 ≤ PSI < 0.2` → `warning` (slight drift)
+- `PSI ≥ 0.2` → `critical` (significant drift — retraining recommended)
 
 ---
 
-### Null Rate (taux de valeurs manquantes)
-**Ce que c'est** : proportion de prédictions récentes où cette feature est `null` ou absente.
+### Null Rate (missing value rate)
+**What it is**: proportion of recent predictions where this feature is `null` or absent.
 
-**Seuil d'alerte** : configurable par modèle dans `alert_thresholds`. Défaut : `warning` si null rate > 5%, `critical` si > 10%.
-
----
-
-### Output Drift (Label Shift / Dérive des sorties)
-**Ce que c'est** : dérive de la distribution des classes prédites par rapport à la distribution de référence (issue de `training_stats.label_distribution`).
-
-**Calcul** : PSI appliqué aux distributions de classes.
-
-**Interprétation** : si votre modèle prédisait 33% de chaque classe Iris et prédit maintenant 80% de "setosa", la population de production a changé (ou le modèle est biaisé).
+**Alert threshold**: configurable per model in `alert_thresholds`. Default: `warning` if null rate > 5%, `critical` if > 10%.
 
 ---
 
-## Métriques A/B Testing
+### Output Drift (Label Shift)
+**What it is**: drift in the distribution of predicted classes compared to the reference distribution (from `training_stats.label_distribution`).
+
+**Calculation**: PSI applied to class distributions.
+
+**Interpretation**: if your model was predicting 33% of each Iris class and is now predicting 80% "setosa", the production population has changed (or the model is biased).
+
+---
+
+## A/B Testing Metrics
 
 ### P-value
-**Ce que c'est** : probabilité d'observer un écart aussi grand entre les versions si elles étaient en réalité équivalentes.
+**What it is**: probability of observing as large a difference between versions if they were actually equivalent.
 
-**Interprétation** :
-- `p < 0.05` → différence statistiquement significative (95% de confiance)
-- `p < 0.01` → très forte évidence (99% de confiance)
-- `p ≥ 0.05` → pas assez de données ou pas de différence réelle
+**Interpretation**:
+- `p < 0.05` → statistically significant difference (95% confidence)
+- `p < 0.01` → very strong evidence (99% confidence)
+- `p ≥ 0.05` → not enough data or no real difference
 
-**Attention** : ne promotez pas une version simplement parce qu'elle semble meilleure. Attendez que `p < confidence_level`.
-
----
-
-### Niveau de confiance
-**Ce que c'est** : seuil de signification statistique choisi (défaut : 95%).
-
-**Signification** : avec 95% de confiance, on accepte 5% de risque de conclure à tort à une différence.
+**Warning**: do not promote a version simply because it appears better. Wait until `p < confidence_level`.
 
 ---
 
-### Test statistique utilisé
-| Condition | Test | Métrique testée |
+### Confidence Level
+**What it is**: the chosen statistical significance threshold (default: 95%).
+
+**Meaning**: with 95% confidence, we accept a 5% risk of incorrectly concluding there is a difference.
+
+---
+
+### Statistical Test Used
+| Condition | Test | Metric tested |
 |---|---|---|
-| ≥ 1 erreur dans un des groupes | Chi-² (tableau de contingence) | Taux d'erreur |
-| 0 erreur + temps de réponse disponibles | Mann-Whitney U | Temps de réponse (ms) |
+| ≥ 1 error in either group | Chi-² (contingency table) | Error rate |
+| 0 errors + response times available | Mann-Whitney U | Response time (ms) |
 
 ---
 
 ### Winner
-**Ce que c'est** : version avec la meilleure métrique (taux d'erreur plus bas ou latence plus faible), mais seulement si `significant: true`.
+**What it is**: the version with the best metric (lower error rate or lower latency), but only if `significant: true`.
 
-**Ne jamais promouvoir si `significant: false`** — il faut accumuler plus de données.
+**Never promote if `significant: false`** — more data needs to be accumulated.
 
 ---
 
 ### min_samples_needed
-**Ce que c'est** : nombre d'observations estimées nécessaires par version pour avoir 80% de puissance statistique au seuil configuré.
+**What it is**: estimated number of observations needed per version to have 80% statistical power at the configured threshold.
 
-**Interprétation** : si vous avez 150 observations mais `min_samples_needed: 400`, attendez encore avant de conclure.
+**Interpretation**: if you have 150 observations but `min_samples_needed: 400`, wait before drawing conclusions.
 
 ---
 
 ### Concordance (shadow)
-**Ce que c'est** : proportion de cas où le modèle shadow et le modèle de production donnent la même prédiction.
+**What it is**: proportion of cases where the shadow model and the production model give the same prediction.
 
-**Interprétation** :
-- `> 95%` → les deux modèles sont très similaires
-- `80–95%` → différences notables, étude approfondie recommandée
-- `< 80%` → comportements très différents
+**Interpretation**:
+- `> 95%` → the two models are very similar
+- `80–95%` → notable differences, in-depth study recommended
+- `< 80%` → very different behaviours
 
 ---
 
-## Métriques de calibration
+## Calibration Metrics
 
 ### Brier Score
-**Ce que c'est** : mesure la qualité des probabilités prédites.
+**What it is**: measures the quality of predicted probabilities.
 
 ```
 Brier = mean((p_pred - y_real)²)
 ```
 
-**Interprétation** :
-- `0` = probabilités parfaites
-- `0.25` = ligne de base (prédire 50% pour tout)
-- `< 0.1` = très bien calibré
+**Interpretation**:
+- `0` = perfect probabilities
+- `0.25` = baseline (predicting 50% for everything)
+- `< 0.1` = very well calibrated
 - `0.1–0.25` = acceptable
-- `> 0.25` = mauvaise calibration
+- `> 0.25` = poor calibration
 
 ---
 
-### Gap de confiance
-**Ce que c'est** : écart entre la confiance moyenne prédite et la précision réelle observée.
+### Confidence Gap
+**What it is**: the difference between the average predicted confidence and the actual observed accuracy.
 
 ```
-gap = confiance_moyenne_prédite - accuracy_réelle
+gap = mean_predicted_confidence - actual_accuracy
 ```
 
-**Interprétation** :
-- `> 0` = **surconfiance** : le modèle surestime ses certitudes (prédit 90% de confiance mais n'a raison qu'à 75%)
-- `< 0` = **sous-confiance** : le modèle est trop prudent
-- `≈ 0` = bien calibré
+**Interpretation**:
+- `> 0` = **overconfidence**: the model overestimates its certainty (predicts 90% confidence but is only right 75% of the time)
+- `< 0` = **underconfidence**: the model is too cautious
+- `≈ 0` = well calibrated
 
 ---
 
-### Statut de calibration
-| Statut | Condition |
+### Calibration Status
+| Status | Condition |
 |---|---|
 | `OK` | `|gap| < 0.05` |
-| `Surconfiant` | `gap > 0.05` |
-| `Sous-confiant` | `gap < -0.05` |
+| `Overconfident` | `gap > 0.05` |
+| `Underconfident` | `gap < -0.05` |
 
 ---
 
-## Métriques de confiance
+## Confidence Metrics
 
-### Confiance moyenne
-**Ce que c'est** : `max(probabilities)` moyen sur les prédictions récentes — à quel point le modèle est "sûr" en moyenne.
-
----
-
-### Distribution de confiance
-**Ce que c'est** : histogramme du niveau de confiance (`max(probabilities)`) des prédictions.
-
-**Utilité** : identifier la proportion de prédictions incertaines. Si beaucoup de prédictions ont une confiance < 60%, affinez votre `confidence_threshold`.
+### Average Confidence
+**What it is**: mean `max(probabilities)` across recent predictions — how "sure" the model is on average.
 
 ---
 
-## Métriques de tendance
+### Confidence Distribution
+**What it is**: histogram of the confidence level (`max(probabilities)`) of predictions.
 
-### Tendance de performance
-**Ce que c'est** : comparaison de l'accuracy entre la première et la seconde moitié de la période sélectionnée.
-
-**Interprétation** : une baisse indique un drift potentiel du modèle ou un changement de la population.
+**Use**: identify the proportion of uncertain predictions. If many predictions have confidence < 60%, refine your `confidence_threshold`.
 
 ---
 
-## KPIs opérationnels
+## Trend Metrics
 
-### Volume de prédictions
-**Ce que c'est** : nombre de prédictions effectuées sur une période donnée.
+### Performance Trend
+**What it is**: comparison of accuracy between the first and second half of the selected period.
 
-**Suivi** : un pic inhabituel peut signaler un abus (scraping, boucle infinie), une baisse peut signaler une panne upstream.
-
----
-
-### Quota journalier
-**Ce que c'est** : nombre de prédictions autorisées par jour par utilisateur (`rate_limit_per_day`).
-
-**Comportement** : si le quota est atteint, l'API retourne HTTP 429. Le quota se réinitialise à minuit UTC.
+**Interpretation**: a drop indicates potential model drift or a change in the population.
 
 ---
 
-### Couverture ground truth
-**Ce que c'est** : proportion de prédictions ayant un résultat observé associé.
+## Operational KPIs
+
+### Prediction Volume
+**What it is**: number of predictions made over a given period.
+
+**Monitoring**: an unusual spike can indicate abuse (scraping, infinite loop); a drop can indicate an upstream outage.
+
+---
+
+### Daily Quota
+**What it is**: number of predictions allowed per day per user (`rate_limit_per_day`).
+
+**Behaviour**: if the quota is reached, the API returns HTTP 429. The quota resets at midnight UTC.
+
+---
+
+### Ground Truth Coverage
+**What it is**: proportion of predictions that have an associated observed result.
 
 ```
-couverture = nb_paires(prédiction, résultat_observé) / total_prédictions
+coverage = nb_pairs(prediction, observed_result) / total_predictions
 ```
 
-**Interprétation** : une couverture de 100% signifie que vous pouvez calculer la performance réelle sur toutes les prédictions. En dessous de 20%, les métriques de performance réelle ne sont pas fiables.
+**Interpretation**: 100% coverage means you can calculate real performance across all predictions. Below 20%, real performance metrics are not reliable.
 
 ---
 
-## Guide de lecture rapide
+## Quick Reading Guide
 
-| Métrique | Bon | Attention | Alerte |
+| Metric | Good | Warning | Alert |
 |---|---|---|---|
 | Accuracy | > 0.9 | 0.7–0.9 | < 0.7 |
 | F1 Score | > 0.85 | 0.6–0.85 | < 0.6 |
-| Taux d'erreur | < 0.05 | 0.05–0.15 | > 0.15 |
-| Latence P95 | < 100ms | 100–500ms | > 500ms |
+| Error Rate | < 0.05 | 0.05–0.15 | > 0.15 |
+| P95 Latency | < 100ms | 100–500ms | > 500ms |
 | Z-score drift | < 2 | 2–3 | > 3 |
 | PSI | < 0.1 | 0.1–0.2 | > 0.2 |
 | Brier Score | < 0.1 | 0.1–0.25 | > 0.25 |
-| p-value A/B | < 0.05 = significatif | — | > 0.05 = pas concluant |
+| p-value A/B | < 0.05 = significant | — | > 0.05 = inconclusive |

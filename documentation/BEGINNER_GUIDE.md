@@ -1,79 +1,79 @@
-# Guide débutant — PredictML API
+# Beginner Guide — PredictML API
 
-Ce guide est destiné à quelqu'un qui découvre PredictML API. Il explique le concept, l'architecture, et guide pas-à-pas à travers un workflow ML complet en Python.
-
----
-
-## Qu'est-ce que PredictML API ?
-
-PredictML API est une plateforme qui permet de **mettre un modèle Machine Learning en production en quelques minutes**.
-
-Le problème qu'elle résout : vous avez entraîné un modèle scikit-learn sur votre ordinateur. Comment le rendre utilisable par une application web ? Comment le versionner, tracer chaque prédiction, mesurer sa précision réelle, et le mettre à jour ? PredictML API répond à tout cela.
-
-**Ce que vous faites :**
-1. Entraîner un modèle localement (`model.fit(...)`)
-2. Le sauvegarder en `.joblib` (`joblib.dump(...)`)
-3. L'uploader via l'API
-4. Faire des prédictions via HTTP depuis n'importe quelle application
-
-**Ce que l'API gère pour vous :**
-- Stocker le modèle dans MinIO (stockage objet compatible S3)
-- Versionner les modèles (v1.0, v2.0…)
-- Logger chaque prédiction avec ses features, son résultat et sa latence
-- Calculer les métriques réelles quand vous envoyez les résultats observés
-- Détecter si les données de production dérivent par rapport aux données d'entraînement
-- Expliquer pourquoi le modèle a prédit ce qu'il a prédit (SHAP)
-- Tester silencieusement une nouvelle version avant de la mettre en production (shadow)
+This guide is intended for someone discovering PredictML API for the first time. It explains the concept, the architecture, and walks step-by-step through a complete ML workflow in Python.
 
 ---
 
-## Architecture expliquée simplement
+## What is PredictML API?
+
+PredictML API is a platform that lets you **put a Machine Learning model into production in just a few minutes**.
+
+The problem it solves: you have trained a scikit-learn model on your computer. How do you make it usable by a web application? How do you version it, trace every prediction, measure its real-world accuracy, and update it? PredictML API answers all of this.
+
+**What you do:**
+1. Train a model locally (`model.fit(...)`)
+2. Save it as `.joblib` (`joblib.dump(...)`)
+3. Upload it via the API
+4. Make predictions via HTTP from any application
+
+**What the API handles for you:**
+- Storing the model in MinIO (S3-compatible object storage)
+- Versioning models (v1.0, v2.0…)
+- Logging every prediction with its features, result and latency
+- Computing real-world metrics when you send observed results
+- Detecting whether production data drifts from training data
+- Explaining why the model made a given prediction (SHAP)
+- Silently testing a new version before putting it into production (shadow)
+
+---
+
+## Architecture Explained Simply
 
 ```
-Votre script Python  ──upload .joblib──▶  PredictML API  ──stocke──▶  MinIO
+Your Python script  ──upload .joblib──▶  PredictML API  ──stores──▶  MinIO
                                             │
-                                            │  ──log──▶  PostgreSQL
+                                            │  ──logs──▶  PostgreSQL
                                             │
-Votre application    ──POST /predict──▶  API  ──retourne──▶  { prediction: 0 }
+Your application    ──POST /predict──▶  API  ──returns──▶  { prediction: 0 }
 ```
 
-L'API tourne dans Docker avec 7 services :
-- **FastAPI** (port 8000) — l'API principale
-- **PostgreSQL** (port 5433) — stocke les prédictions et métadonnées
-- **MinIO** (port 9000) — stocke les fichiers `.joblib`
-- **Redis** (port 6379) — cache les modèles en mémoire pour des prédictions rapides
-- **MLflow** (port 5000) — experiment tracking optionnel
-- **Streamlit** (port 8501) — dashboard d'administration
-- **Grafana** (port 3000) — observabilité (logs, traces, métriques)
+The API runs in Docker with 7 services:
+- **FastAPI** (port 8000) — the main API
+- **PostgreSQL** (port 5433) — stores predictions and metadata
+- **MinIO** (port 9000) — stores `.joblib` files
+- **Redis** (port 6379) — caches models in memory for fast predictions
+- **MLflow** (port 5000) — optional experiment tracking
+- **Streamlit** (port 8501) — administration dashboard
+- **Grafana** (port 3000) — observability (logs, traces, metrics)
 
 ---
 
 ## Installation
 
 ```bash
-# Prérequis : Git + Docker Desktop
+# Prerequisites: Git + Docker Desktop
 git clone https://github.com/alanconqrepo/predictml-api.git
 cd predictml-api
 
-# Générer les secrets dans .env (ouvrir un terminal Git Bash)
+# Generate secrets in .env (open a Git Bash terminal)
 bash scripts/init_env.sh
 
-# (Optionnel) Repartir de zéro — supprime les volumes Postgres existants
-# Utile si vous aviez déjà lancé le projet avec un autre mot de passe
-docker-compose -p predictml-api down -v 2>&1 && echo "=== Volumes supprimés ==="
+# (Optional) Start from scratch — removes existing Postgres volumes
+# Useful if you had already launched the project with a different password
+docker-compose -p predictml-api down -v 2>&1 && echo "=== Volumes deleted ==="
 
-# Lancer tous les services
+# Start all services
 docker-compose -p predictml-api up -d --build
 
-# Vérifier (via Nginx port 80)
+# Verify (via Nginx port 80)
 curl http://localhost/health
 # {"status": "healthy", "database": "connected", "models_available": 0, "models_cached": 0}
 ```
 
-> L'utilisateur admin est créé automatiquement au démarrage si `ADMIN_TOKEN` est défini dans `.env`.
-> Le token admin est la valeur de `ADMIN_TOKEN` dans votre fichier `.env`.
+> The admin user is created automatically at startup if `ADMIN_TOKEN` is defined in `.env`.
+> The admin token is the value of `ADMIN_TOKEN` in your `.env` file.
 
-Installez les dépendances Python pour les exemples ci-dessous :
+Install Python dependencies for the examples below:
 
 ```bash
 pip install requests scikit-learn pandas numpy shap
@@ -81,9 +81,9 @@ pip install requests scikit-learn pandas numpy shap
 
 ---
 
-## Tutoriel complet — Iris classifier
+## Complete Tutorial — Iris Classifier
 
-### Étape 1 : Entraîner et sauvegarder un modèle
+### Step 1: Train and Save a Model
 
 ```python
 # 1_train.py
@@ -94,7 +94,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, f1_score
 
-# Charger le dataset Iris (150 fleurs, 4 features, 3 classes)
+# Load the Iris dataset (150 flowers, 4 features, 3 classes)
 iris = load_iris()
 df = pd.DataFrame(iris.data, columns=iris.feature_names)
 df["target"] = iris.target
@@ -102,29 +102,29 @@ df["target"] = iris.target
 X = df[iris.feature_names]
 y = df["target"]
 
-# Entraîner
+# Train
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 model = RandomForestClassifier(n_estimators=100, random_state=42)
 model.fit(X_train, y_train)
 
-# Évaluer
+# Evaluate
 y_pred = model.predict(X_test)
-print(f"Accuracy : {accuracy_score(y_test, y_pred):.4f}")
-print(f"F1 Score : {f1_score(y_test, y_pred, average='weighted'):.4f}")
+print(f"Accuracy: {accuracy_score(y_test, y_pred):.4f}")
+print(f"F1 Score: {f1_score(y_test, y_pred, average='weighted'):.4f}")
 
-# Sauvegarder
+# Save
 joblib.dump(model, "iris_model.joblib")
-print("Modèle sauvegardé dans iris_model.joblib")
+print("Model saved to iris_model.joblib")
 ```
 
 ```bash
 python 1_train.py
-# Accuracy : 1.0000
-# F1 Score : 1.0000
-# Modèle sauvegardé dans iris_model.joblib
+# Accuracy: 1.0000
+# F1 Score: 1.0000
+# Model saved to iris_model.joblib
 ```
 
-### Étape 2 : Uploader le modèle
+### Step 2: Upload the Model
 
 ```python
 # 2_upload.py
@@ -142,7 +142,7 @@ with open("iris_model.joblib", "rb") as f:
         data={
             "name": "iris_model",
             "version": "1.0.0",
-            "description": "Classifieur Iris — RandomForest 100 arbres",
+            "description": "Iris Classifier — RandomForest 100 trees",
             "algorithm": "RandomForestClassifier",
             "accuracy": "1.0",
             "f1_score": "1.0",
@@ -151,12 +151,12 @@ with open("iris_model.joblib", "rb") as f:
         },
     )
 
-print(f"Status : {response.status_code}")   # 201
+print(f"Status: {response.status_code}")   # 201
 model = response.json()
-print(f"ID : {model['id']}, version : {model['version']}")
+print(f"ID: {model['id']}, version: {model['version']}")
 ```
 
-### Étape 3 : Passer en production
+### Step 3: Set to Production
 
 ```python
 # 3_set_production.py
@@ -170,10 +170,10 @@ response = requests.patch(
     headers=HEADERS,
     json={"is_production": True}
 )
-print(f"En production : {response.json()['is_production']}")  # True
+print(f"In production: {response.json()['is_production']}")  # True
 ```
 
-### Étape 4 : Faire une prédiction
+### Step 4: Make a Prediction
 
 ```python
 # 4_predict.py
@@ -182,13 +182,13 @@ import requests
 BASE_URL = "http://localhost:8000"
 HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
-# Une fleur à identifier
+# A flower to identify
 response = requests.post(
     f"{BASE_URL}/predict",
     headers=HEADERS,
     json={
         "model_name": "iris_model",
-        "id_obs": "obs-001",          # identifiant pour lier au résultat réel plus tard
+        "id_obs": "obs-001",          # identifier to link to the real result later
         "features": {
             "sepal length (cm)": 5.1,
             "sepal width (cm)": 3.5,
@@ -200,15 +200,15 @@ response = requests.post(
 
 result = response.json()
 classes = ["setosa", "versicolor", "virginica"]
-print(f"Prédiction : {classes[result['prediction']]} (classe {result['prediction']})")
-print(f"Probabilités : {result['probability']}")
-# Prédiction : setosa (classe 0)
-# Probabilités : [0.97, 0.02, 0.01]
+print(f"Prediction: {classes[result['prediction']]} (class {result['prediction']})")
+print(f"Probabilities: {result['probability']}")
+# Prediction: setosa (class 0)
+# Probabilities: [0.97, 0.02, 0.01]
 ```
 
-### Étape 5 : Prédictions en lot (batch)
+### Step 5: Batch Predictions
 
-Plus efficace que des appels individuels : le modèle est chargé une seule fois.
+More efficient than individual calls: the model is loaded only once.
 
 ```python
 # 5_batch.py
@@ -238,9 +238,9 @@ for item in response.json()["predictions"]:
 # obs-003 → versicolor (conf: 71%)
 ```
 
-### Étape 6 : Explication SHAP
+### Step 6: SHAP Explanation
 
-Comprendre pourquoi le modèle a fait cette prédiction.
+Understand why the model made this prediction.
 
 ```python
 # 6_explain.py
@@ -264,17 +264,17 @@ response = requests.post(
 )
 
 data = response.json()
-print(f"Prédiction : {data['prediction']}")
-print(f"Base value : {data['base_value']:.4f}")
-print("\nContributions SHAP (+ = vers la classe prédite, - = à l'opposé) :")
+print(f"Prediction: {data['prediction']}")
+print(f"Base value: {data['base_value']:.4f}")
+print("\nSHAP contributions (+ = towards predicted class, - = away from it):")
 for feat, val in sorted(data["shap_values"].items(), key=lambda x: abs(x[1]), reverse=True):
     bar = "█" * int(abs(val) * 5) if abs(val) > 0.05 else "·"
     print(f"  {'↑' if val > 0 else '↓'} {feat:<25} {val:+.4f}  {bar}")
 ```
 
-### Étape 7 : Enregistrer les résultats observés
+### Step 7: Record Observed Results
 
-Après avoir obtenu le vrai résultat, envoyez-le pour calculer la performance réelle.
+After obtaining the true result, send it to compute real-world performance.
 
 ```python
 # 7_feedback.py
@@ -284,7 +284,7 @@ from datetime import datetime
 BASE_URL = "http://localhost:8000"
 HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
-# Les vrais résultats (ce que vous avez constaté après la prédiction)
+# The true results (what you observed after the prediction)
 observed = [
     {"id_obs": "obs-001", "model_name": "iris_model",
      "date_time": datetime.now().isoformat(), "observed_result": 0},   # setosa ✓
@@ -302,7 +302,7 @@ response = requests.post(
 print(response.json())  # {"upserted": 3}
 ```
 
-### Étape 8 : Consulter la performance réelle
+### Step 8: Check Real-World Performance
 
 ```python
 # 8_performance.py
@@ -318,15 +318,15 @@ response = requests.get(
 )
 
 data = response.json()
-print(f"Prédictions total : {data['total_predictions']}")
-print(f"Avec résultat réel : {data['matched_predictions']}")
-print(f"Accuracy réelle : {data.get('accuracy', 'N/A')}")
-print(f"F1 réel : {data.get('f1_weighted', 'N/A')}")
+print(f"Total predictions: {data['total_predictions']}")
+print(f"With real result: {data['matched_predictions']}")
+print(f"Real accuracy: {data.get('accuracy', 'N/A')}")
+print(f"Real F1: {data.get('f1_weighted', 'N/A')}")
 ```
 
-### Étape 9 : Détecter la dérive des données
+### Step 9: Detect Data Drift
 
-Configurer d'abord une baseline (stats des features à l'entraînement) :
+First configure a baseline (feature stats at training time):
 
 ```python
 # 9_drift.py
@@ -335,7 +335,7 @@ import requests
 BASE_URL = "http://localhost:8000"
 HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
-# 1. Définir la baseline (stats des features en entraînement)
+# 1. Define the baseline (feature stats at training time)
 requests.patch(
     f"{BASE_URL}/models/iris_model/1.0.0",
     headers=HEADERS,
@@ -349,33 +349,33 @@ requests.patch(
     }
 )
 
-# 2. Consulter le rapport de dérive (après accumulation de prédictions)
+# 2. Consult the drift report (after predictions have accumulated)
 response = requests.get(
     f"{BASE_URL}/models/iris_model/drift",
     headers=HEADERS,
     params={"days": 30}
 )
 data = response.json()
-print(f"Résumé dérive : {data['drift_summary']}")
+print(f"Drift summary: {data['drift_summary']}")
 for feat, info in data["features"].items():
     status = info["drift_status"]
     z = info.get("z_score")
     print(f"  {feat:<25} {status:<15} z={z:.2f}" if z else f"  {feat:<25} {status}")
 ```
 
-**Interprétation des statuts :**
-- `ok` — aucune dérive détectée
-- `warning` — dérive modérée, à surveiller
-- `critical` — dérive forte, ré-entraînement probablement nécessaire
-- `no_baseline` — vous n'avez pas encore configuré de baseline
+**Status interpretation:**
+- `ok` — no drift detected
+- `warning` — moderate drift, monitor closely
+- `critical` — strong drift, retraining probably required
+- `no_baseline` — you have not yet configured a baseline
 
 ---
 
-## Fonctionnalités avancées
+## Advanced Features
 
 ### A/B Testing
 
-Tester une nouvelle version sur 20% du trafic sans risque :
+Test a new version on 20% of traffic without risk:
 
 ```python
 import requests
@@ -383,82 +383,82 @@ import requests
 BASE_URL = "http://localhost:8000"
 HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
-# 1. Uploader la nouvelle version
+# 1. Upload the new version
 with open("iris_model_v2.joblib", "rb") as f:
     requests.post(f"{BASE_URL}/models", headers=HEADERS,
                   files={"file": ("iris_model_v2.joblib", f, "application/octet-stream")},
                   data={"name": "iris_model", "version": "2.0.0"})
 
-# 2. Configurer l'A/B test (20% du trafic vers v2)
+# 2. Configure the A/B test (20% of traffic to v2)
 requests.patch(f"{BASE_URL}/models/iris_model/2.0.0", headers=HEADERS,
                json={"deployment_mode": "ab_test", "traffic_weight": 0.2})
 
-# 3. Les prédictions normales seront routées automatiquement (80% v1 / 20% v2)
+# 3. Normal predictions will be routed automatically (80% v1 / 20% v2)
 response = requests.post(f"{BASE_URL}/predict", headers=HEADERS,
                          json={"model_name": "iris_model",
                                "features": {"sepal length (cm)": 5.1, "sepal width (cm)": 3.5,
                                             "petal length (cm)": 1.4, "petal width (cm)": 0.2}})
-print(f"Version utilisée : {response.json()['selected_version']}")
+print(f"Version used: {response.json()['selected_version']}")
 
-# 4. Comparer les résultats après quelques jours
+# 4. Compare results after a few days
 compare = requests.get(f"{BASE_URL}/models/iris_model/ab-compare",
                        headers=HEADERS, params={"days": 7})
 data = compare.json()
 
 for v in data["versions"]:
-    print(f"  v{v['version']}: {v['total_predictions']} preds, erreur={v['error_rate']:.1%}")
+    print(f"  v{v['version']}: {v['total_predictions']} preds, error={v['error_rate']:.1%}")
 
-# 5. Interpréter la significativité statistique
+# 5. Interpret statistical significance
 sig = data.get("ab_significance")
 if sig:
     if sig["significant"]:
-        print(f"\n✅ Différence statistiquement significative (p={sig['p_value']:.4f})")
-        print(f"   Gagnant : {sig['winner']} — basé sur {sig['metric']}")
+        print(f"\n✅ Statistically significant difference (p={sig['p_value']:.4f})")
+        print(f"   Winner: {sig['winner']} — based on {sig['metric']}")
     else:
-        print(f"\n⚠️  Différence NON significative (p={sig['p_value']:.4f})")
-        print(f"   Il faut ~{sig['min_samples_needed']} observations/version pour conclure")
-        print("   Ne promotez pas encore — accumulez plus de données")
+        print(f"\n⚠️  NON-significant difference (p={sig['p_value']:.4f})")
+        print(f"   Need ~{sig['min_samples_needed']} observations/version to conclude")
+        print("   Do not promote yet — accumulate more data")
 ```
 
 ### Shadow Deployment
 
-Tester silencieusement une nouvelle version sans jamais l'exposer aux clients :
+Silently test a new version without ever exposing it to clients:
 
 ```python
-# La v2 reçoit les mêmes inputs que la v1 en arrière-plan
-# mais ses résultats ne sont jamais retournés aux clients
+# v2 receives the same inputs as v1 in the background
+# but its results are never returned to clients
 requests.patch(f"{BASE_URL}/models/iris_model/2.0.0", headers=HEADERS,
                json={"deployment_mode": "shadow"})
 
-# Après accumulation, comparer les taux de concordance
+# After accumulation, compare concordance rates
 compare = requests.get(f"{BASE_URL}/models/iris_model/ab-compare", headers=HEADERS)
 for v in compare.json()["versions"]:
     if v["deployment_mode"] == "shadow":
-        print(f"Concordance shadow vs prod : {v['agreement_rate']:.1%}")
+        print(f"Shadow vs prod concordance: {v['agreement_rate']:.1%}")
 ```
 
-### Seuil de confiance
+### Confidence Threshold
 
-Marquer les prédictions incertaines avec `low_confidence: true` :
+Mark uncertain predictions with `low_confidence: true`:
 
 ```python
-# Configurer un seuil de confiance à 80%
+# Configure a confidence threshold of 80%
 requests.patch(f"{BASE_URL}/models/iris_model/1.0.0", headers=HEADERS,
                json={"confidence_threshold": 0.8})
 
-# Les prédictions avec probabilité max < 80% auront low_confidence: true
+# Predictions with max probability < 80% will have low_confidence: true
 result = requests.post(f"{BASE_URL}/predict", headers=HEADERS,
                        json={"model_name": "iris_model",
                              "features": {"sepal length (cm)": 5.8, "sepal width (cm)": 2.7,
                                           "petal length (cm)": 4.1, "petal width (cm)": 1.0}})
 data = result.json()
 if data.get("low_confidence"):
-    print("⚠ Prédiction incertaine — révision manuelle recommandée")
+    print("⚠ Uncertain prediction — manual review recommended")
 ```
 
-### Ré-entraînement automatique
+### Automatic Retraining
 
-Si vous avez fourni un script `train.py` à l'upload, vous pouvez déclencher un ré-entraînement :
+If you provided a `train.py` script at upload, you can trigger a retrain:
 
 ```python
 response = requests.post(
@@ -473,21 +473,21 @@ response = requests.post(
 )
 data = response.json()
 if data["success"]:
-    print(f"Nouvelle version créée : {data['new_version']}")
-    print(data["stdout"][-500:])   # derniers logs
+    print(f"New version created: {data['new_version']}")
+    print(data["stdout"][-500:])   # last logs
 else:
-    print(f"Erreur : {data['error']}")
+    print(f"Error: {data['error']}")
 ```
 
-### Explication SHAP inline sur /predict
+### Inline SHAP Explanation on /predict
 
-Obtenir les valeurs SHAP directement dans la réponse de prédiction sans appel supplémentaire :
+Get SHAP values directly in the prediction response without an extra call:
 
 ```python
 response = requests.post(
     f"{BASE_URL}/predict",
     headers=HEADERS,
-    params={"explain": "true"},          # paramètre de requête
+    params={"explain": "true"},          # query parameter
     json={
         "model_name": "iris_model",
         "features": {
@@ -499,30 +499,30 @@ response = requests.post(
     }
 )
 data = response.json()
-print(f"Prédiction : {data['prediction']}")
-# La réponse contient un champ "explanation" avec les valeurs SHAP
+print(f"Prediction: {data['prediction']}")
+# The response contains an "explanation" field with SHAP values
 if data.get("explanation"):
     for feat, val in data["explanation"]["shap_values"].items():
         print(f"  {feat}: {val:+.4f}")
 ```
 
-### Consulter une prédiction par son ID
+### Look Up a Prediction by ID
 
-Retrouver le détail d'une prédiction passée (features, résultat, latence) depuis son identifiant interne :
+Retrieve the detail of a past prediction (features, result, latency) from its internal identifier:
 
 ```python
-prediction_id = 42   # ID retourné par /predict ou trouvé dans /predictions
+prediction_id = 42   # ID returned by /predict or found in /predictions
 
 response = requests.get(
     f"{BASE_URL}/predictions/{prediction_id}",
     headers=HEADERS
 )
 data = response.json()
-print(f"Modèle : {data['model_name']} v{data['model_version']}")
-print(f"Résultat : {data['prediction_result']}")
-print(f"Latence : {data['response_time_ms']} ms")
+print(f"Model: {data['model_name']} v{data['model_version']}")
+print(f"Result: {data['prediction_result']}")
+print(f"Latency: {data['response_time_ms']} ms")
 
-# Récupérer l'explication SHAP post-hoc (si le modèle supporte SHAP)
+# Retrieve the post-hoc SHAP explanation (if the model supports SHAP)
 explain = requests.get(
     f"{BASE_URL}/predictions/{prediction_id}/explain",
     headers=HEADERS
@@ -530,9 +530,9 @@ explain = requests.get(
 print(explain.json()["shap_values"])
 ```
 
-### Import CSV de résultats observés
+### CSV Import of Observed Results
 
-Plutôt que d'envoyer les résultats un par un, importez-les en lot depuis un fichier CSV :
+Rather than sending results one by one, import them in bulk from a CSV file:
 
 ```python
 import io
@@ -541,7 +541,7 @@ import requests
 BASE_URL = "http://localhost:8000"
 HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
-# Format attendu : colonnes id_obs, model_name, date_time, observed_result
+# Expected format: columns id_obs, model_name, date_time, observed_result
 csv_content = """id_obs,model_name,date_time,observed_result
 obs-001,iris_model,2026-01-15T10:00:00,0
 obs-002,iris_model,2026-01-15T10:01:00,2
@@ -556,17 +556,17 @@ response = requests.post(
 print(response.json())  # {"upserted": 3, "errors": []}
 ```
 
-Vous pouvez également exporter les résultats observés et vérifier la couverture :
+You can also export observed results and check coverage:
 
 ```python
-# Statistiques de couverture (combien de prédictions ont un résultat observé)
+# Coverage statistics (how many predictions have an observed result)
 stats = requests.get(f"{BASE_URL}/observed-results/stats", headers=HEADERS,
                      params={"model_name": "iris_model"})
 data = stats.json()
-print(f"Prédictions avec ground truth : {data['matched_count']} / {data['total_predictions']}")
-print(f"Couverture : {data['coverage_rate']:.1%}")
+print(f"Predictions with ground truth: {data['matched_count']} / {data['total_predictions']}")
+print(f"Coverage: {data['coverage_rate']:.1%}")
 
-# Export CSV des résultats observés
+# CSV export of observed results
 export = requests.get(f"{BASE_URL}/observed-results/export", headers=HEADERS,
                       params={"model_name": "iris_model", "format": "csv"})
 with open("observed_results_export.csv", "wb") as f:
@@ -575,37 +575,37 @@ with open("observed_results_export.csv", "wb") as f:
 
 ### Webhooks
 
-Recevoir une notification après chaque prédiction :
+Receive a notification after each prediction:
 
 ```python
 requests.patch(f"{BASE_URL}/models/iris_model/1.0.0", headers=HEADERS,
                json={"webhook_url": "https://your-app.com/hooks/predictions"})
-# L'API enverra un POST JSON après chaque prédiction sur ce modèle
+# The API will send a JSON POST after each prediction on this model
 ```
 
 ---
 
-## Dashboard Streamlit
+## Streamlit Dashboard
 
-Ouvrez **http://localhost:8501** et connectez-vous avec le token admin.
+Open **http://localhost:8501** and log in with the admin token.
 
-**Pages disponibles :**
+**Available pages:**
 
-| Page | Fonctionnalités |
+| Page | Features |
 |---|---|
-| Accueil | Vue d'ensemble, liens vers les services |
-| Utilisateurs | Créer/désactiver des comptes, renouveler les tokens, analytics d'utilisation par modèle |
-| Modèles | Détails, passer en production, What-if Explorer (sliders → prédiction live), confusion matrix, importance des features SHAP, validation de schéma, téléchargement .joblib, seuil de confiance, lien MLflow |
-| Prédictions | Historique filtrable par modèle, date, version ; soumission inline de résultat observé ; export CSV/JSONL/Parquet ; purge RGPD |
-| Stats | Graphiques volume, temps de réponse, distribution ; leaderboard ; scatter plot accuracy vs latency P95 |
-| Code Example | Exemples Python, curl/bash et JavaScript générés dynamiquement |
-| A/B Testing | Shadow mode, comparaison statistique, promotion du gagnant en un clic |
-| Supervision | Monitoring global, drift, alertes, configuration des seuils par modèle, export rapport CSV/Markdown |
-| Retrain | Planifier, déclencher et suivre les ré-entraînements ; historique avec métriques ; delta d'importance des features avant/après retrain |
+| Home | System overview, links to services |
+| Users | Create/deactivate accounts, renew tokens, usage analytics by model |
+| Models | Details, set to production, What-if Explorer (sliders → live prediction), confusion matrix, SHAP feature importance, schema validation, .joblib download, confidence threshold, MLflow link |
+| Predictions | History filterable by model, date, version; inline observed result submission; CSV/JSONL/Parquet export; GDPR purge |
+| Stats | Volume, response time, distribution charts; leaderboard; accuracy vs latency P95 scatter plot |
+| Code Example | Dynamically generated Python, curl/bash and JavaScript examples |
+| A/B Testing | Shadow mode, statistical comparison, one-click winner promotion |
+| Supervision | Global monitoring, drift, alerts, per-model threshold configuration, CSV/Markdown report export |
+| Retrain | Schedule, trigger and monitor retrains; history with metrics; feature importance delta before/after retrain |
 
 ---
 
-## Gestion des utilisateurs
+## User Management
 
 ```python
 import requests
@@ -613,22 +613,22 @@ import requests
 BASE_URL = "http://localhost:8000"
 ADMIN_HEADERS = {"Authorization": "Bearer <ADMIN_TOKEN>"}
 
-# Créer un utilisateur pour votre application
+# Create a user for your application
 response = requests.post(
     f"{BASE_URL}/users",
     headers=ADMIN_HEADERS,
     json={
-        "username": "mon_app",
+        "username": "my_app",
         "email": "app@example.com",
         "role": "user",
-        "rate_limit": 10000    # 10 000 prédictions/jour
+        "rate_limit": 10000    # 10,000 predictions/day
     }
 )
 user = response.json()
 app_token = user["api_token"]
-print(f"Token de l'app : {app_token}")  # À stocker en sécurité
+print(f"App token: {app_token}")  # Store securely
 
-# Utiliser le token de l'app pour les prédictions
+# Use the app token for predictions
 app_headers = {"Authorization": f"Bearer {app_token}"}
 result = requests.post(f"{BASE_URL}/predict", headers=app_headers,
                        json={"model_name": "iris_model",
@@ -636,29 +636,29 @@ result = requests.post(f"{BASE_URL}/predict", headers=app_headers,
                                           "petal length (cm)": 1.4, "petal width (cm)": 0.2}})
 ```
 
-**Rôles :**
-- `admin` — accès complet (gestion utilisateurs, modèles, tout)
-- `user` — peut faire des prédictions et voir ses propres données
-- `readonly` — peut seulement lire (pas de prédiction)
+**Roles:**
+- `admin` — full access (user management, models, everything)
+- `user` — can make predictions and view their own data
+- `readonly` — can only read (no predictions)
 
 ---
 
-## Récapitulatif des URL importantes
+## Summary of Important URLs
 
 | Service | URL |
 |---|---|
 | API (via Nginx) | http://localhost |
-| Documentation interactive | http://localhost/docs |
-| Dashboard admin | http://localhost:8501 |
+| Interactive documentation | http://localhost/docs |
+| Admin dashboard | http://localhost:8501 |
 | MLflow | http://localhost:5000 |
-| MinIO (gestion fichiers) | http://localhost:9001 |
-| Grafana (observabilité) | http://localhost:3000 |
+| MinIO (file management) | http://localhost:9001 |
+| Grafana (observability) | http://localhost:3000 |
 
 ---
 
-## Prochaines étapes
+## Next Steps
 
-- [QUICKSTART.md](QUICKSTART.md) — récapitulatif concis des commandes essentielles
-- [API_REFERENCE.md](API_REFERENCE.md) — référence complète de tous les endpoints
-- [ARCHITECTURE.md](ARCHITECTURE.md) — comment les services interagissent
-- `http://localhost:8000/docs` — interface Swagger interactive pour tester l'API en direct
+- [QUICKSTART.md](QUICKSTART.md) — concise summary of essential commands
+- [API_REFERENCE.md](API_REFERENCE.md) — complete reference of all endpoints
+- [ARCHITECTURE.md](ARCHITECTURE.md) — how services interact
+- `http://localhost:8000/docs` — interactive Swagger interface to test the API live

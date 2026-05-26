@@ -1,45 +1,45 @@
-# Référence API — PredictML API v2.0
+# API Reference — PredictML API v2.0
 
-Documentation complète de tous les endpoints, schémas de données et exemples de code Python.
+Complete documentation of all endpoints, data schemas and Python code examples.
 
 ---
 
-## Authentification
+## Authentication
 
-Toutes les routes protégées utilisent un token Bearer dans l'en-tête HTTP.
+All protected routes use a Bearer token in the HTTP header.
 
 ```python
 import requests
 
 BASE_URL = "http://localhost:8000"
-TOKEN = "votre-token-ici"
+TOKEN = "your-token-here"
 
 headers = {"Authorization": f"Bearer {TOKEN}"}
 ```
 
-**Codes d'erreur d'authentification**
+**Authentication error codes**
 
-| Code | Raison |
+| Code | Reason |
 |---|---|
-| 401 | Token absent ou invalide |
-| 403 | Compte inactif ou rôle insuffisant |
-| 429 | Quota journalier de prédictions dépassé |
+| 401 | Token absent or invalid |
+| 403 | Inactive account or insufficient role |
+| 429 | Daily prediction quota exceeded |
 
-**Rôles disponibles**
+**Available roles**
 
-| Rôle | Accès |
+| Role | Access |
 |---|---|
-| `admin` | Accès complet — gestion utilisateurs, modèles, prédictions |
-| `user` | Prédictions, consultation de son profil |
-| `readonly` | Consultation uniquement, pas de prédiction |
+| `admin` | Full access — user management, models, predictions |
+| `user` | Predictions, viewing own profile |
+| `readonly` | Read-only, no predictions |
 
 ---
 
-## Endpoints publics
+## Public Endpoints
 
 ### `GET /`
 
-Statut de l'API et liste des modèles actifs.
+API status and list of active models.
 
 ```python
 response = requests.get(f"{BASE_URL}/")
@@ -60,7 +60,7 @@ print(response.json())
 
 ### `GET /health`
 
-Vérifie la connectivité à la base de données et l'état du cache Redis.
+Checks database connectivity and Redis cache status.
 
 ```python
 response = requests.get(f"{BASE_URL}/health")
@@ -76,32 +76,32 @@ response = requests.get(f"{BASE_URL}/health")
 
 ---
 
-## Modèles
+## Models
 
 ### `GET /models`
 
-Liste tous les modèles actifs. Filtrable par tag.
+Lists all active models. Filterable by tag.
 
 ```python
-# Tous les modèles
+# All models
 response = requests.get(f"{BASE_URL}/models")
 
-# Filtrés par tag
+# Filtered by tag
 response = requests.get(f"{BASE_URL}/models", params={"tag": "production"})
 models = response.json()
 ```
 
-**Paramètre de requête**
+**Query parameter**
 
-| Paramètre | Type | Description |
+| Parameter | Type | Description |
 |---|---|---|
-| `tag` | str | Filtre par tag (optionnel) |
+| `tag` | str | Filter by tag (optional) |
 
 ---
 
 ### `GET /models/cached`
 
-Liste les modèles actuellement chargés en mémoire (cache Redis).
+Lists models currently loaded in memory (Redis cache).
 
 ```python
 response = requests.get(f"{BASE_URL}/models/cached")
@@ -118,7 +118,7 @@ response = requests.get(f"{BASE_URL}/models/cached")
 
 ### `GET /models/{name}/{version}`
 
-Détail complet d'un modèle, incluant les métriques et les informations de chargement.
+Full details of a model, including metrics and loading information.
 
 ```python
 response = requests.get(f"{BASE_URL}/models/iris_model/1.0.0")
@@ -129,14 +129,14 @@ print(model["deployment_mode"])   # "production" | "ab_test" | "shadow"
 print(model["traffic_weight"])    # 0.8
 ```
 
-**Schéma de réponse `ModelGetResponse`**
+**Response schema `ModelGetResponse`**
 
 ```json
 {
   "id": 1,
   "name": "iris_model",
   "version": "1.0.0",
-  "description": "Classifieur Iris — 3 espèces",
+  "description": "Iris Classifier — 3 species",
   "algorithm": "RandomForestClassifier",
   "mlflow_run_id": "abc123def456",
   "minio_bucket": "models",
@@ -177,11 +177,11 @@ print(model["traffic_weight"])    # 0.8
 
 ---
 
-### `POST /models` — Uploader un modèle
+### `POST /models` — Upload a Model
 
-Upload d'un fichier `.joblib` avec ses métadonnées. Utilise `multipart/form-data`.
+Upload of a `.joblib` file with its metadata. Uses `multipart/form-data`.
 
-**Auth requise** (rôle `user` ou supérieur)
+**Auth required** (role `user` or higher)
 
 ```python
 import requests
@@ -191,7 +191,7 @@ with open("iris_model.joblib", "rb") as f:
     data = {
         "name": "iris_model",
         "version": "1.0.0",
-        "description": "Classifieur Iris — 3 espèces",
+        "description": "Iris Classifier — 3 species",
         "algorithm": "RandomForestClassifier",
         "accuracy": "0.97",
         "f1_score": "0.97",
@@ -213,7 +213,7 @@ with open("iris_model.joblib", "rb") as f:
 print(response.status_code)  # 201
 ```
 
-**Avec un run MLflow (sans fichier `.joblib`)**
+**With an MLflow run (without `.joblib` file)**
 
 ```python
 data = {
@@ -224,7 +224,7 @@ data = {
 response = requests.post(f"{BASE_URL}/models", headers=headers, data=data)
 ```
 
-**Avec un script de ré-entraînement**
+**With a retraining script**
 
 ```python
 with open("iris_model.joblib", "rb") as f_model, open("train.py", "rb") as f_train:
@@ -239,54 +239,54 @@ with open("iris_model.joblib", "rb") as f_model, open("train.py", "rb") as f_tra
     )
 ```
 
-**Champs du formulaire**
+**Form fields**
 
-| Champ | Type | Requis | Description |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | str | Oui | Nom unique du modèle |
-| `version` | str | Oui | Version (ex: "1.0.0") |
-| `file` | fichier `.joblib` | Si pas de MLflow | Fichier sérialisé |
-| `train_file` | fichier `.py` | Non | Script de ré-entraînement |
-| `description` | str | Non | Description lisible |
-| `algorithm` | str | Non | Nom de l'algo |
-| `mlflow_run_id` | str | Non | ID de run MLflow |
-| `accuracy` | float | Non | Score de précision |
-| `f1_score` | float | Non | Score F1 |
-| `features_count` | int | Non | Nombre de features |
-| `classes` | JSON str | Non | Labels des classes `["A","B"]` |
-| `training_params` | JSON str | Non | Hyperparamètres `{"n": 100}` |
-| `training_dataset` | str | Non | Nom/URI du dataset |
-| `tags` | JSON str | Non | Tags `["tag1","tag2"]` |
-| `webhook_url` | str | Non | URL de webhook post-prédiction |
-| `confidence_threshold` | float | Non | Seuil de confiance (0.0–1.0) |
-| `feature_baseline` | JSON str | Non | Stats baseline par feature |
+| `name` | str | Yes | Unique model name |
+| `version` | str | Yes | Version (e.g. "1.0.0") |
+| `file` | `.joblib` file | If no MLflow | Serialised file |
+| `train_file` | `.py` file | No | Retraining script |
+| `description` | str | No | Human-readable description |
+| `algorithm` | str | No | Algorithm name |
+| `mlflow_run_id` | str | No | MLflow run ID |
+| `accuracy` | float | No | Accuracy score |
+| `f1_score` | float | No | F1 score |
+| `features_count` | int | No | Number of features |
+| `classes` | JSON str | No | Class labels `["A","B"]` |
+| `training_params` | JSON str | No | Hyperparameters `{"n": 100}` |
+| `training_dataset` | str | No | Dataset name/URI |
+| `tags` | JSON str | No | Tags `["tag1","tag2"]` |
+| `webhook_url` | str | No | Post-prediction webhook URL |
+| `confidence_threshold` | float | No | Confidence threshold (0.0–1.0) |
+| `feature_baseline` | JSON str | No | Per-feature baseline stats |
 
 ---
 
-### `PATCH /models/{name}/{version}` — Mettre à jour un modèle
+### `PATCH /models/{name}/{version}` — Update a Model
 
-Met à jour les métadonnées, le mode de déploiement ou les paramètres de production.
+Updates metadata, deployment mode or production parameters.
 
-**Auth requise**
+**Auth required**
 
 ```python
-# Passer en production
+# Set to production
 requests.patch(f"{BASE_URL}/models/iris_model/2.0.0", headers=headers,
                json={"is_production": True})
 
-# Configurer l'A/B testing
+# Configure A/B testing
 requests.patch(f"{BASE_URL}/models/iris_model/2.0.0", headers=headers,
                json={"deployment_mode": "ab_test", "traffic_weight": 0.2})
 
-# Mode shadow (test silencieux sans impacter les réponses)
+# Shadow mode (silent testing without impacting responses)
 requests.patch(f"{BASE_URL}/models/iris_model/2.0.0", headers=headers,
                json={"deployment_mode": "shadow"})
 
-# Configurer un seuil de confiance
+# Configure a confidence threshold
 requests.patch(f"{BASE_URL}/models/iris_model/1.0.0", headers=headers,
                json={"confidence_threshold": 0.8})
 
-# Ajouter une baseline pour la dérive
+# Add a drift baseline
 requests.patch(f"{BASE_URL}/models/iris_model/1.0.0", headers=headers,
                json={
                    "feature_baseline": {
@@ -294,33 +294,33 @@ requests.patch(f"{BASE_URL}/models/iris_model/1.0.0", headers=headers,
                    }
                })
 
-# Ajouter des tags et un webhook
+# Add tags and a webhook
 requests.patch(f"{BASE_URL}/models/iris_model/1.0.0", headers=headers,
                json={"tags": ["iris", "v1"], "webhook_url": "https://hooks.example.com/ml"})
 ```
 
-**Schéma `ModelUpdateInput`**
+**Schema `ModelUpdateInput`**
 
-| Champ | Type | Description |
+| Field | Type | Description |
 |---|---|---|
-| `description` | str | Nouvelle description |
-| `is_production` | bool | Si `true`, les autres versions passent à `false` |
-| `accuracy` | float | Score mis à jour |
-| `features_count` | int | Nombre de features |
-| `classes` | list | Labels des classes |
-| `confidence_threshold` | float (0–1) | Seuil de confiance min pour `low_confidence` |
-| `feature_baseline` | dict | Stats par feature `{nom: {mean, std, min, max}}` |
-| `tags` | list[str] | Tags libres |
-| `webhook_url` | str | URL appelée après chaque prédiction |
-| `deployment_mode` | str | `"production"`, `"ab_test"` ou `"shadow"` |
-| `traffic_weight` | float (0–1) | Part du trafic routée vers cette version |
-| `alert_thresholds` | dict | Seuils d'alerte spécifiques au modèle (ex: `{"error_rate": 0.05, "drift_zscore": 2.0}`) — surcharge les seuils globaux |
+| `description` | str | New description |
+| `is_production` | bool | If `true`, other versions are set to `false` |
+| `accuracy` | float | Updated score |
+| `features_count` | int | Number of features |
+| `classes` | list | Class labels |
+| `confidence_threshold` | float (0–1) | Min confidence threshold for `low_confidence` |
+| `feature_baseline` | dict | Per-feature stats `{name: {mean, std, min, max}}` |
+| `tags` | list[str] | Free tags |
+| `webhook_url` | str | URL called after each prediction |
+| `deployment_mode` | str | `"production"`, `"ab_test"` or `"shadow"` |
+| `traffic_weight` | float (0–1) | Traffic fraction routed to this version |
+| `alert_thresholds` | dict | Model-specific alert thresholds (e.g. `{"error_rate": 0.05, "drift_zscore": 2.0}`) — overrides global thresholds |
 
 ---
 
-### `DELETE /models/{name}/{version}` — Supprimer une version
+### `DELETE /models/{name}/{version}` — Delete a Version
 
-Supprime le modèle de la base, MinIO et MLflow. Retourne 204.
+Removes the model from the database, MinIO and MLflow. Returns 204.
 
 ```python
 response = requests.delete(f"{BASE_URL}/models/iris_model/1.0.0", headers=headers)
@@ -329,7 +329,7 @@ assert response.status_code == 204
 
 ---
 
-### `DELETE /models/{name}` — Supprimer toutes les versions
+### `DELETE /models/{name}` — Delete All Versions
 
 ```python
 response = requests.delete(f"{BASE_URL}/models/iris_model", headers=headers)
@@ -340,11 +340,11 @@ print(response.json())
 
 ---
 
-### `GET /models/{name}/performance` — Performance réelle
+### `GET /models/{name}/performance` — Real-World Performance
 
-Calcule les métriques réelles en joignant les prédictions aux résultats observés.
+Calculates real-world metrics by joining predictions with observed results.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.get(
@@ -353,14 +353,14 @@ response = requests.get(
     params={
         "start": "2025-01-01T00:00:00",
         "end": "2025-12-31T23:59:59",
-        "version": "1.0.0",   # optionnel
-        "period": "week",     # optionnel : "day", "week", "month"
+        "version": "1.0.0",   # optional
+        "period": "week",     # optional: "day", "week", "month"
     }
 )
 data = response.json()
 ```
 
-**Schéma `ModelPerformanceResponse`** (classification)
+**Schema `ModelPerformanceResponse`** (classification)
 
 ```json
 {
@@ -388,7 +388,7 @@ data = response.json()
 }
 ```
 
-**Schéma `ModelPerformanceResponse`** (régression)
+**Schema `ModelPerformanceResponse`** (regression)
 
 ```json
 {
@@ -402,11 +402,11 @@ data = response.json()
 
 ---
 
-### `GET /models/{name}/drift` — Dérive des données
+### `GET /models/{name}/drift` — Data Drift
 
-Rapport de dérive pour chaque feature (Z-score + PSI) par rapport à la baseline.
+Drift report for each feature (Z-score + PSI) compared to the baseline.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.get(
@@ -418,7 +418,7 @@ data = response.json()
 print(data["drift_summary"])  # "ok" | "warning" | "critical" | "no_baseline"
 ```
 
-**Schéma `DriftReportResponse`**
+**Schema `DriftReportResponse`**
 
 ```json
 {
@@ -446,29 +446,29 @@ print(data["drift_summary"])  # "ok" | "warning" | "critical" | "no_baseline"
 }
 ```
 
-Le rapport couvre **4 dimensions de monitoring** :
-1. **Dérive de distribution** (Z-score sur la moyenne, PSI sur la distribution)
-2. **Dérive de performance** (accuracy/MAE vs baseline)
-3. **Dérive de taux d'erreur** (HTTP 500 et erreurs de prédiction)
-4. **Null rate** — taux de valeurs nulles par feature (`null_rate_current` vs `null_rate_baseline`)
+The report covers **4 monitoring dimensions**:
+1. **Distribution drift** (Z-score on mean, PSI on distribution)
+2. **Performance drift** (accuracy/MAE vs baseline)
+3. **Error rate drift** (HTTP 500 and prediction errors)
+4. **Null rate** — rate of null values per feature (`null_rate_current` vs `null_rate_baseline`)
 
-Voir aussi `GET /models/{name}/output-drift` pour la dérive de distribution des sorties (label shift).
+See also `GET /models/{name}/output-drift` for output distribution drift (label shift).
 
 ---
 
-### `GET /models/{name}/output-drift` — Drift de distribution des sorties
+### `GET /models/{name}/output-drift` — Output Distribution Drift
 
-Détecte le **label shift** : compare la distribution récente des prédictions à la distribution de référence (`training_stats.label_distribution`).
+Detects **label shift**: compares the recent prediction distribution to the reference distribution (`training_stats.label_distribution`).
 
-**Auth requise**
+**Auth required**
 
-**Paramètres**
+**Parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `period_days` | int | 7 | Fenêtre d'analyse (max 90) |
-| `model_version` | str | production | Version cible |
-| `min_predictions` | int | 30 | Nb minimal de prédictions pour calculer (sinon `insufficient_data`) |
+| `period_days` | int | 7 | Analysis window (max 90) |
+| `model_version` | str | production | Target version |
+| `min_predictions` | int | 30 | Minimum number of predictions to compute (otherwise `insufficient_data`) |
 
 ```python
 response = requests.get(
@@ -478,13 +478,13 @@ response = requests.get(
 )
 drift = response.json()
 
-print(f"Statut : {drift['status']}")  # ok | warning | critical | insufficient_data | no_reference
-print(f"PSI : {drift['psi']:.4f}")
+print(f"Status: {drift['status']}")  # ok | warning | critical | insufficient_data | no_reference
+print(f"PSI: {drift['psi']:.4f}")
 for cls, data in drift["class_distribution"].items():
-    print(f"  {cls}: référence={data['reference']:.2%}, récent={data['recent']:.2%}")
+    print(f"  {cls}: reference={data['reference']:.2%}, recent={data['recent']:.2%}")
 ```
 
-**Schéma `OutputDriftResponse`**
+**Schema `OutputDriftResponse`**
 
 ```json
 {
@@ -502,42 +502,42 @@ for cls, data in drift["class_distribution"].items():
 }
 ```
 
-**Seuils PSI**
+**PSI Thresholds**
 
-| PSI | Statut |
+| PSI | Status |
 |---|---|
 | < 0.1 | `ok` |
 | 0.1 – 0.2 | `warning` |
 | ≥ 0.2 | `critical` |
 
-> Un `status: critical` déclenche une alerte webhook (`output_drift_critical`) et peut déclencher un retrain si `trigger_on_drift` est configuré dans le schedule.
+> A `status: critical` triggers a webhook alert (`output_drift_critical`) and can trigger a retrain if `trigger_on_drift` is configured in the schedule.
 
-**Statuts de dérive**
+**Drift Statuses**
 
-| Statut | Signification |
+| Status | Meaning |
 |---|---|
-| `ok` | Pas de dérive détectée |
-| `warning` | Dérive modérée (Z-score > 1.5 ou PSI > 0.1) |
-| `critical` | Dérive forte (Z-score > 2 ou PSI > 0.2) |
-| `no_baseline` | Aucune baseline configurée pour ce modèle |
-| `insufficient_data` | Pas assez de prédictions récentes |
+| `ok` | No drift detected |
+| `warning` | Moderate drift (Z-score > 1.5 or PSI > 0.1) |
+| `critical` | Strong drift (Z-score > 2 or PSI > 0.2) |
+| `no_baseline` | No baseline configured for this model |
+| `insufficient_data` | Not enough recent predictions |
 
 ---
 
-### `GET /models/{name}/feature-importance` — Importance globale des features (SHAP agrégé)
+### `GET /models/{name}/feature-importance` — Global Feature Importance (aggregated SHAP)
 
-Calcule la moyenne de `|SHAP|` par feature sur un échantillon de prédictions récentes.
-Permet d'identifier les features les plus influentes du modèle en production et de détecter des dérives comportementales avant même que les métriques de performance ne bougent.
+Computes the average `|SHAP|` per feature over a sample of recent predictions.
+Allows identifying the most influential features in production and detecting behavioural drift before performance metrics degrade.
 
-**Auth requise**
+**Auth required**
 
-**Paramètres**
+**Parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `version` | str | production | Version cible ; sinon `is_production=True`, sinon la plus récente |
-| `last_n` | int | 100 | Nb de prédictions à échantillonner (max 500) |
-| `days` | int | 7 | Fenêtre temporelle en jours (max 90) |
+| `version` | str | production | Target version; otherwise `is_production=True`, otherwise most recent |
+| `last_n` | int | 100 | Number of predictions to sample (max 500) |
+| `days` | int | 7 | Time window in days (max 90) |
 
 ```python
 response = requests.get(
@@ -547,14 +547,14 @@ response = requests.get(
 )
 data = response.json()
 
-print(f"Analysé sur {data['sample_size']} prédictions")
+print(f"Analysed over {data['sample_size']} predictions")
 for feat, info in sorted(
     data["feature_importance"].items(), key=lambda x: x[1]["rank"]
 ):
     print(f"  #{info['rank']} {feat}: mean |SHAP| = {info['mean_abs_shap']:.4f}")
 ```
 
-**Schéma `FeatureImportanceResponse`**
+**Schema `FeatureImportanceResponse`**
 
 ```json
 {
@@ -570,32 +570,32 @@ for feat, info in sorted(
 }
 ```
 
-**Cas particuliers**
+**Edge Cases**
 
-| Situation | Comportement |
+| Situation | Behaviour |
 |---|---|
-| Aucune prédiction dans la fenêtre | `sample_size: 0`, `feature_importance: {}` |
-| Modèle sans `feature_names_in_` | 422 — doit être entraîné avec un DataFrame pandas |
-| Type de modèle non supporté par SHAP | 422 — voir `POST /explain` pour la liste des types |
+| No predictions in the window | `sample_size: 0`, `feature_importance: {}` |
+| Model without `feature_names_in_` | 422 — must be trained with a pandas DataFrame |
+| Model type not supported by SHAP | 422 — see `POST /explain` for the list of types |
 
-> **Utilisation typique :** surveiller chaque semaine que les features les plus importantes restent stables. Un changement de classement indique souvent une dérive du comportement du modèle avant que l'accuracy ne baisse.
+> **Typical use:** monitor weekly that the most important features remain stable. A ranking change often indicates model behavioural drift before accuracy drops.
 
 ---
 
-### `GET /models/{name}/history` — Historique complet
+### `GET /models/{name}/history` — Complete History
 
-Journal de tous les changements d'état pour toutes les versions d'un modèle.
+Log of all state changes for all versions of a model.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.get(f"{BASE_URL}/models/iris_model/history", headers=headers)
 data = response.json()
 for entry in data["entries"]:
-    print(f"[{entry['timestamp']}] {entry['action']} par {entry['changed_by_username']}")
+    print(f"[{entry['timestamp']}] {entry['action']} by {entry['changed_by_username']}")
 ```
 
-**Schéma `ModelHistoryResponse`**
+**Schema `ModelHistoryResponse`**
 
 ```json
 {
@@ -619,21 +619,21 @@ for entry in data["entries"]:
 
 ---
 
-### `GET /models/{name}/{version}/history` — Historique d'une version
+### `GET /models/{name}/{version}/history` — History of a Version
 
 ```python
 response = requests.get(f"{BASE_URL}/models/iris_model/1.0.0/history", headers=headers)
 ```
 
-Même schéma que `/models/{name}/history` mais filtré sur la version spécifiée.
+Same schema as `/models/{name}/history` but filtered on the specified version.
 
 ---
 
 ### `POST /models/{name}/{version}/rollback/{history_id}` — Rollback
 
-Restaure les métadonnées d'un modèle à un état précédent enregistré dans l'historique.
+Restores a model's metadata to a previous state recorded in the history.
 
-**Auth requise : admin**
+**Auth required: admin**
 
 ```python
 response = requests.post(
@@ -641,11 +641,11 @@ response = requests.post(
     headers=headers
 )
 data = response.json()
-print(f"Restauré vers history_id={data['rolled_back_to_history_id']}")
-print(f"Champs restaurés : {data['restored_fields']}")
+print(f"Restored to history_id={data['rolled_back_to_history_id']}")
+print(f"Restored fields: {data['restored_fields']}")
 ```
 
-**Schéma `RollbackResponse`**
+**Schema `RollbackResponse`**
 
 ```json
 {
@@ -660,11 +660,11 @@ print(f"Champs restaurés : {data['restored_fields']}")
 
 ---
 
-### `POST /models/{name}/{version}/retrain` — Ré-entraîner
+### `POST /models/{name}/{version}/retrain` — Retrain
 
-Déclenche le ré-entraînement d'un modèle via son script `train.py` stocké dans MinIO.
+Triggers retraining of a model via its `train.py` script stored in MinIO.
 
-**Auth requise : admin**
+**Auth required: admin**
 
 ```python
 response = requests.post(
@@ -673,26 +673,26 @@ response = requests.post(
     json={
         "start_date": "2025-01-01",
         "end_date": "2025-12-31",
-        "new_version": "1.1.0",      # optionnel, auto-généré si absent
+        "new_version": "1.1.0",      # optional, auto-generated if absent
         "set_production": false
     }
 )
 data = response.json()
-print(f"Succès : {data['success']}")
-print(f"Nouvelle version : {data['new_version']}")
-print(data["stdout"])   # logs d'entraînement
+print(f"Success: {data['success']}")
+print(f"New version: {data['new_version']}")
+print(data["stdout"])   # training logs
 ```
 
-**Schéma `RetrainRequest`**
+**Schema `RetrainRequest`**
 
-| Champ | Type | Requis | Description |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `start_date` | str (YYYY-MM-DD) | Oui | Date début des données |
-| `end_date` | str (YYYY-MM-DD) | Oui | Date fin des données |
-| `new_version` | str | Non | Version de la nouvelle sortie (auto si absent) |
-| `set_production` | bool | Non | Passer en production après (défaut: false) |
+| `start_date` | str (YYYY-MM-DD) | Yes | Data start date |
+| `end_date` | str (YYYY-MM-DD) | Yes | Data end date |
+| `new_version` | str | No | Output version (auto if absent) |
+| `set_production` | bool | No | Set to production after (default: false) |
 
-**Schéma `RetrainResponse`**
+**Schema `RetrainResponse`**
 
 ```json
 {
@@ -722,44 +722,44 @@ print(data["stdout"])   # logs d'entraînement
 }
 ```
 
-> Le script `train.py` doit référencer les variables d'env `TRAIN_START_DATE`, `TRAIN_END_DATE`, `OUTPUT_MODEL_PATH`. Voir [CLAUDE.md](../CLAUDE.md) pour le contrat complet.
+> The `train.py` script must reference the env variables `TRAIN_START_DATE`, `TRAIN_END_DATE`, `OUTPUT_MODEL_PATH`. See [CLAUDE.md](../CLAUDE.md) for the complete contract.
 
 ---
 
-### `PATCH /models/{name}/{version}/schedule` — Planifier le ré-entraînement automatique
+### `PATCH /models/{name}/{version}/schedule` — Schedule Automatic Retraining
 
-Configure un planning cron pour déclencher automatiquement le ré-entraînement d'une version.
-Le scheduler APScheduler charge tous les plannings actifs au démarrage de l'API.
+Configures a cron schedule to automatically trigger retraining of a version.
+The APScheduler loads all active schedules at API startup.
 
-**Auth requise : admin**
+**Auth required: admin**
 
 ```python
 response = requests.patch(
     f"{BASE_URL}/models/iris_model/1.0.0/schedule",
     headers=headers,
     json={
-        "cron": "0 3 * * 1",    # chaque lundi à 03h00 UTC
-        "lookback_days": 30,     # TRAIN_START_DATE = today - 30j
-        "auto_promote": False,   # évaluer la promotion_policy après retrain
+        "cron": "0 3 * * 1",    # every Monday at 03:00 UTC
+        "lookback_days": 30,     # TRAIN_START_DATE = today - 30d
+        "auto_promote": False,   # evaluate promotion_policy after retrain
         "enabled": True
     }
 )
 data = response.json()
-print(f"Prochain déclenchement : {data['retrain_schedule']['next_run_at']}")
+print(f"Next trigger: {data['retrain_schedule']['next_run_at']}")
 ```
 
-**Schéma `RetrainScheduleInput`**
+**Schema `RetrainScheduleInput`**
 
-| Champ | Type | Défaut | Description |
+| Field | Type | Default | Description |
 |---|---|---|---|
-| `cron` | str | null | Expression cron 5 champs (ex : `"0 3 * * 1"`) |
-| `lookback_days` | int ≥ 1 | 30 | Fenêtre d'historique passée au script (jours) |
-| `auto_promote` | bool | false | Évaluer la `promotion_policy` après chaque retrain |
-| `enabled` | bool | true | `false` = pause sans effacer le planning |
-| `trigger_on_drift` | `"warning"` \| `"critical"` \| null | null | Niveau de drift déclenchant un retrain réactif (sans attendre le cron) |
-| `drift_retrain_cooldown_hours` | int ≥ 1 | 24 | Cooldown minimal entre deux retrains drift-triggered (évite les boucles) |
+| `cron` | str | null | 5-field cron expression (e.g. `"0 3 * * 1"`) |
+| `lookback_days` | int ≥ 1 | 30 | Historical window passed to the script (days) |
+| `auto_promote` | bool | false | Evaluate `promotion_policy` after each retrain |
+| `enabled` | bool | true | `false` = pause without clearing the schedule |
+| `trigger_on_drift` | `"warning"` \| `"critical"` \| null | null | Drift level triggering a reactive retrain (without waiting for the cron) |
+| `drift_retrain_cooldown_hours` | int ≥ 1 | 24 | Minimum cooldown between two drift-triggered retrains (prevents loops) |
 
-**Schéma `ScheduleUpdateResponse`**
+**Schema `ScheduleUpdateResponse`**
 
 ```json
 {
@@ -776,24 +776,23 @@ print(f"Prochain déclenchement : {data['retrain_schedule']['next_run_at']}")
 }
 ```
 
-> Si `cron` est invalide, l'API retourne HTTP 422 avec le détail de l'erreur.  
-> Si `enabled=True` sans `cron`, HTTP 422 est retourné.  
-> Pour désactiver sans effacer le planning : `{"cron": "0 3 * * 1", "enabled": false}`.
+> If `cron` is invalid, the API returns HTTP 422 with error details.  
+> If `enabled=True` without `cron`, HTTP 422 is returned.  
+> To disable without clearing the schedule: `{"cron": "0 3 * * 1", "enabled": false}`.
 
 ---
 
-### `GET /models/{name}/ab-compare` — Rapport A/B avec significativité statistique
+### `GET /models/{name}/ab-compare` — A/B Report with Statistical Significance
 
-Comparaison côte à côte des versions en A/B test ou shadow sur une période, enrichie d'un test
-de significativité statistique automatique entre les deux versions les plus actives.
+Side-by-side comparison of A/B test or shadow versions over a period, enriched with an automatic statistical significance test between the two most active versions.
 
-**Auth requise**
+**Auth required**
 
-**Paramètres**
+**Parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `days` | int | 30 | Fenêtre d'analyse en jours (1–90) |
+| `days` | int | 30 | Analysis window in days (1–90) |
 
 ```python
 response = requests.get(
@@ -803,24 +802,24 @@ response = requests.get(
 )
 data = response.json()
 
-# Métriques brutes par version
+# Raw metrics per version
 for v in data["versions"]:
     print(f"{v['version']} ({v['deployment_mode']}): "
           f"{v['total_predictions']} preds, error_rate={v['error_rate']:.2%}, "
           f"agreement={v['agreement_rate']}")
 
-# Significativité statistique
+# Statistical significance
 sig = data.get("ab_significance")
 if sig:
-    status = "✅ significative" if sig["significant"] else "⚠️  non significative"
-    print(f"\nDifférence {status} (p={sig['p_value']:.4f}, test={sig['test']})")
+    status = "✅ significant" if sig["significant"] else "⚠️  not significant"
+    print(f"\nDifference {status} (p={sig['p_value']:.4f}, test={sig['test']})")
     if sig["winner"]:
-        print(f"Meilleure version : {sig['winner']}")
+        print(f"Best version: {sig['winner']}")
     if sig["current_samples"][sig["winner"] or list(sig["current_samples"])[0]] < sig["min_samples_needed"]:
-        print(f"⚠️  Données insuffisantes — {sig['min_samples_needed']} observations/version recommandées")
+        print(f"⚠️  Insufficient data — {sig['min_samples_needed']} observations/version recommended")
 ```
 
-**Schéma `ABCompareResponse`**
+**Schema `ABCompareResponse`**
 
 ```json
 {
@@ -865,38 +864,38 @@ if sig:
 }
 ```
 
-**Champs `ab_significance`**
+**`ab_significance` fields**
 
-| Champ | Type | Description |
+| Field | Type | Description |
 |---|---|---|
-| `metric` | str | Métrique testée : `"error_rate"` ou `"response_time_ms"` |
-| `test` | str | Test utilisé : `"chi2"` (erreur) ou `"mann_whitney_u"` (latence) |
-| `p_value` | float | Valeur p du test statistique |
-| `significant` | bool | `true` si `p_value < 1 - confidence_level` |
-| `confidence_level` | float | Seuil de confiance (défaut `0.95`) |
-| `winner` | str \| null | Version avec la meilleure métrique, `null` si égalité exacte |
-| `min_samples_needed` | int | Observations/version recommandées pour détecter cet effet (puissance 80 %) |
-| `current_samples` | dict | Nombre d'observations disponibles par version |
+| `metric` | str | Metric tested: `"error_rate"` or `"response_time_ms"` |
+| `test` | str | Test used: `"chi2"` (error) or `"mann_whitney_u"` (latency) |
+| `p_value` | float | P-value of the statistical test |
+| `significant` | bool | `true` if `p_value < 1 - confidence_level` |
+| `confidence_level` | float | Confidence threshold (default `0.95`) |
+| `winner` | str \| null | Version with the best metric, `null` if exact tie |
+| `min_samples_needed` | int | Observations/version recommended to detect this effect (80% power) |
+| `current_samples` | dict | Number of available observations per version |
 
-> **Logique de sélection du test :**  
-> Chi-² si au moins une erreur est observée dans l'un des groupes (tableau de contingence succès/erreur).  
-> Fallback Mann-Whitney U sur les temps de réponse si aucune erreur n'est présente.  
-> `ab_significance: null` si moins de 2 versions actives ou données insuffisantes.
+> **Test selection logic:**  
+> Chi-² if at least one error is observed in either group (success/error contingency table).  
+> Fallback to Mann-Whitney U on response times if no errors are present.  
+> `ab_significance: null` if fewer than 2 active versions or insufficient data.
 
 ---
 
-### `GET /models/{name}/shadow-compare` — Rapport shadow vs production
+### `GET /models/{name}/shadow-compare` — Shadow vs Production Report
 
-Comparaison enrichie entre le modèle shadow et le modèle de production : accuracy, latence, taux de désaccord et recommandation de promotion.
+Enriched comparison between the shadow model and the production model: accuracy, latency, disagreement rate and promotion recommendation.
 
-**Auth requise**
+**Auth required**
 
-**Paramètres**
+**Parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `days` | int | 7 | Fenêtre d'analyse |
-| `shadow_version` | str | auto | Version shadow cible (sinon la première version `shadow` active) |
+| `days` | int | 7 | Analysis window |
+| `shadow_version` | str | auto | Target shadow version (otherwise the first active `shadow` version) |
 
 ```python
 response = requests.get(
@@ -908,12 +907,12 @@ cmp = response.json()
 
 print(f"Production v{cmp['production_version']}: accuracy={cmp['production_accuracy']:.2%}")
 print(f"Shadow v{cmp['shadow_version']}: accuracy={cmp['shadow_accuracy']:.2%}")
-print(f"Delta accuracy: {cmp['accuracy_delta']:+.2%}")
-print(f"Taux de désaccord: {cmp['disagreement_rate']:.2%}")
-print(f"Recommandation: {cmp['recommendation']}")
+print(f"Accuracy delta: {cmp['accuracy_delta']:+.2%}")
+print(f"Disagreement rate: {cmp['disagreement_rate']:.2%}")
+print(f"Recommendation: {cmp['recommendation']}")
 ```
 
-**Schéma `ShadowCompareResponse`**
+**Schema `ShadowCompareResponse`**
 
 ```json
 {
@@ -934,33 +933,33 @@ print(f"Recommandation: {cmp['recommendation']}")
 }
 ```
 
-| `recommendation` | Signification |
+| `recommendation` | Meaning |
 |---|---|
-| `promote` | Le shadow est meilleur sur toutes les métriques — promouvoir en production |
-| `keep_shadow` | Métriques mitigées ou données insuffisantes — continuer l'observation |
-| `no_shadow` | Aucun modèle shadow actif |
+| `promote` | Shadow is better on all metrics — promote to production |
+| `keep_shadow` | Mixed metrics or insufficient data — continue observation |
+| `no_shadow` | No active shadow model |
 
 ---
 
 ### `GET /models/{name}/{version}/card` — Model Card
 
-Fiche récapitulative d'un modèle en un seul appel : métadonnées, performance réelle, drift, calibration, top features SHAP, info retrain et couverture ground truth.
+Summary sheet of a model in a single call: metadata, real performance, drift, calibration, top SHAP features, retrain info and ground truth coverage.
 
-**Auth requise**
+**Auth required**
 
 ```python
-# JSON (défaut)
+# JSON (default)
 response = requests.get(
     f"{BASE_URL}/models/iris_model/2.0.0/card",
     headers=headers
 )
 card = response.json()
-print(f"Modèle : {card['name']} v{card['version']}")
-print(f"Accuracy réelle : {card['performance']['accuracy']:.2%}")
-print(f"Drift : {card['drift']['summary']}")
-print(f"Top feature : {card['feature_importance'][0]['feature']}")
+print(f"Model: {card['name']} v{card['version']}")
+print(f"Real accuracy: {card['performance']['accuracy']:.2%}")
+print(f"Drift: {card['drift']['summary']}")
+print(f"Top feature: {card['feature_importance'][0]['feature']}")
 
-# Markdown — prêt à partager ou insérer dans une PR
+# Markdown — ready to share or insert into a PR
 response_md = requests.get(
     f"{BASE_URL}/models/iris_model/2.0.0/card",
     headers={"Authorization": f"Bearer {TOKEN}", "Accept": "text/markdown"}
@@ -969,13 +968,13 @@ with open("model_card.md", "w") as f:
     f.write(response_md.text)
 ```
 
-**Schéma `ModelCardResponse`**
+**Schema `ModelCardResponse`**
 
 ```json
 {
   "name": "iris_model",
   "version": "2.0.0",
-  "description": "Classifieur Iris — 3 espèces",
+  "description": "Iris Classifier — 3 species",
   "algorithm": "RandomForestClassifier",
   "trained_by": "alice",
   "training_date": "2026-03-01T03:00:00",
@@ -1010,19 +1009,19 @@ with open("model_card.md", "w") as f:
 
 ---
 
-### `GET /models/{name}/confidence-trend` — Tendance de confiance
+### `GET /models/{name}/confidence-trend` — Confidence Trend
 
-Retourne l'évolution de la probabilité de confiance maximale moyenne sur une période, par fenêtre temporelle.
+Returns the evolution of the average maximum confidence probability over a period, by time window.
 
-**Auth requise**
+**Auth required**
 
-**Paramètres**
+**Parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `version` | str | production | Version cible |
-| `days` | int | 30 | Fenêtre d'analyse en jours |
-| `granularity` | str | `"day"` | Granularité : `"hour"`, `"day"`, `"week"` |
+| `version` | str | production | Target version |
+| `days` | int | 30 | Analysis window in days |
+| `granularity` | str | `"day"` | Granularity: `"hour"`, `"day"`, `"week"` |
 
 ```python
 response = requests.get(
@@ -1037,7 +1036,7 @@ for point in data["trend"]:
           f"low_conf_rate={point['low_confidence_rate']:.1%}")
 ```
 
-**Schéma `ConfidenceTrendResponse`**
+**Schema `ConfidenceTrendResponse`**
 
 ```json
 {
@@ -1062,15 +1061,15 @@ for point in data["trend"]:
 }
 ```
 
-> Une baisse progressive de `avg_confidence` sans dégradation d'accuracy peut indiquer que le modèle rencontre des observations de plus en plus proches des frontières de décision — signe précoce de dérive.
+> A gradual drop in `avg_confidence` without accuracy degradation can indicate that the model is encountering observations increasingly close to decision boundaries — an early sign of drift.
 
 ---
 
-### `POST /models/{name}/{version}/warmup` — Préchauffage du cache
+### `POST /models/{name}/{version}/warmup` — Cache Warmup
 
-Précharge le modèle dans le cache Redis sans attendre la première requête de prédiction. Réduit la latence à froid lors des déploiements.
+Preloads the model into Redis cache without waiting for the first prediction request. Reduces cold-start latency during deployments.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.post(
@@ -1078,10 +1077,10 @@ response = requests.post(
     headers=headers
 )
 data = response.json()
-print(f"Chargé en {data['load_time_ms']:.1f} ms — {data['status']}")
+print(f"Loaded in {data['load_time_ms']:.1f} ms — {data['status']}")
 ```
 
-**Schéma `WarmupResponse`**
+**Schema `WarmupResponse`**
 
 ```json
 {
@@ -1093,28 +1092,28 @@ print(f"Chargé en {data['load_time_ms']:.1f} ms — {data['status']}")
 }
 ```
 
-| `status` | Signification |
+| `status` | Meaning |
 |---|---|
-| `loaded` | Modèle chargé et mis en cache |
-| `already_cached` | Modèle déjà présent dans le cache Redis |
-| `error` | Échec du chargement (voir `detail`) |
+| `loaded` | Model loaded and cached |
+| `already_cached` | Model already present in Redis cache |
+| `error` | Loading failed (see `detail`) |
 
 ---
 
-## Prédictions
+## Predictions
 
-### `POST /models/{name}/{version}/validate-input` — Validation du schéma d'entrée
+### `POST /models/{name}/{version}/validate-input` — Input Schema Validation
 
-Valide les features d'entrée contre le schéma attendu d'une version de modèle, **sans effectuer de prédiction**.
+Validates input features against the expected schema of a model version, **without making a prediction**.
 
-**Auth requise**
+**Auth required**
 
-Détecte :
-- **features manquantes** — présentes dans le modèle, absentes dans la requête
-- **features inattendues** — présentes dans la requête, absentes dans le modèle
-- **coercitions de type** — valeurs `string` convertibles en `float` (avertissement non bloquant)
+Detects:
+- **missing features** — present in the model, absent in the request
+- **unexpected features** — present in the request, absent in the model
+- **type coercions** — `string` values convertible to `float` (non-blocking warning)
 
-La source de vérité est, par priorité : `feature_names_in_` du modèle sklearn chargé, puis les clés de `feature_baseline` stockées en DB.
+The source of truth is, in priority order: `feature_names_in_` from the loaded sklearn model, then the keys of `feature_baseline` stored in DB.
 
 ```python
 response = requests.post(
@@ -1124,7 +1123,7 @@ response = requests.post(
         "petal_length": 5.1,
         "petal_width": 1.8,
         "sepal_length": 6.3
-        # sepal_width manquant
+        # sepal_width missing
     }
 )
 print(response.json())
@@ -1144,26 +1143,26 @@ print(response.json())
 }
 ```
 
-| Champ | Description |
+| Field | Description |
 |---|---|
-| `valid` | `true` seulement si `errors` est vide |
-| `errors` | Liste d'erreurs bloquantes (`missing_feature`, `unexpected_feature`) |
-| `warnings` | Avertissements non bloquants (`type_coercion`) |
-| `expected_features` | Liste triée des features attendues ; `null` si aucun schéma disponible |
+| `valid` | `true` only if `errors` is empty |
+| `errors` | List of blocking errors (`missing_feature`, `unexpected_feature`) |
+| `warnings` | Non-blocking warnings (`type_coercion`) |
+| `expected_features` | Sorted list of expected features; `null` if no schema available |
 
 ---
 
 ### `POST /predict`
 
-Effectue une prédiction avec routage intelligent (A/B test, shadow).
+Makes a prediction with intelligent routing (A/B test, shadow).
 
-**Auth requise** — contribue au quota journalier.
+**Auth required** — counts towards the daily quota.
 
-**Sélection de version** (ordre de priorité) :
-1. `model_version` si fourni
-2. Routage A/B si des versions `ab_test` sont configurées
-3. Version avec `is_production=true`
-4. Dernière version créée
+**Version selection** (priority order):
+1. `model_version` if provided
+2. A/B routing if `ab_test` versions are configured
+3. Version with `is_production=true`
+4. Most recently created version
 
 ```python
 response = requests.post(
@@ -1183,9 +1182,9 @@ response = requests.post(
 result = response.json()
 ```
 
-**Query parameter `explain`** (optionnel, défaut `false`) :
+**Query parameter `explain`** (optional, default `false`):
 
-Ajouter `?explain=true` pour recevoir les valeurs SHAP directement dans la réponse, sans appel séparé à `POST /explain`.
+Add `?explain=true` to receive SHAP values directly in the response, without a separate call to `POST /explain`.
 
 ```python
 response = requests.post(
@@ -1198,20 +1197,20 @@ response = requests.post(
     }
 )
 data = response.json()
-# data["explanation"]["shap_values"] contient les valeurs SHAP locales
+# data["explanation"]["shap_values"] contains the local SHAP values
 if data.get("explanation"):
     for feat, val in data["explanation"]["shap_values"].items():
         print(f"  {feat}: {val:+.4f}")
 ```
 
-Le champ `explanation` suit le schéma `ExplainOutput` (voir `POST /explain`). Si le modèle ne supporte pas SHAP, `explanation` est `null`.
+The `explanation` field follows the `ExplainOutput` schema (see `POST /explain`). If the model does not support SHAP, `explanation` is `null`.
 
-**Query parameter `strict_validation`** (optionnel, défaut `false`) :
+**Query parameter `strict_validation`** (optional, default `false`):
 
-Ajouter `?strict_validation=true` pour rejeter les requêtes avec des features **inattendues** (en plus des features manquantes déjà vérifiées par défaut). Retourne un `422` structuré si la validation échoue.
+Add `?strict_validation=true` to reject requests with **unexpected** features (in addition to missing features already checked by default). Returns a structured `422` if validation fails.
 
 ```python
-# Rejette si features inattendues présentes
+# Rejects if unexpected features are present
 response = requests.post(
     f"{BASE_URL}/predict?strict_validation=true",
     headers=headers,
@@ -1220,19 +1219,19 @@ response = requests.post(
         "features": {"sepal_length": 5.1, "extra_col": 99.0, ...}
     }
 )
-# → 422 avec detail.errors listant les features inattendues
+# → 422 with detail.errors listing unexpected features
 ```
 
-**Schéma `PredictionInput`**
+**Schema `PredictionInput`**
 
-| Champ | Type | Requis | Description |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `model_name` | str | Oui | Nom du modèle |
-| `model_version` | str | Non | Version précise ; sinon auto-sélection |
-| `id_obs` | str | Non | Identifiant d'observation |
-| `features` | dict | Oui | `{"feature_name": valeur}` |
+| `model_name` | str | Yes | Model name |
+| `model_version` | str | No | Specific version; otherwise auto-selection |
+| `id_obs` | str | No | Observation identifier |
+| `features` | dict | Yes | `{"feature_name": value}` |
 
-**Schéma `PredictionOutput`**
+**Schema `PredictionOutput`**
 
 ```json
 {
@@ -1246,20 +1245,20 @@ response = requests.post(
 }
 ```
 
-| Champ | Description |
+| Field | Description |
 |---|---|
-| `prediction` | Résultat du modèle (classe ou valeur) |
-| `probability` | Probabilités par classe (si `predict_proba` disponible) |
-| `low_confidence` | `true` si prob max < `confidence_threshold` du modèle |
-| `selected_version` | Version choisie par le routage A/B (si applicable) |
+| `prediction` | Model result (class or value) |
+| `probability` | Per-class probabilities (if `predict_proba` available) |
+| `low_confidence` | `true` if max prob < model's `confidence_threshold` |
+| `selected_version` | Version chosen by A/B routing (if applicable) |
 
 ---
 
 ### `POST /predict-batch`
 
-Prédictions en lot : le modèle est chargé une seule fois, toutes les prédictions sont persistées en une transaction.
+Batch predictions: the model is loaded once, all predictions are persisted in one transaction.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.post(
@@ -1267,7 +1266,7 @@ response = requests.post(
     headers=headers,
     json={
         "model_name": "iris_model",
-        "model_version": "1.0.0",   # optionnel
+        "model_version": "1.0.0",   # optional
         "inputs": [
             {
                 "id_obs": "obs-001",
@@ -1287,12 +1286,12 @@ for item in data["predictions"]:
     print(f"{item['id_obs']} → {item['prediction']} (conf: {item['probability']})")
 ```
 
-**Query parameter `strict_validation`** (optionnel, défaut `false`) :
+**Query parameter `strict_validation`** (optional, default `false`):
 
-Ajouter `?strict_validation=true` pour rejeter les requêtes contenant des features **inattendues** dans n'importe quel item du lot. Retourne un `422` avec le détail des erreurs si la validation échoue, sans exécuter aucune prédiction.
+Add `?strict_validation=true` to reject requests containing **unexpected** features in any item of the batch. Returns a `422` with error details if validation fails, without executing any predictions.
 
 ```python
-# Mode strict : rejette si une feature inattendue est présente dans le batch
+# Strict mode: rejects if an unexpected feature is present in the batch
 response = requests.post(
     f"{BASE_URL}/predict-batch?strict_validation=true",
     headers=headers,
@@ -1300,18 +1299,18 @@ response = requests.post(
         {"features": {"sepal length (cm)": 5.1, "extra_col": 99}}
     ]}
 )
-# → 422 avec detail.errors listant les features inattendues
+# → 422 with detail.errors listing unexpected features
 ```
 
-**Schéma `BatchPredictionInput`**
+**Schema `BatchPredictionInput`**
 
-| Champ | Type | Requis | Description |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `model_name` | str | Oui | Nom du modèle |
-| `model_version` | str | Non | Version ; sinon auto-sélection |
-| `inputs` | list | Oui | Liste d'items `{features, id_obs}` (min 1, max limité par rate limiting) |
+| `model_name` | str | Yes | Model name |
+| `model_version` | str | No | Version; otherwise auto-selection |
+| `inputs` | list | Yes | List of items `{features, id_obs}` (min 1, max limited by rate limiting) |
 
-**Schéma `BatchPredictionOutput`**
+**Schema `BatchPredictionOutput`**
 
 ```json
 {
@@ -1328,9 +1327,9 @@ response = requests.post(
 
 ### `POST /explain`
 
-Calcule les valeurs SHAP locales pour expliquer une prédiction.
+Calculates local SHAP values to explain a prediction.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.post(
@@ -1338,7 +1337,7 @@ response = requests.post(
     headers=headers,
     json={
         "model_name": "iris_model",
-        "model_version": "1.0.0",   # optionnel
+        "model_version": "1.0.0",   # optional
         "features": {
             "sepal length (cm)": 5.1,
             "sepal width (cm)": 3.5,
@@ -1348,22 +1347,22 @@ response = requests.post(
     }
 )
 data = response.json()
-print(f"Prédiction : {data['prediction']}")
-print(f"Base value : {data['base_value']}")
+print(f"Prediction: {data['prediction']}")
+print(f"Base value: {data['base_value']}")
 for feat, val in sorted(data["shap_values"].items(), key=lambda x: abs(x[1]), reverse=True):
     direction = "↑" if val > 0 else "↓"
     print(f"  {direction} {feat}: {val:+.4f}")
 ```
 
-**Schéma `ExplainInput`**
+**Schema `ExplainInput`**
 
-| Champ | Type | Requis | Description |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `model_name` | str | Oui | Nom du modèle |
-| `model_version` | str | Non | Version ; sinon auto-sélection |
-| `features` | dict | Oui | Features à expliquer |
+| `model_name` | str | Yes | Model name |
+| `model_version` | str | No | Version; otherwise auto-selection |
+| `features` | dict | Yes | Features to explain |
 
-**Schéma `ExplainOutput`**
+**Schema `ExplainOutput`**
 
 ```json
 {
@@ -1381,17 +1380,17 @@ for feat, val in sorted(data["shap_values"].items(), key=lambda x: abs(x[1]), re
 }
 ```
 
-> **Interprétation :** valeur SHAP positive = feature pousse vers la classe prédite, négative = pousse à l'opposé. La somme des SHAP values + `base_value` = prédiction brute.
+> **Interpretation:** positive SHAP value = feature pushes towards the predicted class, negative = pushes away. The sum of SHAP values + `base_value` = raw prediction.
 
-> **Modèles supportés :** arborescents (`RandomForest`, `GradientBoosting`, `XGBoost`) via `TreeExplainer` ; linéaires (`LogisticRegression`, `LinearRegression`) via `LinearExplainer`.
+> **Supported models:** tree-based (`RandomForest`, `GradientBoosting`, `XGBoost`) via `TreeExplainer`; linear (`LogisticRegression`, `LinearRegression`) via `LinearExplainer`.
 
 ---
 
 ### `GET /predictions`
 
-Historique filtrable des prédictions avec pagination par curseur.
+Filterable prediction history with cursor pagination.
 
-**Auth requise**
+**Auth required**
 
 ```python
 from datetime import datetime, timedelta
@@ -1400,36 +1399,36 @@ params = {
     "name": "iris_model",
     "start": (datetime.now() - timedelta(days=7)).isoformat(),
     "end": datetime.now().isoformat(),
-    "version": "1.0.0",        # optionnel
-    "user": "alice",           # optionnel
+    "version": "1.0.0",        # optional
+    "user": "alice",           # optional
     "limit": 50,
-    "cursor": None,            # id de la dernière entrée pour la page suivante
+    "cursor": None,            # id of the last entry for the next page
 }
 response = requests.get(f"{BASE_URL}/predictions", headers=headers, params=params)
 data = response.json()
 
-# Page suivante
+# Next page
 if data["next_cursor"]:
     params["cursor"] = data["next_cursor"]
     next_page = requests.get(f"{BASE_URL}/predictions", headers=headers, params=params)
 ```
 
-**Paramètres de requête**
+**Query parameters**
 
-| Paramètre | Type | Requis | Description |
+| Parameter | Type | Required | Description |
 |---|---|---|---|
-| `name` | str | Oui | Nom du modèle |
-| `start` | datetime | Oui | Date de début (ISO 8601) |
-| `end` | datetime | Oui | Date de fin (ISO 8601) |
-| `version` | str | Non | Filtre sur la version |
-| `user` | str | Non | Filtre sur le username |
-| `id_obs` | str | Non | Filtre par identifiant d'observation |
-| `min_confidence` | float (0–1) | Non | Confiance minimale (max des probabilités) |
-| `max_confidence` | float (0–1) | Non | Confiance maximale (max des probabilités) |
-| `limit` | int | Non | Max résultats (1-1000, défaut 100) |
-| `cursor` | int | Non | ID de la dernière prédiction vue (pagination curseur) |
+| `name` | str | Yes | Model name |
+| `start` | datetime | Yes | Start date (ISO 8601) |
+| `end` | datetime | Yes | End date (ISO 8601) |
+| `version` | str | No | Filter by version |
+| `user` | str | No | Filter by username |
+| `id_obs` | str | No | Filter by observation identifier |
+| `min_confidence` | float (0–1) | No | Minimum confidence (max of probabilities) |
+| `max_confidence` | float (0–1) | No | Maximum confidence (max of probabilities) |
+| `limit` | int | No | Max results (1-1000, default 100) |
+| `cursor` | int | No | ID of the last seen prediction (cursor pagination) |
 
-**Schéma `PredictionsListResponse`**
+**Schema `PredictionsListResponse`**
 
 ```json
 {
@@ -1456,15 +1455,15 @@ if data["next_cursor"]:
 }
 ```
 
-> **Pagination curseur :** utiliser `next_cursor` (id de la dernière prédiction retournée) comme paramètre `cursor` de la requête suivante. Plus efficace que `offset` sur des volumes importants.
+> **Cursor pagination:** use `next_cursor` (id of the last returned prediction) as the `cursor` parameter of the next request. More efficient than `offset` on large volumes.
 
 ---
 
-### `GET /predictions/{prediction_id}` — Consulter une prédiction par ID
+### `GET /predictions/{prediction_id}` — Look Up a Prediction by ID
 
-Retourne le détail complet d'une prédiction à partir de son identifiant interne.
+Returns the full details of a prediction from its internal identifier.
 
-**Auth requise**
+**Auth required**
 
 ```python
 prediction_id = 1040
@@ -1474,20 +1473,20 @@ response = requests.get(
     headers=headers
 )
 data = response.json()
-print(f"Modèle : {data['model_name']} v{data['model_version']}")
-print(f"Résultat : {data['prediction_result']}")
-print(f"Latence : {data['response_time_ms']} ms")
+print(f"Model: {data['model_name']} v{data['model_version']}")
+print(f"Result: {data['prediction_result']}")
+print(f"Latency: {data['response_time_ms']} ms")
 ```
 
-Retourne le même schéma qu'un élément de `GET /predictions` (voir ci-dessus). Retourne `404` si la prédiction n'existe pas ou appartient à un autre utilisateur (non admin).
+Returns the same schema as an element of `GET /predictions` (see above). Returns `404` if the prediction does not exist or belongs to another user (non-admin).
 
 ---
 
-### `GET /predictions/{prediction_id}/explain` — Explication SHAP post-hoc
+### `GET /predictions/{prediction_id}/explain` — Post-hoc SHAP Explanation
 
-Génère a posteriori l'explication SHAP d'une prédiction existante, en rechargeant les features depuis la base de données.
+Generates a post-hoc SHAP explanation for an existing prediction, by reloading the features from the database.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.get(
@@ -1495,34 +1494,34 @@ response = requests.get(
     headers=headers
 )
 data = response.json()
-print(f"Prédiction : {data['prediction']}")
+print(f"Prediction: {data['prediction']}")
 for feat, val in sorted(data["shap_values"].items(), key=lambda x: abs(x[1]), reverse=True):
     print(f"  {'↑' if val > 0 else '↓'} {feat}: {val:+.4f}")
 ```
 
-Retourne le même schéma que `POST /explain`. Retourne `404` si la prédiction n'existe pas, `422` si le modèle ne supporte pas SHAP.
+Returns the same schema as `POST /explain`. Returns `404` if the prediction does not exist, `422` if the model does not support SHAP.
 
 ---
 
 ### `GET /predictions/stats`
 
-Statistiques agrégées des prédictions par modèle.
+Aggregated prediction statistics per model.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.get(
     f"{BASE_URL}/predictions/stats",
     headers=headers,
-    params={"days": 7, "model_name": "iris_model"}  # model_name optionnel
+    params={"days": 7, "model_name": "iris_model"}  # model_name optional
 )
 data = response.json()
 for stat in data["stats"]:
-    print(f"{stat['model_name']}: {stat['total_predictions']} prédictions, "
-          f"erreur={stat['error_rate']:.1%}, p95={stat['p95_response_time_ms']}ms")
+    print(f"{stat['model_name']}: {stat['total_predictions']} predictions, "
+          f"error={stat['error_rate']:.1%}, p95={stat['p95_response_time_ms']}ms")
 ```
 
-**Schéma `PredictionStatsResponse`**
+**Schema `PredictionStatsResponse`**
 
 ```json
 {
@@ -1544,20 +1543,20 @@ for stat in data["stats"]:
 
 ---
 
-### `GET /predictions/anomalies` — Détection d'anomalies
+### `GET /predictions/anomalies` — Anomaly Detection
 
-Retourne les prédictions récentes dont au moins une feature présente un z-score anormal par rapport à la baseline du modèle.
+Returns recent predictions where at least one feature has an abnormal z-score compared to the model baseline.
 
-**Auth requise**
+**Auth required**
 
-**Paramètres**
+**Parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `model_name` | str | Oui | Nom du modèle |
-| `days` | int | 7 | Fenêtre d'analyse (max 90) |
-| `z_threshold` | float | 3.0 | Seuil z-score au-dessus duquel une feature est considérée aberrante |
-| `limit` | int | 200 | Nombre max de résultats (max 1000) |
+| `model_name` | str | Yes | Model name |
+| `days` | int | 7 | Analysis window (max 90) |
+| `z_threshold` | float | 3.0 | Z-score threshold above which a feature is considered anomalous |
+| `limit` | int | 200 | Max results (max 1000) |
 
 ```python
 response = requests.get(
@@ -1567,15 +1566,15 @@ response = requests.get(
 )
 data = response.json()
 
-print(f"{data['anomaly_count']} prédictions anormales sur {data['total_analyzed']} analysées")
+print(f"{data['anomaly_count']} anomalous predictions out of {data['total_analyzed']} analysed")
 for pred in data["anomalies"]:
     print(f"  ID {pred['prediction_id']} ({pred['timestamp'][:10]}):")
     for feat in pred["anomalous_features"]:
         print(f"    {feat['feature']}: z={feat['z_score']:.1f} "
-              f"(valeur={feat['value']}, baseline_mean={feat['baseline_mean']:.2f})")
+              f"(value={feat['value']}, baseline_mean={feat['baseline_mean']:.2f})")
 ```
 
-**Schéma `AnomaliesResponse`**
+**Schema `AnomaliesResponse`**
 
 ```json
 {
@@ -1604,36 +1603,36 @@ for pred in data["anomalies"]:
 }
 ```
 
-> Retourne `{"error": "no_baseline"}` si `feature_baseline` n'est pas configurée pour ce modèle.
+> Returns `{"error": "no_baseline"}` if `feature_baseline` is not configured for this model.
 
 ---
 
-### `DELETE /predictions/purge` — Purge RGPD
+### `DELETE /predictions/purge` — GDPR Purge
 
-Supprime les prédictions antérieures à N jours. `dry_run=true` par défaut — aucune suppression sans confirmation explicite.
+Deletes predictions older than N days. `dry_run=true` by default — no deletion without explicit confirmation.
 
-**Auth requise : admin**
+**Auth required: admin**
 
-**Paramètres de requête**
+**Query parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `older_than_days` | int | Oui | Supprimer les prédictions > N jours |
-| `model_name` | str | Non | Limiter la purge à un seul modèle |
-| `dry_run` | bool | `true` | Simuler sans supprimer |
+| `older_than_days` | int | Yes | Delete predictions > N days old |
+| `model_name` | str | No | Limit the purge to a single model |
+| `dry_run` | bool | `true` | Simulate without deleting |
 
 ```python
-# Simuler (dry_run par défaut)
+# Simulate (dry_run by default)
 response = requests.delete(
     f"{BASE_URL}/predictions/purge",
     headers=headers,
     params={"older_than_days": 90}
 )
 data = response.json()
-print(f"Seraient supprimées : {data['deleted_count']} prédictions")
-print(f"Résultats observés liés : {data['linked_observed_results_count']}")
+print(f"Would be deleted: {data['deleted_count']} predictions")
+print(f"Linked observed results: {data['linked_observed_results_count']}")
 
-# Purger réellement
+# Actually purge
 response = requests.delete(
     f"{BASE_URL}/predictions/purge",
     headers=headers,
@@ -1641,7 +1640,7 @@ response = requests.delete(
 )
 ```
 
-**Schéma `PurgeResponse`**
+**Schema `PurgeResponse`**
 
 ```json
 {
@@ -1653,17 +1652,17 @@ response = requests.delete(
 }
 ```
 
-> `linked_observed_results_count > 0` indique que des prédictions liées à des `observed_results` seront supprimées — perte de données de performance historiques.
+> `linked_observed_results_count > 0` indicates that predictions linked to `observed_results` will be deleted — loss of historical performance data.
 
 ---
 
 ## Golden Tests
 
-Tests de régression pour valider qu'un modèle produit toujours les sorties attendues sur des cas de référence. Particulièrement utile après un ré-entraînement.
+Regression tests to validate that a model always produces the expected outputs on reference cases. Particularly useful after a retrain.
 
-### `GET /models/{name}/golden-tests` — Lister les cas de test
+### `GET /models/{name}/golden-tests` — List Test Cases
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.get(
@@ -1674,17 +1673,17 @@ tests = response.json()
 
 for t in tests:
     print(f"#{t['id']} [{t.get('description', '—')}] "
-          f"→ attendu: {t['expected_output']}")
+          f"→ expected: {t['expected_output']}")
 ```
 
-**Schéma `GoldenTestResponse`**
+**Schema `GoldenTestResponse`**
 
 ```json
 [
   {
     "id": 1,
     "model_name": "iris_model",
-    "description": "Iris setosa typique",
+    "description": "Typical Iris setosa",
     "input_features": {"sepal length (cm)": 5.1, "sepal width (cm)": 3.5,
                        "petal length (cm)": 1.4, "petal width (cm)": 0.2},
     "expected_output": "setosa",
@@ -1696,9 +1695,9 @@ for t in tests:
 
 ---
 
-### `POST /models/{name}/golden-tests` — Créer un cas de test
+### `POST /models/{name}/golden-tests` — Create a Test Case
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.post(
@@ -1712,23 +1711,23 @@ response = requests.post(
             "petal width (cm)": 0.2
         },
         "expected_output": "setosa",
-        "description": "Iris setosa typique — toutes features nominales"
+        "description": "Typical Iris setosa — all nominal features"
     }
 )
-print(response.json()["id"])  # id du nouveau cas
+print(response.json()["id"])  # id of the new case
 ```
 
-| Champ | Type | Requis | Description |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `input_features` | dict | Oui | Features d'entrée du cas |
-| `expected_output` | str/int/float | Oui | Sortie attendue du modèle |
-| `description` | str | Non | Description du cas de test |
+| `input_features` | dict | Yes | Input features for the case |
+| `expected_output` | str/int/float | Yes | Expected model output |
+| `description` | str | No | Test case description |
 
 ---
 
-### `DELETE /models/{name}/golden-tests/{test_id}` — Supprimer un cas
+### `DELETE /models/{name}/golden-tests/{test_id}` — Delete a Case
 
-**Auth requise : admin**
+**Auth required: admin**
 
 ```python
 response = requests.delete(
@@ -1740,16 +1739,16 @@ assert response.status_code == 204
 
 ---
 
-### `POST /models/{name}/golden-tests/upload-csv` — Import en lot depuis CSV
+### `POST /models/{name}/golden-tests/upload-csv` — Bulk Import from CSV
 
-**Auth requise : admin**
+**Auth required: admin**
 
-**Format du CSV**
+**CSV Format**
 
 ```
 description,input_features,expected_output
-"Iris setosa typique","{""sepal length (cm)"": 5.1, ""sepal width (cm)"": 3.5, ""petal length (cm)"": 1.4, ""petal width (cm)"": 0.2}",setosa
-"Iris virginica robuste","{""sepal length (cm)"": 6.7, ""sepal width (cm)"": 3.0, ""petal length (cm)"": 5.2, ""petal width (cm)"": 2.3}",virginica
+"Typical Iris setosa","{""sepal length (cm)"": 5.1, ""sepal width (cm)"": 3.5, ""petal length (cm)"": 1.4, ""petal width (cm)"": 0.2}",setosa
+"Robust Iris virginica","{""sepal length (cm)"": 6.7, ""sepal width (cm)"": 3.0, ""petal length (cm)"": 5.2, ""petal width (cm)"": 2.3}",virginica
 ```
 
 ```python
@@ -1776,19 +1775,19 @@ response = requests.post(
     files={"file": ("tests.csv", buf, "text/csv")}
 )
 result = response.json()
-print(f"{result['imported']} cas importés")
+print(f"{result['imported']} cases imported")
 if result.get("errors"):
     for err in result["errors"]:
-        print(f"  ❌ Ligne {err['row']}: {err['reason']}")
+        print(f"  ❌ Row {err['row']}: {err['reason']}")
 ```
 
 ---
 
-### `POST /models/{name}/{version}/run-golden-tests` — Exécuter les tests
+### `POST /models/{name}/{version}/run-golden-tests` — Run Tests
 
-Exécute tous les cas de test enregistrés pour un modèle sur une version donnée.
+Runs all registered test cases for a model on a given version.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.post(
@@ -1797,7 +1796,7 @@ response = requests.post(
 )
 result = response.json()
 
-print(f"✅ {result['passed']} / {result['total_tests']} tests passés "
+print(f"✅ {result['passed']} / {result['total_tests']} tests passed "
       f"({result['pass_rate']:.1%})")
 
 for detail in result["details"]:
@@ -1805,10 +1804,10 @@ for detail in result["details"]:
     desc = detail.get("description", f"Test #{detail['test_id']}")
     print(f"  {icon} {desc}")
     if not detail["passed"]:
-        print(f"      attendu: {detail['expected']!r} | reçu: {detail['actual']!r}")
+        print(f"      expected: {detail['expected']!r} | received: {detail['actual']!r}")
 ```
 
-**Schéma `GoldenTestRunResponse`**
+**Schema `GoldenTestRunResponse`**
 
 ```json
 {
@@ -1821,7 +1820,7 @@ for detail in result["details"]:
   "details": [
     {
       "test_id": 1,
-      "description": "Iris setosa typique",
+      "description": "Typical Iris setosa",
       "input": {"sepal length (cm)": 5.1},
       "expected": "setosa",
       "actual": "setosa",
@@ -1829,7 +1828,7 @@ for detail in result["details"]:
     },
     {
       "test_id": 3,
-      "description": "Cas limite versicolor",
+      "description": "Borderline versicolor case",
       "input": {"sepal length (cm)": 6.0},
       "expected": "versicolor",
       "actual": "virginica",
@@ -1839,19 +1838,19 @@ for detail in result["details"]:
 }
 ```
 
-> L'intégration avec `promotion_policy.min_golden_test_pass_rate` permet de bloquer l'auto-promotion si le taux de réussite est insuffisant.
+> Integration with `promotion_policy.min_golden_test_pass_rate` allows blocking auto-promotion if the pass rate is insufficient.
 
 ---
 
-## Résultats observés
+## Observed Results
 
-Permet d'enregistrer les résultats réels après prédiction, pour évaluer les modèles en production.
+Allows recording real results after prediction, to evaluate models in production.
 
 ### `POST /observed-results`
 
-Enregistre ou met à jour des résultats observés. Idempotent sur `(id_obs, model_name)`.
+Records or updates observed results. Idempotent on `(id_obs, model_name)`.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.post(
@@ -1877,25 +1876,25 @@ response = requests.post(
 print(response.json())  # {"upserted": 2}
 ```
 
-**Schéma `ObservedResultInput`**
+**Schema `ObservedResultInput`**
 
-| Champ | Type | Description |
+| Field | Type | Description |
 |---|---|---|
-| `id_obs` | str | Identifiant de l'observation (lié à la prédiction) |
-| `model_name` | str | Nom du modèle |
-| `date_time` | datetime | Horodatage du résultat réel |
-| `observed_result` | float/int/str | Résultat observé réel |
+| `id_obs` | str | Observation identifier (linked to the prediction) |
+| `model_name` | str | Model name |
+| `date_time` | datetime | Timestamp of the real result |
+| `observed_result` | float/int/str | Actual observed result |
 
 ---
 
 ### `GET /observed-results`
 
-Consulte les résultats observés avec filtres optionnels.
+Retrieves observed results with optional filters.
 
 ```python
 params = {
-    "model_name": "iris_model",  # optionnel
-    "id_obs": "obs-2025-001",    # optionnel
+    "model_name": "iris_model",  # optional
+    "id_obs": "obs-2025-001",    # optional
     "start": "2025-01-01T00:00:00",
     "end": "2025-01-31T23:59:59",
     "limit": 100,
@@ -1925,20 +1924,20 @@ data = response.json()
 
 ---
 
-### `GET /observed-results/export` — Export CSV/JSON
+### `GET /observed-results/export` — CSV/JSON Export
 
-Exporte les résultats observés filtrés dans un fichier téléchargeable.
+Exports filtered observed results to a downloadable file.
 
-**Auth requise**
+**Auth required**
 
-**Paramètres de requête**
+**Query parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `model_name` | str | Non | Filtre sur le modèle |
-| `start` | datetime | Non | Date de début |
-| `end` | datetime | Non | Date de fin |
-| `format` | str | `"csv"` | `"csv"` ou `"json"` |
+| `model_name` | str | No | Filter by model |
+| `start` | datetime | No | Start date |
+| `end` | datetime | No | End date |
+| `format` | str | `"csv"` | `"csv"` or `"json"` |
 
 ```python
 response = requests.get(
@@ -1949,16 +1948,16 @@ response = requests.get(
 
 with open("observed_results.csv", "wb") as f:
     f.write(response.content)
-# Colonnes : id_obs, model_name, observed_result, date_time, username
+# Columns: id_obs, model_name, observed_result, date_time, username
 ```
 
 ---
 
-### `GET /observed-results/stats` — Statistiques de couverture
+### `GET /observed-results/stats` — Coverage Statistics
 
-Retourne des statistiques sur la couverture ground truth : combien de prédictions ont un résultat observé associé.
+Returns statistics on ground truth coverage: how many predictions have an associated observed result.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.get(
@@ -1967,12 +1966,12 @@ response = requests.get(
     params={"model_name": "iris_model", "days": 30}
 )
 data = response.json()
-print(f"Prédictions : {data['total_predictions']}")
-print(f"Avec ground truth : {data['matched_count']}")
-print(f"Couverture : {data['coverage_rate']:.1%}")
+print(f"Predictions: {data['total_predictions']}")
+print(f"With ground truth: {data['matched_count']}")
+print(f"Coverage: {data['coverage_rate']:.1%}")
 ```
 
-**Schéma `ObservedResultsStatsResponse`**
+**Schema `ObservedResultsStatsResponse`**
 
 ```json
 {
@@ -1987,13 +1986,13 @@ print(f"Couverture : {data['coverage_rate']:.1%}")
 
 ---
 
-### `POST /observed-results/upload-csv` — Import CSV en lot
+### `POST /observed-results/upload-csv` — Bulk CSV Import
 
-Importe un fichier CSV de résultats observés. Idempotent sur `(id_obs, model_name)`.
+Imports a CSV file of observed results. Idempotent on `(id_obs, model_name)`.
 
-**Auth requise**
+**Auth required**
 
-**Format du CSV**
+**CSV Format**
 
 ```
 id_obs,model_name,date_time,observed_result
@@ -2018,7 +2017,7 @@ response = requests.post(
 print(response.json())
 ```
 
-**Schéma `CSVUploadResponse`**
+**Schema `CSVUploadResponse`**
 
 ```json
 {
@@ -2027,15 +2026,15 @@ print(response.json())
 }
 ```
 
-Si certaines lignes sont invalides, elles sont listées dans `errors` et les lignes valides sont quand même insérées.
+If some rows are invalid, they are listed in `errors` and valid rows are still inserted.
 
 ---
 
-## Utilisateurs
+## Users
 
-### `POST /users` — Créer un utilisateur
+### `POST /users` — Create a User
 
-**Auth requise : admin**
+**Auth required: admin**
 
 ```python
 response = requests.post(
@@ -2049,19 +2048,19 @@ response = requests.post(
     }
 )
 user = response.json()
-print(user["api_token"])  # Token à conserver — affiché une seule fois
+print(user["api_token"])  # Token to keep — displayed only once
 ```
 
-**Schéma `UserCreateInput`**
+**Schema `UserCreateInput`**
 
-| Champ | Type | Description |
+| Field | Type | Description |
 |---|---|---|
-| `username` | str (3-50 chars) | Nom unique |
-| `email` | EmailStr | Email unique |
-| `role` | str | `"admin"`, `"user"` ou `"readonly"` (défaut: `"user"`) |
-| `rate_limit` | int (1-100000) | Prédictions par jour (défaut: 1000) |
+| `username` | str (3-50 chars) | Unique name |
+| `email` | EmailStr | Unique email |
+| `role` | str | `"admin"`, `"user"` or `"readonly"` (default: `"user"`) |
+| `rate_limit` | int (1-100000) | Predictions per day (default: 1000) |
 
-**Schéma `UserResponse`**
+**Schema `UserResponse`**
 
 ```json
 {
@@ -2079,9 +2078,9 @@ print(user["api_token"])  # Token à conserver — affiché une seule fois
 
 ---
 
-### `GET /users` — Lister les utilisateurs
+### `GET /users` — List Users
 
-**Auth requise : admin**
+**Auth required: admin**
 
 ```python
 response = requests.get(f"{BASE_URL}/users", headers=headers)
@@ -2090,9 +2089,9 @@ users = response.json()
 
 ---
 
-### `GET /users/{user_id}` — Détail d'un utilisateur
+### `GET /users/{user_id}` — User Details
 
-Un utilisateur peut voir son propre profil. Un admin peut voir tous les profils.
+A user can view their own profile. An admin can view all profiles.
 
 ```python
 response = requests.get(f"{BASE_URL}/users/3", headers=headers)
@@ -2100,19 +2099,19 @@ response = requests.get(f"{BASE_URL}/users/3", headers=headers)
 
 ---
 
-### `PATCH /users/{user_id}` — Modifier un utilisateur
+### `PATCH /users/{user_id}` — Modify a User
 
-**Auth requise : admin**
+**Auth required: admin**
 
 ```python
-# Désactiver un compte
+# Deactivate an account
 requests.patch(f"{BASE_URL}/users/3", headers=headers, json={"is_active": False})
 
-# Changer le rôle et le quota
+# Change role and quota
 requests.patch(f"{BASE_URL}/users/3", headers=headers,
                json={"role": "readonly", "rate_limit": 100})
 
-# Renouveler le token
+# Renew the token
 response = requests.patch(
     f"{BASE_URL}/users/3",
     headers=headers,
@@ -2121,22 +2120,22 @@ response = requests.patch(
 new_token = response.json()["api_token"]
 ```
 
-**Schéma `UserUpdateInput`**
+**Schema `UserUpdateInput`**
 
-| Champ | Type | Description |
+| Field | Type | Description |
 |---|---|---|
-| `is_active` | bool | Activer/désactiver le compte |
-| `role` | str | Nouveau rôle |
-| `rate_limit` | int | Nouveau quota journalier |
-| `regenerate_token` | bool | Génère un nouveau token Bearer |
+| `is_active` | bool | Activate/deactivate the account |
+| `role` | str | New role |
+| `rate_limit` | int | New daily quota |
+| `regenerate_token` | bool | Generates a new Bearer token |
 
 ---
 
-### `DELETE /users/{user_id}` — Supprimer un utilisateur
+### `DELETE /users/{user_id}` — Delete a User
 
-Supprime l'utilisateur et toutes ses prédictions en cascade. Retourne 204.
+Deletes the user and all their predictions in cascade. Returns 204.
 
-**Auth requise : admin**
+**Auth required: admin**
 
 ```python
 response = requests.delete(f"{BASE_URL}/users/3", headers=headers)
@@ -2149,9 +2148,9 @@ assert response.status_code == 204
 
 ### `GET /monitoring/overview`
 
-Tableau de bord global de santé pour tous les modèles sur une période.
+Global health dashboard for all models over a period.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.get(
@@ -2160,13 +2159,13 @@ response = requests.get(
     params={"days": 7}
 )
 data = response.json()
-print(f"Erreurs globales : {data['global_stats']['error_rate']:.1%}")
+print(f"Global errors: {data['global_stats']['error_rate']:.1%}")
 for model in data["models"]:
     print(f"  {model['model_name']}: drift={model['drift_summary']}, "
           f"error_rate={model['error_rate']:.1%}")
 ```
 
-**Schéma `GlobalDashboard`**
+**Schema `GlobalDashboard`**
 
 ```json
 {
@@ -2194,9 +2193,9 @@ for model in data["models"]:
 
 ### `GET /monitoring/model/{name}`
 
-Détail complet du monitoring pour un modèle : timeseries, drift, A/B, erreurs récentes.
+Full monitoring detail for a model: timeseries, drift, A/B, recent errors.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.get(
@@ -2205,12 +2204,12 @@ response = requests.get(
     params={"days": 30}
 )
 data = response.json()
-# data["timeseries"] — points de prédiction par période
-# data["drift"]      — rapport de dérive
-# data["ab_compare"] — comparaison A/B si applicable
+# data["timeseries"] — prediction points per period
+# data["drift"]      — drift report
+# data["ab_compare"] — A/B comparison if applicable
 ```
 
-**Schéma `ModelDetailDashboard`**
+**Schema `ModelDetailDashboard`**
 
 ```json
 {
@@ -2230,28 +2229,28 @@ data = response.json()
   ],
   "drift_summary": "ok",
   "recent_errors": [
-    {"timestamp": "2025-01-10T14:22:00", "error_message": "Feature manquante: petal length"}
+    {"timestamp": "2025-01-10T14:22:00", "error_message": "Missing feature: petal length"}
   ]
 }
 ```
 
 ---
 
-## Modèles — Endpoints complémentaires
+## Models — Additional Endpoints
 
-### `GET /models/leaderboard` — Classement des modèles
+### `GET /models/leaderboard` — Model Ranking
 
-Classe les modèles en production par métrique sur une fenêtre glissante. Résultat mis en cache (TTL configurable).
+Ranks production models by metric over a rolling window. Result is cached (configurable TTL).
 
-**Auth non requise**
+**Auth not required**
 
-**Paramètres**
+**Parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `metric` | str | `accuracy` | Métrique de classement : `accuracy`, `f1_score`, `latency_p95_ms`, `predictions_count` |
-| `days` | int | 30 | Fenêtre temporelle |
-| `top_n` | int | 10 | Nombre de modèles retournés |
+| `metric` | str | `accuracy` | Ranking metric: `accuracy`, `f1_score`, `latency_p95_ms`, `predictions_count` |
+| `days` | int | 30 | Time window |
+| `top_n` | int | 10 | Number of models returned |
 
 ```python
 response = requests.get(
@@ -2265,7 +2264,7 @@ for i, entry in enumerate(leaderboard["entries"], 1):
           f"accuracy={entry.get('accuracy')}, p95={entry.get('latency_p95_ms')}ms")
 ```
 
-**Schéma `LeaderboardResponse`**
+**Schema `LeaderboardResponse`**
 
 ```json
 {
@@ -2288,17 +2287,17 @@ for i, entry in enumerate(leaderboard["entries"], 1):
 
 ---
 
-### `GET /models/{name}/performance-timeline` — Timeline de performance
+### `GET /models/{name}/performance-timeline` — Performance Timeline
 
-Évolution des métriques de performance version par version, triée par date de déploiement.
+Evolution of performance metrics version by version, sorted by deployment date.
 
-**Auth requise**
+**Auth required**
 
-**Paramètres**
+**Parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `days` | int | 90 | Fenêtre temporelle |
+| `days` | int | 90 | Time window |
 
 ```python
 response = requests.get(
@@ -2309,11 +2308,11 @@ response = requests.get(
 timeline = response.json()
 
 for entry in timeline["versions"]:
-    print(f"v{entry['version']} déployée le {entry['deployed_at']} — "
+    print(f"v{entry['version']} deployed on {entry['deployed_at']} — "
           f"accuracy={entry.get('accuracy')}, MAE={entry.get('mae')}")
 ```
 
-**Schéma**
+**Schema**
 
 ```json
 {
@@ -2342,19 +2341,19 @@ for entry in timeline["versions"]:
 
 ---
 
-### `GET /models/{name}/calibration` — Calibration des probabilités
+### `GET /models/{name}/calibration` — Probability Calibration
 
-Mesure la qualité de calibration des probabilités prédites : un modèle parfaitement calibré retourne 70% de confiance quand il a raison 70% du temps.
+Measures the calibration quality of predicted probabilities: a perfectly calibrated model returns 70% confidence when it is right 70% of the time.
 
-**Auth requise**
+**Auth required**
 
-**Paramètres**
+**Parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `days` | int | 30 | Fenêtre temporelle |
-| `version` | str | production | Version cible |
-| `bins` | int | 10 | Nombre de bins pour la courbe de reliability |
+| `days` | int | 30 | Time window |
+| `version` | str | production | Target version |
+| `bins` | int | 10 | Number of bins for the reliability curve |
 
 ```python
 response = requests.get(
@@ -2364,16 +2363,16 @@ response = requests.get(
 )
 cal = response.json()
 
-print(f"Brier score: {cal['brier_score']:.4f}")  # 0 = parfait, 1 = pire
-print(f"Gap de surconfiance: {cal['overconfidence_gap']:+.3f}")
-# Positif = modèle trop confiant, négatif = pas assez confiant
+print(f"Brier score: {cal['brier_score']:.4f}")  # 0 = perfect, 1 = worst
+print(f"Overconfidence gap: {cal['overconfidence_gap']:+.3f}")
+# Positive = model too confident, negative = not confident enough
 
 for b in cal["reliability_diagram"]:
-    print(f"  conf={b['bin_center']:.1f} → réalité={b['fraction_positive']:.2f} "
+    print(f"  conf={b['bin_center']:.1f} → reality={b['fraction_positive']:.2f} "
           f"(n={b['count']})")
 ```
 
-**Schéma `CalibrationResponse`**
+**Schema `CalibrationResponse`**
 
 ```json
 {
@@ -2392,25 +2391,25 @@ for b in cal["reliability_diagram"]:
 }
 ```
 
-> **Interprétation :** Un `brier_score` < 0.1 est bon pour la classification. Un `overconfidence_gap` > 0.05 signale que le modèle surestime sa certitude — à surveiller avant un déploiement haute-criticité.
+> **Interpretation:** A `brier_score` < 0.1 is good for classification. An `overconfidence_gap` > 0.05 signals that the model overestimates its certainty — to monitor before high-criticality deployment.
 
 ---
 
-### `GET /models/{name}/confidence-distribution` — Distribution de confiance
+### `GET /models/{name}/confidence-distribution` — Confidence Distribution
 
-Histogramme du niveau de confiance (`max(probabilities)`) sur les prédictions récentes. Permet d'identifier la proportion de prédictions incertaines.
+Histogram of the confidence level (`max(probabilities)`) over recent predictions. Allows identifying the proportion of uncertain predictions.
 
-**Auth requise**
+**Auth required**
 
-**Paramètres**
+**Parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `days` | int | 7 | Fenêtre temporelle |
-| `version` | str | production | Version cible |
-| `bins` | int | 10 | Résolution de l'histogramme |
-| `high_threshold` | float | 0.9 | Seuil confiance haute |
-| `uncertain_threshold` | float | 0.6 | Seuil incertitude |
+| `days` | int | 7 | Time window |
+| `version` | str | production | Target version |
+| `bins` | int | 10 | Histogram resolution |
+| `high_threshold` | float | 0.9 | High confidence threshold |
+| `uncertain_threshold` | float | 0.6 | Uncertainty threshold |
 
 ```python
 response = requests.get(
@@ -2420,13 +2419,13 @@ response = requests.get(
 )
 dist = response.json()
 
-print(f"Prédictions très confiantes (>{dist['high_threshold']}) : "
+print(f"Highly confident predictions (>{dist['high_threshold']}): "
       f"{dist['high_confidence_pct']:.1%}")
-print(f"Prédictions incertaines (<{dist['uncertain_threshold']}) : "
+print(f"Uncertain predictions (<{dist['uncertain_threshold']}): "
       f"{dist['uncertain_pct']:.1%}")
 ```
 
-**Schéma `ConfidenceDistributionResponse`**
+**Schema `ConfidenceDistributionResponse`**
 
 ```json
 {
@@ -2447,18 +2446,18 @@ print(f"Prédictions incertaines (<{dist['uncertain_threshold']}) : "
 
 ---
 
-### `GET /models/{name}/performance-report` — Rapport consolidé
+### `GET /models/{name}/performance-report` — Consolidated Report
 
-Agrège en un seul appel : performance, drift, feature importance, calibration, et comparaison A/B.
-Idéal pour des scripts de monitoring automatique ou des alertes programmatiques.
+Aggregates in a single call: performance, drift, feature importance, calibration, and A/B comparison.
+Ideal for automatic monitoring scripts or programmatic alerts.
 
-**Auth requise**
+**Auth required**
 
-**Paramètres**
+**Parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `days` | int | 30 | Fenêtre temporelle commune à toutes les composantes |
+| `days` | int | 30 | Common time window for all components |
 
 ```python
 response = requests.get(
@@ -2468,13 +2467,13 @@ response = requests.get(
 )
 report = response.json()
 
-# Vérification globale en une ligne
+# Global check in one line
 if (report["drift"]["drift_summary"] == "critical" or
         report["performance"].get("accuracy", 1.0) < 0.85):
-    print("⚠️  Action requise sur iris_model")
+    print("⚠️  Action required on iris_model")
 ```
 
-**Schéma `PerformanceReportResponse`**
+**Schema `PerformanceReportResponse`**
 
 ```json
 {
@@ -2491,11 +2490,11 @@ if (report["drift"]["drift_summary"] == "critical" or
 
 ---
 
-### `GET /models/{name}/readiness` — Vérification de disponibilité
+### `GET /models/{name}/readiness` — Readiness Check
 
-Vérifie qu'un modèle satisfait tous les prérequis avant d'être passé en production.
+Verifies that a model satisfies all prerequisites before being set to production.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.get(
@@ -2505,14 +2504,14 @@ response = requests.get(
 check = response.json()
 
 if check["ready"]:
-    print("✅ Modèle prêt pour la production")
+    print("✅ Model ready for production")
 else:
     for name, ok in check["checks"].items():
         if not ok:
-            print(f"❌ {name} : non satisfait")
+            print(f"❌ {name}: not satisfied")
 ```
 
-**Schéma `ReadinessResponse`**
+**Schema `ReadinessResponse`**
 
 ```json
 {
@@ -2529,24 +2528,24 @@ else:
 
 | Check | Description |
 |---|---|
-| `is_production` | `is_production=True` sur au moins une version |
-| `file_accessible` | Fichier `.joblib` accessible dans MinIO |
-| `baseline_computed` | `feature_baseline` calculée (nécessaire pour le drift) |
-| `no_critical_drift` | Aucun drift critique détecté dans la fenêtre récente |
+| `is_production` | `is_production=True` on at least one version |
+| `file_accessible` | `.joblib` file accessible in MinIO |
+| `baseline_computed` | `feature_baseline` computed (required for drift) |
+| `no_critical_drift` | No critical drift detected in the recent window |
 
 ---
 
-### `GET /models/{name}/retrain-history` — Historique des ré-entraînements
+### `GET /models/{name}/retrain-history` — Retrain History
 
-Journal structuré de tous les événements de retrain pour un modèle : manuel ou planifié.
+Structured log of all retrain events for a model: manual or scheduled.
 
-**Auth requise**
+**Auth required**
 
-**Paramètres**
+**Parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `limit` | int | 20 | Nombre d'entrées |
+| `limit` | int | 20 | Number of entries |
 | `offset` | int | 0 | Pagination |
 
 ```python
@@ -2557,7 +2556,7 @@ response = requests.get(
 )
 history = response.json()
 
-print(f"Total retrains : {history['total']}")
+print(f"Total retrains: {history['total']}")
 for entry in history["history"]:
     promoted = "✅" if entry["auto_promoted"] else "⏭️"
     print(f"{promoted} {entry['timestamp'][:10]} "
@@ -2565,7 +2564,7 @@ for entry in history["history"]:
           f"(accuracy={entry.get('accuracy')}, by={entry['trained_by']})")
 ```
 
-**Schéma `RetrainHistoryResponse`**
+**Schema `RetrainHistoryResponse`**
 
 ```json
 {
@@ -2591,11 +2590,11 @@ for entry in history["history"]:
 
 ---
 
-### `PATCH /models/{name}/{version}/deprecate` — Déprécier une version
+### `PATCH /models/{name}/{version}/deprecate` — Deprecate a Version
 
-Marque une version comme dépréciée. Les nouvelles prédictions sur cette version retournent **HTTP 410 Gone**.
+Marks a version as deprecated. New predictions on this version return **HTTP 410 Gone**.
 
-**Auth requise : admin**
+**Auth required: admin**
 
 ```python
 response = requests.patch(
@@ -2605,20 +2604,20 @@ response = requests.patch(
 print(response.json())
 # {"model_name": "iris_model", "version": "1.0.0",
 #  "deprecated_at": "2026-04-28T10:00:00",
-#  "message": "Version dépréciée. Les nouvelles prédictions sont bloquées."}
+#  "message": "Version deprecated. New predictions are blocked."}
 ```
 
-> **Note :** La dépréciation est irréversible via cet endpoint. Pour restaurer une version, utiliser `POST /models/{name}/{version}/rollback/{history_id}`.
+> **Note:** Deprecation is irreversible via this endpoint. To restore a version, use `POST /models/{name}/{version}/rollback/{history_id}`.
 
 ---
 
-### `PATCH /models/{name}/policy` — Politique d'auto-promotion post-retrain
+### `PATCH /models/{name}/policy` — Post-Retrain Auto-Promotion Policy
 
-Définit les critères que doit satisfaire un modèle retrained pour être promu automatiquement en production.
+Defines the criteria a retrained model must satisfy to be automatically promoted to production.
 
-**Auth requise : admin**
+**Auth required: admin**
 
-**Corps de la requête**
+**Request body**
 
 ```json
 {
@@ -2629,20 +2628,20 @@ Définit les critères que doit satisfaire un modèle retrained pour être promu
 }
 ```
 
-| Champ | Type | Défaut | Description |
+| Field | Type | Default | Description |
 |---|---|---|---|
-| `min_accuracy` | float [0–1] | null | Précision minimale (sur les observed_results récents) |
-| `max_latency_p95_ms` | float > 0 | null | Latence P95 maximale en ms |
-| `min_sample_validation` | int ≥ 1 | 10 | Nb minimal de paires (prédiction, résultat) pour évaluer |
-| `auto_promote` | bool | false | Activer l'auto-promotion post-retrain |
-| `min_golden_test_pass_rate` | float [0–1] | null | Taux de réussite minimal des golden tests avant promotion |
-| `auto_demote` | bool | false | Activer l'auto-demotion (circuit breaker) |
-| `demote_on_drift` | `"warning"` \| `"critical"` \| null | null | Niveau de drift déclenchant la demotion automatique |
-| `demote_on_accuracy_below` | float [0–1] | null | Accuracy minimale sous laquelle le modèle est démis |
-| `demote_cooldown_hours` | int ≥ 1 | 24 | Délai minimal entre deux demotions automatiques |
+| `min_accuracy` | float [0–1] | null | Minimum accuracy (on recent observed_results) |
+| `max_latency_p95_ms` | float > 0 | null | Maximum P95 latency in ms |
+| `min_sample_validation` | int ≥ 1 | 10 | Minimum number of (prediction, result) pairs to evaluate |
+| `auto_promote` | bool | false | Enable post-retrain auto-promotion |
+| `min_golden_test_pass_rate` | float [0–1] | null | Minimum golden test pass rate before promotion |
+| `auto_demote` | bool | false | Enable auto-demotion (circuit breaker) |
+| `demote_on_drift` | `"warning"` \| `"critical"` \| null | null | Drift level triggering automatic demotion |
+| `demote_on_accuracy_below` | float [0–1] | null | Minimum accuracy below which the model is demoted |
+| `demote_cooldown_hours` | int ≥ 1 | 24 | Minimum delay between two automatic demotions |
 
 ```python
-# Auto-promotion post-retrain
+# Post-retrain auto-promotion
 response = requests.patch(
     f"{BASE_URL}/models/iris_model/policy",
     headers=headers,
@@ -2655,7 +2654,7 @@ response = requests.patch(
     }
 )
 
-# Circuit breaker — auto-demotion si drift critique ou accuracy trop basse
+# Circuit breaker — auto-demotion if critical drift or accuracy too low
 response = requests.patch(
     f"{BASE_URL}/models/iris_model/policy",
     headers=headers,
@@ -2666,18 +2665,18 @@ response = requests.patch(
         "demote_cooldown_hours": 48
     }
 )
-print(f"Politique activée : {response.json()['auto_promote']}")
+print(f"Policy enabled: {response.json()['auto_promote']}")
 ```
 
-> La politique est évaluée automatiquement à la fin de chaque ré-entraînement (auto-promotion) et lors de chaque cycle de supervision toutes les 6h (auto-demotion). Le résultat est retourné dans la réponse de `POST /models/{name}/{version}/retrain` via les champs `auto_promoted` et `auto_promote_reason`.
+> The policy is evaluated automatically at the end of each retrain (auto-promotion) and during each supervision cycle every 6h (auto-demotion). The result is returned in the `POST /models/{name}/{version}/retrain` response via the `auto_promoted` and `auto_promote_reason` fields.
 
 ---
 
-### `GET /models/{name}/{version}/download` — Télécharger le fichier .joblib
+### `GET /models/{name}/{version}/download` — Download the .joblib File
 
-Télécharge le fichier modèle sérialisé depuis MinIO.
+Downloads the serialised model file from MinIO.
 
-**Auth requise**
+**Auth required**
 
 ```python
 import pathlib
@@ -2694,30 +2693,30 @@ with open(output_path, "wb") as f:
     for chunk in response.iter_content(chunk_size=8192):
         f.write(chunk)
 
-print(f"Modèle téléchargé : {output_path} ({output_path.stat().st_size / 1024:.1f} Ko)")
+print(f"Model downloaded: {output_path} ({output_path.stat().st_size / 1024:.1f} KB)")
 ```
 
-La réponse est un flux binaire (`Content-Type: application/octet-stream`) avec en-tête `Content-Disposition: attachment; filename=iris_model_2.0.0.joblib`.
+The response is a binary stream (`Content-Type: application/octet-stream`) with header `Content-Disposition: attachment; filename=iris_model_2.0.0.joblib`.
 
 ---
 
-## Prédictions — Endpoints complémentaires
+## Predictions — Additional Endpoints
 
-### `GET /predictions/export` — Export streaming
+### `GET /predictions/export` — Streaming Export
 
-Exporte l'historique des prédictions en CSV, JSONL, ou Parquet. Utilise une pagination curseur en interne pour gérer les grands volumes sans surcharger la mémoire.
+Exports prediction history as CSV, JSONL, or Parquet. Uses cursor pagination internally to handle large volumes without overloading memory.
 
-**Auth requise : admin**
+**Auth required: admin**
 
-**Paramètres**
+**Parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `format` | str | `csv` | Format : `csv`, `jsonl`, `parquet` |
-| `model_name` | str | — | Filtre par modèle (optionnel) |
-| `start` | datetime | — | Début de la plage (ISO 8601) |
-| `end` | datetime | — | Fin de la plage (ISO 8601) |
-| `version` | str | — | Filtre par version (optionnel) |
+| `format` | str | `csv` | Format: `csv`, `jsonl`, `parquet` |
+| `model_name` | str | — | Filter by model (optional) |
+| `start` | datetime | — | Start of range (ISO 8601) |
+| `end` | datetime | — | End of range (ISO 8601) |
+| `version` | str | — | Filter by version (optional) |
 
 ```python
 from datetime import datetime, timedelta
@@ -2739,7 +2738,7 @@ with open("predictions_export.csv", "wb") as f:
     for chunk in response.iter_content(chunk_size=8192):
         f.write(chunk)
 
-# Pour Parquet (binaire, compatible pandas/polars)
+# For Parquet (binary, compatible with pandas/polars)
 response_parquet = requests.get(
     f"{BASE_URL}/predictions/export",
     headers=headers,
@@ -2757,21 +2756,21 @@ print(df.head())
 
 ---
 
-## Utilisateurs — Endpoints complémentaires
+## Users — Additional Endpoints
 
-### `GET /users/me` — Profil de l'utilisateur courant
+### `GET /users/me` — Current User Profile
 
-Retourne le profil de l'utilisateur propriétaire du token Bearer utilisé.
+Returns the profile of the user who owns the Bearer token being used.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.get(f"{BASE_URL}/users/me", headers=headers)
 me = response.json()
-print(f"Connecté en tant que {me['username']} (rôle : {me['role']})")
+print(f"Logged in as {me['username']} (role: {me['role']})")
 ```
 
-**Schéma**
+**Schema**
 
 ```json
 {
@@ -2788,21 +2787,21 @@ print(f"Connecté en tant que {me['username']} (rôle : {me['role']})")
 
 ---
 
-### `GET /users/me/quota` — Quota journalier
+### `GET /users/me/quota` — Daily Quota
 
-Retourne la consommation de quota de l'utilisateur courant pour la journée en cours.
+Returns the current user's quota consumption for the current day.
 
-**Auth requise**
+**Auth required**
 
 ```python
 response = requests.get(f"{BASE_URL}/users/me/quota", headers=headers)
 quota = response.json()
 
-print(f"Quota : {quota['used_today']} / {quota['rate_limit_per_day']} prédictions")
-print(f"Restant : {quota['remaining']} — Réinitialisation à {quota['reset_at']}")
+print(f"Quota: {quota['used_today']} / {quota['rate_limit_per_day']} predictions")
+print(f"Remaining: {quota['remaining']} — Reset at {quota['reset_at']}")
 ```
 
-**Schéma `QuotaResponse`**
+**Schema `QuotaResponse`**
 
 ```json
 {
@@ -2815,17 +2814,17 @@ print(f"Restant : {quota['remaining']} — Réinitialisation à {quota['reset_at
 
 ---
 
-### `GET /users/{user_id}/usage` — Statistiques d'utilisation
+### `GET /users/{user_id}/usage` — Usage Statistics
 
-Statistiques de consommation d'un utilisateur : volume par modèle et par jour. Accessible par l'utilisateur lui-même ou par un admin.
+Usage statistics for a user: volume by model and by day. Accessible by the user themselves or by an admin.
 
-**Auth requise (self ou admin)**
+**Auth required (self or admin)**
 
-**Paramètres**
+**Parameters**
 
-| Paramètre | Type | Défaut | Description |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `days` | int | 30 | Fenêtre temporelle |
+| `days` | int | 30 | Time window |
 
 ```python
 response = requests.get(
@@ -2835,13 +2834,13 @@ response = requests.get(
 )
 usage = response.json()
 
-print(f"Total 30j : {usage['total_predictions']} prédictions")
+print(f"Total 30d: {usage['total_predictions']} predictions")
 for model in usage["by_model"]:
     print(f"  {model['model_name']}: {model['predictions']} pred, "
-          f"{model['errors']} erreurs")
+          f"{model['errors']} errors")
 ```
 
-**Schéma `UserUsageResponse`**
+**Schema `UserUsageResponse`**
 
 ```json
 {
@@ -2864,24 +2863,24 @@ for model in usage["by_model"]:
 
 ## Infrastructure
 
-### `GET /health/dependencies` — Santé détaillée des dépendances
+### `GET /health/dependencies` — Detailed Dependency Health
 
-Vérifie la connectivité et la latence de chaque service dépendant. Utile pour le diagnostic en production et les health checks orchestrateurs (K8s readiness probe).
+Checks connectivity and latency of each dependent service. Useful for production diagnosis and orchestrator health checks (K8s readiness probe).
 
-**Auth non requise**
+**Auth not required**
 
 ```python
 response = requests.get(f"{BASE_URL}/health/dependencies")
 health = response.json()
 
-print(f"Statut global : {health['status']}")
+print(f"Overall status: {health['status']}")
 for service, info in health["dependencies"].items():
     status_icon = "✅" if info["status"] == "ok" else "❌"
     latency = f" ({info.get('latency_ms', '?')}ms)" if "latency_ms" in info else ""
     print(f"  {status_icon} {service}{latency}")
 ```
 
-**Schéma `DependencyHealthResponse`**
+**Schema `DependencyHealthResponse`**
 
 ```json
 {
@@ -2895,33 +2894,33 @@ for service, info in health["dependencies"].items():
 }
 ```
 
-| Statut | Signification |
+| Status | Meaning |
 |---|---|
-| `ok` | Service joignable et fonctionnel |
-| `degraded` | Service joignable mais lent ou erreur partielle |
-| `unavailable` | Service inaccessible |
+| `ok` | Service reachable and functional |
+| `degraded` | Service reachable but slow or partial error |
+| `unavailable` | Service unreachable |
 
 ---
 
-### `GET /metrics` — Métriques Prometheus
+### `GET /metrics` — Prometheus Metrics
 
-Expose les métriques de l'API au format texte Prometheus. Scraped automatiquement par Grafana LGTM via le dashboard `http://localhost:3000`.
+Exposes API metrics in Prometheus text format. Automatically scraped by Grafana LGTM via the dashboard at `http://localhost:3000`.
 
-**Auth optionnelle** — si `METRICS_TOKEN` est défini dans les variables d'environnement, le token Bearer est requis.
+**Optional auth** — if `METRICS_TOKEN` is defined in the environment variables, the Bearer token is required.
 
 ```python
-# Sans token (si METRICS_TOKEN non configuré)
+# Without token (if METRICS_TOKEN not configured)
 response = requests.get(f"{BASE_URL}/metrics")
-print(response.text[:500])  # format texte Prometheus
+print(response.text[:500])  # Prometheus text format
 
-# Avec token
+# With token
 response = requests.get(
     f"{BASE_URL}/metrics",
     headers={"Authorization": "Bearer <METRICS_TOKEN>"}
 )
 ```
 
-**Métriques exposées (exemples)**
+**Exposed metrics (examples)**
 
 ```
 # HELP http_requests_total Total HTTP requests
@@ -2937,7 +2936,7 @@ http_request_duration_seconds_bucket{le="0.05",endpoint="/predict"} 17832
 predictions_total{model="iris_model",version="2.0.0"} 12540
 ```
 
-> Pour configurer le scraping Grafana, ajouter l'endpoint dans `prometheus.yml` :
+> To configure Grafana scraping, add the endpoint in `prometheus.yml`:
 > ```yaml
 > - job_name: predictml
 >   static_configs:
@@ -2947,7 +2946,7 @@ predictions_total{model="iris_model",version="2.0.0"} 12540
 
 ---
 
-## Client Python complet
+## Complete Python Client
 
 ```python
 import requests
@@ -2975,7 +2974,7 @@ class PredictMLClient:
         r.raise_for_status()
         return r.json()
 
-    # ── Prédictions ──────────────────────────────────────────────────────────
+    # ── Predictions ──────────────────────────────────────────────────────────
 
     def predict(self, model_name: str, features: Dict[str, Any],
                 model_version: Optional[str] = None, id_obs: Optional[str] = None) -> dict:
@@ -3009,7 +3008,7 @@ class PredictMLClient:
     def get_stats(self, days: int = 7, model_name: Optional[str] = None) -> dict:
         return self._get("/predictions/stats", params={"days": days, "model_name": model_name})
 
-    # ── Modèles ───────────────────────────────────────────────────────────────
+    # ── Models ───────────────────────────────────────────────────────────────
 
     def upload_model(self, pkl_path: str, name: str, version: str, **metadata) -> dict:
         with open(pkl_path, "rb") as f:
@@ -3084,7 +3083,7 @@ class PredictMLClient:
     def run_golden_tests(self, model_name: str, version: str) -> dict:
         return self._post(f"/models/{model_name}/{version}/run-golden-tests")
 
-    # ── Résultats observés ────────────────────────────────────────────────────
+    # ── Observed Results ──────────────────────────────────────────────────────
 
     def submit_observed_results(self, records: List[dict]) -> dict:
         return self._post("/observed-results", json={"data": records})
@@ -3096,81 +3095,4 @@ class PredictMLClient:
 
     def get_model_dashboard(self, name: str, days: int = 30) -> dict:
         return self._get(f"/monitoring/model/{name}", params={"days": days})
-
-    # ── Divers ────────────────────────────────────────────────────────────────
-
-    def get_models(self, tag: Optional[str] = None) -> list:
-        return self._get("/models", params={"tag": tag} if tag else None)
-
-    def health(self) -> dict:
-        return requests.get(f"{self.base_url}/health").json()
-
-
-# ── Exemple d'utilisation ─────────────────────────────────────────────────────
-
-client = PredictMLClient("http://localhost:8000", "<ADMIN_TOKEN>")
-
-# Prédiction simple
-result = client.predict(
-    "iris_model",
-    {"sepal length (cm)": 5.1, "sepal width (cm)": 3.5,
-     "petal length (cm)": 1.4, "petal width (cm)": 0.2},
-    id_obs="obs-001"
-)
-print(f"Prédiction: {result['prediction']}, conf: {result['probability']}")
-
-# Prédiction en lot
-batch = client.predict_batch("iris_model", [
-    {"id_obs": "obs-001", "features": {"sepal length (cm)": 5.1, "sepal width (cm)": 3.5,
-                                        "petal length (cm)": 1.4, "petal width (cm)": 0.2}},
-    {"id_obs": "obs-002", "features": {"sepal length (cm)": 6.7, "sepal width (cm)": 3.0,
-                                        "petal length (cm)": 5.2, "petal width (cm)": 2.3}},
-])
-
-# Explication SHAP
-explanation = client.explain(
-    "iris_model",
-    {"sepal length (cm)": 5.1, "sepal width (cm)": 3.5,
-     "petal length (cm)": 1.4, "petal width (cm)": 0.2}
-)
-print(f"Top feature: {max(explanation['shap_values'], key=lambda k: abs(explanation['shap_values'][k]))}")
-
-# Upload + mise en production
-client.upload_model("models/rf_v2.joblib", "iris_model", "2.0.0",
-                    algorithm="RandomForestClassifier", accuracy=0.98)
-client.set_production("iris_model", "2.0.0")
-
-# Résultats observés
-client.submit_observed_results([
-    {"id_obs": "obs-001", "model_name": "iris_model",
-     "date_time": "2025-01-16T08:00:00", "observed_result": 0},
-])
-
-# Performance réelle
-perf = client.get_performance("iris_model", "2025-01-01T00:00:00", "2025-12-31T23:59:59")
-print(f"Accuracy réelle: {perf.get('accuracy')}")
-
-# Dérive
-drift = client.get_drift("iris_model", days=30)
-print(f"Drift: {drift['drift_summary']}")
-
-# Monitoring global
-overview = client.get_overview(days=7)
-print(f"Taux d'erreur global: {overview['global_stats']['error_rate']:.1%}")
 ```
-
----
-
-## Codes d'erreur courants
-
-| Code | Situation |
-|---|---|
-| 400 | Corps de requête invalide (champ manquant, format incorrect) |
-| 401 | Token Bearer absent ou invalide |
-| 403 | Rôle insuffisant (ex: action admin avec rôle user) |
-| 404 | Modèle, utilisateur ou history_id introuvable |
-| 409 | Conflit (modèle `name+version` déjà existant) |
-| 422 | Erreur de validation Pydantic |
-| 429 | Quota journalier de prédictions dépassé |
-| 500 | Erreur serveur interne |
-| 503 | Service indisponible (Redis, MinIO, DB inaccessible) |

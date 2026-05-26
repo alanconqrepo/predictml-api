@@ -2,252 +2,252 @@
 
 ## Stack
 
-| Service | Technologie | Port externe |
+| Service | Technology | External Port |
 |---|---|---|
 | Reverse proxy / Load balancer | Nginx 1.27 | **80** |
-| API (3 réplicas) | FastAPI (async) | — (interne uniquement) |
-| Dashboard Admin | Streamlit | 8501 |
-| Base de données (primary) | PostgreSQL 16 | 5433 |
-| Base de données (replica) | PostgreSQL 16 (streaming replication) | — |
+| API (3 replicas) | FastAPI (async) | — (internal only) |
+| Admin Dashboard | Streamlit | 8501 |
+| Database (primary) | PostgreSQL 16 | 5433 |
+| Database (replica) | PostgreSQL 16 (streaming replication) | — |
 | Connection pooler (write) | PgBouncer 1.23 (transaction mode) | — |
 | Connection pooler (read) | PgBouncer 1.23 (transaction mode) | — |
-| Stockage modèles | MinIO (S3-compatible) | 9000 / console 9001 |
+| Model storage | MinIO (S3-compatible) | 9000 / console 9001 |
 | Experiment tracking | MLflow | 5000 |
-| Cache distribué | Redis 7 Sentinel (1 master + 2 réplicas + 3 sentinels) | 6379 (master) |
-| Queue prédictions | Redis Streams + worker `prediction-writer` | — |
-| Observabilité | Grafana LGTM (Loki + Tempo + Prometheus + OTLP) | 3000 |
+| Distributed cache | Redis 7 Sentinel (1 master + 2 replicas + 3 sentinels) | 6379 (master) |
+| Prediction queue | Redis Streams + `prediction-writer` worker | — |
+| Observability | Grafana LGTM (Loki + Tempo + Prometheus + OTLP) | 3000 |
 
 ---
 
-## Structure du projet
+## Project Structure
 
 ```
 predictml-api/
 ├── src/
-│   ├── api/                        # Endpoints HTTP
+│   ├── api/                        # HTTP Endpoints
 │   │   ├── models.py               # CRUD + drift + history + retrain + A/B
 │   │   ├── predict.py              # POST /predict, /predict-batch, /explain, GET /predictions, /predictions/{id}, /predictions/{id}/explain, /stats, DELETE /predictions/purge
 │   │   ├── users.py                # CRUD /users
 │   │   ├── observed_results.py     # /observed-results
 │   │   └── monitoring.py           # /monitoring/overview, /monitoring/model/{name}
 │   ├── core/
-│   │   ├── config.py               # Settings (variables d'env via dotenv)
-│   │   ├── security.py             # Auth Bearer token
+│   │   ├── config.py               # Settings (env variables via dotenv)
+│   │   ├── security.py             # Bearer token auth
 │   │   ├── rate_limit.py           # Rate limiting per-IP via slowapi (Redis backend)
-│   │   ├── ml_metrics.py           # Métriques Prometheus ML métier (predictions, inference, drift, retrain)
+│   │   ├── ml_metrics.py           # Business ML Prometheus metrics (predictions, inference, drift, retrain)
 │   │   └── telemetry.py            # OpenTelemetry → Grafana LGTM
 │   ├── workers/
-│   │   └── prediction_writer.py    # Consommateur Redis Streams — batch INSERT prédictions
+│   │   └── prediction_writer.py    # Redis Streams consumer — batch INSERT predictions
 │   ├── db/
-│   │   ├── models/                 # ORM SQLAlchemy
+│   │   ├── models/                 # SQLAlchemy ORM
 │   │   │   ├── user.py             # Table users
 │   │   │   ├── prediction.py       # Table predictions
 │   │   │   ├── model_metadata.py   # Table model_metadata
 │   │   │   ├── observed_result.py  # Table observed_results
 │   │   │   ├── golden_test.py      # Table golden_tests
 │   │   │   └── model_history.py    # Table model_history
-│   │   └── database.py             # Session async (asyncpg)
+│   │   └── database.py             # Async session (asyncpg)
 │   ├── services/
-│   │   ├── db_service.py               # Toutes les requêtes DB
-│   │   ├── model_service.py            # Chargement, cache Redis, routage A/B/shadow
+│   │   ├── db_service.py               # All DB queries
+│   │   ├── model_service.py            # Loading, Redis cache, A/B/shadow routing
 │   │   ├── minio_service.py            # Upload/download MinIO
-│   │   ├── drift_service.py            # Calcul dérive Z-score + PSI + null rate (input + output)
-│   │   ├── shap_service.py             # Explications SHAP locales (tree + linear)
-│   │   ├── ab_significance_service.py  # Tests statistiques A/B (Chi-², Mann-Whitney U)
+│   │   ├── drift_service.py            # Drift computation Z-score + PSI + null rate (input + output)
+│   │   ├── shap_service.py             # Local SHAP explanations (tree + linear)
+│   │   ├── ab_significance_service.py  # A/B statistical tests (Chi-², Mann-Whitney U)
 │   │   ├── auto_promotion_service.py   # Auto-promotion, auto-demotion (circuit breaker)
-│   │   ├── golden_test_service.py      # Tests de régression golden (CRUD + run)
-│   │   ├── input_validation_service.py # Validation schéma de features d'entrée
-│   │   ├── supervision_reporter.py     # Supervision toutes les 6h : drift, alertes, retrain réactif
-│   │   ├── email_service.py            # Alertes email & rapports hebdomadaires
-│   │   └── webhook_service.py          # Webhooks HTTP post-prédiction
-│   ├── schemas/                    # Schémas Pydantic (validation I/O)
+│   │   ├── golden_test_service.py      # Golden regression tests (CRUD + run)
+│   │   ├── input_validation_service.py # Input feature schema validation
+│   │   ├── supervision_reporter.py     # Supervision every 6h: drift, alerts, reactive retrain
+│   │   ├── email_service.py            # Email alerts & weekly reports
+│   │   └── webhook_service.py          # HTTP webhooks post-prediction
+│   ├── schemas/                    # Pydantic schemas (I/O validation)
 │   │   ├── model.py
 │   │   ├── prediction.py
 │   │   ├── user.py
 │   │   ├── observed_result.py
 │   │   └── monitoring.py
-│   └── main.py                     # App FastAPI + lifecycle hooks
+│   └── main.py                     # FastAPI app + lifecycle hooks
 ├── streamlit_app/
 │   ├── Dockerfile
 │   ├── requirements.txt
-│   ├── app.py                      # Page login + accueil
+│   ├── app.py                      # Login + home page
 │   ├── utils/
-│   │   ├── api_client.py           # Client HTTP vers l'API
-│   │   └── auth.py                 # Helpers session_state
+│   │   ├── api_client.py           # HTTP client to the API
+│   │   └── auth.py                 # session_state helpers
 │   └── pages/
 │       ├── 1_Users.py
 │       ├── 2_Models.py
 │       ├── 3_Predictions.py
 │       ├── 4_Stats.py
 │       ├── 5_Code_Example.py
-│       ├── 6_AB_Testing.py      # A/B testing, shadow mode, comparaison statistique
-│       ├── 7_Supervision.py     # Monitoring global, drift, alertes, performance
-│       ├── 8_Retrain.py         # Gestion centralisée des retrains (manuel + planifié)
-│       └── 9_Golden_Tests.py    # CRUD cas de test golden, run par version, import CSV
-├── tests/                          # Tests pytest (automatisés, sans Docker)
-├── smoke-tests/                    # Tests manuels (Docker live)
-├── init_data/                      # Scripts one-shot (init_db, create_multiple_models)
-│   └── example_train.py            # Exemple de script train.py compatible retrain
-├── Models/                         # Fichiers .joblib locaux
+│       ├── 6_AB_Testing.py      # A/B testing, shadow mode, statistical comparison
+│       ├── 7_Supervision.py     # Global monitoring, drift, alerts, performance
+│       ├── 8_Retrain.py         # Centralised retrain management (manual + scheduled)
+│       └── 9_Golden_Tests.py    # CRUD golden test cases, run by version, CSV import
+├── tests/                          # Pytest tests (automated, no Docker required)
+├── smoke-tests/                    # Manual tests (live Docker)
+├── init_data/                      # One-shot scripts (init_db, create_multiple_models)
+│   └── example_train.py            # Example train.py script compatible with retrain
+├── Models/                         # Local .joblib files
 ├── notebooks/                      # Jupyter notebooks
-├── alembic/                        # Migrations DB
+├── alembic/                        # DB migrations
 ├── docker-compose.yml
-├── nginx.conf                          # Configuration reverse proxy / load balancer
+├── nginx.conf                          # Reverse proxy / load balancer configuration
 ├── docker/
-│   ├── pg_hba.conf                     # Authentification PostgreSQL (réplication)
+│   ├── pg_hba.conf                     # PostgreSQL authentication (replication)
 │   ├── postgres-replica-entrypoint.sh  # Init replica via pg_basebackup
-│   └── sentinel-entrypoint.sh          # Génère sentinel.conf au démarrage
+│   └── sentinel-entrypoint.sh          # Generates sentinel.conf at startup
 └── .env
 ```
 
 ---
 
-## Flux de données — Prédiction
+## Data Flow — Prediction
 
 ```
 Client
   │  POST /predict + Bearer Token
   ▼
 Nginx (port 80, least_conn)
-  → distribue vers l'un des 3 réplicas API
+  → distributes to one of the 3 API replicas
   ▼
 security.py
-  → vérifie le token en DB
-  → contrôle le rate limit per-IP via slowapi (Redis DB 1)
-  → contrôle le quota journalier (DB)
+  → verifies token in DB
+  → checks per-IP rate limit via slowapi (Redis DB 1)
+  → checks daily quota (DB)
   ▼
 predict.py
-  → valide la requête (Pydantic)
+  → validates request (Pydantic)
   ▼
 model_service.py
   → select_routing_versions() : A/B test / shadow / production
-  → charge le modèle (cache Redis DB 0 → MinIO)
+  → loads model (Redis DB 0 cache → MinIO)
   ▼
 model.predict(X)  ← sklearn
   ▼
-[si shadow] background_task → prédiction shadow loguée séparément
+[if shadow] background_task → shadow prediction logged separately
   ▼
 [PREDICTION_STREAM_ENABLED=true]
-  → publie dans Redis Stream "predictions:new" (<1 ms)
-  → prediction-writer consomme en batch (100 lignes / 500 ms)
-  → INSERT en PostgreSQL (via pgbouncer)
-[fallback synchrone si Redis indisponible]
+  → publishes to Redis Stream "predictions:new" (<1 ms)
+  → prediction-writer consumes in batch (100 rows / 500 ms)
+  → INSERT into PostgreSQL (via pgbouncer)
+[synchronous fallback if Redis unavailable]
   ▼
-[si webhook_url configuré] webhook_service.send_webhook()
+[if webhook_url configured] webhook_service.send_webhook()
   ▼
 Client ← JSON { prediction, probability, low_confidence, selected_version }
 ```
 
-### Routage read/write PostgreSQL
+### PostgreSQL read/write routing
 
-- **Écritures** (prédictions, modèles, utilisateurs) → `pgbouncer` → `postgres` (primary)
-- **Lectures analytiques** (`/predictions/stats`, `/monitoring`, agrégations) → `pgbouncer-read` → `postgres-replica`
+- **Writes** (predictions, models, users) → `pgbouncer` → `postgres` (primary)
+- **Analytical reads** (`/predictions/stats`, `/monitoring`, aggregations) → `pgbouncer-read` → `postgres-replica`
 
-Plafonds de sécurité sur les requêtes analytiques : `MAX_ROWS_ANALYTICS` (50 000 lignes) et `ANALYTICS_MAX_DAYS` (90 jours) pour éviter les agrégations illimitées.
+Safety caps on analytical queries: `MAX_ROWS_ANALYTICS` (50,000 rows) and `ANALYTICS_MAX_DAYS` (90 days) to prevent unbounded aggregations.
 
-### Routage A/B / Shadow
+### A/B / Shadow Routing
 
-- `deployment_mode="production"` : version principale, reçoit tout le trafic
-- `deployment_mode="ab_test"` : reçoit `traffic_weight` fraction du trafic (ex: 0.2 = 20%)
-- `deployment_mode="shadow"` : exécutée en arrière-plan sur chaque requête production, résultat non retourné au client
+- `deployment_mode="production"`: main version, receives all traffic
+- `deployment_mode="ab_test"`: receives `traffic_weight` fraction of traffic (e.g. 0.2 = 20%)
+- `deployment_mode="shadow"`: executed in the background on each production request, result not returned to the client
 
-Le service `model_service.select_routing_versions()` détermine quelle version répond à la requête et quelles versions shadow tourner en parallèle.
+The `model_service.select_routing_versions()` service determines which version responds to the request and which shadow versions to run in parallel.
 
 ---
 
-## Flux de données — Dashboard Streamlit
+## Data Flow — Streamlit Dashboard
 
 ```
-Navigateur
+Browser
   │  HTTP + API Token (session_state)
   ▼
 streamlit_app/utils/api_client.py
-  │  requests HTTP
+  │  HTTP requests
   ▼
 API FastAPI (http://api:8000)
   ▼
 PostgreSQL / MinIO / Redis / MLflow
 ```
 
-Le dashboard Streamlit ne parle **jamais directement** à la DB ou à MinIO — l'API FastAPI est le seul backend.
+The Streamlit dashboard **never** talks directly to the DB or MinIO — the FastAPI API is the sole backend.
 
 ---
 
-## Base de données
+## Database
 
-| Table | Rôle |
+| Table | Role |
 |---|---|
-| `users` | Auth, rôles (admin/user/readonly), rate limiting, token Bearer |
-| `model_metadata` | Registre des modèles (versioning, localisation MinIO/MLflow, tags, A/B config) |
-| `predictions` | Log complet de chaque appel API (features, résultat, temps de réponse, shadow flag) |
-| `observed_results` | Résultats réels observés (pour comparer aux prédictions) |
-| `golden_tests` | Cas de test golden par modèle (features attendues, sortie attendue, description) |
-| `model_history` | Journal des changements d'état des modèles (pour rollback) |
+| `users` | Auth, roles (admin/user/readonly), rate limiting, Bearer token |
+| `model_metadata` | Model registry (versioning, MinIO/MLflow location, tags, A/B config) |
+| `predictions` | Complete log of each API call (features, result, response time, shadow flag) |
+| `observed_results` | Actual observed results (to compare against predictions) |
+| `golden_tests` | Golden test cases per model (expected features, expected output, description) |
+| `model_history` | Log of model state changes (for rollback) |
 
-### Table `predictions` — colonnes notables
+### Table `predictions` — notable columns
 
-| Colonne | Type | Description |
+| Column | Type | Description |
 |---|---|---|
-| `id_obs` | VARCHAR(255), nullable | Identifiant métier de l'observation |
-| `input_features` | JSON | Features envoyées |
-| `prediction_result` | JSON | Résultat du modèle |
-| `probabilities` | JSON, nullable | Probabilités par classe |
-| `response_time_ms` | Float | Temps d'inférence en millisecondes |
-| `status` | VARCHAR(20) | `success` ou `error` |
-| `is_shadow` | Boolean | `true` si prédiction shadow (non retournée au client) |
+| `id_obs` | VARCHAR(255), nullable | Business identifier of the observation |
+| `input_features` | JSON | Sent features |
+| `prediction_result` | JSON | Model result |
+| `probabilities` | JSON, nullable | Per-class probabilities |
+| `response_time_ms` | Float | Inference time in milliseconds |
+| `status` | VARCHAR(20) | `success` or `error` |
+| `is_shadow` | Boolean | `true` if shadow prediction (not returned to client) |
 
-### Table `model_history` — colonnes notables
+### Table `model_history` — notable columns
 
-| Colonne | Type | Description |
+| Column | Type | Description |
 |---|---|---|
-| `action` | str | Type de changement (`set_production`, `update_metadata`, `rollback`…) |
-| `snapshot` | JSON | État complet des métadonnées au moment du changement |
-| `changed_fields` | JSON | Liste des champs modifiés |
-| `changed_by_user_id` | int | Auteur du changement |
+| `action` | str | Type of change (`set_production`, `update_metadata`, `rollback`…) |
+| `snapshot` | JSON | Complete metadata state at the time of the change |
+| `changed_fields` | JSON | List of modified fields |
+| `changed_by_user_id` | int | Author of the change |
 
-### Table `model_metadata` — colonnes notables
+### Table `model_metadata` — notable columns
 
-| Colonne | Type | Description |
+| Column | Type | Description |
 |---|---|---|
 | `deployment_mode` | str | `production`, `ab_test`, `shadow` |
-| `traffic_weight` | float | Part du trafic (0.0–1.0) |
-| `confidence_threshold` | float | Seuil de confiance min |
-| `feature_baseline` | JSON | Stats par feature pour drift detection |
-| `tags` | JSON | Liste de tags libres |
-| `webhook_url` | str | URL de callback post-prédiction |
-| `train_script_object_key` | str | Clé MinIO du script train.py |
-| `parent_version` | str | Version source du retrain (traçabilité de lignée) |
-| `promotion_policy` | JSON | Politique d'auto-promotion post-retrain (`min_accuracy`, `max_latency_p95_ms`, etc.) |
-| `retrain_schedule` | JSON | Planning cron de ré-entraînement automatique (`cron`, `lookback_days`, `enabled`, etc.) |
-| `alert_thresholds` | JSON | Seuils d'alerte spécifiques au modèle (surcharge les seuils globaux) |
-| `training_stats` | JSON | Snapshot des données d'entraînement du dernier retrain (`n_rows`, `feature_stats`, etc.) |
+| `traffic_weight` | float | Traffic share (0.0–1.0) |
+| `confidence_threshold` | float | Min confidence threshold |
+| `feature_baseline` | JSON | Per-feature stats for drift detection |
+| `tags` | JSON | List of free tags |
+| `webhook_url` | str | Post-prediction callback URL |
+| `train_script_object_key` | str | MinIO key of the train.py script |
+| `parent_version` | str | Source version of the retrain (lineage traceability) |
+| `promotion_policy` | JSON | Post-retrain auto-promotion policy (`min_accuracy`, `max_latency_p95_ms`, etc.) |
+| `retrain_schedule` | JSON | Automatic retraining cron schedule (`cron`, `lookback_days`, `enabled`, etc.) |
+| `alert_thresholds` | JSON | Model-specific alert thresholds (overrides global thresholds) |
+| `training_stats` | JSON | Snapshot of training data from the last retrain (`n_rows`, `feature_stats`, etc.) |
 
 ---
 
-## Stockage des données d'entraînement
+## Training Data Storage
 
-### Stratégie : MinIO (stockage) + MLflow (traçabilité)
+### Strategy: MinIO (storage) + MLflow (traceability)
 
-Les données d'entraînement ne sont **pas** stockées comme artifacts MLflow (évite la duplication à chaque run). Elles vivent dans un bucket MinIO dédié, et MLflow en garde uniquement la **référence**.
+Training data is **not** stored as MLflow artifacts (avoids duplication on each run). They live in a dedicated MinIO bucket, and MLflow keeps only the **reference**.
 
 ```
 MinIO bucket: datasets/
 └── loan_model/
     └── v1/
-        ├── train.parquet    ← données d'entraînement
+        ├── train.parquet    ← training data
         └── test.parquet
 
 MLflow Run:
   params:  dataset_uri = "s3://datasets/loan_model/v1"
-  inputs:  mlflow.log_input(dataset, context="training")  ← référence, pas de copie
+  inputs:  mlflow.log_input(dataset, context="training")  ← reference, not a copy
 ```
 
-**Avantages :**
-- Pas de duplication : 10 runs → 1 seul exemplaire du dataset
-- Fichiers volumineux gérés nativement par MinIO (multipart, streaming)
-- Traçabilité complète via MLflow
+**Advantages:**
+- No duplication: 10 runs → 1 single copy of the dataset
+- Large files handled natively by MinIO (multipart, streaming)
+- Full traceability via MLflow
 
-### Workflow complet
+### Complete Workflow
 
 ```python
 import os, mlflow, mlflow.sklearn, pandas as pd
@@ -286,84 +286,84 @@ requests.post("http://localhost:8000/models", headers=HEADERS, data={
 
 ---
 
-## Haute disponibilité Redis (Sentinel)
+## Redis High Availability (Sentinel)
 
-Redis tourne en mode Sentinel : 1 master + 2 réplicas + 3 sentinels (quorum : 2).
+Redis runs in Sentinel mode: 1 master + 2 replicas + 3 sentinels (quorum: 2).
 
 ```
-redis-master (écriture + lecture)
-  ├── redis-replica-1  (réplication asynchrone)
+redis-master (write + read)
+  ├── redis-replica-1  (asynchronous replication)
   └── redis-replica-2
 
 redis-sentinel-1 }
-redis-sentinel-2 } → quorum de 2 suffit pour élire un nouveau master
-redis-sentinel-3 }   basculement automatique en < 10 s
+redis-sentinel-2 } → quorum of 2 is sufficient to elect a new master
+redis-sentinel-3 }   automatic failover in < 10 s
 ```
 
-- **DB 0** — cache des instances de modèles (TTL configurable via `REDIS_CACHE_TTL`)
-- **DB 1** — compteurs de rate limiting per-IP (`slowapi`)
-- **Stream** `predictions:new` — queue async des writes de prédictions
-- **Stream** `predictions:dlq` — dead letter queue (après `MAX_RETRIES` échecs)
+- **DB 0** — model instance cache (TTL configurable via `REDIS_CACHE_TTL`)
+- **DB 1** — per-IP rate limiting counters (`slowapi`)
+- **Stream** `predictions:new` — async prediction write queue
+- **Stream** `predictions:dlq` — dead letter queue (after `MAX_RETRIES` failures)
 
-Le verrou `retrain_lock:{name}:{version}` (SET NX EX 700) garantit qu'un seul réplica API
-exécute le job de ré-entraînement planifié à la fois.
+The lock `retrain_lock:{name}:{version}` (SET NX EX 700) ensures that only one API replica
+runs the scheduled retraining job at a time.
 
-## Authentification
+## Authentication
 
-- **Mécanisme** : HTTP Bearer token (`Authorization: Bearer <token>`)
-- **Token** : `secrets.token_urlsafe(32)` stocké dans `users.api_token`
-- **Rôles** : `admin` (accès total), `user` (prédictions + lecture), `readonly`
-- **Rate limiting** : quota journalier par utilisateur (`rate_limit_per_day`)
-- **Renouvellement** : `PATCH /users/{id}` avec `{"regenerate_token": true}` (admin)
+- **Mechanism**: HTTP Bearer token (`Authorization: Bearer <token>`)
+- **Token**: `secrets.token_urlsafe(32)` stored in `users.api_token`
+- **Roles**: `admin` (full access), `user` (predictions + read), `readonly`
+- **Rate limiting**: daily quota per user (`rate_limit_per_day`)
+- **Renewal**: `PATCH /users/{id}` with `{"regenerate_token": true}` (admin)
 
 ---
 
-## Observabilité
+## Observability
 
-### Logging structuré
+### Structured Logging
 
-L'API utilise `structlog` pour produire des logs JSON structurés. Chaque requête loguée contient : `model_name`, `model_version`, `response_time_ms`, `status`, `user_id`.
+The API uses `structlog` to produce structured JSON logs. Each logged request contains: `model_name`, `model_version`, `response_time_ms`, `status`, `user_id`.
 
-### Endpoint Prometheus `/metrics`
+### Prometheus Endpoint `/metrics`
 
-L'API expose `GET /metrics` au format Prometheus text 0.0.4 via `prometheus-fastapi-instrumentator`.
+The API exposes `GET /metrics` in Prometheus text 0.0.4 format via `prometheus-fastapi-instrumentator`.
 
-Métriques collectées automatiquement :
+Automatically collected metrics:
 - `http_requests_total` (counter) — labels `method`, `handler`, `status_code`
-- `http_request_duration_seconds` (histogramme) — latence par endpoint et code de retour
-- Métriques process Python standard (mémoire, CPU, file descriptors)
+- `http_request_duration_seconds` (histogram) — latency per endpoint and response code
+- Standard Python process metrics (memory, CPU, file descriptors)
 
-Le fichier `monitoring/prometheus.yml` configure un job de scrape `predictml-api` ciblant `api:8000/metrics`. Il est monté dans le conteneur `grafana/otel-lgtm` au démarrage.
+The file `monitoring/prometheus.yml` configures a `predictml-api` scrape job targeting `api:8000/metrics`. It is mounted in the `grafana/otel-lgtm` container at startup.
 
-Sécurisation optionnelle via `METRICS_TOKEN` (Bearer token). Le mode multi-workers est supporté via `PROMETHEUS_MULTIPROC_DIR` — les compteurs sont agrégés par worker dans un répertoire partagé.
+Optional security via `METRICS_TOKEN` (Bearer token). Multi-worker mode is supported via `PROMETHEUS_MULTIPROC_DIR` — counters are aggregated per worker in a shared directory.
 
 ### OpenTelemetry → Grafana LGTM
 
-Quand `ENABLE_OTEL=true`, les traces et métriques sont envoyées au collecteur OTLP (Grafana LGTM sur le port 4317).
+When `ENABLE_OTEL=true`, traces and metrics are sent to the OTLP collector (Grafana LGTM on port 4317).
 
-Grafana LGTM regroupe :
-- **Loki** — agrégation des logs
-- **Tempo** — traces distribuées
-- **Prometheus** — métriques (dont le scrape de `/metrics`)
-- **Grafana** — visualisation unifiée (http://localhost:3000)
+Grafana LGTM bundles:
+- **Loki** — log aggregation
+- **Tempo** — distributed traces
+- **Prometheus** — metrics (including scraping `/metrics`)
+- **Grafana** — unified visualisation (http://localhost:3000)
 
-### Alertes email
+### Email Alerts
 
-Déclenchées automatiquement par `email_service.py` (scheduler APScheduler) quand :
-- La dérive d'accuracy dépasse `PERFORMANCE_DRIFT_ALERT_THRESHOLD` (défaut: 10%)
-- Le taux d'erreur dépasse `ERROR_RATE_ALERT_THRESHOLD` (défaut: 10%)
-- Rapport hebdomadaire si `WEEKLY_REPORT_ENABLED=true`
+Triggered automatically by `email_service.py` (APScheduler scheduler) when:
+- Accuracy drift exceeds `PERFORMANCE_DRIFT_ALERT_THRESHOLD` (default: 10%)
+- Error rate exceeds `ERROR_RATE_ALERT_THRESHOLD` (default: 10%)
+- Weekly report if `WEEKLY_REPORT_ENABLED=true`
 
-### Scheduler de ré-entraînement planifié
+### Scheduled Retraining Scheduler
 
-`src/tasks/retrain_scheduler.py` — second scheduler APScheduler (AsyncIOScheduler) dédié aux retrains automatiques.
+`src/tasks/retrain_scheduler.py` — second APScheduler (AsyncIOScheduler) dedicated to automatic retrains.
 
-**Lifecycle :**
-1. Au démarrage (`lifespan` dans `main.py`), charge tous les `ModelMetadata` actifs ayant `retrain_schedule.enabled=True`.
-2. Crée un job cron par version (ID : `retrain_schedule:{name}:{version}`).
-3. À chaque déclenchement, acquiert un **verrou Redis** `SET NX EX 700` pour éviter les exécutions concurrentes en multi-réplicas.
-4. Exécute la logique retrain dans un sous-processus (timeout 600 s), crée une nouvelle version, met à jour `last_run_at` / `next_run_at`.
+**Lifecycle:**
+1. At startup (`lifespan` in `main.py`), loads all active `ModelMetadata` with `retrain_schedule.enabled=True`.
+2. Creates one cron job per version (ID: `retrain_schedule:{name}:{version}`).
+3. On each trigger, acquires a **Redis lock** `SET NX EX 700` to prevent concurrent executions in multi-replica environments.
+4. Executes the retrain logic in a subprocess (timeout 600 s), creates a new version, updates `last_run_at` / `next_run_at`.
 
-**Modification d'un planning en live :** l'endpoint `PATCH /models/{name}/{version}/schedule` met à jour la DB *et* le scheduler en cours d'exécution (`add_retrain_job` / `remove_retrain_job`).
+**Modifying a live schedule:** the `PATCH /models/{name}/{version}/schedule` endpoint updates the DB *and* the running scheduler (`add_retrain_job` / `remove_retrain_job`).
 
-**Retrain réactif (drift-triggered) :** si `trigger_on_drift` est configuré dans `retrain_schedule` (`"warning"` ou `"critical"`), `run_alert_check()` évalue `_max_input_drift` et `_max_output_drift` après chaque cycle de 6h. Si le niveau de drift détecté atteint ou dépasse le seuil configuré et que le cooldown `drift_retrain_cooldown_hours` est expiré, un retrain est déclenché immédiatement via `_run_retrain_job()` — sans attendre le prochain cycle cron.
+**Reactive retrain (drift-triggered):** if `trigger_on_drift` is configured in `retrain_schedule` (`"warning"` or `"critical"`), `run_alert_check()` evaluates `_max_input_drift` and `_max_output_drift` after each 6-hour cycle. If the detected drift level reaches or exceeds the configured threshold and the `drift_retrain_cooldown_hours` cooldown has expired, a retrain is triggered immediately via `_run_retrain_job()` — without waiting for the next cron cycle.

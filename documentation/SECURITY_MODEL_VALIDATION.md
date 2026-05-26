@@ -1,43 +1,43 @@
-# Validation des noms de modèles et versions (sécurité)
+# Model Name and Version Validation (Security)
 
-## Contexte
+## Context
 
-Les noms de modèles et les versions sont interpolés directement dans les chemins d'objets MinIO :
+Model names and versions are interpolated directly into MinIO object paths:
 
 ```python
 object_name = f"{name}/v{version}.joblib"
 ```
 
-Sans validation, un attaquant peut envoyer une valeur comme `../admin_model` ou
-`../../../../etc/cron.d/malicious`, provoquant une **traversée de répertoire** (_path traversal_)
-dans le bucket MinIO — écrasement d'objets arbitraires ou lecture hors de l'espace prévu.
+Without validation, an attacker can send a value like `../admin_model` or
+`../../../../etc/cron.d/malicious`, causing a **path traversal** attack
+in the MinIO bucket — overwriting arbitrary objects or reading outside the intended scope.
 
-## Règles de validation
+## Validation Rules
 
-### Nom de modèle
+### Model Name
 
-| Propriété | Valeur |
+| Property | Value |
 |-----------|--------|
 | Regex | `^[a-zA-Z0-9_-]{1,64}$` |
-| Caractères autorisés | lettres (`a-z`, `A-Z`), chiffres (`0-9`), tiret (`-`), underscore (`_`) |
-| Longueur | 1 à 64 caractères |
-| Exemples valides | `iris`, `wine_model`, `my-model-v2` |
-| Exemples refusés | `../admin`, `model/evil`, `<script>`, `` (vide) |
+| Allowed characters | letters (`a-z`, `A-Z`), digits (`0-9`), dash (`-`), underscore (`_`) |
+| Length | 1 to 64 characters |
+| Valid examples | `iris`, `wine_model`, `my-model-v2` |
+| Rejected examples | `../admin`, `model/evil`, `<script>`, `` (empty) |
 
 ### Version
 
-| Propriété | Valeur |
+| Property | Value |
 |-----------|--------|
 | Regex | `^\d+\.\d+(\.\d+)?$` |
-| Format | `X.Y` ou `X.Y.Z` (semver simplifié) |
-| Exemples valides | `1.0`, `2.3.1`, `10.0.0` |
-| Exemples refusés | `../etc`, `1.0.0.0`, `v1.0`, `latest` |
+| Format | `X.Y` or `X.Y.Z` (simplified semver) |
+| Valid examples | `1.0`, `2.3.1`, `10.0.0` |
+| Rejected examples | `../etc`, `1.0.0.0`, `v1.0`, `latest` |
 
-## Implémentation
+## Implementation
 
-### Constantes et fonctions utilitaires
+### Constants and Utility Functions
 
-Définies dans `src/api/models.py` (juste après l'instanciation du routeur) :
+Defined in `src/api/models.py` (just after router instantiation):
 
 ```python
 import re
@@ -47,68 +47,68 @@ VERSION_RE = re.compile(r"^\d+\.\d+(\.\d+)?$")
 
 def validate_model_name(name: str) -> str:
     if not NAME_RE.match(name):
-        raise HTTPException(422, "Nom de modèle invalide (caractères autorisés : a-z A-Z 0-9 _ -)")
+        raise HTTPException(422, "Invalid model name (allowed characters: a-z A-Z 0-9 _ -)")
     return name
 
 def validate_version(version: str) -> str:
     if not VERSION_RE.match(version):
-        raise HTTPException(422, "Version invalide (format attendu : X.Y ou X.Y.Z)")
+        raise HTTPException(422, "Invalid version (expected format: X.Y or X.Y.Z)")
     return version
 ```
 
-### Paramètres de chemin (path params)
+### Path Parameters (path params)
 
-Tous les endpoints FastAPI qui acceptent `{name}` ou `{version}` dans leur URL utilisent des
-types `Annotated` avec `Path(pattern=...)` :
+All FastAPI endpoints that accept `{name}` or `{version}` in their URL use
+`Annotated` types with `Path(pattern=...)`:
 
 ```python
 ModelNamePath = Annotated[str, Path(pattern=r"^[a-zA-Z0-9_-]{1,64}$")]
 ModelVersionPath = Annotated[str, Path(pattern=r"^\d+\.\d+(\.\d+)?$")]
 ```
 
-FastAPI valide le pattern **avant** d'appeler le handler et renvoie une erreur 422 automatique
-si la valeur ne correspond pas.
+FastAPI validates the pattern **before** calling the handler and returns an automatic 422 error
+if the value does not match.
 
-### Paramètres de requête (query params)
+### Query Parameters (query params)
 
-Les paramètres `version` optionnels transmis via query string utilisent
-`Query(pattern=...)` :
+Optional `version` parameters passed via query string use
+`Query(pattern=...)`:
 
 ```python
 version: Optional[str] = Query(None, pattern=r"^\d+\.\d+(\.\d+)?$")
 ```
 
-### Corps de requête (body params)
+### Request Body (body params)
 
-Les schémas Pydantic `PredictionInput`, `BatchPredictionInput` et `ExplainInput`
-(dans `src/schemas/prediction.py`) intègrent des `field_validator` :
+The Pydantic schemas `PredictionInput`, `BatchPredictionInput` and `ExplainInput`
+(in `src/schemas/prediction.py`) include `field_validator`s:
 
 ```python
 @field_validator("model_name")
 @classmethod
 def validate_model_name(cls, v: str) -> str:
     if not _NAME_RE.match(v):
-        raise ValueError("Nom de modèle invalide (caractères autorisés : a-z A-Z 0-9 _ -)")
+        raise ValueError("Invalid model name (allowed characters: a-z A-Z 0-9 _ -)")
     return v
 
 @field_validator("model_version")
 @classmethod
 def validate_model_version(cls, v: Optional[str]) -> Optional[str]:
     if v is not None and not _VERSION_RE.match(v):
-        raise ValueError("Version invalide (format attendu : X.Y ou X.Y.Z)")
+        raise ValueError("Invalid version (expected format: X.Y or X.Y.Z)")
     return v
 ```
 
-## Fichiers concernés
+## Files Involved
 
-| Fichier | Modification |
+| File | Modification |
 |---------|-------------|
-| `src/api/models.py` | Constantes `NAME_RE`/`VERSION_RE`, fonctions `validate_model_name`/`validate_version`, types `ModelNamePath`/`ModelVersionPath`, appliqués sur 35 endpoints |
-| `src/schemas/prediction.py` | `field_validator` sur `model_name` et `model_version` dans `PredictionInput`, `BatchPredictionInput`, `ExplainInput` |
+| `src/api/models.py` | Constants `NAME_RE`/`VERSION_RE`, functions `validate_model_name`/`validate_version`, types `ModelNamePath`/`ModelVersionPath`, applied to 35 endpoints |
+| `src/schemas/prediction.py` | `field_validator` on `model_name` and `model_version` in `PredictionInput`, `BatchPredictionInput`, `ExplainInput` |
 
-## Réponse d'erreur
+## Error Response
 
-Lorsque la validation échoue, FastAPI retourne :
+When validation fails, FastAPI returns:
 
 ```json
 HTTP 422 Unprocessable Entity
@@ -126,5 +126,5 @@ HTTP 422 Unprocessable Entity
 
 ## Tests
 
-Les tests de validation sont dans `tests/test_models_get.py`, `tests/test_models_create.py`,
-`tests/test_predict_post.py` et `tests/test_input_validation.py`.
+Validation tests are in `tests/test_models_get.py`, `tests/test_models_create.py`,
+`tests/test_predict_post.py` and `tests/test_input_validation.py`.

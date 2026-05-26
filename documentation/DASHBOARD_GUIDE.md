@@ -1,250 +1,250 @@
-# Guide du Dashboard Streamlit — PredictML Admin
+# Streamlit Dashboard Guide — PredictML Admin
 
-Le dashboard est accessible sur **http://localhost:8501**. Connectez-vous avec votre token Bearer.
-
----
-
-## Connexion
-
-1. Ouvrez http://localhost:8501
-2. Dans le champ **API URL**, laissez `http://localhost:8000` (ou remplacez par l'URL de votre serveur)
-3. Collez votre **token Bearer** (ex : le token admin par défaut `<ADMIN_TOKEN>`)
-4. Cliquez **Se connecter**
-
-Le dashboard détecte automatiquement si votre token est admin ou utilisateur simple.
+The dashboard is accessible at **http://localhost:8501**. Log in with your Bearer token.
 
 ---
 
-## Page d'accueil
+## Login
 
-Vue d'ensemble de l'état du système :
-- **Santé de l'API** : statut, latence, nombre de modèles en cache
-- **Métriques clés** : nombre de modèles actifs, de prédictions, d'utilisateurs
-- **Liens rapides** vers tous les services (API Swagger, MLflow, MinIO, Grafana)
+1. Open http://localhost:8501
+2. In the **API URL** field, leave `http://localhost:8000` (or replace with your server URL)
+3. Paste your **Bearer token** (e.g. the default admin token `<ADMIN_TOKEN>`)
+4. Click **Sign in**
+
+The dashboard automatically detects whether your token is admin or regular user.
 
 ---
 
-## 👥 Page 1 — Utilisateurs (`/1_Users`)
+## Home Page
 
-**Accessible aux admins uniquement.**
+System status overview:
+- **API Health**: status, latency, number of cached models
+- **Key Metrics**: number of active models, predictions, users
+- **Quick links** to all services (API Swagger, MLflow, MinIO, Grafana)
 
-### Ce que vous pouvez faire
-- **Créer un utilisateur** : renseignez username, email, rôle (`admin`, `user`, `readonly`) et quota journalier
-- **Voir le token** : bouton "Afficher le token" avec copie en un clic
-- **Renouveler un token** : bouton "Régénérer" (l'ancien token est immédiatement invalidé)
-- **Désactiver / réactiver** un compte
-- **Voir les quotas** : jauge de consommation journalière par utilisateur
-- **Statistiques d'usage** : expander avec les prédictions par modèle et par jour
+---
 
-### Champs du formulaire de création
-| Champ | Description |
+## 👥 Page 1 — Users (`/1_Users`)
+
+**Accessible to admins only.**
+
+### What you can do
+- **Create a user**: fill in username, email, role (`admin`, `user`, `readonly`) and daily quota
+- **View token**: "Show token" button with one-click copy
+- **Renew a token**: "Regenerate" button (the old token is immediately invalidated)
+- **Deactivate / reactivate** an account
+- **View quotas**: daily consumption gauge per user
+- **Usage statistics**: expander with predictions by model and by day
+
+### Creation form fields
+| Field | Description |
 |---|---|
-| Username | Identifiant unique (pas d'espaces) |
-| Email | Adresse email unique |
-| Rôle | `admin` = accès total, `user` = prédictions, `readonly` = lecture seule |
-| Quota/jour | Nombre max de prédictions par jour (défaut : 1000) |
+| Username | Unique identifier (no spaces) |
+| Email | Unique email address |
+| Role | `admin` = full access, `user` = predictions, `readonly` = read-only |
+| Quota/day | Max number of predictions per day (default: 1000) |
 
 ---
 
-## 🤖 Page 2 — Modèles (`/2_Models`)
+## 🤖 Page 2 — Models (`/2_Models`)
 
-### Onglets disponibles
+### Available Tabs
 
-#### Détails
-- Tableau de toutes les versions avec accuracy, F1, statut (production/actif/déprécié)
-- Bouton **Passer en production** : sélectionnez la version, confirmez
-- Télécharger le fichier `.joblib` directement depuis MinIO
-- Lien vers le run MLflow associé
+#### Details
+- Table of all versions with accuracy, F1, status (production/active/deprecated)
+- **Set to production** button: select the version, confirm
+- Download the `.joblib` file directly from MinIO
+- Link to the associated MLflow run
 
-#### Uploader un modèle
-Formulaire multipart pour uploader un `.joblib` :
-- Fichier `.joblib` (obligatoire)
-- `train.py` (optionnel — permet le ré-entraînement)
-- Métadonnées : name, version, description, algorithm, accuracy, f1_score, features_count, classes
+#### Upload a Model
+Multipart form to upload a `.joblib`:
+- `.joblib` file (required)
+- `train.py` (optional — enables retraining)
+- Metadata: name, version, description, algorithm, accuracy, f1_score, features_count, classes
 
 #### What-If Explorer
-- Sliders pour chaque feature connue du modèle
-- Prédiction en temps réel à chaque modification
-- Historique des combinaisons testées
+- Sliders for each known feature of the model
+- Real-time prediction on each change
+- History of tested combinations
 
 #### Feature Importance (SHAP)
-- Importance globale des features sur les N dernières prédictions
-- Graphique à barres `mean(|SHAP|)` par feature
+- Global feature importance over the N most recent predictions
+- Bar chart of `mean(|SHAP|)` per feature
 
-#### Validation de schéma
-- Testez un JSON de features contre le schéma attendu du modèle
-- Retourne : features manquantes, inattendues, coercitions de type
+#### Schema Validation
+- Test a features JSON against the expected schema of the model
+- Returns: missing features, unexpected features, type coercions
 
-#### Comparaison A/B
-- Tableau côte à côte des performances de chaque version
-- Résultat du test statistique (Chi-² ou Mann-Whitney U, p-value, winner)
+#### A/B Comparison
+- Side-by-side performance table for each version
+- Statistical test result (Chi-² or Mann-Whitney U, p-value, winner)
 
 #### Golden Tests
-- Voir les cas de test associés au modèle
-- Lancer les golden tests sur une version spécifique (PASS/FAIL par cas)
+- View test cases associated with the model
+- Run golden tests on a specific version (PASS/FAIL per case)
 
 ---
 
-## 📊 Page 3 — Prédictions (`/3_Predictions`)
+## 📊 Page 3 — Predictions (`/3_Predictions`)
 
-### Onglet Historique
-- Filtres : modèle, date de début/fin, statut, version
-- Tableau paginé des prédictions avec features détaillées
-- Cliquer sur une ligne pour soumettre le résultat observé (feedback)
-- Export CSV/JSONL/Parquet des prédictions filtrées
+### History Tab
+- Filters: model, start/end date, status, version
+- Paginated table of predictions with detailed features
+- Click a row to submit an observed result (feedback)
+- CSV/JSONL/Parquet export of filtered predictions
 
-### Onglet Batch
-- Soumettez plusieurs prédictions en JSON
-- Résultats affichés avec probabilités
-- Import/export de résultats observés en CSV
+### Batch Tab
+- Submit multiple predictions as JSON
+- Results displayed with probabilities
+- Import/export of observed results as CSV
 
-### Purge RGPD
-- Simulez (`dry_run=true`) puis confirmez la suppression des prédictions anciennes
-- Paramètres : nombre de jours de rétention, modèle cible
-- Affiche combien de lignes seraient supprimées avant confirmation
+### GDPR Purge
+- Simulate (`dry_run=true`) then confirm deletion of old predictions
+- Parameters: number of retention days, target model
+- Shows how many rows would be deleted before confirmation
 
 ---
 
 ## 📈 Page 4 — Stats (`/4_Stats`)
 
-### Métriques globales
-- **Volume de prédictions** par heure/jour (graphique temporel)
-- **Taux d'erreur** avec alerte si au-dessus du seuil
-- **Latence moyenne et P95** par modèle
+### Global Metrics
+- **Prediction volume** by hour/day (time series chart)
+- **Error rate** with alert if above threshold
+- **Average and P95 latency** by model
 
 ### Leaderboard
-Classement des modèles en production par :
-- Accuracy, F1 Score, latence P95, volume de prédictions
+Ranking of production models by:
+- Accuracy, F1 Score, P95 latency, prediction volume
 
-### Scatter plot
-Accuracy vs Latence P95 pour identifier les compromis performance/vitesse.
+### Scatter Plot
+Accuracy vs P95 Latency to identify performance/speed trade-offs.
 
-### Distribution des prédictions
-- Histogramme par classe prédite
-- Distribution de confiance (utile pour ajuster `confidence_threshold`)
+### Prediction Distribution
+- Histogram by predicted class
+- Confidence distribution (useful for adjusting `confidence_threshold`)
 
 ---
 
 ## 💡 Page 5 — Code Example (`/5_Code_Example`)
 
-Exemples de code générés dynamiquement avec vos URL et token de session :
-- **Python** : entraîner avec MLflow, uploader, prédire, résultats observés
-- **curl / bash** : upload, prédiction, historique, résultat observé
-- **JavaScript** : même workflow avec `fetch()`
+Dynamically generated code examples with your session URL and token:
+- **Python**: train with MLflow, upload, predict, observed results
+- **curl / bash**: upload, predict, history, observed result
+- **JavaScript**: same workflow with `fetch()`
 
 ---
 
 ## 🔬 Page 6 — A/B Testing (`/6_AB_Testing`)
 
 ### Configuration
-- Sélectionnez un modèle et ses versions
-- Définissez le `deployment_mode` : `production`, `ab_test`, `shadow`
-- Ajustez le `traffic_weight` (0–100% pour les versions en A/B test)
+- Select a model and its versions
+- Define the `deployment_mode`: `production`, `ab_test`, `shadow`
+- Adjust the `traffic_weight` (0–100% for A/B test versions)
 
-### Résultats
-- Tableau comparatif : prédictions, erreurs, latence, taux de concordance (shadow)
-- **Test statistique** : p-value, seuil de signification, winner
-- Bouton **Promouvoir en production** si le winner est identifié
+### Results
+- Comparative table: predictions, errors, latency, concordance rate (shadow)
+- **Statistical test**: p-value, significance threshold, winner
+- **Promote to production** button if the winner is identified
 
-### Modes de déploiement
-| Mode | Comportement |
+### Deployment Modes
+| Mode | Behaviour |
 |---|---|
-| `production` | Reçoit 100% du trafic (par défaut) |
-| `ab_test` | Reçoit `traffic_weight`% du trafic réel |
-| `shadow` | Reçoit toutes les requêtes en background, résultat non retourné |
+| `production` | Receives 100% of traffic (default) |
+| `ab_test` | Receives `traffic_weight`% of real traffic |
+| `shadow` | Receives all requests in the background, result not returned |
 
 ---
 
 ## 🔍 Page 7 — Supervision (`/7_Supervision`)
 
-### Tableau de bord global
-- État de santé de chaque modèle en production
-- Alertes actives (dérive, taux d'erreur, latence)
+### Global Dashboard
+- Health status of each production model
+- Active alerts (drift, error rate, latency)
 
 ### Drift Detection
-Pour chaque feature :
-- **Z-score** : écart en nombre d'écarts-types par rapport à la baseline
-- **PSI** (Population Stability Index) : mesure le décalage de distribution
-- **Null rate** : taux de valeurs manquantes
-- Statut : `ok`, `warning`, `critical`, `no_baseline`
+For each feature:
+- **Z-score**: deviation in number of standard deviations from the baseline
+- **PSI** (Population Stability Index): measures distribution shift
+- **Null rate**: rate of missing values
+- Status: `ok`, `warning`, `critical`, `no_baseline`
 
-### Output drift (label shift)
-- Compare la distribution des classes prédites à la distribution de référence
-- Utile pour détecter un glissement sémantique de la population
+### Output Drift (Label Shift)
+- Compares the distribution of predicted classes to the reference distribution
+- Useful for detecting a semantic shift in the population
 
-### Configuration des seuils
-Seuils d'alerte configurables par modèle (surcharge les valeurs globales).
+### Threshold Configuration
+Alert thresholds configurable per model (overrides global values).
 
 ### Export
-Rapport exportable en CSV ou Markdown pour partager avec l'équipe.
+Report exportable as CSV or Markdown to share with the team.
 
 ---
 
 ## 🔄 Page 8 — Retrain (`/8_Retrain`)
 
-### Ré-entraînement manuel
-1. Sélectionnez le modèle et la version source
-2. Renseignez la plage de dates d'entraînement
-3. Donnez le numéro de la nouvelle version
-4. Optionnel : cochez "Mettre en production automatiquement"
-5. Cliquez **Lancer le ré-entraînement**
-6. Les logs stdout/stderr s'affichent en temps réel
+### Manual Retraining
+1. Select the model and source version
+2. Enter the training date range
+3. Enter the new version number
+4. Optional: check "Set to production automatically"
+5. Click **Launch retrain**
+6. stdout/stderr logs are displayed in real time
 
-### Planning automatique (cron)
-- Configurez une expression cron (ex : `0 3 * * 1` = chaque lundi à 3h UTC)
-- `lookback_days` : fenêtre temporelle des données d'entraînement
-- `auto_promote` : promouvoir automatiquement si la politique d'auto-promotion est définie
-- Activer/désactiver sans perdre la configuration
+### Automatic Schedule (cron)
+- Configure a cron expression (e.g. `0 3 * * 1` = every Monday at 3:00 UTC)
+- `lookback_days`: time window for training data
+- `auto_promote`: promote automatically if the auto-promotion policy is defined
+- Enable/disable without losing the configuration
 
-### Politique d'auto-promotion
-Définissez les critères pour qu'une nouvelle version soit automatiquement promue :
-- `min_accuracy` : précision minimale requise
-- `max_latency_p95_ms` : latence P95 maximale
-- `min_sample_validation` : nombre minimal d'observations de validation
-- `min_golden_test_pass_rate` : taux de réussite minimal des golden tests
+### Auto-Promotion Policy
+Define the criteria for a new version to be automatically promoted:
+- `min_accuracy`: minimum required accuracy
+- `max_latency_p95_ms`: maximum P95 latency
+- `min_sample_validation`: minimum number of validation observations
+- `min_golden_test_pass_rate`: minimum golden test pass rate
 
-### Historique des retrains
-Tableau chronologique : version source → nouvelle version, métriques avant/après, auto-promue ou non.
+### Retrain History
+Chronological table: source version → new version, before/after metrics, auto-promoted or not.
 
 ---
 
 ## 🧪 Page 9 — Golden Tests (`/9_Golden_Tests`)
 
-### Gérer les cas de test
-- **Créer** : ajoutez un cas avec features d'entrée + sortie attendue + description
-- **Import CSV** : colonnes `input_features` (JSON), `expected_output`, `description`
-- **Supprimer** des cas existants
+### Manage Test Cases
+- **Create**: add a case with input features + expected output + description
+- **CSV Import**: columns `input_features` (JSON), `expected_output`, `description`
+- **Delete** existing cases
 
-### Exécuter les tests
-1. Sélectionnez le modèle et la version à tester
-2. Cliquez **Lancer les tests**
-3. Chaque cas est marqué **PASS** ou **FAIL** avec diff attendu/reçu
+### Run Tests
+1. Select the model and version to test
+2. Click **Run tests**
+3. Each case is marked **PASS** or **FAIL** with expected/received diff
 
-### Intégration avec l'auto-promotion
-Configurez `min_golden_test_pass_rate` dans la politique d'auto-promotion pour bloquer la promotion si trop de tests échouent.
-
----
-
-## 💬 Page 10 — Aide & Assistant IA (`/10_Aide`)
-
-Cette page. Posez vos questions au chatbot Claude spécialisé sur PredictML.
+### Integration with Auto-Promotion
+Configure `min_golden_test_pass_rate` in the auto-promotion policy to block promotion if too many tests fail.
 
 ---
 
-## Conseils d'utilisation du dashboard
+## 💬 Page 10 — Help & AI Assistant (`/10_Aide`)
 
-### Navigation rapide
-- La barre latérale Streamlit liste toutes les pages
-- L'accueil affiche un tableau récapitulatif avec liens directs
+This page. Ask your questions to the Claude chatbot specialised in PredictML.
 
-### Actualisation des données
-- Beaucoup de données sont mises en cache (TTL 30s)
-- Cliquez **🔄 Actualiser** sur les pages qui le proposent pour forcer le rechargement
+---
 
-### Erreurs fréquentes
+## Dashboard Usage Tips
+
+### Quick Navigation
+- The Streamlit sidebar lists all pages
+- The home page shows a summary table with direct links
+
+### Data Refresh
+- Much of the data is cached (TTL 30s)
+- Click **🔄 Refresh** on pages that offer it to force a reload
+
+### Common Errors
 | Message | Cause | Solution |
 |---|---|---|
-| "Accès réservé aux administrateurs" | Token non-admin | Utilisez le token admin |
-| "Erreur de connexion à l'API" | API non démarrée | `docker-compose up -d api` |
-| "Aucun modèle disponible" | DB vide | Uploadez un modèle d'abord |
-| "Token invalide" | Token expiré ou incorrect | Reconnectez-vous |
+| "Access restricted to administrators" | Non-admin token | Use the admin token |
+| "API connection error" | API not started | `docker-compose up -d api` |
+| "No model available" | Empty DB | Upload a model first |
+| "Invalid token" | Expired or incorrect token | Log in again |
