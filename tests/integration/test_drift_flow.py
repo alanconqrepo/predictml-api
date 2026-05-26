@@ -1,17 +1,17 @@
 """
-Tests d'intégration — workflow de détection de drift.
+Integration tests — drift detection workflow.
 
-Workflow testé :
-  POST /models (avec ou sans feature_baseline)
-  → GET /models/{name}/drift → vérifier structure et valeurs
+Tested workflow:
+  POST /models (with or without feature_baseline)
+  → GET /models/{name}/drift → verify structure and values
 
-Stratégie :
-  Les prédictions sont insérées directement en base via DBService.create_prediction
-  (pattern de test_db_service_monitoring.py) pour contrôler précisément les
-  input_features et garantir les statistiques de production désirées.
+Strategy:
+  Predictions are inserted directly into the database via DBService.create_prediction
+  (pattern from test_db_service_monitoring.py) to precisely control
+  input_features and guarantee the desired production statistics.
 
-Utilise SQLite in-memory + FakeRedis + MinIO mock global.
-Token admin : test-token-integ-df-admin-kk11
+Uses SQLite in-memory + FakeRedis + global MinIO mock.
+Admin token: test-token-integ-df-admin-kk11
 """
 
 import asyncio
@@ -37,7 +37,7 @@ DF_MODEL_BASELINE = "df_drift_baseline_model"
 DF_MODEL_CRITICAL = "df_drift_critical_model"
 MODEL_VERSION = "1.0.0"
 
-# Baseline typique pour iris (sepal length)
+# Typical baseline for iris (sepal length)
 BASELINE = {
     "sepal length (cm)": {"mean": 5.84, "std": 0.83, "min": 4.3, "max": 7.9},
     "sepal width (cm)": {"mean": 3.05, "std": 0.43, "min": 2.0, "max": 4.4},
@@ -45,7 +45,7 @@ BASELINE = {
     "petal width (cm)": {"mean": 1.20, "std": 0.76, "min": 0.1, "max": 2.5},
 }
 
-# Features proches du baseline → pas de drift (valeur unique pour les tests ponctuels)
+# Features close to baseline → no drift (single value for point tests)
 NORMAL_FEATURES = {
     "sepal length (cm)": 5.8,
     "sepal width (cm)": 3.0,
@@ -53,8 +53,8 @@ NORMAL_FEATURES = {
     "petal width (cm)": 1.2,
 }
 
-# Génère des features suivant la distribution baseline N(mean, std) pour un PSI fiable.
-# N=200 avec seed fixe → déterministe, dépasse min_count=30, PSI cohérent avec "ok/warning".
+# Generate features following baseline distribution N(mean, std) for reliable PSI.
+# N=200 with fixed seed → deterministic, exceeds min_count=30, PSI consistent with "ok/warning".
 _rng = np.random.default_rng(42)
 NORMAL_FEATURES_LIST = [
     {
@@ -66,7 +66,7 @@ NORMAL_FEATURES_LIST = [
     for _ in range(200)
 ]
 
-# Features très éloignées du baseline → drift critique
+# Features far from baseline → critical drift
 OUTLIER_FEATURES = {
     "sepal length (cm)": 99.0,
     "sepal width (cm)": 99.0,
@@ -76,7 +76,7 @@ OUTLIER_FEATURES = {
 
 
 def _make_pkl() -> bytes:
-    """Crée un modèle sklearn sérialisé."""
+    """Create a serialized sklearn model."""
     X, y = load_iris(return_X_y=True)
     _jbuf = io.BytesIO()
     joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
@@ -84,7 +84,7 @@ def _make_pkl() -> bytes:
 
 
 async def _setup():
-    """Crée l'utilisateur admin et les modèles de test."""
+    """Create the admin user and test models."""
     async with _TestSessionLocal() as db:
         if not await DBService.get_user_by_token(db, ADMIN_TOKEN):
             await DBService.create_user(
@@ -102,7 +102,7 @@ asyncio.run(_setup())
 
 
 def _create_model(name: str, with_baseline: bool = False):
-    """Crée un modèle via l'API."""
+    """Create a model via the API."""
     data = {"name": name, "version": MODEL_VERSION}
     if with_baseline:
         data["feature_baseline"] = json.dumps(BASELINE)
@@ -117,7 +117,7 @@ def _create_model(name: str, with_baseline: bool = False):
 
 
 async def _insert_predictions(model_name: str, features_list: list):
-    """Insère des prédictions directement en base pour contrôler les input_features."""
+    """Insert predictions directly into the database to control input_features."""
     async with _TestSessionLocal() as db:
         user = await DBService.get_user_by_token(db, ADMIN_TOKEN)
         for features in features_list:
@@ -135,23 +135,23 @@ async def _insert_predictions(model_name: str, features_list: list):
         await db.commit()
 
 
-# Créer les modèles au chargement du module
+# Create models at module load time
 _create_model(DF_MODEL_NOBASELINE, with_baseline=False)
 _create_model(DF_MODEL_BASELINE, with_baseline=True)
 _create_model(DF_MODEL_CRITICAL, with_baseline=True)
 
-# Insérer 200 prédictions normales pour DF_MODEL_BASELINE (PSI fiable avec N>=200)
+# Insert 200 normal predictions for DF_MODEL_BASELINE (reliable PSI with N>=200)
 asyncio.run(_insert_predictions(DF_MODEL_BASELINE, NORMAL_FEATURES_LIST))
 
-# Insérer 30 prédictions outlier pour DF_MODEL_CRITICAL
+# Insert 30 outlier predictions for DF_MODEL_CRITICAL
 asyncio.run(_insert_predictions(DF_MODEL_CRITICAL, [OUTLIER_FEATURES] * 30))
 
 
 class TestDriftFlow:
-    """Tests du workflow de détection de drift."""
+    """Tests for the drift detection workflow."""
 
     def test_01_drift_without_baseline_returns_no_baseline(self):
-        """Modèle sans feature_baseline → baseline_available=False, drift_summary='no_baseline'."""
+        """Model without feature_baseline → baseline_available=False, drift_summary='no_baseline'."""
         r = client.get(
             f"/models/{DF_MODEL_NOBASELINE}/drift",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -162,7 +162,7 @@ class TestDriftFlow:
         assert data["drift_summary"] == "no_baseline"
 
     def test_02_drift_with_normal_features_returns_ok_or_no_data(self):
-        """Modèle avec baseline et features normales → drift_summary == 'ok' (ou similaire)."""
+        """Model with baseline and normal features → drift_summary == 'ok' (or similar)."""
         r = client.get(
             f"/models/{DF_MODEL_BASELINE}/drift",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -170,12 +170,12 @@ class TestDriftFlow:
         assert r.status_code == 200
         data = r.json()
         assert data["baseline_available"] is True
-        # Avec des features suivant la distribution baseline, le drift doit être ok ou warning
-        # (insufficient_data si la fenêtre temporelle ne couvre pas les prédictions insérées)
+        # With features following baseline distribution, drift should be ok or warning
+        # (insufficient_data if time window does not cover inserted predictions)
         assert data["drift_summary"] in ("ok", "warning", "no_data", "insufficient_data")
 
     def test_03_drift_with_outlier_features_returns_critical(self):
-        """Modèle avec features très éloignées du baseline → au moins une feature critical."""
+        """Model with features far from baseline → at least one critical feature."""
         r = client.get(
             f"/models/{DF_MODEL_CRITICAL}/drift",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -184,12 +184,12 @@ class TestDriftFlow:
         data = r.json()
         assert data["baseline_available"] is True
         if data["predictions_analyzed"] > 0:
-            # Les features outlier doivent provoquer un drift critique
+            # Outlier features should trigger critical drift
             feature_statuses = [f["drift_status"] for f in data["features"].values()]
             assert "critical" in feature_statuses
 
     def test_04_drift_response_has_required_fields(self):
-        """La réponse de drift contient tous les champs requis."""
+        """The drift response contains all required fields."""
         r = client.get(
             f"/models/{DF_MODEL_BASELINE}/drift",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -205,7 +205,7 @@ class TestDriftFlow:
         assert "features" in data
 
     def test_05_drift_features_have_production_stats(self):
-        """Chaque feature de production a les stats requises."""
+        """Each production feature has the required stats."""
         r = client.get(
             f"/models/{DF_MODEL_BASELINE}/drift",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -227,12 +227,12 @@ class TestDriftFlow:
         assert r.status_code == 404
 
     def test_07_drift_requires_auth(self):
-        """Sans token → 401 ou 403."""
+        """Without token → 401 or 403."""
         r = client.get(f"/models/{DF_MODEL_BASELINE}/drift")
         assert r.status_code in (401, 403)
 
     def test_08_drift_period_days_param_accepted(self):
-        """Paramètre days= est accepté sans erreur."""
+        """The days= parameter is accepted without error."""
         r = client.get(
             f"/models/{DF_MODEL_BASELINE}/drift",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -243,8 +243,8 @@ class TestDriftFlow:
         assert data["period_days"] == 30
 
     def test_09_drift_no_baseline_features_have_no_baseline_status(self):
-        """Sans baseline, chaque feature a drift_status='no_baseline'."""
-        # Insérer quelques prédictions pour que features soient non vides
+        """Without baseline, each feature has drift_status='no_baseline'."""
+        # Insert a few predictions so features are non-empty
         asyncio.run(_insert_predictions(DF_MODEL_NOBASELINE, [NORMAL_FEATURES] * 3))
 
         r = client.get(
@@ -258,7 +258,7 @@ class TestDriftFlow:
                 assert feat_data["drift_status"] == "no_baseline"
 
     def test_10_drift_model_name_in_response(self):
-        """Le nom du modèle dans la réponse correspond au modèle demandé."""
+        """The model name in the response matches the requested model."""
         r = client.get(
             f"/models/{DF_MODEL_BASELINE}/drift",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},

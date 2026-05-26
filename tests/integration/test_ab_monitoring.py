@@ -1,11 +1,11 @@
 """
-Tests d'intégration — modèle A/B + monitoring.
+Integration tests — A/B model + monitoring.
 
-Workflow testé :
-  Créer 2 versions du même modèle en mode ab_test
-  → faire des prédictions
-  → vérifier GET /monitoring/overview et GET /monitoring/model/{name}
-  → vérifier les statistiques de version
+Tested workflow:
+  Create 2 versions of the same model in ab_test mode
+  → make predictions
+  → verify GET /monitoring/overview and GET /monitoring/model/{name}
+  → verify version statistics
 """
 
 import asyncio
@@ -76,7 +76,7 @@ async def _setup():
 
 asyncio.run(_setup())
 
-# Créer les deux versions du modèle A/B
+# Create both A/B model versions
 _r1 = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -111,21 +111,21 @@ _inject_cache(AB_MODEL, V2)
 
 class TestABMonitoring:
     def test_ab_model_versions_in_model_list(self):
-        """Les deux versions A/B sont listées dans GET /models."""
+        """Both A/B versions are listed in GET /models."""
         r = client.get(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
         )
         assert r.status_code == 200
         data = r.json()
-        # Chercher les versions du modèle AB dans la liste globale
+        # Find AB model versions in the global list
         ab_versions = [m for m in data if m.get("name") == AB_MODEL]
         all_versions = [m["version"] for m in ab_versions]
         assert V1 in all_versions
         assert V2 in all_versions
 
     def test_ab_predict_routes_to_a_version(self):
-        """POST /predict sur un modèle A/B → retourne une prédiction (l'une des versions)."""
+        """POST /predict on an A/B model → returns a prediction (one of the versions)."""
         r = client.post(
             "/predict",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -136,8 +136,8 @@ class TestABMonitoring:
         assert "prediction" in data
 
     def test_monitoring_overview_shows_ab_model(self):
-        """GET /monitoring/overview → le modèle A/B apparaît."""
-        # Générer quelques prédictions
+        """GET /monitoring/overview → the A/B model appears."""
+        # Generate a few predictions
         for _ in range(3):
             client.post(
                 "/predict",
@@ -160,8 +160,8 @@ class TestABMonitoring:
         assert AB_MODEL in model_names
 
     def test_monitoring_detail_includes_version_stats(self):
-        """GET /monitoring/model/{name} → per_version_stats non vide après prédictions."""
-        # S'assurer d'avoir des prédictions
+        """GET /monitoring/model/{name} → per_version_stats non-empty after predictions."""
+        # Ensure we have predictions
         for _ in range(2):
             client.post(
                 "/predict",
@@ -184,8 +184,8 @@ class TestABMonitoring:
         assert "ab_comparison" in data
 
     def test_monitoring_detail_shows_ab_comparison_when_ab_mode(self):
-        """Quand deployment_mode=ab_test, ab_comparison est non null."""
-        # Générer des prédictions pour créer des données
+        """When deployment_mode=ab_test, ab_comparison is non-null."""
+        # Generate predictions to create data
         for _ in range(3):
             client.post(
                 "/predict",
@@ -204,12 +204,12 @@ class TestABMonitoring:
         )
         assert r.status_code == 200
         data = r.json()
-        # ab_comparison peut être non-null si deployment_mode inclut "ab_test"
-        # (dépend des versions créées avec deployment_mode)
+        # ab_comparison may be non-null if deployment_mode includes "ab_test"
+        # (depends on versions created with deployment_mode)
         assert "ab_comparison" in data
 
     def test_monitoring_overview_empty_future_period(self):
-        """GET /monitoring/overview avec une période future → zéro modèles."""
+        """GET /monitoring/overview with a future period → zero models."""
         future = datetime.utcnow() + timedelta(days=1000)
         r = client.get(
             "/monitoring/overview",
@@ -221,5 +221,5 @@ class TestABMonitoring:
         )
         assert r.status_code == 200
         data = r.json()
-        # Peut ne pas inclure le modèle A/B dans une période future
-        assert data["global_stats"]["total_predictions"] == 0 or True  # souple
+        # May not include the A/B model in a future period
+        assert data["global_stats"]["total_predictions"] == 0 or True  # lenient

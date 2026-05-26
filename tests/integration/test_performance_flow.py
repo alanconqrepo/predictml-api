@@ -1,14 +1,14 @@
 """
-Tests d'intégration — calcul de performance avec données réelles.
+Integration tests — performance calculation with real data.
 
-Workflow testé :
+Tested workflow:
   POST /models → inject cache
-  → POST /predict × N (avec id_obs)
+  → POST /predict × N (with id_obs)
   → POST /observed-results (ground truth)
-  → GET /models/{name}/performance → métriques calculées
+  → GET /models/{name}/performance → calculated metrics
 
-Utilise SQLite in-memory + FakeRedis + MinIO mock global.
-Token admin : test-token-integ-pf-admin-jj00
+Uses SQLite in-memory + FakeRedis + global MinIO mock.
+Admin token: test-token-integ-pf-admin-jj00
 """
 
 import asyncio
@@ -41,7 +41,7 @@ FEATURES = {
 
 
 def _make_pkl() -> bytes:
-    """Crée un modèle sklearn sérialisé."""
+    """Create a serialized sklearn model."""
     X, y = load_iris(return_X_y=True)
     _jbuf = io.BytesIO()
     joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
@@ -49,7 +49,7 @@ def _make_pkl() -> bytes:
 
 
 def _inject_cache(name: str, version: str = MODEL_VERSION):
-    """Injecte le modèle dans Redis avec feature_names_in_ configuré."""
+    """Inject the model into Redis with feature_names_in_ configured."""
     X, y = load_iris(return_X_y=True)
     model = LogisticRegression(max_iter=200).fit(X, y)
     model.feature_names_in_ = list(FEATURES.keys())
@@ -68,7 +68,7 @@ def _inject_cache(name: str, version: str = MODEL_VERSION):
 
 
 async def _setup():
-    """Crée l'utilisateur admin."""
+    """Create the admin user."""
     async with _TestSessionLocal() as db:
         if not await DBService.get_user_by_token(db, ADMIN_TOKEN):
             await DBService.create_user(
@@ -84,7 +84,7 @@ async def _setup():
 
 asyncio.run(_setup())
 
-# Créer le modèle + injecter dans le cache
+# Create the model + inject into cache
 _r_create = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -96,10 +96,10 @@ _inject_cache(PF_MODEL)
 
 
 class TestPerformanceFlow:
-    """Tests du calcul de performance avec données réelles en base."""
+    """Tests for performance calculation with real data in the database."""
 
     def test_01_performance_without_observed_results_has_zero_matched(self):
-        """Sans résultats observés → matched_predictions == 0."""
+        """Without observed results → matched_predictions == 0."""
         r = client.get(
             f"/models/{PF_MODEL}/performance",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -109,8 +109,8 @@ class TestPerformanceFlow:
         assert data["matched_predictions"] == 0
 
     def test_02_performance_with_matched_pairs_returns_accuracy(self):
-        """Avec des paires prediction+observed → accuracy calculée et non None."""
-        # Faire 4 prédictions avec id_obs distincts
+        """With prediction+observed pairs → accuracy calculated and not None."""
+        # Make 4 predictions with distinct id_obs
         obs_ids = [f"pf-integ-obs-{i}" for i in range(4)]
         for obs_id in obs_ids:
             r = client.post(
@@ -120,7 +120,7 @@ class TestPerformanceFlow:
             )
             assert r.status_code == 200
 
-        # Ajouter observed_results (classe 0 = iris setosa)
+        # Add observed_results (class 0 = iris setosa)
         now = datetime.utcnow().isoformat()
         client.post(
             "/observed-results",
@@ -143,7 +143,7 @@ class TestPerformanceFlow:
         assert data["accuracy"] is not None
 
     def test_03_performance_response_has_expected_fields(self):
-        """La réponse de performance contient les champs attendus."""
+        """The performance response contains the expected fields."""
         r = client.get(
             f"/models/{PF_MODEL}/performance",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -156,7 +156,7 @@ class TestPerformanceFlow:
         assert "matched_predictions" in data
 
     def test_04_performance_with_upsert_does_not_double_count(self):
-        """Double POST observed_result sur même id_obs → upsert, pas duplication."""
+        """Double POST observed_result on same id_obs → upsert, not duplication."""
         obs_id = "pf-upsert-dedup-99"
         ts = datetime.utcnow().isoformat()
 
@@ -167,7 +167,7 @@ class TestPerformanceFlow:
             json={"model_name": PF_MODEL, "features": FEATURES, "id_obs": obs_id},
         )
 
-        # Premier observed_result
+        # First observed_result
         client.post(
             "/observed-results",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -184,7 +184,7 @@ class TestPerformanceFlow:
         )
         matched1 = r1.json()["matched_predictions"]
 
-        # Deuxième POST même id_obs (upsert)
+        # Second POST same id_obs (upsert)
         client.post(
             "/observed-results",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -200,7 +200,7 @@ class TestPerformanceFlow:
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
         )
         matched2 = r2.json()["matched_predictions"]
-        # L'upsert ne doit pas augmenter le nombre de paires
+        # Upsert must not increase the number of pairs
         assert matched2 == matched1
 
     def test_05_performance_unknown_model_returns_404(self):
@@ -212,12 +212,12 @@ class TestPerformanceFlow:
         assert r.status_code == 404
 
     def test_06_performance_requires_auth(self):
-        """Sans token → 401 ou 403."""
+        """Without token → 401 or 403."""
         r = client.get(f"/models/{PF_MODEL}/performance")
         assert r.status_code in (401, 403)
 
     def test_07_performance_version_filter(self):
-        """Paramètre version= filtre sur la version spécifique."""
+        """The version= parameter filters on the specific version."""
         r = client.get(
             f"/models/{PF_MODEL}/performance",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -228,7 +228,7 @@ class TestPerformanceFlow:
         assert data["model_version"] == MODEL_VERSION
 
     def test_08_performance_with_granularity_day(self):
-        """Paramètre granularity=day → réponse 200 avec bucketing par jour."""
+        """The granularity=day parameter → 200 response with daily bucketing."""
         r = client.get(
             f"/models/{PF_MODEL}/performance",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -237,8 +237,8 @@ class TestPerformanceFlow:
         assert r.status_code == 200
 
     def test_09_predictions_without_id_obs_not_counted_as_matched(self):
-        """Prédictions sans id_obs ne sont pas dans matched_predictions."""
-        # Faire une prédiction sans id_obs
+        """Predictions without id_obs are not counted in matched_predictions."""
+        # Make a prediction without id_obs
         client.post(
             "/predict",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -251,7 +251,7 @@ class TestPerformanceFlow:
         )
         matched_before = r1.json()["matched_predictions"]
 
-        # Le matched ne doit pas avoir augmenté (pas d'id_obs → pas de JOIN)
+        # matched count must not have increased (no id_obs → no JOIN)
         r2 = client.get(
             f"/models/{PF_MODEL}/performance",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},

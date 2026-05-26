@@ -1,11 +1,11 @@
 """
-Tests d'intégration — cycle de vie complet de la purge RGPD.
+Integration tests — complete GDPR purge lifecycle.
 
-Workflow testé :
+Tested workflow:
   POST /models → POST /predict × N → DELETE /predictions/purge (dry_run)
-  → DELETE /predictions/purge (réel) → GET /predictions/stats (compte réduit)
+  → DELETE /predictions/purge (real) → GET /predictions/stats (reduced count)
 
-Ces tests exercent predict.py, db_service.py (purge_predictions), stats.
+These tests exercise predict.py, db_service.py (purge_predictions), stats.
 """
 
 import asyncio
@@ -90,7 +90,7 @@ async def _setup():
 
 asyncio.run(_setup())
 
-# Créer les modèles une fois pour tous les tests
+# Create models once for all tests
 _r1 = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -112,8 +112,8 @@ _inject_cache(PURGE_MODEL_B)
 
 class TestPurgeLifecycle:
     def test_purge_dry_run_does_not_delete(self):
-        """dry_run=True → deleted_count reporté mais aucune suppression réelle."""
-        # Faire une prédiction
+        """dry_run=True → deleted_count reported but no actual deletion."""
+        # Make a prediction
         client.post(
             "/predict",
             headers={"Authorization": f"Bearer {USER_TOKEN}"},
@@ -131,8 +131,8 @@ class TestPurgeLifecycle:
         assert data["dry_run"] is True
 
     def test_purge_real_reduces_prediction_count(self):
-        """dry_run=False → prédictions supprimées."""
-        # Faire quelques prédictions
+        """dry_run=False → predictions deleted."""
+        # Make a few predictions
         for _ in range(3):
             client.post(
                 "/predict",
@@ -156,8 +156,8 @@ class TestPurgeLifecycle:
         assert data["deleted_count"] >= 0  # peut être 0 si timestamp boundary
 
     def test_purge_model_filter_only_affects_target_model(self):
-        """Purge avec model_name → seul ce modèle est affecté."""
-        # Faire des prédictions sur les deux modèles
+        """Purge with model_name → only that model is affected."""
+        # Make predictions on both models
         for model in [PURGE_MODEL, PURGE_MODEL_B]:
             client.post(
                 "/predict",
@@ -165,7 +165,7 @@ class TestPurgeLifecycle:
                 json={"model_name": model, "features": FEATURES},
             )
 
-        # Dry-run sur model B
+        # Dry-run on model B
         resp = client.delete(
             "/predictions/purge",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -173,11 +173,11 @@ class TestPurgeLifecycle:
         )
         assert resp.status_code == 200
         data = resp.json()
-        # models_affected ne contient que le modèle ciblé (en dry_run)
+        # models_affected contains only the targeted model (in dry_run)
         assert data["dry_run"] is True
 
     def test_purge_requires_admin_auth(self):
-        """Purge sans auth admin → 401/403."""
+        """Purge without admin auth → 401/403."""
         resp = client.delete(
             "/predictions/purge",
             headers={"Authorization": f"Bearer {USER_TOKEN}"},
@@ -186,7 +186,7 @@ class TestPurgeLifecycle:
         assert resp.status_code in [401, 403]
 
     def test_purge_without_auth_returns_401(self):
-        """Purge sans token → 401."""
+        """Purge without token → 401."""
         resp = client.delete(
             "/predictions/purge",
             params={"older_than_days": 90},
@@ -194,7 +194,7 @@ class TestPurgeLifecycle:
         assert resp.status_code in [401, 403]
 
     def test_purge_response_has_expected_fields(self):
-        """La réponse contient dry_run, deleted_count, oldest_remaining, models_affected."""
+        """The response contains dry_run, deleted_count, oldest_remaining, models_affected."""
         resp = client.delete(
             "/predictions/purge",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -209,9 +209,9 @@ class TestPurgeLifecycle:
         assert "linked_observed_results_count" in data
 
     def test_purge_with_observed_results_reports_linked_count(self):
-        """Prédictions liées à des observed_results → linked_observed_results_count dans réponse."""
+        """Predictions linked to observed_results → linked_observed_results_count in response."""
         obs_id = "purge-integ-obs-link-1"
-        # Prédiction avec id_obs
+        # Prediction with id_obs
         client.post(
             "/predict",
             headers={"Authorization": f"Bearer {USER_TOKEN}"},
@@ -221,14 +221,14 @@ class TestPurgeLifecycle:
                 "id_obs": obs_id,
             },
         )
-        # Ajouter un observed_result lié
+        # Add a linked observed_result
         client.post(
             "/observed-results",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
             json=[{"id_obs": obs_id, "model_name": PURGE_MODEL, "true_label": "setosa"}],
         )
 
-        # Dry-run pour voir linked_observed_results_count
+        # Dry-run to see linked_observed_results_count
         resp = client.delete(
             "/predictions/purge",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},

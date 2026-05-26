@@ -1,10 +1,10 @@
 """
-Tests E2E — cycle de vie complet d'un utilisateur.
+E2E tests — complete user lifecycle.
 
-Scénario :
-  Un admin crée un utilisateur, celui-ci utilise l'API,
-  l'admin met à jour son quota, régénère son token,
-  et désactive son compte.
+Scenario:
+  An admin creates a user, the user uses the API,
+  the admin updates the quota, regenerates the token,
+  and deactivates the account.
 """
 
 import asyncio
@@ -23,7 +23,7 @@ from tests.conftest import _TestSessionLocal
 client = TestClient(app)
 
 ADMIN_TOKEN = "e2e-um-admin-token-cc33"
-# Modèle créé par l'admin pour les tests de prédiction
+# Model created by admin for prediction tests
 UM_MODEL = "e2e_um_model"
 
 FEATURES = {
@@ -57,7 +57,7 @@ async def _setup():
 
 asyncio.run(_setup())
 
-# Créer un modèle de test
+# Create a test model
 _r_model = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -67,13 +67,13 @@ _r_model = client.post(
 assert _r_model.status_code == 201, _r_model.text
 
 
-# État partagé entre tests de la classe (exécutés séquentiellement)
+# Shared state between class tests (executed sequentially)
 _state: dict = {}
 
 
 class TestUserManagementE2E:
     def test_01_admin_creates_user(self):
-        """L'admin crée un nouvel utilisateur."""
+        """The admin creates a new user."""
         r = client.post(
             "/users",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -92,11 +92,11 @@ class TestUserManagementE2E:
         _state["token"] = data["api_token"]
 
     def test_02_new_user_can_authenticate(self):
-        """Le nouvel utilisateur peut s'authentifier (GET /users/{id})."""
+        """The new user can authenticate (GET /users/{id})."""
         user_id = _state.get("user_id")
         token = _state.get("token")
         if not user_id or not token:
-            pytest.skip("user_id/token non disponible (test_01 non exécuté)")
+            pytest.skip("user_id/token not available (test_01 not executed)")
 
         r = client.get(
             f"/users/{user_id}",
@@ -106,10 +106,10 @@ class TestUserManagementE2E:
         assert r.json()["id"] == user_id
 
     def test_03_non_admin_cannot_list_users(self):
-        """Un utilisateur standard ne peut pas lister les utilisateurs → 403."""
+        """A standard user cannot list users → 403."""
         token = _state.get("token")
         if not token:
-            pytest.skip("token non disponible (test_01 non exécuté)")
+            pytest.skip("token not available (test_01 not executed)")
 
         r = client.get(
             "/users",
@@ -118,10 +118,10 @@ class TestUserManagementE2E:
         assert r.status_code == 403
 
     def test_04_admin_updates_user_rate_limit(self):
-        """L'admin peut modifier le quota de l'utilisateur."""
+        """The admin can modify the user's quota."""
         user_id = _state.get("user_id")
         if not user_id:
-            pytest.skip("user_id non disponible (test_01 non exécuté)")
+            pytest.skip("user_id not available (test_01 not executed)")
 
         r = client.patch(
             f"/users/{user_id}",
@@ -132,11 +132,11 @@ class TestUserManagementE2E:
         assert r.json()["rate_limit_per_day"] == 2000
 
     def test_05_admin_regenerates_user_token(self):
-        """L'admin régénère le token de l'utilisateur."""
+        """The admin regenerates the user's token."""
         user_id = _state.get("user_id")
         old_token = _state.get("token")
         if not user_id or not old_token:
-            pytest.skip("user_id/token non disponible (test_01 non exécuté)")
+            pytest.skip("user_id/token not available (test_01 not executed)")
 
         r = client.patch(
             f"/users/{user_id}",
@@ -152,12 +152,12 @@ class TestUserManagementE2E:
         _state["token"] = new_token
 
     def test_06_old_token_no_longer_works(self):
-        """L'ancien token est rejeté sur un endpoint protégé → 401 ou 403."""
+        """The old token is rejected on a protected endpoint → 401 or 403."""
         old_token = _state.get("old_token")
         if not old_token:
-            pytest.skip("old_token non disponible (test_05 non exécuté)")
+            pytest.skip("old_token not available (test_05 not executed)")
 
-        # GET /users requiert require_admin → vérifie l'authentification
+        # GET /users requires require_admin → verifies authentication
         r = client.get(
             "/users",
             headers={"Authorization": f"Bearer {old_token}"},
@@ -165,13 +165,13 @@ class TestUserManagementE2E:
         assert r.status_code in (401, 403)
 
     def test_07_new_token_works(self):
-        """Le nouveau token fonctionne sur un endpoint protégé."""
+        """The new token works on a protected endpoint."""
         user_id = _state.get("user_id")
         new_token = _state.get("token")
         if not user_id or not new_token:
-            pytest.skip("user_id/token non disponible (test_05 non exécuté)")
+            pytest.skip("user_id/token not available (test_05 not executed)")
 
-        # L'utilisateur peut accéder à son propre profil
+        # The user can access their own profile
         r = client.get(
             f"/users/{user_id}",
             headers={"Authorization": f"Bearer {new_token}"},
@@ -179,10 +179,10 @@ class TestUserManagementE2E:
         assert r.status_code == 200
 
     def test_08_admin_deactivates_user(self):
-        """L'admin désactive le compte de l'utilisateur."""
+        """The admin deactivates the user's account."""
         user_id = _state.get("user_id")
         if not user_id:
-            pytest.skip("user_id non disponible (test_01 non exécuté)")
+            pytest.skip("user_id not available (test_01 not executed)")
 
         r = client.patch(
             f"/users/{user_id}",
@@ -193,13 +193,13 @@ class TestUserManagementE2E:
         assert r.json()["is_active"] is False
 
     def test_09_deactivated_user_access_denied(self):
-        """Utilisateur désactivé → accès refusé sur endpoint protégé (401 ou 403)."""
+        """Deactivated user → access denied on protected endpoint (401 or 403)."""
         user_id = _state.get("user_id")
         token = _state.get("token")
         if not user_id or not token:
-            pytest.skip("user_id/token non disponible")
+            pytest.skip("user_id/token not available")
 
-        # GET /users/{id} requiert verify_token → utilisateur inactif → 403
+        # GET /users/{id} requires verify_token → inactive user → 403
         r = client.get(
             f"/users/{user_id}",
             headers={"Authorization": f"Bearer {token}"},
@@ -207,7 +207,7 @@ class TestUserManagementE2E:
         assert r.status_code in (401, 403)
 
     def test_10_admin_can_list_users(self):
-        """L'admin peut lister tous les utilisateurs."""
+        """The admin can list all users."""
         r = client.get(
             "/users",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},

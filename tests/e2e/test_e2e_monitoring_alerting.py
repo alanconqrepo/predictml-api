@@ -1,9 +1,9 @@
 """
-Tests E2E — supervision et santé des modèles.
+E2E tests — model supervision and health.
 
-Scénario :
-  Créer des modèles, générer des prédictions avec différents statuts,
-  vérifier le dashboard de supervision et les transitions de santé.
+Scenario:
+  Create models, generate predictions with different statuses,
+  verify the supervision dashboard and health transitions.
 """
 
 import asyncio
@@ -76,7 +76,7 @@ async def _setup():
 
 asyncio.run(_setup())
 
-# Créer le modèle de monitoring
+# Create the monitoring model
 _r_mon = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -86,7 +86,7 @@ _r_mon = client.post(
 assert _r_mon.status_code == 201, _r_mon.text
 _inject_cache(MON_MODEL, "1.0.0")
 
-# Générer des prédictions initiales pour alimenter le monitoring
+# Generate initial predictions to feed monitoring
 for _ in range(5):
     client.post(
         "/predict",
@@ -97,7 +97,7 @@ for _ in range(5):
 
 class TestMonitoringAlertingE2E:
     def test_01_monitoring_overview_requires_auth(self):
-        """Sans token → 401 ou 403."""
+        """Without token → 401 or 403."""
         now = datetime.utcnow()
         r = client.get(
             "/monitoring/overview",
@@ -122,7 +122,7 @@ class TestMonitoringAlertingE2E:
         assert r.status_code == 422
 
     def test_03_healthy_model_shows_ok_or_no_data_status(self):
-        """Modèle récent sans erreurs → statut ok ou no_data."""
+        """Recent model without errors → status ok or no_data."""
         now = datetime.utcnow()
         r = client.get(
             "/monitoring/overview",
@@ -141,7 +141,7 @@ class TestMonitoringAlertingE2E:
         assert mon_entry["health_status"] in ("ok", "no_data", "warning", "critical")
 
     def test_04_model_detail_shows_predictions(self):
-        """GET /monitoring/model/{name} → au moins une prédiction dans per_version_stats."""
+        """GET /monitoring/model/{name} → at least one prediction in per_version_stats."""
         now = datetime.utcnow()
         r = client.get(
             f"/monitoring/model/{MON_MODEL}",
@@ -153,13 +153,13 @@ class TestMonitoringAlertingE2E:
         )
         assert r.status_code == 200
         data = r.json()
-        # per_version_stats est une liste de dicts avec total_predictions
+        # per_version_stats is a list of dicts with total_predictions
         version_stats = data.get("per_version_stats", [])
         total = sum(v.get("total_predictions", 0) for v in version_stats)
         assert total >= 1
 
     def test_05_model_detail_has_required_fields(self):
-        """GET /monitoring/model/{name} → tous les champs attendus sont présents."""
+        """GET /monitoring/model/{name} → all expected fields are present."""
         now = datetime.utcnow()
         r = client.get(
             f"/monitoring/model/{MON_MODEL}",
@@ -179,7 +179,7 @@ class TestMonitoringAlertingE2E:
         assert "recent_errors" in data
 
     def test_06_nonexistent_model_detail_returns_404(self):
-        """GET /monitoring/model/{name} modèle inexistant → 404."""
+        """GET /monitoring/model/{name} non-existent model → 404."""
         now = datetime.utcnow()
         r = client.get(
             "/monitoring/model/totally_nonexistent_e2e_model_xyz",
@@ -192,7 +192,7 @@ class TestMonitoringAlertingE2E:
         assert r.status_code == 404
 
     def test_07_multiple_models_in_overview(self):
-        """Deux modèles avec prédictions → overview contient les deux."""
+        """Two models with predictions → overview contains both."""
         second_model = f"{MON_MODEL}_second"
         r_create = client.post(
             "/models",
@@ -225,7 +225,7 @@ class TestMonitoringAlertingE2E:
         assert second_model in model_names
 
     def test_08_empty_future_period_returns_zero_stats(self):
-        """Période future → aucune prédiction, stats globales à zéro."""
+        """Future period → no predictions, global stats at zero."""
         future = datetime.utcnow() + timedelta(days=1000)
         r = client.get(
             "/monitoring/overview",
@@ -241,7 +241,7 @@ class TestMonitoringAlertingE2E:
         assert data["models"] == []
 
     def test_09_observed_results_added_after_predictions(self):
-        """Ajouter des résultats observés est possible après des prédictions."""
+        """Adding observed results is possible after predictions."""
         r = client.post(
             "/observed-results",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},

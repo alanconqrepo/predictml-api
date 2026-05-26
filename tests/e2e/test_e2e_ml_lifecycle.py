@@ -1,11 +1,11 @@
 """
-Tests E2E — cycle de vie ML complet.
+E2E tests — complete ML lifecycle.
 
-Scénario :
-  Un admin déploie un modèle (avec script d'entraînement),
-  un utilisateur fait des prédictions,
-  l'admin ajoute des résultats observés, vérifie le monitoring,
-  déclenche un retrain et met la nouvelle version en production.
+Scenario:
+  An admin deploys a model (with a training script),
+  a user makes predictions,
+  the admin adds observed results, checks monitoring,
+  triggers a retrain and promotes the new version to production.
 """
 
 import asyncio
@@ -136,7 +136,7 @@ async def _mock_exec_success(*args, **kwargs):
     return proc
 
 
-# Créer le modèle une seule fois à l'initialisation du module
+# Create the model once at module initialization
 _r_create = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -156,7 +156,7 @@ _inject_cache(E2E_MODEL, "1.0.0")
 
 class TestMLLifecycleE2E:
     def test_01_admin_creates_model(self):
-        """Le modèle créé par l'admin est visible dans GET /models."""
+        """The model created by the admin is visible in GET /models."""
         r = client.get(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -166,7 +166,7 @@ class TestMLLifecycleE2E:
         assert E2E_MODEL in names
 
     def test_02_user_cannot_list_users(self):
-        """Un utilisateur standard ne peut pas lister les utilisateurs → 403."""
+        """A standard user cannot list users → 403."""
         r = client.get(
             "/users",
             headers={"Authorization": f"Bearer {USER_TOKEN}"},
@@ -174,8 +174,8 @@ class TestMLLifecycleE2E:
         assert r.status_code == 403
 
     def test_03_admin_predicts_on_model(self):
-        """Prédiction sur le modèle par l'admin → succès."""
-        # Utilise ADMIN_TOKEN pour predict + cohérence avec GET /predictions
+        """Prediction on the model by the admin → success."""
+        # Uses ADMIN_TOKEN for predict + consistency with GET /predictions
         r = client.post(
             "/predict",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -186,7 +186,7 @@ class TestMLLifecycleE2E:
         assert "prediction" in data
 
     def test_04_admin_sees_predictions_in_history(self):
-        """Prédictions visibles dans GET /predictions."""
+        """Predictions visible in GET /predictions."""
         now = datetime.utcnow()
         r = client.get(
             "/predictions",
@@ -203,7 +203,7 @@ class TestMLLifecycleE2E:
         assert data["total"] >= 1
 
     def test_05_admin_adds_observed_results(self):
-        """L'admin peut ajouter des résultats observés."""
+        """The admin can add observed results."""
         r = client.post(
             "/observed-results",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -222,7 +222,7 @@ class TestMLLifecycleE2E:
         assert r.json()["upserted"] >= 1
 
     def test_06_admin_checks_model_history(self):
-        """Historique du modèle visible → au moins une entrée."""
+        """Model history visible → at least one entry."""
         r = client.get(
             f"/models/{E2E_MODEL}/1.0.0/history",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -232,7 +232,7 @@ class TestMLLifecycleE2E:
         assert data["total"] >= 1
 
     def test_07_admin_retrains_model(self):
-        """Retrain → 202 Accepted avec job_id (ARQ async)."""
+        """Retrain → 202 Accepted with job_id (ARQ async)."""
         r = client.post(
             f"/models/{E2E_MODEL}/1.0.0/retrain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -249,9 +249,9 @@ class TestMLLifecycleE2E:
         assert data["new_version"] == "2.0.0"
 
     def test_08_new_version_visible_in_models_list(self):
-        """Après retrain enqueued, la version de base est toujours visible dans GET /models."""
-        # Le worker ARQ est mocké : la nouvelle version (2.0.0) ne sera pas créée
-        # immédiatement. On vérifie que le modèle de base reste accessible.
+        """After retrain enqueued, the base version is still visible in GET /models."""
+        # The ARQ worker is mocked: the new version (2.0.0) will not be created
+        # immediately. We verify that the base model remains accessible.
         r = client.get(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -261,7 +261,7 @@ class TestMLLifecycleE2E:
         assert E2E_MODEL in model_names
 
     def test_09_admin_sets_new_version_as_production(self):
-        """Retrain avec set_production=True → 202 Accepted, promotion gérée par le worker."""
+        """Retrain with set_production=True → 202 Accepted, promotion handled by the worker."""
         r = client.post(
             f"/models/{E2E_MODEL}/1.0.0/retrain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -278,7 +278,7 @@ class TestMLLifecycleE2E:
         assert data["status"] == "queued"
 
     def test_10_monitoring_overview_includes_model(self):
-        """Le monitoring global inclut le modèle E2E après prédictions."""
+        """The global monitoring overview includes the E2E model after predictions."""
         now = datetime.utcnow()
         r = client.get(
             "/monitoring/overview",

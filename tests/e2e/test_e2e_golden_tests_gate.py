@@ -1,12 +1,12 @@
 """
-Tests E2E — Golden tests comme gate de promotion.
+E2E tests — Golden tests as a promotion gate.
 
-Scénarios :
-  1. Créer modèle → CRUD golden tests (create / list / delete)
-  2. Upload CSV de golden tests → liste enrichie
-  3. Exécuter les golden tests (run) → résultat pass/fail
-  4. Policy avec min_golden_test_pass_rate → gate de promotion
-  5. Retrain avec golden tests qui passent → promotion autorisée
+Scenarios:
+  1. Create model → CRUD golden tests (create / list / delete)
+  2. Upload CSV of golden tests → enriched list
+  3. Execute golden tests (run) → pass/fail result
+  4. Policy with min_golden_test_pass_rate → promotion gate
+  5. Retrain with passing golden tests → promotion allowed
 """
 
 import asyncio
@@ -95,7 +95,7 @@ async def _setup():
 
 asyncio.run(_setup())
 
-# Créer le modèle une fois
+# Create the model once
 _r = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -118,13 +118,13 @@ def _headers():
 
 class TestGoldenTestsCRUD:
     def test_list_golden_tests_empty(self):
-        """GET /models/{name}/golden-tests → liste vide au départ."""
+        """GET /models/{name}/golden-tests → empty list initially."""
         resp = client.get(f"/models/{GT_E2E_MODEL}/golden-tests", headers=_headers())
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
 
     def test_create_golden_test(self):
-        """POST /models/{name}/golden-tests → golden test créé."""
+        """POST /models/{name}/golden-tests → golden test created."""
         resp = client.post(
             f"/models/{GT_E2E_MODEL}/golden-tests",
             headers=_headers(),
@@ -141,7 +141,7 @@ class TestGoldenTestsCRUD:
         return data["id"]
 
     def test_list_golden_tests_after_create(self):
-        """Après création → liste non vide."""
+        """After creation → non-empty list."""
         client.post(
             f"/models/{GT_E2E_MODEL}/golden-tests",
             headers=_headers(),
@@ -156,7 +156,7 @@ class TestGoldenTestsCRUD:
         assert len(data) >= 1
 
     def test_delete_golden_test(self):
-        """POST puis DELETE → test supprimé."""
+        """POST then DELETE → test deleted."""
         r = client.post(
             f"/models/{GT_E2E_MODEL}/golden-tests",
             headers=_headers(),
@@ -172,7 +172,7 @@ class TestGoldenTestsCRUD:
         assert del_resp.status_code in [200, 204]
 
     def test_create_golden_test_without_auth_returns_401(self):
-        """POST sans auth → 401/403."""
+        """POST without auth → 401/403."""
         resp = client.post(
             f"/models/{GT_E2E_MODEL}/golden-tests",
             json={"input_features": FEATURES, "expected_output": "setosa"},
@@ -182,7 +182,7 @@ class TestGoldenTestsCRUD:
 
 class TestGoldenTestsCsvUpload:
     def test_upload_csv_adds_tests(self):
-        """POST /models/{name}/golden-tests/upload-csv → tests créés depuis CSV."""
+        """POST /models/{name}/golden-tests/upload-csv → tests created from CSV."""
         csv_content = (
             "sepal_length,sepal_width,petal_length,petal_width,expected_output\n"
             "5.1,3.5,1.4,0.2,setosa\n"
@@ -198,7 +198,7 @@ class TestGoldenTestsCsvUpload:
         assert data["created"] >= 2
 
     def test_upload_csv_without_auth_returns_401(self):
-        """Upload CSV sans auth → 401/403."""
+        """Upload CSV without auth → 401/403."""
         csv_content = "f1,expected_output\n1.0,setosa\n"
         resp = client.post(
             f"/models/{GT_E2E_MODEL}/golden-tests/upload-csv",
@@ -209,8 +209,8 @@ class TestGoldenTestsCsvUpload:
 
 class TestGoldenTestsRun:
     def test_run_golden_tests_returns_results(self):
-        """POST /models/{name}/{version}/golden-tests/run → résultats pass/fail."""
-        # S'assurer qu'il y a au moins un golden test
+        """POST /models/{name}/{version}/golden-tests/run → pass/fail results."""
+        # Ensure there is at least one golden test
         client.post(
             f"/models/{GT_E2E_MODEL}/golden-tests",
             headers=_headers(),
@@ -229,7 +229,7 @@ class TestGoldenTestsRun:
         assert "pass_rate" in data
 
     def test_run_golden_tests_without_auth_returns_401(self):
-        """Run sans auth → 401/403."""
+        """Run without auth → 401/403."""
         resp = client.post(
             f"/models/{GT_E2E_MODEL}/{GT_VERSION}/golden-tests/run"
         )
@@ -238,10 +238,10 @@ class TestGoldenTestsRun:
 
 class TestGoldenTestsPolicyGate:
     def test_policy_with_min_pass_rate_blocks_if_below_threshold(self):
-        """Policy min_golden_test_pass_rate → gate de promotion."""
+        """Policy min_golden_test_pass_rate → promotion gate."""
         from src.services.auto_promotion_service import evaluate_auto_promotion
 
-        # Évaluer avec policy qui exige 100% de pass
+        # Evaluate with a policy requiring 100% pass rate
         async def _run():
             async with _TestSessionLocal() as db:
                 result, reason = await evaluate_auto_promotion(
@@ -259,5 +259,5 @@ class TestGoldenTestsPolicyGate:
             return result, reason
 
         promoted, reason = asyncio.run(_run())
-        # Sans observed_results → min_sample non atteint → non promu
+        # Without observed_results → min_sample not reached → not promoted
         assert promoted is False or reason is not None

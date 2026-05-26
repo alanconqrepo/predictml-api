@@ -1,11 +1,11 @@
 """
-Tests pour POST /models/{name}/{version}/validate-input et ?strict_validation sur /predict.
+Tests for POST /models/{name}/{version}/validate-input and ?strict_validation on /predict.
 
-Stratégie :
-  - Injecter les modèles dans le cache Redis via model_service._redis
-  - Créer les entrées ModelMetadata en DB dans _setup()
-  - Nettoyer le cache dans try/finally pour éviter les interférences
-  - SQLite en mémoire + FakeRedis — aucun Docker requis
+Strategy:
+  - Inject models into the Redis cache via model_service._redis
+  - Create ModelMetadata entries in DB in _setup()
+  - Clean up the cache in try/finally to avoid interference
+  - SQLite in-memory + FakeRedis — no Docker required
 """
 
 import asyncio
@@ -26,9 +26,9 @@ from tests.conftest import _TestSessionLocal
 client = TestClient(app)
 
 TEST_TOKEN = "test-token-input-validation-v1"
-IV_MODEL = "iv_model_features"  # modèle avec feature_names_in_
-IV_MODEL_NOFEAT = "iv_model_nofeat"  # modèle sans feature_names_in_ ni baseline
-IV_MODEL_BASELINE = "iv_model_base"  # modèle sans feature_names_in_, avec feature_baseline
+IV_MODEL = "iv_model_features"  # model with feature_names_in_
+IV_MODEL_NOFEAT = "iv_model_nofeat"  # model without feature_names_in_ or baseline
+IV_MODEL_BASELINE = "iv_model_base"  # model without feature_names_in_, with feature_baseline
 MODEL_VERSION = "1.0.0"
 
 
@@ -38,7 +38,7 @@ MODEL_VERSION = "1.0.0"
 
 
 def _make_model_with_features() -> LogisticRegression:
-    """LogisticRegression sur DataFrame → feature_names_in_ disponible."""
+    """LogisticRegression trained on a DataFrame → feature_names_in_ available."""
     x_train = pd.DataFrame(
         {
             "sepal_length": [5.1, 4.9, 6.3, 5.8],
@@ -52,14 +52,14 @@ def _make_model_with_features() -> LogisticRegression:
 
 
 def _make_model_no_feature_names() -> LogisticRegression:
-    """LogisticRegression sur numpy array → PAS de feature_names_in_."""
+    """LogisticRegression trained on numpy array → NO feature_names_in_."""
     x_arr = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]])
     y = [0, 1, 0, 1]
     return LogisticRegression(max_iter=1000).fit(x_arr, y)
 
 
 def _inject_cache(model_name: str, version: str, model, confidence_threshold=None) -> str:
-    """Injecte un modèle dans le cache Redis ; retourne la clé pour le nettoyage."""
+    """Inject a model into the Redis cache; returns the key for cleanup."""
     key = f"{model_name}:{version}"
     data = {
         "model": model,
@@ -136,7 +136,7 @@ asyncio.run(_setup())
 class TestValidateInput:
 
     def test_model_not_found_returns_404(self):
-        """Modèle inexistant → 404."""
+        """Non-existent model → 404."""
         response = client.post(
             "/models/inexistant_model/9.9.9/validate-input",
             headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -145,7 +145,7 @@ class TestValidateInput:
         assert response.status_code == 404
 
     def test_requires_auth(self):
-        """Sans token → 401/403."""
+        """Without token → 401/403."""
         response = client.post(
             f"/models/{IV_MODEL}/{MODEL_VERSION}/validate-input",
             json={"sepal_length": 5.1},
@@ -153,7 +153,7 @@ class TestValidateInput:
         assert response.status_code in [401, 403]
 
     def test_valid_input_all_features_present(self):
-        """Toutes les features attendues présentes → valid=true, pas d'erreur."""
+        """All expected features present → valid=true, no errors."""
         model = _make_model_with_features()
         key = _inject_cache(IV_MODEL, MODEL_VERSION, model)
         try:
@@ -182,7 +182,7 @@ class TestValidateInput:
             asyncio.run(_delete_cache(key))
 
     def test_missing_feature_detected(self):
-        """Feature manquante → valid=false, erreur missing_feature."""
+        """Missing feature → valid=false, missing_feature error."""
         model = _make_model_with_features()
         key = _inject_cache(IV_MODEL, MODEL_VERSION, model)
         try:
@@ -193,7 +193,7 @@ class TestValidateInput:
                     "sepal_length": 5.1,
                     "petal_length": 1.4,
                     "petal_width": 0.2,
-                    # sepal_width est manquant
+                    # sepal_width is missing
                 },
             )
             assert response.status_code == 200
@@ -207,7 +207,7 @@ class TestValidateInput:
             asyncio.run(_delete_cache(key))
 
     def test_unexpected_feature_detected(self):
-        """Feature inattendue → valid=false, erreur unexpected_feature."""
+        """Unexpected feature → valid=false, unexpected_feature error."""
         model = _make_model_with_features()
         key = _inject_cache(IV_MODEL, MODEL_VERSION, model)
         try:
@@ -219,7 +219,7 @@ class TestValidateInput:
                     "sepal_width": 3.5,
                     "petal_length": 1.4,
                     "petal_width": 0.2,
-                    "petal_width_squared": 0.04,  # feature inconnue
+                    "petal_width_squared": 0.04,  # unknown feature
                 },
             )
             assert response.status_code == 200
@@ -233,7 +233,7 @@ class TestValidateInput:
             asyncio.run(_delete_cache(key))
 
     def test_multiple_errors_missing_and_unexpected(self):
-        """Features manquantes ET inattendues → plusieurs erreurs."""
+        """Missing AND unexpected features → multiple errors."""
         model = _make_model_with_features()
         key = _inject_cache(IV_MODEL, MODEL_VERSION, model)
         try:
@@ -242,10 +242,10 @@ class TestValidateInput:
                 headers={"Authorization": f"Bearer {TEST_TOKEN}"},
                 json={
                     "sepal_length": 5.1,
-                    # sepal_width manquant
+                    # sepal_width missing
                     "petal_length": 1.4,
-                    # petal_width manquant
-                    "extra_feature": 99.0,  # inattendue
+                    # petal_width missing
+                    "extra_feature": 99.0,  # unexpected
                 },
             )
             assert response.status_code == 200
@@ -263,7 +263,7 @@ class TestValidateInput:
             asyncio.run(_delete_cache(key))
 
     def test_type_coercion_warning_for_string_float(self):
-        """Valeur string convertible en float → avertissement type_coercion."""
+        """String value convertible to float → type_coercion warning."""
         model = _make_model_with_features()
         key = _inject_cache(IV_MODEL, MODEL_VERSION, model)
         try:
@@ -279,7 +279,7 @@ class TestValidateInput:
             )
             assert response.status_code == 200
             data = response.json()
-            assert data["valid"] is True  # warning n'invalide pas
+            assert data["valid"] is True  # warning does not invalidate
             assert len(data["warnings"]) == 1
             w = data["warnings"][0]
             assert w["type"] == "type_coercion"
@@ -290,7 +290,7 @@ class TestValidateInput:
             asyncio.run(_delete_cache(key))
 
     def test_no_schema_returns_valid_true_with_null_features(self):
-        """Modèle sans feature_names_in_ ni baseline → valid=true, expected_features=null."""
+        """Model without feature_names_in_ or baseline → valid=true, expected_features=null."""
         model = _make_model_no_feature_names()
         key = _inject_cache(IV_MODEL_NOFEAT, MODEL_VERSION, model)
         try:
@@ -308,8 +308,8 @@ class TestValidateInput:
             asyncio.run(_delete_cache(key))
 
     def test_fallback_to_feature_baseline_when_model_not_loaded(self):
-        """Sans modèle en cache, fallback sur feature_baseline de la DB."""
-        # IV_MODEL_BASELINE n'a pas de modèle en cache → fallback baseline
+        """Without model in cache, fallback to feature_baseline from DB."""
+        # IV_MODEL_BASELINE has no model in cache → fallback to baseline
         response = client.post(
             f"/models/{IV_MODEL_BASELINE}/{MODEL_VERSION}/validate-input",
             headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -321,11 +321,11 @@ class TestValidateInput:
         assert sorted(data["expected_features"]) == ["sepal_length", "sepal_width"]
 
     def test_fallback_baseline_detects_missing(self):
-        """Fallback sur baseline : feature manquante → erreur."""
+        """Fallback to baseline: missing feature → error."""
         response = client.post(
             f"/models/{IV_MODEL_BASELINE}/{MODEL_VERSION}/validate-input",
             headers={"Authorization": f"Bearer {TEST_TOKEN}"},
-            json={"sepal_length": 5.5},  # sepal_width manquant
+            json={"sepal_length": 5.5},  # sepal_width missing
         )
         assert response.status_code == 200
         data = response.json()
@@ -334,7 +334,7 @@ class TestValidateInput:
         assert "sepal_width" in features
 
     def test_expected_features_sorted_in_response(self):
-        """expected_features retournées dans l'ordre alphabétique."""
+        """expected_features returned in alphabetical order."""
         model = _make_model_with_features()
         key = _inject_cache(IV_MODEL, MODEL_VERSION, model)
         try:
@@ -363,7 +363,7 @@ class TestValidateInput:
 class TestStrictValidationPredict:
 
     def test_strict_validation_false_allows_unexpected_features(self):
-        """strict_validation=false (défaut) : features inattendues ignorées silencieusement."""
+        """strict_validation=false (default): unexpected features silently ignored."""
         model = _make_model_with_features()
         key = _inject_cache(IV_MODEL, MODEL_VERSION, model)
         try:
@@ -378,7 +378,7 @@ class TestStrictValidationPredict:
                         "sepal_width": 3.5,
                         "petal_length": 1.4,
                         "petal_width": 0.2,
-                        "extra_col": 999.0,  # inattendue — pas bloquante sans strict
+                        "extra_col": 999.0,  # unexpected — not blocking without strict
                     },
                 },
             )
@@ -387,7 +387,7 @@ class TestStrictValidationPredict:
             asyncio.run(_delete_cache(key))
 
     def test_strict_validation_true_rejects_unexpected_features(self):
-        """strict_validation=true : features inattendues → 422."""
+        """strict_validation=true: unexpected features → 422."""
         model = _make_model_with_features()
         key = _inject_cache(IV_MODEL, MODEL_VERSION, model)
         try:
@@ -402,7 +402,7 @@ class TestStrictValidationPredict:
                         "sepal_width": 3.5,
                         "petal_length": 1.4,
                         "petal_width": 0.2,
-                        "extra_col": 999.0,  # inattendue → bloquante en mode strict
+                        "extra_col": 999.0,  # unexpected → blocking in strict mode
                     },
                 },
             )
@@ -415,7 +415,7 @@ class TestStrictValidationPredict:
             asyncio.run(_delete_cache(key))
 
     def test_strict_validation_true_accepts_exact_match(self):
-        """strict_validation=true : toutes les features exactement correspondantes → 200."""
+        """strict_validation=true: all features exactly matching → 200."""
         model = _make_model_with_features()
         key = _inject_cache(IV_MODEL, MODEL_VERSION, model)
         try:
@@ -438,7 +438,7 @@ class TestStrictValidationPredict:
             asyncio.run(_delete_cache(key))
 
     def test_strict_validation_true_still_rejects_missing_features(self):
-        """strict_validation=true : features manquantes toujours rejetées (comportement de base)."""
+        """strict_validation=true: missing features still rejected (base behavior)."""
         model = _make_model_with_features()
         key = _inject_cache(IV_MODEL, MODEL_VERSION, model)
         try:
@@ -450,7 +450,7 @@ class TestStrictValidationPredict:
                     "model_version": MODEL_VERSION,
                     "features": {
                         "sepal_length": 5.1,
-                        # sepal_width, petal_length, petal_width manquants
+                        # sepal_width, petal_length, petal_width missing
                     },
                 },
             )
