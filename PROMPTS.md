@@ -1,56 +1,56 @@
-uquelles sont les améliorations qu'on peut faire en terme de fonctionnalités ? exmple de nouvelles routes ?
-mets toi dans le Role Data scientist MLOps engineer, quelles fonctionnalités pourrait être intérréssantes facile à implémenter sans devenir une usine à gaz. garde en tête l'objectif initial du projet ne propose pas des fonctionnalités qui n'ont rien à voir où inutiles pour 80%des utilisateurs. si toutes les fonctionnalités nécessaires sont déjà présentes n'en invente pas de nouvelles. classes tes idées par ordre de priorité et niveau de difficulté à implémenter. écris le résultat dans un nouveau fichier ROADMAP_VX.md toutes les fonctionnalités des roadmap précédentes ont déjà été implémentées. propose les fonctionnalités api et ou dans l'App streamlit utiles pour les utilisateurs. propose uniquement des choses utiles et nécessaires ! si le projet est déjà complet et que tes propositions ne font que complexifié le projet sans apport il vaut mieux éviter.
-si tu as quand même des propositions explique en détails le pourquoi et le comment
+What improvements can be made in terms of features? Example of new routes?
+Put yourself in the role of a Data Scientist / MLOps engineer. What features would be interesting and easy to implement without making things unnecessarily complex? Keep in mind the initial objective of the project — do not propose features that are unrelated or useless for 80% of users. If all necessary features are already present, do not invent new ones. Rank your ideas by priority and implementation difficulty. Write the result in a new ROADMAP_VX.md file — all features from previous roadmaps have already been implemented. Propose API features and/or Streamlit app features that are useful for users. Propose only useful and necessary things! If the project is already complete and your proposals only add complexity without value, it is better to avoid.
+If you still have proposals, explain in detail the why and how.
 
 ------------------------------------
 
 
-en mode plan:
-a partir de l'historique des git mettre à jour là documentation présents dans les .md y compris le readme.md pour intégrer les nouvelles fonctionnalités. expliquer aussi comment cloner le projet et lancer docker compose. une doc pour expliquer comment utiliser l'outil pour un débutant avec exemple de code python etc
-si certains documents.md de la documentation so t déjà complets et parfait pas nécessité de les modifier . ajouter dans docker compose Anthropic_api_key
+In plan mode:
+From the git history, update the documentation in .md files including readme.md to integrate new features. Also explain how to clone the project and run docker compose. A doc to explain how to use the tool for a beginner with Python code examples, etc.
+If some .md documentation files are already complete and perfect, no need to modify them. Add Anthropic_api_key in docker compose.
 
 ------------------------------------
 
 ------------------------------------
-reflechis en mode plan 
-a partir des de deniers PR (une semaine) et de la documentation 
-1.ajouter lzs tests unitaires manquants.
-2.ajouter les tests d'intégration nécessaire pour valider le bon fonctionnement global du produit
-ajouter les tests end to end e2e pour valider le bon fonctionnement globale du produit
-détermine quel est le taux de recouvrement des tests avant et après ton plan
+Think in plan mode:
+From the latest PRs (one week) and the documentation:
+1. Add the missing unit tests.
+2. Add the integration tests needed to validate the overall product behavior.
+Add end-to-end (e2e) tests to validate the overall product behavior.
+Determine the test coverage rate before and after your plan.
 
 
 
-est ce que l'intégration avec mlflow est ok à 100%. par exemple est ce que tous les retrain sont stockés dans les expérimentations mlflow avec les bons kpis etc..je souhaite que les fonctionnalités de mlflow soit utilisés à 100%. crée d'implémentation pour que ça soit me cas.
+Is the MLflow integration 100% working? For example, are all retrains stored in MLflow experiments with the correct KPIs, etc.? I want MLflow features to be used 100%. Create an implementation plan to make that the case.
 
 
 
 
-crée une page streamlit d'aide avec chat llm pour aider l'utilisateur d'un point de vue code : génération de script train avec sklearn mlflow..., d'appel api vers la solution, d'aide à l'utilisation de l'App streamlit, explication des différents indicateurs etc... se baser sur la documentation et skills du projet pour répondre, si besoin ajouter de la documentation. possibilité de visualiser directement la doc .md
+Create a Streamlit help page with an LLM chat to help the user from a code perspective: generating train scripts with sklearn mlflow..., API calls to the solution, help using the Streamlit app, explanation of the various indicators, etc. Base responses on the project documentation and skills. Add documentation if needed. Possibility to view .md docs directly.
 
 
 
-en tant qu'expert en sécurité analyse la base de code pour identifier problème de sécurités. vérifie qu'aucunz reelle variable d'environnement n'est publié dans git.
-crée un plan pour améliorer la sécurité du projet.
+As a security expert, analyze the codebase to identify security issues. Verify that no real environment variables are published in git.
+Create a plan to improve project security.
 
 
 
-crée les tests utiles manquants pour les scripts suivants :
+Create the missing useful tests for the following scripts:
 - services/golden_test_service.py
 - api/models.py
 - api/monitoring.py
-- api/prédictions.py
+- api/predictions.py
 - api/users.py
 - db/database.py
 - src/main.py
 
-donne le taux de couverture globale suite aux ajout
+Give the overall coverage rate after the additions.
 
 
 
 
-Action manuelle requise
-GitHub Actions : créer ces 5 secrets dans les paramètres du dépôt (Settings → Secrets → Actions) :
+Manual action required
+GitHub Actions: create these 5 secrets in the repository settings (Settings → Secrets → Actions):
 CI_DB_PASSWORD
 CI_MINIO_ACCESS_KEY
 CI_MINIO_SECRET_KEY

@@ -164,13 +164,13 @@
 
 ## Batch 10 — Root markdown files
 
-- [ ] `README.md`
-- [ ] `CODING_STANDARDS.md`
-- [ ] `CLAUDE.md`
-- [ ] `CODE_QUALITY_PLAN.md`
-- [ ] `CONTRIBUTING.md`
-- [ ] `PROMPTS.md`
-- [ ] `SKILLS.md`
+- [x] `README.md`
+- [x] `CODING_STANDARDS.md`
+- [x] `CLAUDE.md`
+- [x] `CODE_QUALITY_PLAN.md`
+- [x] `CONTRIBUTING.md`
+- [x] `PROMPTS.md`
+- [x] `SKILLS.md`
 
 ---
 

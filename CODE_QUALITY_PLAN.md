@@ -1,40 +1,40 @@
-# Plan — Amélioration qualité de code
+# Plan — Code quality improvement
 
-## Problèmes identifiés
+## Identified issues
 
-### Code mort / inutile
-| Fichier | Problème | Ligne |
+### Dead / unused code
+| File | Issue | Line |
 |---|---|---|
-| `src/core/config.py` | Import `Path` inutilisé | ~5 |
-| `src/core/security.py` | Import `datetime` inutilisé | ~4 |
-| `src/api/predict.py` | Variable `status_str = "error"` inutilisée | ~185 |
-| `src/db/models/model_metadata.py` | `__table_args__` SQLite (projet PostgreSQL) | ~66-68 |
+| `src/core/config.py` | Unused `Path` import | ~5 |
+| `src/core/security.py` | Unused `datetime` import | ~4 |
+| `src/api/predict.py` | Unused variable `status_str = "error"` | ~185 |
+| `src/db/models/model_metadata.py` | `__table_args__` SQLite (PostgreSQL project) | ~66-68 |
 
 ### Duplication
-| Problème | Fichiers concernés |
+| Issue | Files concerned |
 |---|---|
-| `_utcnow()` définie 5 fois à l'identique | `src/services/db_service.py`, `src/db/models/user.py`, `src/db/models/prediction.py`, `src/db/models/model_metadata.py`, `src/db/models/observed_result.py` |
+| `_utcnow()` defined 5 times identically | `src/services/db_service.py`, `src/db/models/user.py`, `src/db/models/prediction.py`, `src/db/models/model_metadata.py`, `src/db/models/observed_result.py` |
 
-### Type hints incorrects (`any` au lieu de `Any`)
-| Fichier | Ligne |
+### Incorrect type hints (`any` instead of `Any`)
+| File | Line |
 |---|---|
 | `src/services/minio_service.py` | ~44, ~115 |
 | `src/services/db_service.py` | ~122 |
 
-### `print()` en production (doit être `logger`)
-| Fichier | Ligne | Niveau suggéré |
+### `print()` in production (should be `logger`)
+| File | Line | Suggested level |
 |---|---|---|
 | `src/api/predict.py` | ~204 | `logger.error` |
 | `src/api/models.py` | ~318 | `logger.warning` |
 | `src/api/models.py` | ~327 | `logger.warning` |
 
-### Violations de style
-| Fichier | Problème | Ligne |
+### Style violations
+| File | Issue | Line |
 |---|---|---|
-| `src/api/models.py` | `== True` sur colonne SQLAlchemy (E712) | ~286 |
+| `src/api/models.py` | `== True` on SQLAlchemy column (E712) | ~286 |
 
-### Docstrings manquantes
-| Fichier | Méthode |
+### Missing docstrings
+| File | Method |
 |---|---|
 | `src/db/models/user.py` | `__repr__` |
 | `src/db/models/model_metadata.py` | `__repr__` |
@@ -43,63 +43,63 @@
 
 ---
 
-## Étapes d'implémentation
+## Implementation steps
 
-### Étape 1 — Créer `src/core/utils.py` (centraliser `_utcnow`)
+### Step 1 — Create `src/core/utils.py` (centralize `_utcnow`)
 ```python
 # src/core/utils.py
 from datetime import datetime, timezone
 
 def _utcnow() -> datetime:
-    """Retourne la date/heure UTC courante (sans info de timezone)."""
+    """Returns the current UTC datetime (without timezone info)."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
 ```
-Puis dans chaque fichier concerné : supprimer la définition locale, ajouter `from src.core.utils import _utcnow`.
+Then in each concerned file: remove the local definition, add `from src.core.utils import _utcnow`.
 
-### Étape 2 — Supprimer le code mort
-- `src/core/config.py` : supprimer `from pathlib import Path`
-- `src/core/security.py` : supprimer `from datetime import datetime`
-- `src/api/predict.py` : supprimer `status_str = "error"`
-- `src/db/models/model_metadata.py` : supprimer le bloc `__table_args__`
+### Step 2 — Remove dead code
+- `src/core/config.py`: remove `from pathlib import Path`
+- `src/core/security.py`: remove `from datetime import datetime`
+- `src/api/predict.py`: remove `status_str = "error"`
+- `src/db/models/model_metadata.py`: remove the `__table_args__` block
 
-### Étape 3 — Corriger les type hints
-- `src/services/minio_service.py` + `src/services/db_service.py` : `any` → `Any`, ajouter `from typing import Any`
+### Step 3 — Fix type hints
+- `src/services/minio_service.py` + `src/services/db_service.py`: `any` → `Any`, add `from typing import Any`
 
-### Étape 4 — Remplacer `print()` par du logging
-- 3 occurrences dans `predict.py` et `models.py` (loggers déjà présents dans ces fichiers)
+### Step 4 — Replace `print()` with logging
+- 3 occurrences in `predict.py` and `models.py` (loggers already present in these files)
 
-### Étape 5 — Corriger E712
-- `src/api/models.py` ligne ~286 : `== True` → `.is_(True)`
+### Step 5 — Fix E712
+- `src/api/models.py` line ~286: `== True` → `.is_(True)`
 
-### Étape 6 — Ajouter les docstrings manquantes
-- `__repr__` dans les 3 modèles ORM
-- `update_user_last_login` dans db_service.py
+### Step 6 — Add missing docstrings
+- `__repr__` in the 3 ORM models
+- `update_user_last_login` in db_service.py
 
-### Étape 7 — Mettre à jour `CLAUDE.md`
-Ajouter une section référençant `CODING_STANDARDS.md` et la commande lint.
+### Step 7 — Update `CLAUDE.md`
+- Add a section referencing `CODING_STANDARDS.md` and the lint command.
 
 ---
 
-## Vérification finale
+## Final verification
 
 ```bash
-# Zéro erreur de lint
+# Zero lint errors
 ruff check src/
 
-# Zéro diff de formatage
+# Zero formatting diff
 black --check src/
 
-# Tous les tests passent
+# All tests pass
 pytest tests/ -v
 ```
 
 ---
 
-## Fichiers à créer
-- `src/core/utils.py` — utilitaires partagés (nouveau)
-- `CODING_STANDARDS.md` — règles de codage (créé)
+## Files to create
+- `src/core/utils.py` — shared utilities (new)
+- `CODING_STANDARDS.md` — coding rules (created)
 
-## Fichiers à modifier
+## Files to modify
 - `src/core/config.py`
 - `src/core/security.py`
 - `src/api/predict.py`

@@ -1,52 +1,52 @@
 # Coding Standards — predictml-api
 
-> Ce fichier définit les règles de codage du projet. Il doit être respecté lors de toute session Claude Code ou contribution manuelle.
+> This file defines the project's coding rules. It must be followed in every Claude Code session or manual contribution.
 
 ---
 
-## 1. Outils de formatage et de lint
+## 1. Formatting and linting tools
 
-| Outil | Rôle | Commande |
+| Tool | Role | Command |
 |---|---|---|
-| **black** | Formatage automatique (line-length=100) | `black src/` |
+| **black** | Automatic formatting (line-length=100) | `black src/` |
 | **ruff** | Lint (E, F, I, N, W) | `ruff check src/` |
 
-**Avant chaque commit :**
+**Before each commit:**
 ```bash
 ruff check src/ && black --check src/
 ```
 
-**Corriger automatiquement :**
+**Auto-fix:**
 ```bash
 ruff check src/ --fix && black src/
 ```
 
 ---
 
-## 2. Style de code
+## 2. Code style
 
-### Longueur de ligne
-- Maximum **100 caractères** (géré par black)
-- E501 ignoré dans ruff (black fait autorité)
+### Line length
+- Maximum **100 characters** (managed by black)
+- E501 ignored in ruff (black takes precedence)
 
 ### Imports
-- Triés automatiquement par ruff (règle I)
-- Ordre : stdlib → third-party → local
-- **Jamais d'import inutilisé** — ruff F401 le détecte
+- Automatically sorted by ruff (rule I)
+- Order: stdlib → third-party → local
+- **Never an unused import** — ruff F401 detects it
 
-### Nommage
-- Fonctions et variables : `snake_case`
-- Classes : `PascalCase`
-- Constantes : `UPPER_SNAKE_CASE`
-- Méthodes privées/utilitaires internes : préfixe `_` (ex: `_utcnow`)
+### Naming
+- Functions and variables: `snake_case`
+- Classes: `PascalCase`
+- Constants: `UPPER_SNAKE_CASE`
+- Private/internal utility methods: `_` prefix (e.g. `_utcnow`)
 
 ---
 
 ## 3. Type hints
 
-- **Obligatoires** sur toutes les fonctions publiques (paramètres + retour)
-- Utiliser `Any` (capital, depuis `typing`) — **jamais `any`** (builtin)
-- Exemples corrects :
+- **Required** on all public functions (parameters + return)
+- Use `Any` (capitalized, from `typing`) — **never `any`** (builtin)
+- Correct examples:
   ```python
   from typing import Any
   def upload_model(self, model: Any, name: str) -> str: ...
@@ -55,112 +55,112 @@ ruff check src/ --fix && black src/
 
 ---
 
-## 4. Logging structuré (JSON)
+## 4. Structured logging (JSON)
 
-- **Jamais de `print()` en code de production**
-- **Jamais de `import logging` / `logging.getLogger()`** — utiliser exclusivement `structlog`
-- Déclarer un logger en haut de chaque module :
+- **Never use `print()` in production code**
+- **Never use `import logging` / `logging.getLogger()`** — use `structlog` exclusively
+- Declare a logger at the top of each module:
   ```python
   import structlog
   logger = structlog.get_logger(__name__)
   ```
-- Appels avec **kwargs structurés** (jamais de `%s` formatting) :
+- Calls with **structured kwargs** (never `%s` formatting):
   ```python
-  # Correct — exploitable par ELK/Datadog/CloudWatch
-  logger.info("Modèle chargé", model_name=name, version=str(v))
-  logger.error("Erreur upload MinIO", object_name=key, error=str(e))
+  # Correct — usable by ELK/Datadog/CloudWatch
+  logger.info("Model loaded", model_name=name, version=str(v))
+  logger.error("MinIO upload error", object_name=key, error=str(e))
 
   # Incorrect
-  logger.info("Modèle '%s' v%s chargé", name, v)
+  logger.info("Model '%s' v%s loaded", name, v)
   ```
-- Niveaux à respecter :
-  - `logger.debug(...)` — informations de débogage
-  - `logger.info(...)` — informations de flux normal
-  - `logger.warning(...)` — situations anormales non-bloquantes
-  - `logger.error(...)` — erreurs gérées
-- La configuration globale est dans **`src/core/logging.py`** (`setup_logging(debug: bool)`).
-  Elle est appelée une seule fois dans `src/main.py` au démarrage.
-  - `DEBUG=False` (production) → sortie **JSON** sur stdout (compatible ELK/Datadog/CloudWatch)
-  - `DEBUG=True` (développement) → sortie colorée lisible dans le terminal
+- Levels to follow:
+  - `logger.debug(...)` — debug information
+  - `logger.info(...)` — normal flow information
+  - `logger.warning(...)` — abnormal non-blocking situations
+  - `logger.error(...)` — handled errors
+- The global configuration is in **`src/core/logging.py`** (`setup_logging(debug: bool)`).
+  It is called once in `src/main.py` at startup.
+  - `DEBUG=False` (production) → **JSON** output on stdout (compatible with ELK/Datadog/CloudWatch)
+  - `DEBUG=True` (development) → colored readable output in the terminal
 
 ---
 
 ## 5. Docstrings
 
-- **Obligatoires** sur toutes les fonctions et méthodes publiques
-- Format **Google-style**, rédigé en **français**
-- Exemple :
+- **Required** on all public functions and methods
+- **Google-style** format, written in **English**
+- Example:
   ```python
   def create_user(db: AsyncSession, username: str, token: str) -> User:
-      """Crée un nouvel utilisateur en base de données.
+      """Creates a new user in the database.
 
       Args:
-          db: Session SQLAlchemy async active.
-          username: Nom d'utilisateur unique.
-          token: Token Bearer de l'utilisateur.
+          db: Active async SQLAlchemy session.
+          username: Unique username.
+          token: User's Bearer token.
 
       Returns:
-          L'objet User créé et persisté.
+          The created and persisted User object.
 
       Raises:
-          IntegrityError: Si le username existe déjà.
+          IntegrityError: If the username already exists.
       """
   ```
-- Les fonctions privées (préfixe `_`) peuvent avoir une docstring courte d'une ligne
+- Private functions (prefix `_`) can have a short one-line docstring
 
 ---
 
-## 6. Fonctions utilitaires partagées
+## 6. Shared utility functions
 
-- Toute fonction utilitaire utilisée dans plusieurs modules doit être centralisée dans **`src/core/utils.py`**
-- Exemples : `_utcnow()`, helpers de formatage, etc.
-- **Ne pas dupliquer** — importer depuis `src.core.utils`
+- Any utility function used in multiple modules must be centralized in **`src/core/utils.py`**
+- Examples: `_utcnow()`, formatting helpers, etc.
+- **Don't duplicate** — import from `src.core.utils`
 
 ---
 
-## 7. Gestion du code mort
+## 7. Dead code management
 
-- **Supprimer** tout import inutilisé (ruff F401)
-- **Supprimer** toute variable assignée mais non utilisée (ruff F841)
-- **Supprimer** toute configuration spécifique à une technologie non utilisée (ex: SQLite sur un projet PostgreSQL)
+- **Remove** all unused imports (ruff F401)
+- **Remove** all assigned but unused variables (ruff F841)
+- **Remove** any configuration specific to an unused technology (e.g., SQLite in a PostgreSQL project)
 
 ---
 
 ## 8. SQLAlchemy
 
-- Comparaison booléenne idiomatique :
+- Idiomatic boolean comparison:
   ```python
   # Correct
   ModelMetadata.is_production.is_(True)
   # Incorrect
   ModelMetadata.is_production == True
   ```
-- Toujours utiliser les sessions async (`AsyncSession`) dans les services
+- Always use async sessions (`AsyncSession`) in services
 
 ---
 
 ## 9. Tests
 
-- Chaque nouvel endpoint doit avoir des tests dans `tests/`
-- Couvrir : cas nominal, auth manquante (401), token invalide (401/403), ressource absente (404), conflit (409)
-- Utiliser `TestClient` de FastAPI — pas de Docker requis
-- Nommage : `test_<endpoint>_<scenario>.py` ou regrouper par ressource
+- Every new endpoint must have tests in `tests/`
+- Cover: nominal case, missing auth (401), invalid token (401/403), missing resource (404), conflict (409)
+- Use FastAPI's `TestClient` — no Docker required
+- Naming: `test_<endpoint>_<scenario>.py` or group by resource
 
 ---
 
 ## 10. Commits
 
-- Messages en **français**, à l'**impératif présent**
-- Format : `<type>: <description courte>`
-- Types : `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
-- Exemple : `refactor: centraliser _utcnow() dans src/core/utils.py`
+- Messages in **English**, in the **imperative present**
+- Format: `<type>: <short description>`
+- Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
+- Example: `refactor: centralize _utcnow() in src/core/utils.py`
 
 ---
 
-## 11. Dépendances
+## 11. Dependencies
 
-Toute nouvelle dépendance doit être ajoutée dans **les deux fichiers** :
-- `requirements.txt` — Dockerfile API
+Any new dependency must be added in **both files**:
+- `requirements.txt` — API Dockerfile
 - `pyproject.toml` — CI GitHub Actions
 
-Pour le dashboard Streamlit : `streamlit_app/requirements.txt`
+For the Streamlit dashboard: `streamlit_app/requirements.txt`
