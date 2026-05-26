@@ -176,18 +176,18 @@
 
 ## Batch 11 — `documentation/` markdown
 
-- [ ] `documentation/API_REFERENCE.md` (heaviest)
-- [ ] `documentation/KPIS_REFERENCE.md`
-- [ ] `documentation/ARCHITECTURE.md`
-- [ ] `documentation/TRAIN_SCRIPT_GUIDE.md`
-- [ ] `documentation/BEGINNER_GUIDE.md`
-- [ ] `documentation/DASHBOARD_GUIDE.md`
-- [ ] `documentation/DATABASE.md`
-- [ ] `documentation/DOCKER.md`
-- [ ] `documentation/FAQ.md`
-- [ ] `documentation/QUICKSTART.md`
-- [ ] `documentation/GRAFANA_OTEL.md`
-- [ ] `documentation/SECURITY_MODEL_VALIDATION.md`
+- [x] `documentation/API_REFERENCE.md` (heaviest)
+- [x] `documentation/KPIS_REFERENCE.md`
+- [x] `documentation/ARCHITECTURE.md`
+- [x] `documentation/TRAIN_SCRIPT_GUIDE.md`
+- [x] `documentation/BEGINNER_GUIDE.md`
+- [x] `documentation/DASHBOARD_GUIDE.md`
+- [x] `documentation/DATABASE.md`
+- [x] `documentation/DOCKER.md`
+- [x] `documentation/FAQ.md`
+- [x] `documentation/QUICKSTART.md`
+- [x] `documentation/GRAFANA_OTEL.md`
+- [x] `documentation/SECURITY_MODEL_VALIDATION.md`
 
 ---
 

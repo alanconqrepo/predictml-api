@@ -1,12 +1,12 @@
 # Docker — PredictML API
 
-## Commandes quotidiennes
+## Daily Commands
 
 ```bash
-# Démarrer tous les services
+# Start all services
 docker-compose up -d
 
-# Arrêter
+# Stop
 docker-compose down
 
 # Logs
@@ -16,288 +16,288 @@ docker-compose logs -f nginx
 docker-compose logs -f redis-master
 docker-compose logs -f prediction-writer
 
-# Rebuild après modification du code API
+# Rebuild after modifying API code
 docker-compose up -d --build api prediction-writer
 
-# Rebuild après modification du dashboard Streamlit
+# Rebuild after modifying the Streamlit dashboard
 docker-compose up -d --build streamlit
 ```
 
-## Services et ports
+## Services and Ports
 
-L'API est exposée publiquement via **Nginx sur le port 80** (reverse proxy + load balancer).  
-Le port 8000 de l'API n'est pas exposé directement à l'hôte.
+The API is publicly exposed via **Nginx on port 80** (reverse proxy + load balancer).  
+Port 8000 of the API is not directly exposed to the host.
 
-| Service | URL externe | Description |
+| Service | External URL | Description |
 |---|---|---|
-| **API** (via Nginx) | http://localhost | Reverse proxy Nginx → 3 réplicas FastAPI |
+| **API** (via Nginx) | http://localhost | Nginx reverse proxy → 3 FastAPI replicas |
 | API docs | http://localhost/docs | Swagger UI |
 | Dashboard | http://localhost:8501 | Streamlit Admin Dashboard |
 | MLflow | http://localhost:5000 | Experiment tracking |
-| MinIO console | http://localhost:9001 | Gestion du stockage modèles |
-| Redis (master) | localhost:6379 | Cache distribué (auth requise) |
-| Grafana | http://localhost:3000 | Observabilité (Prometheus + Loki + Tempo) |
-| PostgreSQL | localhost:5433 | Base de données principale (write) |
+| MinIO console | http://localhost:9001 | Model storage management |
+| Redis (master) | localhost:6379 | Distributed cache (auth required) |
+| Grafana | http://localhost:3000 | Observability (Prometheus + Loki + Tempo) |
+| PostgreSQL | localhost:5433 | Main database (write) |
 
-## Architecture des services Docker
+## Docker Service Architecture
 
 ```
                        ┌──────────────────────────────────────────────┐
-                       │              réseau frontend                  │
+                       │              frontend network                 │
                        │                                               │
 Client ─── port 80 ──► │ nginx (reverse proxy, least_conn)            │
-                       │   └─► api:8000 ×3 réplicas                  │
+                       │   └─► api:8000 ×3 replicas                  │
                        └──────────────────────────────────────────────┘
                                         │
                        ┌────────────────▼─────────────────────────────┐
-                       │              réseau internal                  │
+                       │              internal network                 │
                        │                                               │
-                       │ pgbouncer (pooler write)                      │
+                       │ pgbouncer (write pooler)                      │
                        │   └─► postgres:5432 (primary)                │
                        │         └─► postgres-replica (streaming)      │
                        │               └─► pgbouncer-read (pooler)    │
                        │                                               │
                        │ redis-master ← redis-replica-1/2             │
-                       │ redis-sentinel-1/2/3 (quorum : 2)            │
+                       │ redis-sentinel-1/2/3 (quorum: 2)             │
                        │                                               │
                        │ prediction-writer (Redis Stream consumer)     │
                        │ minio · mlflow · grafana · streamlit          │
                        └──────────────────────────────────────────────┘
 ```
 
-### Services par rôle
+### Services by Role
 
-| Service | Rôle |
+| Service | Role |
 |---|---|
-| `nginx` | Reverse proxy, load balancer least_conn, entrée unique port 80 |
-| `api` (×3 réplicas) | FastAPI — prédictions, modèles, utilisateurs |
-| `migrate` | One-shot Alembic — s'exécute avant l'API, ne redémarre pas |
-| `prediction-writer` | Worker Redis Streams — batch INSERT des prédictions en DB |
-| `postgres` | PostgreSQL primary — toutes les écritures |
-| `postgres-replica` | PostgreSQL replica en streaming — requêtes analytiques |
-| `pgbouncer` | Connection pooler (transaction mode) pour le primary |
-| `pgbouncer-read` | Connection pooler pour la replica |
-| `redis-master` | Redis master — cache modèles (DB 0) + rate limiting (DB 1) |
-| `redis-replica-1/2` | Redis réplicas — haute disponibilité |
-| `redis-sentinel-1/2/3` | Sentinel — basculement automatique < 10 s (quorum : 2) |
-| `minio` | Stockage objets S3-compatible (modèles .joblib, scripts train.py) |
-| `mlflow` | Experiment tracking (métriques, artifacts) |
-| `grafana` | Stack LGTM — Prometheus + Loki + Tempo + Grafana |
-| `streamlit` | Dashboard admin multipage |
+| `nginx` | Reverse proxy, least_conn load balancer, single port 80 entry point |
+| `api` (×3 replicas) | FastAPI — predictions, models, users |
+| `migrate` | One-shot Alembic — runs before the API, does not restart |
+| `prediction-writer` | Redis Streams worker — batch INSERT of predictions to DB |
+| `postgres` | PostgreSQL primary — all writes |
+| `postgres-replica` | PostgreSQL replica via streaming — analytical queries |
+| `pgbouncer` | Connection pooler (transaction mode) for the primary |
+| `pgbouncer-read` | Connection pooler for the replica |
+| `redis-master` | Redis master — model cache (DB 0) + rate limiting (DB 1) |
+| `redis-replica-1/2` | Redis replicas — high availability |
+| `redis-sentinel-1/2/3` | Sentinel — automatic failover < 10 s (quorum: 2) |
+| `minio` | S3-compatible object storage (models .joblib, train.py scripts) |
+| `mlflow` | Experiment tracking (metrics, artifacts) |
+| `grafana` | LGTM stack — Prometheus + Loki + Tempo + Grafana |
+| `streamlit` | Multi-page admin dashboard |
 
-## Accès PostgreSQL
+## PostgreSQL Access
 
 ```bash
-# Primary (container_name stable)
+# Primary (stable container_name)
 docker exec -it predictml-postgres psql -U postgres -d sklearn_api
 
-# Ou via psql local
+# Or via local psql
 psql -h localhost -p 5433 -U postgres -d sklearn_api
 ```
 
-## Cache Redis (Sentinel)
+## Redis Cache (Sentinel)
 
 ```bash
-# Se connecter au master (avec auth)
+# Connect to the master (with auth)
 docker exec -it predictml-redis-master redis-cli -a "$REDIS_PASSWORD"
 
-# Vérifier le rôle du master
+# Check the master role
 docker exec -it predictml-redis-master redis-cli -a "$REDIS_PASSWORD" INFO replication | grep role
 
-# Lister les clés en cache
+# List cached keys
 docker exec -it predictml-redis-master redis-cli -a "$REDIS_PASSWORD" KEYS "*"
 
-# Vider le cache des modèles (force le rechargement depuis MinIO)
+# Clear the model cache (forces reload from MinIO)
 docker exec -it predictml-redis-master redis-cli -a "$REDIS_PASSWORD" FLUSHDB
 
-# Vérifier l'état du Sentinel
+# Check Sentinel status
 docker exec predictml-redis-sentinel-1 redis-cli -p 26379 SENTINEL masters
 ```
 
-> **Note** : `REDIS_PASSWORD` est **obligatoire** dans `.env`. Le Sentinel utilise la même
-> variable pour s'authentifier auprès du master et des réplicas.
+> **Note**: `REDIS_PASSWORD` is **required** in `.env`. The Sentinel uses the same
+> variable to authenticate against the master and replicas.
 
-## File d'attente des prédictions (Redis Streams)
+## Prediction Queue (Redis Streams)
 
-Les prédictions POST /predict sont écrites de façon asynchrone via Redis Streams
-pour découpler l'écriture DB du chemin critique de l'inférence.
+POST /predict predictions are written asynchronously via Redis Streams
+to decouple DB writes from the critical inference path.
 
 ```bash
-# Longueur du stream en attente
+# Length of the pending stream
 docker exec -it predictml-redis-master redis-cli -a "$REDIS_PASSWORD" XLEN predictions:new
 
-# Dead Letter Queue (messages en échec après MAX_RETRIES)
+# Dead Letter Queue (messages that failed after MAX_RETRIES)
 docker exec -it predictml-redis-master redis-cli -a "$REDIS_PASSWORD" XLEN predictions:dlq
 
-# Logs du worker
+# Worker logs
 docker-compose logs -f prediction-writer
 ```
 
-En cas de Redis indisponible, le writer repasse automatiquement en mode synchrone.
+If Redis is unavailable, the writer automatically falls back to synchronous mode.
 
-## Migrations Alembic
+## Alembic Migrations
 
-Les migrations sont exécutées par le service `migrate` **avant** le démarrage de l'API.
-En environnement multi-réplicas, cela évite les conflits de migration simultanés.
+Migrations are executed by the `migrate` service **before** the API starts.
+In a multi-replica environment, this avoids simultaneous migration conflicts.
 
 ```bash
-# Lancer manuellement les migrations (si nécessaire)
+# Run migrations manually (if necessary)
 docker-compose run --rm migrate
 
-# Voir l'historique des migrations
+# View migration history
 docker-compose run --rm migrate alembic history
 
-# Créer une nouvelle migration
+# Create a new migration
 docker-compose run --rm migrate alembic revision --autogenerate -m "description"
 ```
 
-## Initialisation (premier déploiement)
+## Initialisation (First Deployment)
 
-> L'API n'a plus de `container_name: predictml-api` (3 réplicas). Utiliser
-> `docker-compose exec` à la place de `docker exec predictml-api`.
+> The API no longer has `container_name: predictml-api` (3 replicas). Use
+> `docker-compose exec` instead of `docker exec predictml-api`.
 
 ```bash
-# Initialiser la base de données et l'utilisateur admin
+# Initialise the database and admin user
 docker-compose exec api python init_data/init_db.py
 ```
 
-## Réinitialisation complète
+## Complete Reset
 
 ```bash
-# Supprime tous les volumes (perte de données)
+# Removes all volumes (data loss)
 docker-compose down -v
 docker-compose up -d --build
 docker-compose exec api python init_data/init_db.py
 ```
 
-## Métriques Prometheus
+## Prometheus Metrics
 
-L'API expose un endpoint de scrape standard sur `GET /metrics` (format `text/plain 0.0.4`).
+The API exposes a standard scrape endpoint on `GET /metrics` (format `text/plain 0.0.4`).
 
-> En mode multi-réplicas, Nginx distribue les requêtes Prometheus entre les réplicas.
-> `PROMETHEUS_MULTIPROC_DIR` agrège les compteurs de tous les workers.
+> In multi-replica mode, Nginx distributes Prometheus requests between replicas.
+> `PROMETHEUS_MULTIPROC_DIR` aggregates counters from all workers.
 
-### Métriques HTTP (prometheus-fastapi-instrumentator)
+### HTTP Metrics (prometheus-fastapi-instrumentator)
 
-| Métrique | Type | Labels |
+| Metric | Type | Labels |
 |---|---|---|
 | `http_requests_total` | Counter | `method`, `handler`, `status_code` |
 | `http_request_duration_seconds` | Histogram | `method`, `handler`, `status_code` |
-| Métriques process Python | Gauge | — |
+| Python process metrics | Gauge | — |
 
-### Métriques ML métier (src/core/ml_metrics.py)
+### Business ML Metrics (src/core/ml_metrics.py)
 
-| Métrique | Type | Labels | Description |
+| Metric | Type | Labels | Description |
 |---|---|---|---|
-| `predictml_predictions_total` | Counter | `model_name`, `version`, `mode`, `status` | Prédictions par modèle et statut |
-| `predictml_inference_duration_seconds` | Histogram | `model_name`, `version` | Durée d'inférence ML pure |
-| `predictml_retrain_total` | Counter | `model_name`, `status` | Ré-entraînements déclenchés |
-| `predictml_drift_detected_total` | Counter | `model_name`, `drift_type`, `severity` | Alertes de drift |
+| `predictml_predictions_total` | Counter | `model_name`, `version`, `mode`, `status` | Predictions by model and status |
+| `predictml_inference_duration_seconds` | Histogram | `model_name`, `version` | Pure ML inference duration |
+| `predictml_retrain_total` | Counter | `model_name`, `status` | Triggered retrains |
+| `predictml_drift_detected_total` | Counter | `model_name`, `drift_type`, `severity` | Drift alerts |
 
-### Vérifier l'endpoint
+### Verify the Endpoint
 
 ```bash
 # Via Nginx (port 80)
 curl http://localhost/metrics
 
-# Si METRICS_TOKEN est défini
+# If METRICS_TOKEN is set
 curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost/metrics
 ```
 
-### Sécuriser l'endpoint (recommandé en production)
+### Securing the Endpoint (recommended in production)
 
 ```bash
-# Dans .env
-METRICS_TOKEN=mon-token-secret
+# In .env
+METRICS_TOKEN=my-secret-token
 ```
 
-Puis mettre à jour `monitoring/prometheus.yml` :
+Then update `monitoring/prometheus.yml`:
 
 ```yaml
 - job_name: predictml-api
   static_configs:
     - targets: ['api:8000']
   authorization:
-    credentials: "mon-token-secret"
+    credentials: "my-secret-token"
 ```
 
-## Dépannage
+## Troubleshooting
 
 ```bash
-# Vérifier l'état des services
+# Check service status
 docker-compose ps
 
-# Vérifier les ports utilisés
+# Check ports in use
 netstat -ano | grep -E "80|8501|5433|9000|5000|6379|3000"
 
-# Redémarrer l'API (tous les réplicas)
+# Restart the API (all replicas)
 docker-compose restart api
 
-# Redémarrer Nginx
+# Restart Nginx
 docker-compose restart nginx
 
-# Redémarrer le Redis master
+# Restart the Redis master
 docker-compose restart redis-master
 
-# Inspecter les logs d'un service
+# Inspect service logs
 docker-compose logs --tail=50 api
 docker-compose logs --tail=50 nginx
 docker-compose logs --tail=50 prediction-writer
 
-# Si l'API ne répond plus via Nginx
+# If the API is no longer responding via Nginx
 docker-compose logs --tail=50 nginx
-docker-compose ps api  # vérifier le health check
+docker-compose ps api  # check the health check
 
-# Si Redis est inaccessible
+# If Redis is unreachable
 docker-compose ps redis-master redis-sentinel-1
 docker-compose logs redis-sentinel-1
 
-# Si les prédictions ne sont pas enregistrées en DB
+# If predictions are not being recorded in DB
 docker-compose logs prediction-writer
 docker exec -it predictml-redis-master redis-cli -a "$REDIS_PASSWORD" XLEN predictions:dlq
 ```
 
-## Variables d'environnement (`.env`)
+## Environment Variables (`.env`)
 
-> **Variables obligatoires** — l'API ou docker-compose refuse de démarrer sans elles.
+> **Required variables** — the API or docker-compose refuses to start without them.
 
-| Variable | Défaut | Obligatoire | Description |
+| Variable | Default | Required | Description |
 |---|---|---|---|
-| `SECRET_KEY` | — | **Oui** | Clé HMAC pour la signature des modèles. Générez avec `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
-| `REDIS_PASSWORD` | — | **Oui** | Mot de passe Redis (master + réplicas + sentinels). |
-| `MINIO_ROOT_USER` | — | **Oui** | Login du compte root MinIO. |
-| `MINIO_ROOT_PASSWORD` | — | **Oui** | Mot de passe du compte root MinIO. |
-| `GRAFANA_ADMIN_PASSWORD` | — | **Oui** | Mot de passe admin Grafana. |
-| `TOKEN_LIFETIME_DAYS` | `90` | Non | Durée de validité des tokens Bearer en jours. |
-| `API_PORT` | `8000` | Non | Port interne de l'API (Nginx écoute sur 80) |
-| `STREAMLIT_PORT` | `8501` | Non | Port du dashboard |
-| `POSTGRES_PORT` | `5433` | Non | Port PostgreSQL exposé à l'hôte |
-| `MINIO_PORT` | `9000` | Non | Port MinIO API |
-| `MINIO_CONSOLE_PORT` | `9001` | Non | Port console MinIO |
-| `MLFLOW_URL` | `http://localhost:5000` | Non | URL MLflow visible depuis le navigateur |
-| `REDIS_URL` | `redis://:$REDIS_PASSWORD@redis-master:6379/0` | Non | URL Redis master (interne Docker) |
-| `REDIS_SENTINEL_HOSTS` | (auto dans compose) | Non | Adresses des sentinels `host:port,...` |
-| `REDIS_CACHE_TTL` | `3600` | Non | Durée de cache des modèles en secondes |
-| `ENABLE_OTEL` | `true` | Non | Activer OpenTelemetry vers Grafana (activé par défaut) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://grafana:4317` | Non | Endpoint OTLP Grafana |
-| `METRICS_TOKEN` | `` | Non | Token Bearer pour protéger `GET /metrics` (vide = public) |
-| `PROMETHEUS_MULTIPROC_DIR` | `/tmp/prometheus_multiproc` | Non | Partage des métriques entre workers |
-| `PREDICTION_STREAM_ENABLED` | `true` | Non | Activer la queue asynchrone Redis Streams pour les writes de prédictions |
-| `PREDICTION_STREAM_BATCH_SIZE` | `100` | Non | Lignes par commit du worker |
-| `PREDICTION_STREAM_FLUSH_MS` | `500` | Non | Délai de flush max du worker en ms |
-| `PREDICTION_STREAM_MAX_RETRIES` | `3` | Non | Tentatives avant envoi en DLQ |
-| `MAX_ROWS_ANALYTICS` | `50000` | Non | Limite de lignes pour les requêtes analytiques |
-| `ANALYTICS_MAX_DAYS` | `90` | Non | Fenêtre temporelle max pour les agrégations |
-| `DATABASE_READ_REPLICA_URL` | (auto dans compose) | Non | URL PostgreSQL replica pour les lectures analytiques |
-| `ADMIN_TOKEN` | `` | Non | Token admin personnalisé (généré auto si vide) |
-| `ENABLE_EMAIL_ALERTS` | `false` | Non | Activer les alertes email |
-| `SMTP_HOST` | `` | Non | Serveur SMTP |
-| `SMTP_PORT` | `587` | Non | Port SMTP |
-| `SMTP_USER` | `` | Non | Utilisateur SMTP |
-| `SMTP_PASSWORD` | `` | Non | Mot de passe SMTP |
-| `SMTP_FROM` | `` | Non | Adresse expéditeur |
-| `ALERT_EMAIL_TO` | `` | Non | Destinataires alertes (séparés par virgules) |
-| `WEEKLY_REPORT_ENABLED` | `false` | Non | Activer le rapport hebdomadaire |
-| `PERFORMANCE_DRIFT_ALERT_THRESHOLD` | `0.10` | Non | Seuil de chute d'accuracy déclenchant une alerte |
-| `ERROR_RATE_ALERT_THRESHOLD` | `0.10` | Non | Taux d'erreur déclenchant une alerte |
-| `MAX_MODEL_SIZE_MB` | `500` | Non | Taille max d'upload d'un fichier `.joblib` |
+| `SECRET_KEY` | — | **Yes** | HMAC key for model signing. Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `REDIS_PASSWORD` | — | **Yes** | Redis password (master + replicas + sentinels). |
+| `MINIO_ROOT_USER` | — | **Yes** | MinIO root account login. |
+| `MINIO_ROOT_PASSWORD` | — | **Yes** | MinIO root account password. |
+| `GRAFANA_ADMIN_PASSWORD` | — | **Yes** | Grafana admin password. |
+| `TOKEN_LIFETIME_DAYS` | `90` | No | Bearer token validity in days. |
+| `API_PORT` | `8000` | No | Internal API port (Nginx listens on 80) |
+| `STREAMLIT_PORT` | `8501` | No | Dashboard port |
+| `POSTGRES_PORT` | `5433` | No | PostgreSQL port exposed to host |
+| `MINIO_PORT` | `9000` | No | MinIO API port |
+| `MINIO_CONSOLE_PORT` | `9001` | No | MinIO console port |
+| `MLFLOW_URL` | `http://localhost:5000` | No | MLflow URL visible from the browser |
+| `REDIS_URL` | `redis://:$REDIS_PASSWORD@redis-master:6379/0` | No | Redis master URL (internal Docker) |
+| `REDIS_SENTINEL_HOSTS` | (auto in compose) | No | Sentinel addresses `host:port,...` |
+| `REDIS_CACHE_TTL` | `3600` | No | Model cache duration in seconds |
+| `ENABLE_OTEL` | `true` | No | Enable OpenTelemetry to Grafana (enabled by default) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://grafana:4317` | No | Grafana OTLP endpoint |
+| `METRICS_TOKEN` | `` | No | Bearer token to protect `GET /metrics` (empty = public) |
+| `PROMETHEUS_MULTIPROC_DIR` | `/tmp/prometheus_multiproc` | No | Shared metrics directory between workers |
+| `PREDICTION_STREAM_ENABLED` | `true` | No | Enable async Redis Streams queue for prediction writes |
+| `PREDICTION_STREAM_BATCH_SIZE` | `100` | No | Rows per worker commit |
+| `PREDICTION_STREAM_FLUSH_MS` | `500` | No | Max worker flush delay in ms |
+| `PREDICTION_STREAM_MAX_RETRIES` | `3` | No | Attempts before sending to DLQ |
+| `MAX_ROWS_ANALYTICS` | `50000` | No | Row limit for analytical queries |
+| `ANALYTICS_MAX_DAYS` | `90` | No | Max time window for aggregations |
+| `DATABASE_READ_REPLICA_URL` | (auto in compose) | No | PostgreSQL replica URL for analytical reads |
+| `ADMIN_TOKEN` | `` | No | Custom admin token (auto-generated if empty) |
+| `ENABLE_EMAIL_ALERTS` | `false` | No | Enable email alerts |
+| `SMTP_HOST` | `` | No | SMTP server |
+| `SMTP_PORT` | `587` | No | SMTP port |
+| `SMTP_USER` | `` | No | SMTP user |
+| `SMTP_PASSWORD` | `` | No | SMTP password |
+| `SMTP_FROM` | `` | No | Sender address |
+| `ALERT_EMAIL_TO` | `` | No | Alert recipients (comma-separated) |
+| `WEEKLY_REPORT_ENABLED` | `false` | No | Enable weekly report |
+| `PERFORMANCE_DRIFT_ALERT_THRESHOLD` | `0.10` | No | Accuracy drop threshold triggering an alert |
+| `ERROR_RATE_ALERT_THRESHOLD` | `0.10` | No | Error rate triggering an alert |
+| `MAX_MODEL_SIZE_MB` | `500` | No | Max upload size for a `.joblib` file |

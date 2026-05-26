@@ -1,223 +1,223 @@
-# Grafana & OpenTelemetry — Guide d'utilisation
+# Grafana & OpenTelemetry — Usage Guide
 
-## Architecture d'observabilité
+## Observability Architecture
 
-PredictML utilise la stack **Grafana LGTM** tout-en-un (`grafana/otel-lgtm`) qui embarque :
+PredictML uses the all-in-one **Grafana LGTM** stack (`grafana/otel-lgtm`) which includes:
 
-| Composant | Rôle | Port interne |
+| Component | Role | Internal Port |
 |---|---|---|
-| **Prometheus** | Scrape les métriques `/metrics` de l'API | 9090 |
-| **Loki** | Stockage des logs structurés | 3100 |
-| **Tempo** | Stockage des traces distribuées | 3200 |
-| **Grafana** | Visualisation — UI accessible | **3000** |
-| **OTel Collector** | Réception OTLP (traces + métriques + logs) | 4317 (gRPC), 4318 (HTTP) |
+| **Prometheus** | Scrapes API `/metrics` | 9090 |
+| **Loki** | Structured log storage | 3100 |
+| **Tempo** | Distributed trace storage | 3200 |
+| **Grafana** | Visualisation — accessible UI | **3000** |
+| **OTel Collector** | OTLP reception (traces + metrics + logs) | 4317 (gRPC), 4318 (HTTP) |
 
 ```
-API FastAPI
+FastAPI API
   │
   ├─► /metrics (Prometheus scrape)  ──────────────► Prometheus ─► Grafana
   │
-  └─► OTLP gRPC :4317 (si ENABLE_OTEL=true)
+  └─► OTLP gRPC :4317 (if ENABLE_OTEL=true)
         ├─► Traces  ──► Tempo  ──► Grafana
-        ├─► Métriques ► Prometheus ─► Grafana
+        ├─► Metrics ──► Prometheus ─► Grafana
         └─► Logs ────► Loki ───► Grafana
 ```
 
-## Accéder à Grafana
+## Accessing Grafana
 
 ```bash
-# Démarrer la stack
+# Start the stack
 docker-compose up -d
 
-# Grafana est disponible sur
+# Grafana is available at
 open http://localhost:3000
 
-# Identifiants par défaut
-# Login    : admin  (configurable via GRAFANA_ADMIN_USER dans .env)
-# Password : valeur de GRAFANA_ADMIN_PASSWORD dans .env
+# Default credentials
+# Login    : admin  (configurable via GRAFANA_ADMIN_USER in .env)
+# Password : value of GRAFANA_ADMIN_PASSWORD in .env
 ```
 
-## Dashboards pré-configurés
+## Pre-configured Dashboards
 
-Les deux dashboards apparaissent automatiquement au démarrage, dans le dossier **General**.
+Both dashboards appear automatically at startup, in the **General** folder.
 
 ### 1. PredictML — API Overview
 
-**Fichier** : `monitoring/grafana/dashboards/api-overview.json`
+**File**: `monitoring/grafana/dashboards/api-overview.json`
 
-| Panel | Métrique | Description |
+| Panel | Metric | Description |
 |---|---|---|
-| Débit (req/s) | `http_requests_total` | Nombre de requêtes par seconde (toutes routes) |
-| Taux d'erreur 5xx | `http_requests_total{status_code=~"5.."}` | Part des erreurs serveur |
-| Latence P95 | `http_request_duration_seconds_bucket` | 95e percentile de durée |
-| Routes actives | `http_requests_total` | Nombre de routes ayant du trafic |
-| Débit par route | par `handler` | Courbe temporelle par endpoint |
-| Latence P50/P95/P99 | histogramme | Percentiles de latence globale |
-| Erreurs HTTP | 4xx + 5xx par route | Évolution temporelle des erreurs |
-| Répartition codes HTTP | donut | Part de chaque code de statut |
-| Top endpoints | table | Routes les plus sollicitées + latences |
-| Mémoire RSS | `process_resident_memory_bytes` | Consommation mémoire du worker |
-| CPU | `process_cpu_seconds_total` | Consommation CPU du worker |
+| Throughput (req/s) | `http_requests_total` | Number of requests per second (all routes) |
+| 5xx error rate | `http_requests_total{status_code=~"5.."}` | Share of server errors |
+| P95 latency | `http_request_duration_seconds_bucket` | 95th percentile of duration |
+| Active routes | `http_requests_total` | Number of routes with traffic |
+| Throughput by route | by `handler` | Time series per endpoint |
+| P50/P95/P99 latency | histogram | Global latency percentiles |
+| HTTP errors | 4xx + 5xx by route | Time-based error evolution |
+| HTTP code distribution | donut | Share of each status code |
+| Top endpoints | table | Most requested routes + latencies |
+| RSS memory | `process_resident_memory_bytes` | Worker memory consumption |
+| CPU | `process_cpu_seconds_total` | Worker CPU consumption |
 
-> Ce dashboard fonctionne **immédiatement** — il ne nécessite pas `ENABLE_OTEL=true`.
+> This dashboard works **immediately** — it does not require `ENABLE_OTEL=true`.
 
 ---
 
 ### 2. PredictML — Model Performance
 
-**Fichier** : `monitoring/grafana/dashboards/model-performance.json`
+**File**: `monitoring/grafana/dashboards/model-performance.json`
 
 | Panel | Source | Description |
 |---|---|---|
-| Volume /predict (req/s) | Prometheus | Taux de prédictions par seconde |
-| Erreurs /predict (%) | Prometheus | Part des 4xx/5xx sur l'endpoint predict |
-| Latence P95 /predict | Prometheus | Latence de l'inférence ML |
-| Volume prédictions (graphe) | Prometheus | Succès vs erreurs client vs erreurs serveur |
-| Latence /predict P50/P95/P99 | Prometheus | Percentiles de durée d'inférence |
-| Erreurs /models | Prometheus | Erreurs sur les routes de gestion de modèles |
-| Événements retrain | **Loki** | Logs des ré-entraînements (OTEL requis) |
-| Alertes drift | **Loki** | Logs de détection de drift (OTEL requis) |
-| Logs d'erreur récents | **Loki** | Lignes ERROR/WARNING (OTEL requis) |
+| /predict volume (req/s) | Prometheus | Prediction rate per second |
+| /predict errors (%) | Prometheus | Share of 4xx/5xx on the predict endpoint |
+| P95 /predict latency | Prometheus | ML inference latency |
+| Prediction volume (chart) | Prometheus | Success vs client errors vs server errors |
+| /predict P50/P95/P99 latency | Prometheus | Inference duration percentiles |
+| /models errors | Prometheus | Errors on model management routes |
+| Retrain events | **Loki** | Retrain logs (OTEL required) |
+| Drift alerts | **Loki** | Drift detection logs (OTEL required) |
+| Recent error logs | **Loki** | ERROR/WARNING lines (OTEL required) |
 
-> Les **panels Loki** (logs) restent vides sans `ENABLE_OTEL=true`.
+> **Loki panels** (logs) remain empty without `ENABLE_OTEL=true`.
 
 ---
 
-## Activer OpenTelemetry (traces + logs → Loki/Tempo)
+## Enabling OpenTelemetry (traces + logs → Loki/Tempo)
 
-Ajouter dans le fichier `.env` :
+Add to the `.env` file:
 
 ```bash
 ENABLE_OTEL=true
-OTEL_SERVICE_NAME=predictml-api          # label service dans Loki/Tempo
-OTEL_EXPORTER_OTLP_ENDPOINT=http://grafana:4317  # déjà défaut en Docker
+OTEL_SERVICE_NAME=predictml-api          # service label in Loki/Tempo
+OTEL_EXPORTER_OTLP_ENDPOINT=http://grafana:4317  # already default in Docker
 ```
 
-Puis redémarrer l'API :
+Then restart the API:
 
 ```bash
 docker-compose restart api
 ```
 
-Une fois activé :
-- Les **logs Python** (structlog) sont bridgés vers Loki via l'OTLP Collector
-- Les **traces** de chaque requête FastAPI et chaque requête SQL sont envoyées à Tempo
-- Les **métriques OTEL** sont également exportées (en complément de Prometheus)
+Once enabled:
+- **Python logs** (structlog) are bridged to Loki via the OTLP Collector
+- **Traces** from each FastAPI request and SQL query are sent to Tempo
+- **OTEL metrics** are also exported (in addition to Prometheus)
 
 ---
 
-## Lire les logs dans Loki (Explore)
+## Reading Logs in Loki (Explore)
 
-1. Aller dans **Grafana → Explore**
-2. Sélectionner le datasource **Loki**
-3. Exemples de requêtes LogQL :
+1. Go to **Grafana → Explore**
+2. Select the **Loki** datasource
+3. Example LogQL queries:
 
 ```logql
-# Tous les logs de l'API
+# All API logs
 {service_name="predictml-api"}
 
-# Logs d'erreur uniquement
+# Error logs only
 {service_name="predictml-api"} | json | level =~ "(?i)(error|critical)"
 
-# Événements de ré-entraînement
+# Retrain events
 {service_name="predictml-api"} |= "retrain" | json
 
-# Prédictions sur un modèle spécifique
+# Predictions on a specific model
 {service_name="predictml-api"} |= "predict" | json | model_name="iris"
 
-# Détection de drift
+# Drift detection
 {service_name="predictml-api"} |= "drift" | json
 
-# Alertes de supervision
+# Supervision alerts
 {service_name="predictml-api"} |= "alert" | json
 
-# Requêtes lentes (latence > 1 s)
+# Slow requests (latency > 1 s)
 {service_name="predictml-api"} | json | response_time > 1000
 ```
 
 ---
 
-## Lire les traces dans Tempo (Explore)
+## Reading Traces in Tempo (Explore)
 
-1. Aller dans **Grafana → Explore**
-2. Sélectionner le datasource **Tempo**
-3. Rechercher par :
-   - **Service** : `predictml-api`
-   - **Span name** : `POST /predict`, `GET /models`, etc.
-   - **Tag** : `http.status_code=500` pour filtrer les erreurs
+1. Go to **Grafana → Explore**
+2. Select the **Tempo** datasource
+3. Search by:
+   - **Service**: `predictml-api`
+   - **Span name**: `POST /predict`, `GET /models`, etc.
+   - **Tag**: `http.status_code=500` to filter errors
 
-Les traces FastAPI sont instrumentées automatiquement par `FastAPIInstrumentor`.  
-Chaque requête crée un span racine avec les tags `http.method`, `http.route`, `http.status_code`.  
-Les requêtes SQL (SQLAlchemy) créent des spans enfants tracés par `SQLAlchemyInstrumentor`.
+FastAPI traces are automatically instrumented by `FastAPIInstrumentor`.  
+Each request creates a root span with the tags `http.method`, `http.route`, `http.status_code`.  
+SQL queries (SQLAlchemy) create child spans traced by `SQLAlchemyInstrumentor`.
 
-### Lien traces → logs
+### Traces → Logs Link
 
-Dans Tempo, cliquer sur un span ouvre un lien **"Logs for this span"** qui filtre Loki  
-sur le `trace_id` correspondant — corrélation automatique requête / logs.
+In Tempo, clicking a span opens a **"Logs for this span"** link that filters Loki  
+on the corresponding `trace_id` — automatic request / logs correlation.
 
 ---
 
-## Métriques Prometheus disponibles
+## Available Prometheus Metrics
 
-### Métriques HTTP (prometheus-fastapi-instrumentator)
+### HTTP Metrics (prometheus-fastapi-instrumentator)
 
-| Métrique | Type | Labels | Description |
+| Metric | Type | Labels | Description |
 |---|---|---|---|
-| `http_requests_total` | Counter | `handler`, `method`, `status_code` | Nombre total de requêtes |
-| `http_request_duration_seconds` | Histogram | `handler`, `method`, `status_code` | Durée des requêtes |
-| `http_request_duration_highr_seconds` | Histogram | `handler`, `method`, `status_code` | Durée (haute résolution) |
-| `http_request_size_bytes` | Histogram | `handler`, `method` | Taille des corps de requêtes |
-| `http_response_size_bytes` | Histogram | `handler`, `method` | Taille des corps de réponses |
+| `http_requests_total` | Counter | `handler`, `method`, `status_code` | Total number of requests |
+| `http_request_duration_seconds` | Histogram | `handler`, `method`, `status_code` | Request duration |
+| `http_request_duration_highr_seconds` | Histogram | `handler`, `method`, `status_code` | Duration (high resolution) |
+| `http_request_size_bytes` | Histogram | `handler`, `method` | Request body size |
+| `http_response_size_bytes` | Histogram | `handler`, `method` | Response body size |
 
-### Métriques process Python
+### Python Process Metrics
 
-| Métrique | Description |
+| Metric | Description |
 |---|---|
-| `process_cpu_seconds_total` | Temps CPU consommé |
-| `process_resident_memory_bytes` | Mémoire RSS |
-| `process_virtual_memory_bytes` | Mémoire virtuelle |
-| `process_open_fds` | Descripteurs de fichiers ouverts |
-| `process_start_time_seconds` | Timestamp de démarrage |
+| `process_cpu_seconds_total` | CPU time consumed |
+| `process_resident_memory_bytes` | RSS memory |
+| `process_virtual_memory_bytes` | Virtual memory |
+| `process_open_fds` | Open file descriptors |
+| `process_start_time_seconds` | Startup timestamp |
 
-### Exemples de requêtes PromQL utiles
+### Useful PromQL Query Examples
 
 ```promql
-# Débit global en req/s
+# Global throughput in req/s
 sum(rate(http_requests_total[5m]))
 
-# Taux d'erreur 5xx en %
+# 5xx error rate in %
 100 * sum(rate(http_requests_total{status_code=~"5.."}[5m]))
     / sum(rate(http_requests_total[5m]))
 
-# P95 de latence globale (ms)
+# Global P95 latency (ms)
 histogram_quantile(0.95,
   sum(rate(http_request_duration_seconds_bucket[5m])) by (le)
 ) * 1000
 
-# P95 de latence /predict uniquement
+# P95 latency for /predict only
 histogram_quantile(0.95,
   sum(rate(http_request_duration_seconds_bucket{handler=~"/predict.*"}[5m])) by (le)
 ) * 1000
 
-# Volume par endpoint
+# Volume by endpoint
 sum(rate(http_requests_total[5m])) by (handler)
 
-# Erreurs par route
+# Errors by route
 sum(rate(http_requests_total{status_code=~"[45].."}[5m])) by (handler, status_code)
 ```
 
 ---
 
-## Authentification de l'endpoint /metrics
+## Securing the /metrics Endpoint
 
-Par défaut en développement, `/metrics` est accessible sans token.  
-En production, définir `METRICS_TOKEN` dans le `.env` :
+By default in development, `/metrics` is accessible without a token.  
+In production, define `METRICS_TOKEN` in the `.env`:
 
 ```bash
 METRICS_TOKEN=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
 ```
 
-Puis mettre à jour `monitoring/prometheus.yml` pour que Prometheus s'authentifie :
+Then update `monitoring/prometheus.yml` so Prometheus can authenticate:
 
 ```yaml
 scrape_configs:
@@ -226,68 +226,68 @@ scrape_configs:
       - targets: ['api:8000']
     metrics_path: /metrics
     authorization:
-      credentials: "<valeur de METRICS_TOKEN>"
+      credentials: "<value of METRICS_TOKEN>"
 ```
 
 ---
 
-## Modifier ou ajouter un dashboard
+## Modifying or Adding a Dashboard
 
-1. Éditer un dashboard dans l'interface Grafana
-2. Exporter via **Dashboard → Share → Export → Save to file**
-3. Remplacer le fichier `.json` correspondant dans `monitoring/grafana/dashboards/`
-4. Grafana recharge automatiquement les fichiers toutes les 30 secondes (configurable via `updateIntervalSeconds` dans `dashboards.yaml`)
+1. Edit a dashboard in the Grafana interface
+2. Export via **Dashboard → Share → Export → Save to file**
+3. Replace the corresponding `.json` file in `monitoring/grafana/dashboards/`
+4. Grafana automatically reloads files every 30 seconds (configurable via `updateIntervalSeconds` in `dashboards.yaml`)
 
-Pour créer un nouveau dashboard depuis zéro et le rendre persistant :
+To create a new dashboard from scratch and make it persistent:
 
 ```bash
-# 1. Créer dans Grafana UI, exporter en JSON
-# 2. Placer dans monitoring/grafana/dashboards/mon-dashboard.json
-# 3. Pas de restart nécessaire — le provider scrute le répertoire
+# 1. Create in Grafana UI, export as JSON
+# 2. Place in monitoring/grafana/dashboards/my-dashboard.json
+# 3. No restart needed — the provider scans the directory
 ```
 
 ---
 
 ## Troubleshooting
 
-### Les dashboards n'apparaissent pas
+### Dashboards don't appear
 
 ```bash
-# Vérifier que les fichiers sont bien montés dans le container
+# Check that the files are properly mounted in the container
 docker exec predictml-grafana ls /etc/grafana/provisioning/dashboards/
 
-# Vérifier les logs Grafana
+# Check Grafana logs
 docker-compose logs grafana | grep -i "dashboard\|provision\|error"
 ```
 
-### Loki est vide
+### Loki is empty
 
-Vérifier que `ENABLE_OTEL=true` est dans le `.env` et que l'API a redémarré :
+Check that `ENABLE_OTEL=true` is in the `.env` and that the API has restarted:
 
 ```bash
 docker-compose logs api | grep -i "otel\|telemetry"
-# Doit afficher : "OpenTelemetry activé — endpoint: http://grafana:4317"
+# Should display: "OpenTelemetry enabled — endpoint: http://grafana:4317"
 ```
 
-### Prometheus ne scrape pas les métriques
+### Prometheus is not scraping metrics
 
 ```bash
-# Vérifier que l'API expose /metrics
+# Check that the API exposes /metrics
 curl http://localhost:8000/metrics
 
-# Si METRICS_TOKEN est défini
+# If METRICS_TOKEN is set
 curl -H "Authorization: Bearer <METRICS_TOKEN>" http://localhost:8000/metrics
 
-# Vérifier dans Grafana → Explore → Prometheus → Metrics browser
-# Chercher : http_requests_total
+# Check in Grafana → Explore → Prometheus → Metrics browser
+# Search for: http_requests_total
 ```
 
-### Tempo ne reçoit pas de traces
+### Tempo is not receiving traces
 
 ```bash
-# Vérifier la connectivité OTLP
+# Check OTLP connectivity
 docker-compose logs api | grep -i "otlp\|span\|trace"
 
-# Tester l'envoi OTLP HTTP
+# Test OTLP HTTP send
 curl -v http://localhost:4318/v1/traces
 ```
