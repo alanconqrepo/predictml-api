@@ -1,25 +1,25 @@
 """
-Tests pour la fonctionnalité de ré-entraînement planifié (cron_schedule).
+Tests for the scheduled retraining feature (cron_schedule).
 
-Couvre :
+Covers:
 - PATCH /models/{name}/{version}/schedule
   - Auth / permissions
-  - Modèle inexistant → 404
-  - Expression cron invalide → 422
-  - enabled=True sans cron → 422
-  - Succès : retrain_schedule stocké avec next_run_at non-null
-  - next_run_at est dans le futur
-  - Désactivation (enabled=False) : schedule stocké avec enabled=False
-- _run_retrain_job() / _do_retrain() (tests unitaires du job)
-  - Skip si schedule.enabled=False
-  - Skip si train_script_object_key absent
-  - Skip si verrou Redis déjà actif
-  - Succès : nouvelle version créée en base
-  - last_run_at mis à jour après succès
-  - Subprocess en échec : pas de nouvelle version
-- Lifecycle scheduler
-  - start_retrain_scheduler() charge les jobs actifs
-  - stop_retrain_scheduler() appelle shutdown(wait=False)
+  - Non-existent model → 404
+  - Invalid cron expression → 422
+  - enabled=True without cron → 422
+  - Success: retrain_schedule stored with non-null next_run_at
+  - next_run_at is in the future
+  - Disable (enabled=False): schedule stored with enabled=False
+- _run_retrain_job() / _do_retrain() (job unit tests)
+  - Skip if schedule.enabled=False
+  - Skip if train_script_object_key is missing
+  - Skip if Redis lock is already held
+  - Success: new version created in database
+  - last_run_at updated after success
+  - Subprocess failure: no new version created
+- Scheduler lifecycle
+  - start_retrain_scheduler() loads active jobs
+  - stop_retrain_scheduler() calls shutdown(wait=False)
 """
 
 import asyncio
@@ -72,7 +72,7 @@ print(json.dumps({"accuracy": 0.97, "f1_score": 0.96}))
 
 @asynccontextmanager
 async def _test_session_cm():
-    """Remplace AsyncSessionLocal par la session SQLite de test."""
+    """Replaces AsyncSessionLocal with the test SQLite session."""
     async with _TestSessionLocal() as session:
         yield session
 
@@ -105,7 +105,7 @@ def _create_model(name: str, version: str = "1.0.0", with_train_script: bool = F
 
 
 # ---------------------------------------------------------------------------
-# Setup utilisateurs
+# User setup
 # ---------------------------------------------------------------------------
 
 
@@ -133,7 +133,7 @@ async def _setup():
 
 asyncio.run(_setup())
 
-# Configurer le mock MinIO pour le scheduler
+# Configure the MinIO mock for the scheduler
 _minio_mock.download_file_bytes.return_value = VALID_TRAIN_SCRIPT.encode()
 _minio_mock.upload_file_bytes.return_value = {
     "bucket": "models",
@@ -143,12 +143,12 @@ _minio_mock.upload_file_bytes.return_value = {
 
 
 # ---------------------------------------------------------------------------
-# Mock subprocess pour les tests de job
+# Subprocess mocks for job tests
 # ---------------------------------------------------------------------------
 
 
 async def _mock_exec_success(*args, **kwargs):
-    """Subprocess mock : écrit un modèle factice et retourne succès (code 0)."""
+    """Subprocess mock: writes a dummy model and returns success (code 0)."""
     env = kwargs.get("env", {})
     output_path = env.get("OUTPUT_MODEL_PATH", "")
     if output_path:
@@ -167,7 +167,7 @@ async def _mock_exec_success(*args, **kwargs):
 
 
 async def _mock_exec_failure(*args, **kwargs):
-    """Subprocess mock : returncode != 0."""
+    """Subprocess mock: returncode != 0."""
     proc = MagicMock()
     proc.returncode = 1
     proc.communicate = AsyncMock(return_value=(b"", b"Error: training failed\n"))
@@ -176,7 +176,7 @@ async def _mock_exec_failure(*args, **kwargs):
 
 
 # ---------------------------------------------------------------------------
-# Tests endpoint PATCH /models/{name}/{version}/schedule
+# Tests for endpoint PATCH /models/{name}/{version}/schedule
 # ---------------------------------------------------------------------------
 
 
@@ -262,13 +262,13 @@ class TestScheduleEndpointSuccess:
     def test_disable_schedule(self):
         name = f"{MODEL_PREFIX}_disable"
         _create_model(name)
-        # D'abord activer
+        # First enable
         client.patch(
             f"/models/{name}/1.0.0/schedule",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
             json={"cron": "0 3 * * 1", "enabled": True},
         )
-        # Puis désactiver
+        # Then disable
         with patch("src.tasks.retrain_scheduler.remove_retrain_job") as mock_remove:
             r = client.patch(
                 f"/models/{name}/1.0.0/schedule",
@@ -282,19 +282,19 @@ class TestScheduleEndpointSuccess:
 
 
 # ---------------------------------------------------------------------------
-# Tests unitaires du job _run_retrain_job / _do_retrain
+# Unit tests for _run_retrain_job / _do_retrain
 # ---------------------------------------------------------------------------
 
 
 class TestRunRetrainJob:
     def test_skips_when_disabled(self):
-        """schedule.enabled=False → _do_retrain s'arrête sans créer de nouveau modèle."""
+        """schedule.enabled=False → _do_retrain stops without creating a new model."""
         from src.db.models import ModelMetadata
 
         name = f"{MODEL_PREFIX}_job_disabled"
         _create_model(name, with_train_script=True)
 
-        # Stocker un schedule désactivé directement en base
+        # Store a disabled schedule directly in the database
         async def _set_disabled():
             async with _TestSessionLocal() as db:
                 result = await db.execute(
@@ -331,11 +331,11 @@ class TestRunRetrainJob:
         assert count_after == count_before
 
     def test_skips_when_no_train_script(self):
-        """train_script_object_key=None → job s'arrête sans créer de nouvelle version."""
+        """train_script_object_key=None → job stops without creating a new version."""
         from src.db.models import ModelMetadata
 
         name = f"{MODEL_PREFIX}_job_noscript"
-        _create_model(name, with_train_script=False)  # sans script
+        _create_model(name, with_train_script=False)  # without script
 
         async def _set_schedule():
             async with _TestSessionLocal() as db:
@@ -373,14 +373,14 @@ class TestRunRetrainJob:
         assert count_after == count_before
 
     def test_skips_when_redis_lock_held(self):
-        """Verrou Redis déjà actif → _do_retrain n'est pas appelé."""
+        """Redis lock already held → _do_retrain is not called."""
         from src.services.model_service import model_service
         from src.tasks.retrain_scheduler import _run_retrain_job
 
         name = f"{MODEL_PREFIX}_job_lock"
         _create_model(name, with_train_script=True)
 
-        # Pré-setter le verrou sur le FakeRedis de test
+        # Pre-set the lock on the test FakeRedis
         lock_key = f"retrain_lock:{name}:1.0.0"
 
         async def _run():
@@ -398,7 +398,7 @@ class TestRunRetrainJob:
         asyncio.run(_run())
 
     def test_success_creates_new_version(self):
-        """Subprocess réussit → une nouvelle version est créée en base."""
+        """Subprocess succeeds → a new version is created in the database."""
         from src.db.models import ModelMetadata
 
         name = f"{MODEL_PREFIX}_job_ok"
@@ -459,7 +459,7 @@ class TestRunRetrainJob:
         assert new_models[0].trained_by == "scheduler"
 
     def test_updates_last_run_at(self):
-        """Après succès, retrain_schedule.last_run_at est mis à jour sur le modèle source."""
+        """After success, retrain_schedule.last_run_at is updated on the source model."""
         from src.db.models import ModelMetadata
 
         name = f"{MODEL_PREFIX}_last_run"
@@ -508,7 +508,7 @@ class TestRunRetrainJob:
         assert sched["last_run_at"] is not None
 
     def test_subprocess_failure_does_not_create_version(self):
-        """Script retourne returncode != 0 → aucune nouvelle version."""
+        """Script returns returncode != 0 → no new version created."""
         from src.db.models import ModelMetadata
 
         name = f"{MODEL_PREFIX}_job_fail"
@@ -555,13 +555,13 @@ class TestRunRetrainJob:
 
 
 # ---------------------------------------------------------------------------
-# Tests lifecycle scheduler
+# Scheduler lifecycle tests
 # ---------------------------------------------------------------------------
 
 
 class TestSchedulerLifecycle:
     def test_start_scheduler_loads_active_jobs(self):
-        """start_retrain_scheduler() ajoute un job pour chaque modèle avec schedule actif."""
+        """start_retrain_scheduler() adds a job for each model with an active schedule."""
         from src.db.models import ModelMetadata
         from src.tasks.retrain_scheduler import start_retrain_scheduler
 
@@ -601,7 +601,7 @@ class TestSchedulerLifecycle:
         mock_sched.start.assert_called_once()
 
     def test_stop_scheduler_calls_shutdown_when_running(self):
-        """stop_retrain_scheduler() avec running=True → shutdown(wait=False) appelé."""
+        """stop_retrain_scheduler() with running=True → shutdown(wait=False) called."""
         from src.tasks.retrain_scheduler import stop_retrain_scheduler
 
         mock_sched = MagicMock()
@@ -613,7 +613,7 @@ class TestSchedulerLifecycle:
         mock_sched.shutdown.assert_called_once_with(wait=False)
 
     def test_stop_scheduler_noop_when_not_running(self):
-        """stop_retrain_scheduler() avec running=False → shutdown n'est pas appelé."""
+        """stop_retrain_scheduler() with running=False → shutdown is not called."""
         from src.tasks.retrain_scheduler import stop_retrain_scheduler
 
         mock_sched = MagicMock()
@@ -626,14 +626,14 @@ class TestSchedulerLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# Tests drift-triggered retrain
+# Drift-triggered retrain tests
 # ---------------------------------------------------------------------------
 
 
 class TestDriftTriggeredRetrain:
     """
-    Vérifie que run_alert_check() déclenche _run_retrain_job via asyncio.create_task
-    quand le drift atteint ou dépasse le seuil configuré dans retrain_schedule.
+    Verifies that run_alert_check() triggers _run_retrain_job via asyncio.create_task
+    when drift reaches or exceeds the threshold configured in retrain_schedule.
     """
 
     @staticmethod
@@ -681,7 +681,7 @@ class TestDriftTriggeredRetrain:
         return r
 
     def _run_check_with_mocks(self, prod_meta, feat_status: str, out_status: str):
-        """Exécute run_alert_check() avec toutes les dépendances mockées."""
+        """Runs run_alert_check() with all dependencies mocked."""
         from src.tasks.supervision_reporter import run_alert_check
 
         model_stat = {
@@ -739,31 +739,31 @@ class TestDriftTriggeredRetrain:
         return mock_retrain_job
 
     def test_trigger_fires_on_critical_input_drift(self):
-        """Drift feature critique + threshold=critical + cooldown expiré → retrain déclenché."""
+        """Critical feature drift + threshold=critical + expired cooldown → retrain triggered."""
         meta = self._make_prod_meta("drift_fire_input", trigger_on_drift="critical")
         mock_job = self._run_check_with_mocks(meta, feat_status="critical", out_status="ok")
         mock_job.assert_called_once_with(meta.name, "1.0.0")
 
     def test_trigger_fires_on_critical_output_drift(self):
-        """Drift de sortie critique + threshold=critical + cooldown expiré → retrain déclenché."""
+        """Critical output drift + threshold=critical + expired cooldown → retrain triggered."""
         meta = self._make_prod_meta("drift_fire_output", trigger_on_drift="critical")
         mock_job = self._run_check_with_mocks(meta, feat_status="ok", out_status="critical")
         mock_job.assert_called_once_with(meta.name, "1.0.0")
 
     def test_no_trigger_if_warning_with_critical_threshold(self):
-        """Drift feature warning + threshold=critical → pas de retrain."""
+        """Warning feature drift + threshold=critical → no retrain."""
         meta = self._make_prod_meta("drift_no_fire_warn", trigger_on_drift="critical")
         mock_job = self._run_check_with_mocks(meta, feat_status="warning", out_status="ok")
         mock_job.assert_not_called()
 
     def test_trigger_fires_when_threshold_is_warning(self):
-        """Drift feature warning + threshold=warning → retrain déclenché."""
+        """Warning feature drift + threshold=warning → retrain triggered."""
         meta = self._make_prod_meta("drift_fire_warn_thresh", trigger_on_drift="warning")
         mock_job = self._run_check_with_mocks(meta, feat_status="warning", out_status="ok")
         mock_job.assert_called_once_with(meta.name, "1.0.0")
 
     def test_cooldown_blocks_second_fire(self):
-        """last_run_at récent (cooldown non expiré) → pas de retrain déclenché."""
+        """Recent last_run_at (cooldown not expired) → no retrain triggered."""
         from datetime import timezone
 
         recent = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
@@ -777,7 +777,7 @@ class TestDriftTriggeredRetrain:
         mock_job.assert_not_called()
 
     def test_no_trigger_without_train_script(self):
-        """Pas de train_script_object_key → retrain non déclenché même si drift critique."""
+        """No train_script_object_key → retrain not triggered even on critical drift."""
         meta = self._make_prod_meta(
             "drift_no_script", trigger_on_drift="critical", has_script=False
         )
@@ -785,8 +785,8 @@ class TestDriftTriggeredRetrain:
         mock_job.assert_not_called()
 
     def test_no_trigger_when_trigger_on_drift_is_null(self):
-        """trigger_on_drift=None → aucun retrain même si drift critique."""
+        """trigger_on_drift=None → no retrain even on critical drift."""
         meta = self._make_prod_meta("drift_null_trigger", trigger_on_drift=None)
-        meta.retrain_schedule = None  # pas de schedule configuré
+        meta.retrain_schedule = None  # no schedule configured
         mock_job = self._run_check_with_mocks(meta, feat_status="critical", out_status="ok")
         mock_job.assert_not_called()

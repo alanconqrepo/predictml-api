@@ -1,15 +1,15 @@
 """
-Tests unitaires — fonctions d'authentification (src/core/security.py).
+Unit tests — authentication functions (src/core/security.py).
 
-Stratégie :
-  Appeler les fonctions async directement via asyncio.run().
-  DBService est mocké avec unittest.mock.patch.
-  Les objets User/HTTPAuthorizationCredentials sont construits avec MagicMock.
+Strategy:
+  Call async functions directly via asyncio.run().
+  DBService is mocked with unittest.mock.patch.
+  User/HTTPAuthorizationCredentials objects are built with MagicMock.
 
-Couvre :
-- verify_token() : token valide, invalide, utilisateur inactif, mise à jour last_login
-- check_prediction_rate_limit() : quota non atteint, exactement atteint, dépassé
-- require_admin() : admin, user, readonly
+Covers:
+- verify_token(): valid token, invalid, inactive user, last_login update
+- check_prediction_rate_limit(): quota not reached, exactly reached, exceeded
+- require_admin(): admin, user, readonly
 """
 
 import asyncio
@@ -29,7 +29,7 @@ def _make_user(
     rate_limit=100,
     token_expires_at=None,
 ):
-    """Construit un objet User mock minimal."""
+    """Build a minimal mock User object."""
     from src.db.models import UserRole
 
     user = MagicMock()
@@ -45,7 +45,7 @@ def _make_user(
 
 
 def _make_credentials(token="valid-token"):
-    """Construit un HTTPAuthorizationCredentials mock."""
+    """Build a mock HTTPAuthorizationCredentials."""
     creds = MagicMock()
     creds.credentials = token
     return creds
@@ -57,10 +57,10 @@ def _make_credentials(token="valid-token"):
 
 
 class TestVerifyToken:
-    """Tests pour verify_token()."""
+    """Tests for verify_token()."""
 
     def test_valid_token_returns_user(self):
-        """Token valide avec user actif → retourne l'utilisateur."""
+        """Valid token with active user → returns the user."""
         from src.core.security import verify_token
 
         mock_user = _make_user(is_active=True)
@@ -84,7 +84,7 @@ class TestVerifyToken:
         assert result is mock_user
 
     def test_invalid_token_raises_401(self):
-        """Token inconnu (None de get_user_by_token) → HTTPException 401."""
+        """Unknown token (None from get_user_by_token) → HTTPException 401."""
         from src.core.security import verify_token
 
         mock_db = MagicMock()
@@ -101,7 +101,7 @@ class TestVerifyToken:
         assert exc_info.value.status_code == 401
 
     def test_inactive_user_raises_403(self):
-        """User trouvé mais is_active=False → HTTPException 403."""
+        """User found but is_active=False → HTTPException 403."""
         from src.core.security import verify_token
 
         mock_user = _make_user(is_active=False)
@@ -119,7 +119,7 @@ class TestVerifyToken:
         assert exc_info.value.status_code == 403
 
     def test_valid_token_calls_update_last_login(self):
-        """Authentification réussie → update_user_last_login est appelé."""
+        """Successful authentication → update_user_last_login is called."""
         from src.core.security import verify_token
 
         mock_user = _make_user(is_active=True, user_id=42)
@@ -143,7 +143,7 @@ class TestVerifyToken:
         mock_update.assert_called_once_with(mock_db, 42)
 
     def test_invalid_token_detail_message(self):
-        """HTTPException 401 contient un message d'erreur."""
+        """HTTPException 401 contains an error message."""
         from src.core.security import verify_token
 
         mock_db = MagicMock()
@@ -160,7 +160,7 @@ class TestVerifyToken:
         assert exc_info.value.detail != ""
 
     def test_expired_token_raises_401(self):
-        """Token dont token_expires_at est dans le passé → HTTPException 401."""
+        """Token with token_expires_at in the past → HTTPException 401."""
         from src.core.security import verify_token
 
         past = datetime.utcnow() - timedelta(days=1)
@@ -179,7 +179,7 @@ class TestVerifyToken:
         assert exc_info.value.status_code == 401
 
     def test_expired_token_detail_says_expire(self):
-        """Le message 401 pour token expiré contient 'expiré'."""
+        """The 401 message for expired token contains 'expired'."""
         from src.core.security import verify_token
 
         past = datetime.utcnow() - timedelta(seconds=1)
@@ -195,10 +195,10 @@ class TestVerifyToken:
 
         with pytest.raises(HTTPException) as exc_info:
             asyncio.run(_run())
-        assert "expiré" in exc_info.value.detail
+        assert "expired" in exc_info.value.detail.lower()
 
     def test_non_expired_token_passes(self):
-        """Token avec token_expires_at dans le futur → authentification réussie."""
+        """Token with token_expires_at in the future → successful authentication."""
         from src.core.security import verify_token
 
         future = datetime.utcnow() + timedelta(days=89)
@@ -222,7 +222,7 @@ class TestVerifyToken:
         assert result is mock_user
 
     def test_no_expiry_token_passes(self):
-        """Token sans token_expires_at (None) → pas de contrôle d'expiration."""
+        """Token without token_expires_at (None) → no expiry check."""
         from src.core.security import verify_token
 
         mock_user = _make_user(is_active=True, token_expires_at=None)
@@ -251,10 +251,10 @@ class TestVerifyToken:
 
 
 class TestCheckPredictionRateLimit:
-    """Tests pour check_prediction_rate_limit()."""
+    """Tests for check_prediction_rate_limit()."""
 
     def test_below_limit_returns_user(self):
-        """Count < rate_limit → retourne l'utilisateur."""
+        """Count < rate_limit → returns the user."""
         from src.core.security import check_prediction_rate_limit
 
         mock_user = _make_user(rate_limit=100)
@@ -307,7 +307,7 @@ class TestCheckPredictionRateLimit:
         assert exc_info.value.status_code == 429
 
     def test_rate_limit_detail_includes_limit_and_count(self):
-        """Le message 429 mentionne le quota et le compteur."""
+        """The 429 message mentions the quota and the counter."""
         from src.core.security import check_prediction_rate_limit
 
         mock_user = _make_user(rate_limit=5)
@@ -323,11 +323,11 @@ class TestCheckPredictionRateLimit:
         with pytest.raises(HTTPException) as exc_info:
             asyncio.run(_run())
         detail = exc_info.value.detail
-        assert "5" in detail  # le quota
-        assert "7" in detail  # le count
+        assert "5" in detail  # the quota
+        assert "7" in detail  # the count
 
     def test_zero_predictions_passes_non_zero_limit(self):
-        """Count=0 avec rate_limit=10 → retourne user (aucun quota consommé)."""
+        """Count=0 with rate_limit=10 → returns user (no quota consumed)."""
         from src.core.security import check_prediction_rate_limit
 
         mock_user = _make_user(rate_limit=10)
@@ -350,10 +350,10 @@ class TestCheckPredictionRateLimit:
 
 
 class TestRequireAdmin:
-    """Tests pour require_admin()."""
+    """Tests for require_admin()."""
 
     def test_admin_role_returns_user(self):
-        """Utilisateur avec role=admin → retourne l'utilisateur."""
+        """User with role=admin → returns the user."""
         from src.core.security import require_admin
 
         mock_user = _make_user(role="admin")
@@ -365,7 +365,7 @@ class TestRequireAdmin:
         assert result is mock_user
 
     def test_user_role_raises_403(self):
-        """Utilisateur avec role=user → HTTPException 403."""
+        """User with role=user → HTTPException 403."""
         from src.core.security import require_admin
 
         mock_user = _make_user(role="user")
@@ -378,7 +378,7 @@ class TestRequireAdmin:
         assert exc_info.value.status_code == 403
 
     def test_readonly_role_raises_403(self):
-        """Utilisateur avec role=readonly → HTTPException 403."""
+        """User with role=readonly → HTTPException 403."""
         from src.core.security import require_admin
 
         mock_user = _make_user(role="readonly")
@@ -391,7 +391,7 @@ class TestRequireAdmin:
         assert exc_info.value.status_code == 403
 
     def test_admin_error_message_contains_administrateurs(self):
-        """Le message 403 contient 'administrateurs'."""
+        """The 403 message mentions administrators."""
         from src.core.security import require_admin
 
         mock_user = _make_user(role="user")
@@ -401,4 +401,4 @@ class TestRequireAdmin:
 
         with pytest.raises(HTTPException) as exc_info:
             asyncio.run(_run())
-        assert "administrateurs" in exc_info.value.detail
+        assert "admin" in exc_info.value.detail.lower()

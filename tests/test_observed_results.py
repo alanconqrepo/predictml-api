@@ -1,5 +1,5 @@
 """
-Tests pour les endpoints POST /observed-results et GET /observed-results
+Tests for the POST /observed-results and GET /observed-results endpoints.
 """
 import asyncio
 from datetime import datetime, timedelta, timezone
@@ -56,7 +56,7 @@ def test_upsert_with_invalid_token():
 
 
 def test_upsert_insert_single():
-    """Insertion d'une ligne — retourne upserted=1"""
+    """Insert a single row — returns upserted=1."""
     response = client.post(
         "/observed-results",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -76,7 +76,7 @@ def test_upsert_insert_single():
 
 
 def test_upsert_insert_multiple():
-    """Insertion de plusieurs lignes"""
+    """Insert multiple rows."""
     response = client.post(
         "/observed-results",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -93,8 +93,8 @@ def test_upsert_insert_multiple():
 
 def test_upsert_overwrites_existing():
     """
-    Soumettre le même (id_obs, model_name) deux fois avec des valeurs différentes
-    doit écraser la ligne — la deuxième valeur est conservée.
+    Submitting the same (id_obs, model_name) twice with different values
+    must overwrite the row — the second value is retained.
     """
     payload_first = {
         "data": [
@@ -111,7 +111,7 @@ def test_upsert_overwrites_existing():
     client.post("/observed-results", headers=headers, json=payload_first)
     client.post("/observed-results", headers=headers, json=payload_second)
 
-    # Vérifier la valeur via GET
+    # Verify value via GET
     r = client.get(
         "/observed-results",
         headers=headers,
@@ -124,7 +124,7 @@ def test_upsert_overwrites_existing():
 
 
 def test_upsert_empty_data_rejected():
-    """Une liste vide doit lever une 422"""
+    """An empty list must raise a 422."""
     response = client.post(
         "/observed-results",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -134,7 +134,7 @@ def test_upsert_empty_data_rejected():
 
 
 def test_upsert_string_result():
-    """observed_result peut être une chaîne"""
+    """observed_result can be a string."""
     response = client.post(
         "/observed-results",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -155,7 +155,7 @@ def test_get_without_auth():
 
 
 def test_get_no_filters_returns_results():
-    """Sans filtre, retourne toutes les lignes avec pagination"""
+    """Without filters, returns all rows with pagination."""
     response = client.get(
         "/observed-results",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -235,7 +235,7 @@ def test_get_pagination_fields():
 
 
 def test_get_response_contains_username():
-    """Chaque résultat expose le username du soumetteur"""
+    """Each result exposes the username of the submitter."""
     r = client.get(
         "/observed-results",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -254,7 +254,7 @@ def test_stats_requires_auth():
 
 
 def test_stats_global_structure():
-    """Sans model_name : retourne les champs globaux et by_model."""
+    """Without model_name: returns global fields and by_model."""
     r = client.get(
         "/observed-results/stats",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -270,7 +270,7 @@ def test_stats_global_structure():
 
 
 def test_stats_model_filter_structure():
-    """Avec model_name : retourne les champs du modèle et by_version."""
+    """With model_name: returns model fields and by_version."""
     r = client.get(
         "/observed-results/stats",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -287,7 +287,7 @@ def test_stats_model_filter_structure():
 
 
 def test_stats_coverage_rate_range():
-    """coverage_rate doit être dans [0, 1]."""
+    """coverage_rate must be in [0, 1]."""
     r = client.get(
         "/observed-results/stats",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -298,7 +298,7 @@ def test_stats_coverage_rate_range():
 
 
 def test_stats_unknown_model_returns_zeros():
-    """Un modèle inconnu retourne 0 partout sans erreur."""
+    """An unknown model returns 0 everywhere without error."""
     r = client.get(
         "/observed-results/stats",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -313,7 +313,7 @@ def test_stats_unknown_model_returns_zeros():
 
 
 def test_stats_labeled_lte_total():
-    """labeled_count ne peut pas dépasser total_predictions."""
+    """labeled_count cannot exceed total_predictions."""
     r = client.get(
         "/observed-results/stats",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
@@ -324,7 +324,7 @@ def test_stats_labeled_lte_total():
 
 
 def test_stats_by_model_coverage_consistent():
-    """Pour chaque modèle dans by_model, coverage = labeled / predictions."""
+    """For each model in by_model, coverage = labeled / predictions."""
     r = client.get(
         "/observed-results/stats",
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},

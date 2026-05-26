@@ -1,17 +1,17 @@
 """
-Tests pour la fonctionnalité de ré-entraînement.
+Tests for the retraining feature.
 
-Couvre :
-- _validate_train_script() : validation statique (unit tests)
-- POST /models avec train_file  : upload + validation à la création
-- POST /models/{name}/{version}/retrain : ré-entraînement (subprocess mocké)
+Covers:
+- _validate_train_script(): static validation (unit tests)
+- POST /models with train_file: upload + validation at creation
+- POST /models/{name}/{version}/retrain: retraining (mocked subprocess)
   - Auth / permissions
-  - Modèle inexistant ou sans script
-  - Succès : nouvelle version créée, métriques extraites depuis stdout
-  - set_production=True : nouvelle version promue en production
-  - Échec script (returncode != 0)
-  - Script qui ne produit pas le fichier modèle
-  - Version en conflit (409)
+  - Non-existent model or missing script
+  - Success: new version created, metrics extracted from stdout
+  - set_production=True: new version promoted to production
+  - Script failure (returncode != 0)
+  - Script that does not produce the model file
+  - Version conflict (409)
 """
 
 import asyncio
@@ -37,7 +37,7 @@ USER_TOKEN = "test-token-retrain-user-ww66"
 MODEL_PREFIX = "retrain_model"
 
 # ---------------------------------------------------------------------------
-# Script de référence respectant le contrat
+# Reference script respecting the contract
 # ---------------------------------------------------------------------------
 
 VALID_TRAIN_SCRIPT = """\
@@ -75,7 +75,7 @@ def make_pkl_bytes() -> bytes:
 
 
 def _create_model(name: str, version: str = "1.0.0", with_train_script: bool = False) -> dict:
-    """Crée un modèle en base via POST /models."""
+    """Create a model in the database via POST /models."""
     files: dict = {
         "file": ("model.joblib", io.BytesIO(make_pkl_bytes()), "application/octet-stream"),
     }
@@ -96,7 +96,7 @@ def _create_model(name: str, version: str = "1.0.0", with_train_script: bool = F
 
 
 # ---------------------------------------------------------------------------
-# Setup utilisateurs
+# User setup
 # ---------------------------------------------------------------------------
 
 
@@ -124,7 +124,7 @@ async def _setup():
 
 asyncio.run(_setup())
 
-# Configurer le mock MinIO pour download_file_bytes (utilisé par le endpoint retrain)
+# Configure the MinIO mock for download_file_bytes (used by the retrain endpoint)
 _minio_mock.download_file_bytes.return_value = VALID_TRAIN_SCRIPT.encode()
 _minio_mock.upload_file_bytes.return_value = {
     "bucket": "models",
@@ -134,13 +134,13 @@ _minio_mock.upload_file_bytes.return_value = {
 
 
 # ---------------------------------------------------------------------------
-# Mocks du sous-processus asyncio
+# asyncio subprocess mocks
 # ---------------------------------------------------------------------------
 
 
 async def _mock_exec_success(*args, **kwargs):
-    """Subprocess mock (ancien format — conservé pour compatibilité).
-    Retourne stdout/stderr via communicate() pour les tests qui en ont besoin."""
+    """Subprocess mock (legacy format — kept for compatibility).
+    Returns stdout/stderr via communicate() for tests that need it."""
     env = kwargs.get("env", {})
     output_path = env.get("OUTPUT_MODEL_PATH", "")
     if output_path:
@@ -162,7 +162,7 @@ async def _mock_exec_success(*args, **kwargs):
 
 
 async def _mock_exec_failure(*args, **kwargs):
-    """Subprocess mock : returncode != 0 → échec du script."""
+    """Subprocess mock: returncode != 0 → script failure."""
     proc = MagicMock()
     proc.returncode = 1
     proc.communicate = AsyncMock(return_value=(b"", b"Error: fichier introuvable\n"))
@@ -171,7 +171,7 @@ async def _mock_exec_failure(*args, **kwargs):
 
 
 async def _mock_exec_no_output_file(*args, **kwargs):
-    """Subprocess mock : returncode 0 mais n'écrit PAS le fichier output."""
+    """Subprocess mock: returncode 0 but does NOT write the output file."""
     proc = MagicMock()
     proc.returncode = 0
     proc.communicate = AsyncMock(return_value=(b"{}", b"Finished (sans sauvegarder)\n"))
@@ -180,12 +180,12 @@ async def _mock_exec_no_output_file(*args, **kwargs):
 
 
 # ---------------------------------------------------------------------------
-# Mocks subprocess pour retrain_service (lecture ligne-par-ligne via readline)
+# Subprocess mocks for retrain_service (line-by-line reading via readline)
 # ---------------------------------------------------------------------------
 
 
 async def _mock_exec_success_service(*args, **kwargs):
-    """Mock pour retrain_service.do_retrain() — utilise readline() + stderr.read()."""
+    """Mock for retrain_service.do_retrain() — uses readline() + stderr.read()."""
     env = kwargs.get("env", {})
     output_path = env.get("OUTPUT_MODEL_PATH", "")
     if output_path:
@@ -215,7 +215,7 @@ async def _mock_exec_failure_service(*args, **kwargs):
     proc = MagicMock()
     proc.returncode = 1
     proc.stdout = AsyncMock()
-    proc.stdout.readline = AsyncMock(side_effect=[b""])  # EOF immédiat
+    proc.stdout.readline = AsyncMock(side_effect=[b""])  # immediate EOF
     proc.stderr = AsyncMock()
     proc.stderr.read = AsyncMock(return_value=b"Error: fichier introuvable\n")
     proc.wait = AsyncMock(return_value=1)
@@ -224,7 +224,7 @@ async def _mock_exec_failure_service(*args, **kwargs):
 
 
 async def _mock_exec_no_output_service(*args, **kwargs):
-    """Mock retrain_service — returncode 0 mais pas de .joblib produit."""
+    """Mock retrain_service — returncode 0 but no .joblib produced."""
     proc = MagicMock()
     proc.returncode = 0
     proc.stdout = AsyncMock()
@@ -237,13 +237,13 @@ async def _mock_exec_no_output_service(*args, **kwargs):
 
 
 # ---------------------------------------------------------------------------
-# Tests unitaires — _validate_train_script()
+# Unit tests — _validate_train_script()
 # ---------------------------------------------------------------------------
 
 
 class TestValidateTrainScript:
     def test_valid_script_returns_none(self):
-        """Un script respectant toutes les contraintes → None (valide)."""
+        """A script respecting all constraints → None (valid)."""
         assert _validate_train_script(VALID_TRAIN_SCRIPT) is None
 
     def test_invalid_syntax_returns_error(self):
@@ -271,8 +271,8 @@ class TestValidateTrainScript:
         assert "OUTPUT_MODEL_PATH" in error
 
     def test_missing_save_call_returns_error(self):
-        """Script sans aucun appel de sauvegarde → erreur (syntaxe valide mais sans save)."""
-        # Script syntaxiquement valide avec tous les tokens requis, mais sans save call
+        """Script without any save call → error (valid syntax but no save call)."""
+        # Syntactically valid script with all required tokens, but no save call
         script_no_save = (
             "import os\n"
             "import json\n"
@@ -286,21 +286,21 @@ class TestValidateTrainScript:
         assert "joblib.dump" in error or "sauvegarder" in error.lower() or "save" in error.lower()
 
     def test_joblib_dump_accepted(self):
-        """joblib.dump est accepté par le validateur."""
-        # VALID_TRAIN_SCRIPT utilise déjà joblib.dump — la validation doit passer
+        """joblib.dump is accepted by the validator."""
+        # VALID_TRAIN_SCRIPT already uses joblib.dump — validation must pass
         assert _validate_train_script(VALID_TRAIN_SCRIPT) is None
 
     def test_save_model_accepted(self):
-        """save_model(...) est une alternative valide à joblib.dump."""
+        """save_model(...) is a valid alternative to joblib.dump."""
         script = VALID_TRAIN_SCRIPT.replace("joblib.dump(model, f)", "save_model(model, f)")
         assert _validate_train_script(script) is None
 
     def test_empty_string_returns_error(self):
-        """Script vide → erreur (aucun token requis présent)."""
+        """Empty script → error (no required tokens present)."""
         assert _validate_train_script("") is not None
 
     def test_all_tokens_present_but_no_save(self):
-        """Tous les tokens d'env présents mais pas de sauvegarde → erreur."""
+        """All env tokens present but no save call → error."""
         script = (
             "import os\n"
             "TRAIN_START_DATE = os.environ['TRAIN_START_DATE']\n"
@@ -312,7 +312,7 @@ class TestValidateTrainScript:
         assert error is not None
 
     def test_disallowed_import_subprocess_rejected(self):
-        """import subprocess → rejeté (module hors allowlist)."""
+        """import subprocess → rejected (module not in allowlist)."""
         script = VALID_TRAIN_SCRIPT.replace(
             "import os\n", "import os\nimport subprocess\n"
         )
@@ -321,7 +321,7 @@ class TestValidateTrainScript:
         assert "subprocess" in error
 
     def test_disallowed_import_requests_rejected(self):
-        """import requests → rejeté (module hors allowlist)."""
+        """import requests → rejected (module not in allowlist)."""
         script = VALID_TRAIN_SCRIPT.replace(
             "import os\n", "import os\nimport requests\n"
         )
@@ -330,7 +330,7 @@ class TestValidateTrainScript:
         assert "requests" in error
 
     def test_disallowed_from_import_socket_rejected(self):
-        """from socket import create_connection → rejeté."""
+        """from socket import create_connection → rejected."""
         script = VALID_TRAIN_SCRIPT.replace(
             "import os\n", "import os\nfrom socket import create_connection\n"
         )
@@ -339,7 +339,7 @@ class TestValidateTrainScript:
         assert "socket" in error
 
     def test_disallowed_import_submodule_rejected(self):
-        """import urllib.request → rejeté (urllib hors allowlist)."""
+        """import urllib.request → rejected (urllib not in allowlist)."""
         script = VALID_TRAIN_SCRIPT.replace(
             "import os\n", "import os\nimport urllib.request\n"
         )
@@ -348,18 +348,18 @@ class TestValidateTrainScript:
         assert "urllib" in error
 
     def test_allowed_sklearn_submodule_accepted(self):
-        """from sklearn.linear_model import LogisticRegression → autorisé."""
+        """from sklearn.linear_model import LogisticRegression → allowed."""
         assert _validate_train_script(VALID_TRAIN_SCRIPT) is None
 
     def test_allowed_numpy_import_accepted(self):
-        """import numpy as np → autorisé."""
+        """import numpy as np → allowed."""
         script = VALID_TRAIN_SCRIPT.replace(
             "import os\n", "import os\nimport numpy as np\n"
         )
         assert _validate_train_script(script) is None
 
     def test_disallowed_import_ctypes_rejected(self):
-        """import ctypes → rejeté."""
+        """import ctypes → rejected."""
         script = VALID_TRAIN_SCRIPT.replace(
             "import os\n", "import os\nimport ctypes\n"
         )
@@ -369,13 +369,13 @@ class TestValidateTrainScript:
 
 
 # ---------------------------------------------------------------------------
-# Tests — POST /models avec train_file
+# Tests — POST /models with train_file
 # ---------------------------------------------------------------------------
 
 
 class TestCreateModelWithTrainFile:
     def test_upload_with_valid_train_file_sets_key(self):
-        """POST /models avec un train.py valide → train_script_object_key non null."""
+        """POST /models with a valid train.py → train_script_object_key not null."""
         r = client.post(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -392,7 +392,7 @@ class TestCreateModelWithTrainFile:
         assert data["train_script_object_key"] == expected_key
 
     def test_upload_without_train_file_key_is_null(self):
-        """POST /models sans train.py → train_script_object_key est null."""
+        """POST /models without train.py → train_script_object_key is null."""
         r = client.post(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -403,7 +403,7 @@ class TestCreateModelWithTrainFile:
         assert r.json()["train_script_object_key"] is None
 
     def test_upload_with_invalid_syntax_returns_422(self):
-        """train.py avec syntaxe invalide → 422."""
+        """train.py with invalid syntax → 422."""
         bad_script = b"def broken(\n    pass\n"
         r = client.post(
             "/models",
@@ -418,7 +418,7 @@ class TestCreateModelWithTrainFile:
         assert "train.py" in r.json()["detail"].lower() or "syntaxe" in r.json()["detail"].lower()
 
     def test_upload_missing_train_start_date_returns_422(self):
-        """train.py sans TRAIN_START_DATE → 422."""
+        """train.py without TRAIN_START_DATE → 422."""
         script = VALID_TRAIN_SCRIPT.replace("TRAIN_START_DATE", "START_DATE")
         r = client.post(
             "/models",
@@ -433,7 +433,7 @@ class TestCreateModelWithTrainFile:
         assert "TRAIN_START_DATE" in r.json()["detail"]
 
     def test_upload_missing_output_model_path_returns_422(self):
-        """train.py sans OUTPUT_MODEL_PATH → 422."""
+        """train.py without OUTPUT_MODEL_PATH → 422."""
         script = VALID_TRAIN_SCRIPT.replace("OUTPUT_MODEL_PATH", "OUTPUT_PATH")
         r = client.post(
             "/models",
@@ -448,7 +448,7 @@ class TestCreateModelWithTrainFile:
         assert "OUTPUT_MODEL_PATH" in r.json()["detail"]
 
     def test_upload_train_file_without_save_call_returns_422(self):
-        """train.py sans joblib.dump/save_model → 422."""
+        """train.py without joblib.dump/save_model → 422."""
         script = VALID_TRAIN_SCRIPT.replace("joblib.dump(model, f)", "# joblib.dump removed")
         r = client.post(
             "/models",
@@ -462,7 +462,7 @@ class TestCreateModelWithTrainFile:
         assert r.status_code == 422
 
     def test_upload_empty_train_file_returns_400(self):
-        """train.py vide → 400."""
+        """Empty train.py → 400."""
         r = client.post(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -484,12 +484,12 @@ class TestRetrainEndpoint:
 
     @classmethod
     def setup_class(cls):
-        """Crée les modèles nécessaires aux tests de retrain."""
-        # Modèle avec script train.py
+        """Create the models needed for retrain tests."""
+        # Model with train.py script
         cls.model_with_script = _create_model(
             f"{MODEL_PREFIX}_has_script", "1.0.0", with_train_script=True
         )
-        # Modèle sans script
+        # Model without script
         cls.model_no_script = _create_model(
             f"{MODEL_PREFIX}_no_script_rt", "1.0.0", with_train_script=False
         )
@@ -497,7 +497,7 @@ class TestRetrainEndpoint:
     # --- Auth / permissions ---
 
     def test_retrain_without_auth_returns_401(self):
-        """POST /retrain sans header Authorization → 401."""
+        """POST /retrain without Authorization header → 401."""
         r = client.post(
             f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
             json={"start_date": "2025-01-01", "end_date": "2025-12-31"},
@@ -505,7 +505,7 @@ class TestRetrainEndpoint:
         assert r.status_code in [401, 403]
 
     def test_retrain_with_non_admin_token_returns_403(self):
-        """POST /retrain avec un token user (non-admin) → 403."""
+        """POST /retrain with a non-admin user token → 403."""
         r = client.post(
             f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
             headers={"Authorization": f"Bearer {USER_TOKEN}"},
@@ -513,10 +513,10 @@ class TestRetrainEndpoint:
         )
         assert r.status_code == 403
 
-    # --- Erreurs métier ---
+    # --- Business errors ---
 
     def test_retrain_model_not_found_returns_404(self):
-        """POST /retrain sur un modèle inexistant → 404."""
+        """POST /retrain on a non-existent model → 404."""
         r = client.post(
             "/models/inexistant_model_xyz/1.0.0/retrain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -525,7 +525,7 @@ class TestRetrainEndpoint:
         assert r.status_code == 404
 
     def test_retrain_without_train_script_returns_400(self):
-        """POST /retrain sur un modèle sans train_script_object_key → 400."""
+        """POST /retrain on a model without train_script_object_key → 400."""
         r = client.post(
             f"/models/{MODEL_PREFIX}_no_script_rt/1.0.0/retrain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -535,23 +535,23 @@ class TestRetrainEndpoint:
         assert "script" in r.json()["detail"].lower() or "train_script" in r.json()["detail"]
 
     def test_retrain_conflict_if_version_exists(self):
-        """POST /retrain avec new_version déjà existante → 409 (vérifié avant enqueue)."""
+        """POST /retrain with an already existing new_version → 409 (checked before enqueue)."""
         r = client.post(
             f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
             json={
                 "start_date": "2025-01-01",
                 "end_date": "2025-12-31",
-                "new_version": "1.0.0",  # version déjà existante
+                "new_version": "1.0.0",  # already existing version
             },
         )
         assert r.status_code == 409
         assert "existe déjà" in r.json()["detail"]
 
-    # --- Succès (202 + job_id avec ARQ) ---
+    # --- Success (202 + job_id with ARQ) ---
 
     def test_retrain_enqueues_job_returns_202(self):
-        """POST /retrain → 202 Accepted avec job_id et statut queued."""
+        """POST /retrain → 202 Accepted with job_id and queued status."""
         r = client.post(
             f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -571,7 +571,7 @@ class TestRetrainEndpoint:
         assert data["triggered_by"] == "retrain_admin"
 
     def test_retrain_enqueues_job_with_set_production(self):
-        """POST /retrain avec set_production=True → 202, le job sera promu après exécution."""
+        """POST /retrain with set_production=True → 202, job will be promoted after execution."""
         r = client.post(
             f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -589,7 +589,7 @@ class TestRetrainEndpoint:
         assert data["new_version"] == "3.0.0"
 
     def test_retrain_auto_generates_version_if_not_provided(self):
-        """POST /retrain sans new_version → 202 avec version auto-générée dans job_id."""
+        """POST /retrain without new_version → 202 with auto-generated version in job_id."""
         r = client.post(
             f"/models/{MODEL_PREFIX}_has_script/1.0.0/retrain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -600,11 +600,11 @@ class TestRetrainEndpoint:
         assert data["status"] == "queued"
         assert data["new_version"]
         assert data["new_version"] != "1.0.0"
-        # La version auto-générée contient le timestamp de type "1.0.0-retrain-YYYYMMDDHHMMSS"
+        # The auto-generated version contains the timestamp in format "1.0.0-retrain-YYYYMMDDHHMMSS"
         assert "retrain" in data["new_version"]
 
     def test_retrain_creates_task_run_in_db(self):
-        """POST /retrain → TaskRun créé en DB avec status=queued."""
+        """POST /retrain → TaskRun created in DB with status=queued."""
         import asyncio
         from src.db.models.task_run import TaskRun
         from tests.conftest import _TestSessionLocal
@@ -637,10 +637,10 @@ class TestRetrainEndpoint:
         assert row.model_name == f"{MODEL_PREFIX}_has_script"
         assert row.new_version == "7.0.0"
 
-    # --- Tests unitaires de la logique retrain (via retrain_service) ---
+    # --- Unit tests for retrain logic (via retrain_service) ---
 
     def test_retrain_service_success(self):
-        """retrain_service.do_retrain() succès → nouvelle version créée + métriques."""
+        """retrain_service.do_retrain() success → new version created + metrics."""
         import asyncio
         from unittest.mock import AsyncMock, MagicMock, patch
         from src.services.retrain_service import do_retrain
@@ -667,7 +667,7 @@ class TestRetrainEndpoint:
         assert result["f1_score"] == pytest.approx(0.93, abs=1e-6)
 
     def test_retrain_service_script_failure(self):
-        """retrain_service.do_retrain() avec script échoué → success=False."""
+        """retrain_service.do_retrain() with failed script → success=False."""
         import asyncio
         from unittest.mock import AsyncMock, patch
         from src.services.retrain_service import do_retrain
@@ -691,7 +691,7 @@ class TestRetrainEndpoint:
         assert "code 1" in result["error"]
 
     def test_retrain_service_no_output_file(self):
-        """retrain_service.do_retrain() sans .joblib produit → success=False."""
+        """retrain_service.do_retrain() with no .joblib produced → success=False."""
         import asyncio
         from unittest.mock import AsyncMock, patch
         from src.services.retrain_service import do_retrain

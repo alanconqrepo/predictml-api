@@ -1,8 +1,8 @@
 """
-Tests pour la détection de data drift.
+Tests for data drift detection.
 
-Couvre :
-- compute_feature_drift (logique pure, pas de DB)
+Covers:
+- compute_feature_drift (pure logic, no DB)
 - summarize_drift
 - GET /models/{name}/drift (endpoint)
 """
@@ -22,7 +22,7 @@ from src.services.drift_service import (
 )
 from src.schemas.model import FeatureDriftResult
 
-# Utilisateur admin fictif injecté via dependency_overrides
+# Fake admin user injected via dependency_overrides
 _FAKE_USER = SimpleNamespace(id=1, username="admin", role="admin", is_active=True)
 AUTH_HEADERS = {"Authorization": "Bearer test-token"}
 
@@ -34,7 +34,7 @@ async def _fake_verify_token():
 
 
 class _AuthOverride:
-    """Context manager qui injecte un faux utilisateur dans les dépendances FastAPI."""
+    """Context manager that injects a fake user into FastAPI dependencies."""
 
     def __enter__(self):
         app.dependency_overrides[verify_token] = _fake_verify_token
@@ -83,32 +83,32 @@ def _fake_metadata(name="iris_model", version="1.0.0", feature_baseline=None):
 
 
 # ---------------------------------------------------------------------------
-# Tests logique pure — compute_feature_drift
+# Tests pure logic — compute_feature_drift
 # ---------------------------------------------------------------------------
 
 
 def test_compute_feature_drift_ok():
-    """Distribution de production proche du baseline → statut ok (z-score)."""
+    """Production distribution close to baseline → status ok (z-score)."""
     baseline = _make_baseline(mean=5.84, std=0.83)
-    # Même mean → z_score = 0 → "ok" garanti
+    # Same mean → z_score = 0 → "ok" guaranteed
     prod = _make_prod_stats(mean=5.84, std=0.83, count=2000)
 
     results = compute_feature_drift(baseline, prod, min_count=30)
 
     assert "sepal_length" in results
     feat = results["sepal_length"]
-    # Avec mean identique, z_score = 0 donc statut ok (PSI peut varier mais z prévaut)
+    # With identical mean, z_score = 0 so status ok (PSI may vary but z takes precedence)
     assert feat.z_score is not None
     assert feat.z_score < 2.0
     assert feat.production_count == 2000
-    # Statut basé sur z → au maximum "ok" pour z=0
-    assert feat.drift_status in ("ok", "warning")  # PSI peut être légèrement > 0.1
+    # Status based on z → at most "ok" for z=0
+    assert feat.drift_status in ("ok", "warning")  # PSI may be slightly > 0.1
 
 
 def test_compute_feature_drift_critical():
-    """Production très éloignée du baseline → statut critical."""
+    """Production very far from baseline → critical status."""
     baseline = _make_baseline(mean=5.84, std=0.83)
-    # Moyenne de production à +5 écarts-types
+    # Production mean at +5 standard deviations
     prod = _make_prod_stats(mean=10.0, std=0.83, count=100)
 
     results = compute_feature_drift(baseline, prod, min_count=30)
@@ -120,9 +120,9 @@ def test_compute_feature_drift_critical():
 
 
 def test_compute_feature_drift_warning():
-    """Production modérément éloignée → statut warning."""
+    """Production moderately far away → warning status."""
     baseline = _make_baseline(mean=5.84, std=0.83)
-    # z ≈ 2.5 (entre 2 et 3)
+    # z ≈ 2.5 (between 2 and 3)
     prod = _make_prod_stats(mean=5.84 + 2.5 * 0.83, std=0.83, count=100)
 
     results = compute_feature_drift(baseline, prod, min_count=30)
@@ -132,7 +132,7 @@ def test_compute_feature_drift_warning():
 
 
 def test_compute_feature_drift_insufficient_data():
-    """Moins de min_count prédictions → statut insufficient_data."""
+    """Less than min_count predictions → insufficient_data status."""
     baseline = _make_baseline()
     prod = _make_prod_stats(count=5)  # 5 < min_count=30
 
@@ -143,8 +143,8 @@ def test_compute_feature_drift_insufficient_data():
 
 
 def test_compute_feature_drift_no_baseline_for_feature():
-    """Feature présente en production mais absente du baseline → no_baseline."""
-    baseline = {}  # pas de baseline pour sepal_length
+    """Feature present in production but absent from baseline → no_baseline."""
+    baseline = {}  # no baseline for sepal_length
     prod = _make_prod_stats(count=100)
 
     results = compute_feature_drift(baseline, prod, min_count=30)
@@ -154,7 +154,7 @@ def test_compute_feature_drift_no_baseline_for_feature():
 
 
 def test_compute_feature_drift_zero_std_in_baseline():
-    """std=0 dans le baseline (feature constante) — pas d'erreur."""
+    """std=0 in baseline (constant feature) — no error."""
     baseline = {"feat": {"mean": 1.0, "std": 0.0, "min": 1.0, "max": 1.0}}
     prod = {
         "feat": {
@@ -168,7 +168,7 @@ def test_compute_feature_drift_zero_std_in_baseline():
     }
 
     results = compute_feature_drift(baseline, prod, min_count=30)
-    # Pas d'erreur, z_score=None car std=0
+    # No error, z_score=None because std=0
     assert results["feat"].z_score is None
 
 
@@ -211,7 +211,7 @@ def test_summarize_drift_all_insufficient():
 
 
 def _patch_db_service(metadata, prod_stats):
-    """Helper pour patcher DBService dans les tests endpoint."""
+    """Helper to patch DBService in endpoint tests."""
     get_meta = AsyncMock(return_value=metadata)
     get_stats = AsyncMock(return_value=prod_stats)
     return (
@@ -221,14 +221,14 @@ def _patch_db_service(metadata, prod_stats):
 
 
 def test_drift_endpoint_model_not_found():
-    """404 si le modèle n'existe pas."""
+    """404 if the model does not exist."""
     with _patch_auth(), patch("src.api.models.DBService.get_model_metadata", AsyncMock(return_value=None)):
         response = client.get("/models/unknown_model/drift", headers=AUTH_HEADERS)
     assert response.status_code == 404
 
 
 def test_drift_endpoint_no_baseline():
-    """drift_summary=no_baseline si feature_baseline est None."""
+    """drift_summary=no_baseline if feature_baseline is None."""
     meta = _fake_metadata(feature_baseline=None)
     prod = _make_prod_stats(count=50)
 
@@ -245,10 +245,10 @@ def test_drift_endpoint_no_baseline():
 
 
 def test_drift_endpoint_with_baseline_ok():
-    """Résultat avec baseline chargé et distribution identique → z_score=0, pas critical."""
+    """Result with loaded baseline and identical distribution → z_score=0, not critical."""
     baseline = {"sepal_length": {"mean": 5.84, "std": 0.83, "min": 4.3, "max": 7.9}}
     meta = _fake_metadata(feature_baseline=baseline)
-    # mean identique → z_score=0 garanti; PSI peut être légèrement > 0 avec 100 samples
+    # identical mean → z_score=0 guaranteed; PSI may be slightly > 0 with 100 samples
     prod = _make_prod_stats(mean=5.84, std=0.83, count=100)
 
     p1, p2 = _patch_db_service(meta, prod)
@@ -261,14 +261,14 @@ def test_drift_endpoint_with_baseline_ok():
     assert data["model_name"] == "iris_model"
     assert data["period_days"] == 7
     feat = data["features"]["sepal_length"]
-    # z_score=0 → pas critical
+    # z_score=0 → not critical
     assert feat["drift_status"] in ("ok", "warning")
     assert feat["baseline_mean"] == pytest.approx(5.84, abs=1e-4)
     assert feat["z_score"] == pytest.approx(0.0, abs=1e-4)
 
 
 def test_drift_endpoint_with_baseline_critical():
-    """Résultat avec forte déviation → critical."""
+    """Result with strong deviation → critical."""
     baseline = {"sepal_length": {"mean": 5.84, "std": 0.83, "min": 4.3, "max": 7.9}}
     meta = _fake_metadata(feature_baseline=baseline)
     prod = _make_prod_stats(mean=10.0, std=0.83, count=100)
@@ -283,10 +283,10 @@ def test_drift_endpoint_with_baseline_critical():
 
 
 def test_drift_endpoint_insufficient_data():
-    """Moins de min_predictions → insufficient_data."""
+    """Less than min_predictions → insufficient_data."""
     baseline = {"sepal_length": {"mean": 5.84, "std": 0.83, "min": 4.3, "max": 7.9}}
     meta = _fake_metadata(feature_baseline=baseline)
-    # 3 prédictions, bien en dessous du min_predictions=30 par défaut
+    # 3 predictions, well below the default min_predictions=30
     prod = _make_prod_stats(count=3)
 
     p1, p2 = _patch_db_service(meta, prod)
@@ -298,13 +298,13 @@ def test_drift_endpoint_insufficient_data():
 
 
 def test_drift_endpoint_no_auth():
-    """Sans token → 401/403."""
+    """Without token → 401/403."""
     response = client.get("/models/iris_model/drift")
     assert response.status_code in (401, 403)
 
 
 def test_drift_endpoint_structure():
-    """Vérifie la structure complète de la réponse."""
+    """Verify the complete response structure."""
     baseline = {"f1": {"mean": 1.0, "std": 0.5, "min": 0.0, "max": 2.0}}
     meta = _fake_metadata(feature_baseline=baseline)
     prod = {
@@ -325,7 +325,7 @@ def test_drift_endpoint_structure():
     assert response.status_code == 200
     data = response.json()
 
-    # Champs obligatoires
+    # Required fields
     for field in ("model_name", "model_version", "period_days", "predictions_analyzed",
                   "baseline_available", "drift_summary", "features"):
         assert field in data, f"Champ manquant : {field}"
@@ -345,45 +345,45 @@ def test_drift_endpoint_structure():
 
 
 def test_null_rate_status_ok_small_diff():
-    """Écart < 5 pts → ok."""
+    """Difference < 5 pts → ok."""
     assert _status_from_null_rate(0.04, 0.0) == "ok"
 
 
 def test_null_rate_status_ok_zero():
-    """Pas de nulls → ok."""
+    """No nulls → ok."""
     assert _status_from_null_rate(0.0, 0.0) == "ok"
 
 
 def test_null_rate_status_warning():
-    """Écart entre 5 et 15 pts → warning."""
+    """Difference between 5 and 15 pts → warning."""
     assert _status_from_null_rate(0.10, 0.0) == "warning"
     assert _status_from_null_rate(0.20, 0.07) == "warning"
 
 
 def test_null_rate_status_critical_diff():
-    """Écart > 15 pts → critical."""
+    """Difference > 15 pts → critical."""
     assert _status_from_null_rate(0.20, 0.0) == "critical"
 
 
 def test_null_rate_status_critical_threshold():
-    """Taux de null > 30 % en production → critical même si baseline élevé."""
+    """Null rate > 30% in production → critical even if baseline is high."""
     assert _status_from_null_rate(0.35, 0.30) == "critical"
 
 
 def test_null_rate_status_boundary_5pts():
-    """5 pts d'écart → warning (diff >= 0.05)."""
+    """5 pts difference → warning (diff >= 0.05)."""
     assert _status_from_null_rate(0.10, 0.05) == "warning"  # diff = 0.05
     assert _status_from_null_rate(0.08, 0.02) == "warning"  # diff = 0.06
 
 
 def test_null_rate_status_boundary_15pts():
-    """Exactement 15 pts d'écart → warning (critique seulement au-delà de 15 pts)."""
-    assert _status_from_null_rate(0.16, 0.01) == "warning"  # diff = 0.15, pas > 0.15
+    """Exactly 15 pts difference → warning (critical only beyond 15 pts)."""
+    assert _status_from_null_rate(0.16, 0.01) == "warning"  # diff = 0.15, not > 0.15
     assert _status_from_null_rate(0.17, 0.01) == "critical"  # diff = 0.16 > 0.15
 
 
 # ---------------------------------------------------------------------------
-# Tests null rate intégrés dans compute_feature_drift
+# Tests null rate integrated in compute_feature_drift
 # ---------------------------------------------------------------------------
 
 
@@ -404,7 +404,7 @@ def _make_prod_stats_with_null(mean=5.84, std=0.83, mn=4.3, mx=7.9, count=100, n
 
 
 def test_compute_feature_drift_null_rate_ok():
-    """Null rate de production proche du baseline → null_rate_status=ok, fields renseignés."""
+    """Production null rate close to baseline → null_rate_status=ok, fields populated."""
     baseline = _make_baseline_with_null(null_rate=0.02)
     prod = _make_prod_stats_with_null(count=100, null_rate=0.04)
 
@@ -417,7 +417,7 @@ def test_compute_feature_drift_null_rate_ok():
 
 
 def test_compute_feature_drift_null_rate_warning():
-    """Null rate production à +10 pts du baseline → null_rate_status=warning."""
+    """Production null rate at +10 pts from baseline → null_rate_status=warning."""
     baseline = _make_baseline_with_null(null_rate=0.0)
     prod = _make_prod_stats_with_null(count=100, null_rate=0.10)
 
@@ -428,7 +428,7 @@ def test_compute_feature_drift_null_rate_warning():
 
 
 def test_compute_feature_drift_null_rate_critical_diff():
-    """Null rate production à +20 pts du baseline → null_rate_status=critical."""
+    """Production null rate at +20 pts from baseline → null_rate_status=critical."""
     baseline = _make_baseline_with_null(null_rate=0.0)
     prod = _make_prod_stats_with_null(count=100, null_rate=0.20)
 
@@ -440,7 +440,7 @@ def test_compute_feature_drift_null_rate_critical_diff():
 
 
 def test_compute_feature_drift_null_rate_critical_absolute():
-    """Null rate > 30 % en production → critical même avec baseline élevé."""
+    """Null rate > 30% in production → critical even with high baseline."""
     baseline = _make_baseline_with_null(null_rate=0.28)
     prod = _make_prod_stats_with_null(count=100, null_rate=0.35)
 
@@ -452,7 +452,7 @@ def test_compute_feature_drift_null_rate_critical_absolute():
 
 
 def test_compute_feature_drift_null_rate_no_baseline_null_rate():
-    """Baseline sans null_rate (ancienne baseline) → null_rate_status=None."""
+    """Baseline without null_rate (old baseline) → null_rate_status=None."""
     baseline = {"sepal_length": {"mean": 5.84, "std": 0.83, "min": 4.3, "max": 7.9}}
     prod = _make_prod_stats_with_null(count=100, null_rate=0.40)
 
@@ -465,7 +465,7 @@ def test_compute_feature_drift_null_rate_no_baseline_null_rate():
 
 
 def test_compute_feature_drift_null_rate_no_baseline_feature():
-    """Feature sans baseline → null_rate_status=None, null_rate_production renseigné."""
+    """Feature without baseline → null_rate_status=None, null_rate_production populated."""
     baseline = {}
     prod = _make_prod_stats_with_null(count=100, null_rate=0.20)
 
@@ -478,7 +478,7 @@ def test_compute_feature_drift_null_rate_no_baseline_feature():
 
 
 def test_compute_feature_drift_null_rate_with_insufficient_data():
-    """Données insuffisantes mais null rate critical → null_rate_status renseigné, drift_status=insufficient_data."""
+    """Insufficient data but critical null rate → null_rate_status populated, drift_status=insufficient_data."""
     baseline = _make_baseline_with_null(null_rate=0.0)
     prod = _make_prod_stats_with_null(count=5, null_rate=0.40)  # 5 < min_count=30
 
@@ -491,12 +491,12 @@ def test_compute_feature_drift_null_rate_with_insufficient_data():
 
 
 # ---------------------------------------------------------------------------
-# Tests summarize_drift avec null_rate_status
+# Tests summarize_drift with null_rate_status
 # ---------------------------------------------------------------------------
 
 
 def test_summarize_drift_null_rate_critical_promotes_summary():
-    """null_rate_status=critical sur une feature avec drift_status=ok → summary=critical."""
+    """null_rate_status=critical on a feature with drift_status=ok → summary=critical."""
     features = {
         "f1": FeatureDriftResult(production_count=100, drift_status="ok", null_rate_status="critical"),
     }
@@ -504,7 +504,7 @@ def test_summarize_drift_null_rate_critical_promotes_summary():
 
 
 def test_summarize_drift_null_rate_warning_promotes_summary():
-    """null_rate_status=warning et toutes les autres ok → summary=warning."""
+    """null_rate_status=warning and all others ok → summary=warning."""
     features = {
         "f1": FeatureDriftResult(production_count=100, drift_status="ok", null_rate_status="warning"),
         "f2": FeatureDriftResult(production_count=100, drift_status="ok", null_rate_status="ok"),
@@ -513,7 +513,7 @@ def test_summarize_drift_null_rate_warning_promotes_summary():
 
 
 def test_summarize_drift_null_rate_critical_with_insufficient_data():
-    """Feature insufficient_data mais null_rate_status=critical → summary=critical."""
+    """Feature insufficient_data but null_rate_status=critical → summary=critical."""
     features = {
         "f1": FeatureDriftResult(production_count=5, drift_status="insufficient_data", null_rate_status="critical"),
     }
@@ -521,7 +521,7 @@ def test_summarize_drift_null_rate_critical_with_insufficient_data():
 
 
 def test_summarize_drift_null_rate_none_no_change():
-    """null_rate_status=None → n'affecte pas le résumé."""
+    """null_rate_status=None → does not affect the summary."""
     features = {
         "f1": FeatureDriftResult(production_count=100, drift_status="ok", null_rate_status=None),
     }
@@ -529,7 +529,7 @@ def test_summarize_drift_null_rate_none_no_change():
 
 
 # ---------------------------------------------------------------------------
-# Tests output drift — compute_output_drift (logique via endpoint)
+# Tests output drift — compute_output_drift (logic via endpoint)
 # ---------------------------------------------------------------------------
 
 
@@ -542,7 +542,7 @@ def _fake_output_metadata(training_stats=None, version="1.0.0"):
 
 
 def _make_output_drift_mocks(label_distribution, label_counts, total):
-    """Retourne les patches nécessaires pour tester compute_output_drift."""
+    """Return the necessary patches to test compute_output_drift."""
     meta = _fake_output_metadata(
         training_stats={"label_distribution": label_distribution}
     )
@@ -555,7 +555,7 @@ def _make_output_drift_mocks(label_distribution, label_counts, total):
 
 
 def test_output_drift_no_baseline():
-    """Modèle sans training_stats.label_distribution → status=no_baseline."""
+    """Model without training_stats.label_distribution → status=no_baseline."""
     meta = _fake_output_metadata(training_stats=None)
 
     with _patch_auth(), patch(
@@ -577,7 +577,7 @@ def test_output_drift_no_baseline():
 
 
 def test_output_drift_empty_label_distribution():
-    """label_distribution vide dans training_stats → status=no_baseline."""
+    """Empty label_distribution in training_stats → status=no_baseline."""
     meta = _fake_output_metadata(training_stats={"label_distribution": {}})
 
     with _patch_auth(), patch(
@@ -596,7 +596,7 @@ def test_output_drift_empty_label_distribution():
 
 
 def test_output_drift_insufficient_data():
-    """Moins de 30 prédictions → status=insufficient_data."""
+    """Less than 30 predictions → status=insufficient_data."""
     label_distribution = {"setosa": 0.33, "versicolor": 0.34, "virginica": 0.33}
     meta = _fake_output_metadata(training_stats={"label_distribution": label_distribution})
 
@@ -618,9 +618,9 @@ def test_output_drift_insufficient_data():
 
 
 def test_output_drift_ok():
-    """Distribution actuelle proche du baseline → status=ok, PSI < 0.1."""
+    """Current distribution close to baseline → status=ok, PSI < 0.1."""
     label_distribution = {"setosa": 0.33, "versicolor": 0.34, "virginica": 0.33}
-    # Counts proportionnels à la baseline → PSI ≈ 0
+    # Counts proportional to baseline → PSI ≈ 0
     label_counts = {"setosa": 33, "versicolor": 34, "virginica": 33}
     total = 100
 
@@ -647,9 +647,9 @@ def test_output_drift_ok():
 
 
 def test_output_drift_warning():
-    """Distribution modérément décalée → status=warning, 0.1 ≤ PSI < 0.2."""
+    """Moderately shifted distribution → status=warning, 0.1 ≤ PSI < 0.2."""
     label_distribution = {"setosa": 0.33, "versicolor": 0.34, "virginica": 0.33}
-    # Déséquilibre modéré
+    # Moderate imbalance
     label_counts = {"setosa": 50, "versicolor": 30, "virginica": 20}
     total = 100
 
@@ -676,9 +676,9 @@ def test_output_drift_warning():
 
 
 def test_output_drift_critical():
-    """Distribution fortement déséquilibrée → status=critical, PSI ≥ 0.2."""
+    """Strongly imbalanced distribution → status=critical, PSI ≥ 0.2."""
     label_distribution = {"setosa": 0.33, "versicolor": 0.34, "virginica": 0.33}
-    # Déséquilibre fort : 90% setosa
+    # Strong imbalance: 90% setosa
     label_counts = {"setosa": 90, "versicolor": 5, "virginica": 5}
     total = 100
 
@@ -699,13 +699,13 @@ def test_output_drift_critical():
     data = resp.json()
     assert data["status"] == "critical"
     assert data["psi"] >= 0.2
-    # by_class doit contenir le delta pour setosa
+    # by_class must contain the delta for setosa
     setosa_class = next(c for c in data["by_class"] if c["label"] == "setosa")
     assert setosa_class["delta"] > 0.5
 
 
 def test_output_drift_by_class_structure():
-    """Vérifie la structure complète de by_class."""
+    """Verify the complete structure of by_class."""
     label_distribution = {"A": 0.5, "B": 0.5}
     label_counts = {"A": 40, "B": 60}
     total = 100
@@ -732,13 +732,13 @@ def test_output_drift_by_class_structure():
         assert "baseline_ratio" in entry
         assert "current_ratio" in entry
         assert "delta" in entry
-    # A a moins que baseline → delta négatif
+    # A has less than baseline → negative delta
     a_entry = next(c for c in by_class if c["label"] == "A")
     assert a_entry["delta"] < 0
 
 
 def test_output_drift_404_unknown_model():
-    """Modèle inexistant → 404."""
+    """Non-existent model → 404."""
     with _patch_auth(), patch(
         "src.services.db_service.DBService.get_model_metadata", new=AsyncMock(return_value=None)
     ):
@@ -750,13 +750,13 @@ def test_output_drift_404_unknown_model():
 
 
 def test_output_drift_auth_required():
-    """Sans token → 401/403."""
+    """Without token → 401/403."""
     resp = client.get("/models/iris/output-drift")
     assert resp.status_code in (401, 403)
 
 
 def test_output_drift_model_version_in_response():
-    """La version du modèle est bien retournée dans la réponse."""
+    """The model version is correctly returned in the response."""
     label_distribution = {"cat": 0.5, "dog": 0.5}
     label_counts = {"cat": 50, "dog": 50}
     meta = _fake_output_metadata(
