@@ -1,10 +1,10 @@
 """
-Tests pour les endpoints de monitoring et leurs helpers internes.
+Tests for monitoring endpoints and their internal helpers.
 
-Couvre :
-- _worst_health(), _error_rate_status(), _performance_drift_status() (helpers purs)
-- GET /monitoring/overview  — auth, validation période, résultat vide, résultat avec données
-- GET /monitoring/model/{name} — auth, modèle inexistant, résultat complet
+Covers:
+- _worst_health(), _error_rate_status(), _performance_drift_status() (pure helpers)
+- GET /monitoring/overview  — auth, period validation, empty result, result with data
+- GET /monitoring/model/{name} — auth, unknown model, full result
 """
 
 import asyncio
@@ -73,9 +73,9 @@ def _create_model(name: str, version: str = "1.0.0") -> dict:
 
 
 def _inject_model_in_cache(model_name: str, version: str = "1.0.0"):
-    """Injecte un modèle LogisticRegression dans le cache Redis de test.
+    """Inject a LogisticRegression model into the test Redis cache.
 
-    La clé Redis doit correspondre au format utilisé par model_service : model:{name}:{version}
+    The Redis key must match the format used by model_service: model:{name}:{version}
     """
     from types import SimpleNamespace
     X, y = load_iris(return_X_y=True)
@@ -101,7 +101,7 @@ def _inject_model_in_cache(model_name: str, version: str = "1.0.0"):
 
 
 def _predict(model_name: str):
-    """Effectue une prédiction simple pour générer des données de monitoring."""
+    """Make a simple prediction to generate monitoring data."""
     _inject_model_in_cache(model_name)
     r = client.post(
         "/predict",
@@ -120,7 +120,7 @@ def _predict(model_name: str):
 
 
 # ---------------------------------------------------------------------------
-# Helper functions — tests unitaires purs (pas de HTTP)
+# Helper functions — pure unit tests (no HTTP)
 # ---------------------------------------------------------------------------
 
 
@@ -137,9 +137,9 @@ def test_worst_health_ok_when_all_ok():
 
 
 def test_worst_health_no_data_same_level_as_ok():
-    """no_data et ok sont au même niveau (0) — le premier retourné dépend de l'ordre."""
+    """no_data and ok are at the same level (0) — the one returned depends on order."""
     result = _worst_health("no_data", "ok")
-    # Les deux ont le même poids (0), le résultat est l'un des deux
+    # Both have the same weight (0), result is either one
     assert result in ("no_data", "ok")
 
 
@@ -164,19 +164,19 @@ def test_error_rate_status_exactly_at_critical_threshold():
 
 
 def test_performance_drift_status_insufficient_data_below_4():
-    """Moins de 4 points → no_data."""
+    """Fewer than 4 data points → no_data."""
     data = [{"accuracy": 0.9, "matched_count": 10}] * 3
     assert _performance_drift_status(data) == "no_data"
 
 
 def test_performance_drift_status_ok_stable():
-    """Accuracy stable → ok."""
+    """Stable accuracy → ok."""
     data = [{"accuracy": 0.90, "matched_count": 10}] * 8
     assert _performance_drift_status(data) == "ok"
 
 
 def test_performance_drift_status_warning_5_percent_drop():
-    """Baisse de ~5 % sur la 2e moitié → warning."""
+    """~5% drop in the second half → warning."""
     first_half = [{"accuracy": 0.90, "matched_count": 10}] * 4
     second_half = [{"accuracy": 0.84, "matched_count": 10}] * 4
     result = _performance_drift_status(first_half + second_half)
@@ -184,14 +184,14 @@ def test_performance_drift_status_warning_5_percent_drop():
 
 
 def test_performance_drift_status_critical_10_percent_drop():
-    """Baisse de ~10 % sur la 2e moitié → critical."""
+    """~10% drop in the second half → critical."""
     first_half = [{"accuracy": 0.95, "matched_count": 10}] * 4
     second_half = [{"accuracy": 0.80, "matched_count": 10}] * 4
     assert _performance_drift_status(first_half + second_half) == "critical"
 
 
 def test_performance_drift_status_no_matched_count():
-    """matched_count = 0 partout → no_data."""
+    """matched_count = 0 everywhere → no_data."""
     data = [{"accuracy": 0.9, "matched_count": 0}] * 8
     assert _performance_drift_status(data) == "no_data"
 
@@ -200,22 +200,22 @@ def test_performance_drift_status_no_matched_count():
 
 
 def test_performance_drift_status_regression_mae_stable():
-    """Régression : MAE stable → ok."""
+    """Regression: stable MAE → ok."""
     data = [{"accuracy": 0.0, "mae": 1.0, "matched_count": 10}] * 8
     assert _performance_drift_status(data) == "ok"
 
 
 def test_performance_drift_status_regression_mae_critical():
-    """Régression : MAE augmente de plus de 10 % → critical."""
+    """Regression: MAE increases by more than 10% → critical."""
     first_half = [{"accuracy": 0.0, "mae": 1.0, "matched_count": 10}] * 4
     second_half = [{"accuracy": 0.0, "mae": 1.12, "matched_count": 10}] * 4
-    # drop = -(-1.0) - (-(-1.12)) = 1.0 - 1.12 = -0.12 en termes de -MAE
+    # drop = -(-1.0) - (-(-1.12)) = 1.0 - 1.12 = -0.12 in terms of -MAE
     # avg_first = -1.0, avg_second = -1.12 → drop = -1.0 - (-1.12) = 0.12 > 0.10
     assert _performance_drift_status(first_half + second_half) == "critical"
 
 
 def test_performance_drift_status_regression_mae_warning():
-    """Régression : MAE augmente entre 5 % et 10 % → warning."""
+    """Regression: MAE increases between 5% and 10% → warning."""
     first_half = [{"accuracy": 0.0, "mae": 1.0, "matched_count": 10}] * 4
     second_half = [{"accuracy": 0.0, "mae": 1.06, "matched_count": 10}] * 4
     result = _performance_drift_status(first_half + second_half)
@@ -223,14 +223,14 @@ def test_performance_drift_status_regression_mae_warning():
 
 
 def test_performance_drift_status_regression_mae_improves():
-    """Régression : MAE diminue → ok (amélioration)."""
+    """Regression: MAE decreases → ok (improvement)."""
     first_half = [{"accuracy": 0.0, "mae": 2.0, "matched_count": 10}] * 4
     second_half = [{"accuracy": 0.0, "mae": 1.0, "matched_count": 10}] * 4
     assert _performance_drift_status(first_half + second_half) == "ok"
 
 
 def test_performance_drift_status_regression_mixed_mae_none():
-    """Régression : certains points ont mae=None → ignorés dans le calcul."""
+    """Regression: some points have mae=None → ignored in the calculation."""
     data = [
         {"accuracy": 0.0, "mae": 1.0, "matched_count": 5},
         {"accuracy": 0.0, "mae": 1.0, "matched_count": 5},
@@ -252,7 +252,7 @@ def test_performance_drift_status_regression_mixed_mae_none():
 
 class TestMonitoringOverview:
     def test_monitoring_overview_requires_auth(self):
-        """Sans Authorization → 401 ou 403."""
+        """Without Authorization → 401 or 403."""
         now = datetime.utcnow()
         r = client.get(
             "/monitoring/overview",
@@ -277,7 +277,7 @@ class TestMonitoringOverview:
         assert r.status_code == 422
 
     def test_monitoring_overview_empty_period_returns_zero_stats(self):
-        """Période sans prédictions → stats à zéro et liste modèles vide."""
+        """Period without predictions → stats at zero and empty model list."""
         future = datetime.utcnow() + timedelta(days=500)
         r = client.get(
             "/monitoring/overview",
@@ -293,7 +293,7 @@ class TestMonitoringOverview:
         assert data["models"] == []
 
     def test_monitoring_overview_with_predictions_returns_model_summaries(self):
-        """Après avoir créé un modèle et fait des prédictions → overview non vide."""
+        """After creating a model and making predictions → non-empty overview."""
         model = f"{MODEL_NAME}_overview"
         _create_model(model)
         _predict(model)
@@ -324,7 +324,7 @@ class TestMonitoringOverview:
 
 class TestMonitoringModelDetail:
     def test_monitoring_model_detail_requires_auth(self):
-        """Sans Authorization → 401 ou 403."""
+        """Without Authorization → 401 or 403."""
         now = datetime.utcnow()
         r = client.get(
             f"/monitoring/model/{MODEL_NAME}_detail",
@@ -349,7 +349,7 @@ class TestMonitoringModelDetail:
         assert r.status_code == 422
 
     def test_monitoring_model_detail_not_found_returns_404(self):
-        """Modèle inexistant → 404."""
+        """Non-existent model → 404."""
         now = datetime.utcnow()
         r = client.get(
             "/monitoring/model/completely_nonexistent_model_xyz789",
@@ -362,7 +362,7 @@ class TestMonitoringModelDetail:
         assert r.status_code == 404
 
     def test_monitoring_model_detail_success(self):
-        """Modèle existant → réponse complète avec les champs attendus."""
+        """Existing model → full response with expected fields."""
         model = f"{MODEL_NAME}_detail"
         _create_model(model)
         _predict(model)
@@ -404,7 +404,7 @@ class TestMonitoringOverviewCSV:
         return p
 
     def test_csv_format_returns_text_csv_content_type(self):
-        """format=csv → Content-Type text/csv."""
+        """format=csv → Content-Type: text/csv."""
         r = client.get(
             "/monitoring/overview",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -414,7 +414,7 @@ class TestMonitoringOverviewCSV:
         assert "text/csv" in r.headers.get("content-type", "")
 
     def test_csv_format_has_content_disposition_attachment(self):
-        """format=csv → Content-Disposition avec attachment et filename .csv."""
+        """format=csv → Content-Disposition with attachment and .csv filename."""
         r = client.get(
             "/monitoring/overview",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -426,7 +426,7 @@ class TestMonitoringOverviewCSV:
         assert ".csv" in cd
 
     def test_csv_format_header_contains_required_columns(self):
-        """CSV retourné contient les colonnes spécifiées."""
+        """Returned CSV contains the specified columns."""
         r = client.get(
             "/monitoring/overview",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -435,10 +435,10 @@ class TestMonitoringOverviewCSV:
         assert r.status_code == 200
         header = r.text.strip().splitlines()[0].split(",")
         for col in ("model_name", "status", "predictions_7d", "error_rate", "latency_p95", "drift_status"):
-            assert col in header, f"colonne manquante : {col}"
+            assert col in header, f"missing column: {col}"
 
     def test_csv_empty_period_returns_header_only(self):
-        """Période sans prédictions → CSV avec uniquement la ligne d'en-tête."""
+        """Period without predictions → CSV with only the header row."""
         future = datetime.utcnow() + timedelta(days=700)
         r = client.get(
             "/monitoring/overview",
@@ -451,10 +451,10 @@ class TestMonitoringOverviewCSV:
         )
         assert r.status_code == 200
         lines = [ln for ln in r.text.strip().splitlines() if ln]
-        assert len(lines) == 1  # uniquement le header
+        assert len(lines) == 1  # header only
 
     def test_csv_contains_model_row_after_prediction(self):
-        """Après une prédiction → le modèle apparaît dans le CSV."""
+        """After a prediction → the model appears in the CSV."""
         model = f"{MODEL_NAME}_csv"
         _create_model(model)
         _predict(model)
@@ -473,7 +473,7 @@ class TestMonitoringOverviewCSV:
         assert model in r.text
 
     def test_csv_model_row_has_correct_values(self):
-        """La ligne du modèle dans le CSV contient un taux d'erreur et statut cohérents."""
+        """The model row in the CSV contains a consistent error rate and status."""
         model = f"{MODEL_NAME}_csv2"
         _create_model(model)
         _predict(model)
@@ -500,7 +500,7 @@ class TestMonitoringOverviewCSV:
         assert float(row["error_rate"]) >= 0.0
 
     def test_csv_invalid_format_returns_422(self):
-        """format=xml → 422 (valeur non autorisée)."""
+        """format=xml → 422 (unsupported value)."""
         r = client.get(
             "/monitoring/overview",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -512,7 +512,7 @@ class TestMonitoringOverviewCSV:
         assert r.status_code == 422
 
     def test_csv_requires_auth(self):
-        """Sans token → 401 ou 403, même avec format=csv."""
+        """Without token → 401 or 403, even with format=csv."""
         r = client.get(
             "/monitoring/overview",
             params=self._params(),

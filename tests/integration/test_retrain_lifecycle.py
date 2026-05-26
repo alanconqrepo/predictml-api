@@ -1,12 +1,12 @@
 """
-Tests d'intégration — cycle de vie complet du ré-entraînement.
+Integration tests — complete retraining lifecycle.
 
-Workflow testé :
-  POST /models avec train_file
+Tested workflow:
+  POST /models with train_file
   → POST /models/{name}/{version}/retrain
-  → GET /models (nouvelle version visible)
-  → GET /models/{name}/history (entrée historique créée)
-  → set_production=True (nouvelle version en production)
+  → GET /models (new version visible)
+  → GET /models/{name}/history (history entry created)
+  → set_production=True (new version in production)
 """
 
 import asyncio
@@ -79,7 +79,7 @@ _minio_mock.upload_file_bytes.return_value = {
 
 
 async def _mock_exec_success(*args, **kwargs):
-    """Subprocess mock : crée un modèle réel et retourne succès."""
+    """Subprocess mock: creates a real model and returns success."""
     env = kwargs.get("env", {})
     output_path = env.get("OUTPUT_MODEL_PATH", "")
     if output_path:
@@ -100,7 +100,7 @@ async def _mock_exec_success(*args, **kwargs):
     return proc
 
 
-# Créer le modèle de base avec train script
+# Create the base model with train script
 _r = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -115,9 +115,9 @@ assert _r.status_code == 201, _r.text
 
 class TestRetrainLifecycle:
     def test_model_has_train_script_key(self):
-        """Modèle créé avec train_file → train_script_object_key non nul dans GET /models."""
-        # GET /models/{name}/{version} utilise ModelGetResponse qui n'expose pas ce champ ;
-        # GET /models (liste) retourne des dicts incluant train_script_object_key.
+        """Model created with train_file → train_script_object_key non-null in GET /models."""
+        # GET /models/{name}/{version} uses ModelGetResponse which doesn't expose this field;
+        # GET /models (list) returns dicts including train_script_object_key.
         r = client.get(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -128,11 +128,11 @@ class TestRetrainLifecycle:
             (m for m in models if m.get("name") == RT_MODEL and m.get("version") == "1.0.0"),
             None,
         )
-        assert v1 is not None, f"{RT_MODEL} 1.0.0 absent de GET /models"
+        assert v1 is not None, f"{RT_MODEL} 1.0.0 missing from GET /models"
         assert v1["train_script_object_key"] is not None
 
     def test_retrain_creates_new_version(self):
-        """POST /retrain → 202 Accepted avec job_id (ARQ async)."""
+        """POST /retrain → 202 Accepted with job_id (ARQ async)."""
         r = client.post(
             f"/models/{RT_MODEL}/1.0.0/retrain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -150,7 +150,7 @@ class TestRetrainLifecycle:
         assert data["model_name"] == RT_MODEL
 
     def test_retrain_new_version_visible_in_models_list(self):
-        """Après retrain, le modèle est toujours dans la liste des modèles."""
+        """After retrain, the model is still in the models list."""
         r = client.get(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -161,7 +161,7 @@ class TestRetrainLifecycle:
         assert RT_MODEL in model_names
 
     def test_retrain_set_production_promotes_new_version(self):
-        """set_production=True → 202 Accepted, le worker promotera après exécution."""
+        """set_production=True → 202 Accepted, the worker will promote after execution."""
         r = client.post(
             f"/models/{RT_MODEL}/1.0.0/retrain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -179,8 +179,8 @@ class TestRetrainLifecycle:
         assert data["new_version"] == "3.0.0"
 
     def test_retrain_without_script_returns_400(self):
-        """Modèle sans train_script → POST /retrain → 400."""
-        # Créer un modèle sans train script
+        """Model without train_script → POST /retrain → 400."""
+        # Create a model without a train script
         r_create = client.post(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -197,7 +197,7 @@ class TestRetrainLifecycle:
         assert r.status_code == 400
 
     def test_retrain_history_entry_created(self):
-        """Après retrain, l'historique du modèle contient une entrée de type retrain."""
+        """After retrain, the model history contains an entry of type retrain."""
         r = client.get(
             f"/models/{RT_MODEL}/history",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -205,6 +205,6 @@ class TestRetrainLifecycle:
         assert r.status_code == 200
         data = r.json()
         assert data["total"] >= 1
-        # Il doit y avoir au moins une entrée d'historique (created ou retrained)
+        # There must be at least one history entry (created or retrained)
         actions = [e["action"] for e in data["entries"]]
         assert any(a in ("created", "retrained") for a in actions)

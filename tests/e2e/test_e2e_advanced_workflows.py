@@ -1,13 +1,13 @@
 """
-Tests E2E — workflows avancés : batch predict, SHAP explain, A/B testing.
+E2E tests — advanced workflows: batch predict, SHAP explain, A/B testing.
 
-Scénarios :
-  1. POST /predict-batch → 5 prédictions, structure résultats, historique
-  2. POST /explain → valeurs SHAP, clés features, base_value
-  3. A/B testing : deux versions → GET /ab-compare → stats par version
+Scenarios:
+  1. POST /predict-batch → 5 predictions, result structure, history
+  2. POST /explain → SHAP values, feature keys, base_value
+  3. A/B testing: two versions → GET /ab-compare → per-version stats
 
-Utilise SQLite in-memory + FakeRedis + MinIO mock global.
-Token admin : e2e-adv-admin-token-ll22
+Uses SQLite in-memory + FakeRedis + global MinIO mock.
+Admin token: e2e-adv-admin-token-ll22
 """
 
 import asyncio
@@ -43,7 +43,7 @@ FEATURES = {
 
 
 def _make_lr_pkl() -> bytes:
-    """Modèle LogisticRegression sérialisé."""
+    """Serialized LogisticRegression model."""
     X, y = load_iris(return_X_y=True)
     _jbuf = io.BytesIO()
     joblib.dump(LogisticRegression(max_iter=200).fit(X, y), _jbuf)
@@ -51,7 +51,7 @@ def _make_lr_pkl() -> bytes:
 
 
 def _make_rf_pkl() -> bytes:
-    """Modèle RandomForest sérialisé (tree-based pour SHAP TreeExplainer)."""
+    """Serialized RandomForest model (tree-based for SHAP TreeExplainer)."""
     X, y = load_iris(return_X_y=True)
     _jbuf = io.BytesIO()
     joblib.dump(RandomForestClassifier(n_estimators=10, random_state=42).fit(X, y), _jbuf)
@@ -59,7 +59,7 @@ def _make_rf_pkl() -> bytes:
 
 
 def _inject_cache(name: str, version: str, use_rf: bool = False):
-    """Injecte le modèle dans Redis avec feature_names_in_ configuré."""
+    """Inject the model into Redis with feature_names_in_ configured."""
     X, y = load_iris(return_X_y=True)
     if use_rf:
         model = RandomForestClassifier(n_estimators=10, random_state=42).fit(X, y)
@@ -82,7 +82,7 @@ def _inject_cache(name: str, version: str, use_rf: bool = False):
 
 
 async def _setup():
-    """Crée l'utilisateur admin."""
+    """Create the admin user."""
     async with _TestSessionLocal() as db:
         if not await DBService.get_user_by_token(db, ADMIN_TOKEN):
             await DBService.create_user(
@@ -98,7 +98,7 @@ async def _setup():
 
 asyncio.run(_setup())
 
-# Créer les modèles et injecter dans le cache
+# Create models and inject into cache
 _r_batch = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -117,7 +117,7 @@ _r_explain = client.post(
 assert _r_explain.status_code == 201, _r_explain.text
 _inject_cache(ADV_EXPLAIN_MODEL, "1.0.0", use_rf=True)
 
-# Modèle A/B — créer v1 (production) et v2 (ab_test)
+# A/B model — create v1 (production) and v2 (ab_test)
 _r_ab_v1 = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -125,7 +125,7 @@ _r_ab_v1 = client.post(
     data={"name": ADV_AB_MODEL, "version": "1.0.0"},
 )
 assert _r_ab_v1.status_code == 201, _r_ab_v1.text
-# PATCH pour mettre v1 en production
+# PATCH to set v1 in production
 _r_ab_v1_patch = client.patch(
     f"/models/{ADV_AB_MODEL}/1.0.0",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -141,7 +141,7 @@ _r_ab_v2 = client.post(
     data={"name": ADV_AB_MODEL, "version": "2.0.0"},
 )
 assert _r_ab_v2.status_code == 201, _r_ab_v2.text
-# PATCH pour configurer v2 en ab_test
+# PATCH to configure v2 as ab_test
 _r_ab_v2_patch = client.patch(
     f"/models/{ADV_AB_MODEL}/2.0.0",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -157,10 +157,10 @@ _inject_cache(ADV_AB_MODEL, "2.0.0")
 
 
 class TestBatchPredictE2E:
-    """Tests E2E pour POST /predict-batch."""
+    """E2E tests for POST /predict-batch."""
 
     def test_01_batch_returns_correct_count(self):
-        """POST /predict-batch avec 5 inputs → 5 résultats."""
+        """POST /predict-batch with 5 inputs → 5 results."""
         inputs = [{"features": FEATURES} for _ in range(5)]
         r = client.post(
             "/predict-batch",
@@ -172,7 +172,7 @@ class TestBatchPredictE2E:
         assert len(data["predictions"]) == 5
 
     def test_02_batch_each_result_has_prediction(self):
-        """Chaque résultat du batch contient un champ 'prediction'."""
+        """Each batch result contains a 'prediction' field."""
         inputs = [{"features": FEATURES} for _ in range(3)]
         r = client.post(
             "/predict-batch",
@@ -184,7 +184,7 @@ class TestBatchPredictE2E:
             assert "prediction" in result
 
     def test_03_batch_with_id_obs_stores_in_history(self):
-        """Batch avec id_obs → entrées dans GET /predictions."""
+        """Batch with id_obs → entries in GET /predictions."""
         obs_ids = [f"e2e-adv-batch-obs-{i}" for i in range(3)]
         inputs = [{"features": FEATURES, "id_obs": oid} for oid in obs_ids]
         client.post(
@@ -208,7 +208,7 @@ class TestBatchPredictE2E:
         assert r.json()["total"] >= 3
 
     def test_04_batch_unknown_model_returns_404(self):
-        """POST /predict-batch sur modèle inexistant → 404."""
+        """POST /predict-batch on a non-existent model → 404."""
         r = client.post(
             "/predict-batch",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -220,7 +220,7 @@ class TestBatchPredictE2E:
         assert r.status_code == 404
 
     def test_05_batch_requires_auth(self):
-        """POST /predict-batch sans token → 401 ou 403."""
+        """POST /predict-batch without token → 401 or 403."""
         r = client.post(
             "/predict-batch",
             json={"model_name": ADV_BATCH_MODEL, "inputs": [{"features": FEATURES}]},
@@ -228,7 +228,7 @@ class TestBatchPredictE2E:
         assert r.status_code in (401, 403)
 
     def test_06_batch_single_input_works(self):
-        """Batch de 1 seul input → fonctionne normalement."""
+        """Batch of 1 input → works normally."""
         r = client.post(
             "/predict-batch",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -244,10 +244,10 @@ class TestBatchPredictE2E:
 
 
 class TestExplainE2E:
-    """Tests E2E pour POST /explain."""
+    """E2E tests for POST /explain."""
 
     def test_01_explain_returns_shap_values_and_base_value(self):
-        """POST /explain → réponse avec feature_importance et base_value."""
+        """POST /explain → response with feature_importance and base_value."""
         r = client.post(
             "/explain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -259,7 +259,7 @@ class TestExplainE2E:
         assert "base_value" in data
 
     def test_02_explain_feature_importance_keys_match_features(self):
-        """Les clés de feature_importance correspondent aux noms de features."""
+        """The feature_importance keys match the feature names."""
         r = client.post(
             "/explain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -273,7 +273,7 @@ class TestExplainE2E:
             assert feature_name in importance_dict
 
     def test_03_explain_requires_auth(self):
-        """POST /explain sans token → 401 ou 403."""
+        """POST /explain without token → 401 or 403."""
         r = client.post(
             "/explain",
             json={"model_name": ADV_EXPLAIN_MODEL, "features": FEATURES},
@@ -281,7 +281,7 @@ class TestExplainE2E:
         assert r.status_code in (401, 403)
 
     def test_04_explain_unknown_model_returns_404(self):
-        """POST /explain sur modèle inexistant → 404."""
+        """POST /explain on a non-existent model → 404."""
         r = client.post(
             "/explain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -290,7 +290,7 @@ class TestExplainE2E:
         assert r.status_code == 404
 
     def test_05_explain_model_name_in_response(self):
-        """La réponse contient le nom du modèle."""
+        """The response contains the model name."""
         r = client.post(
             "/explain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -306,10 +306,10 @@ class TestExplainE2E:
 
 
 class TestABTestingE2E:
-    """Tests E2E pour le setup A/B et GET /ab-compare."""
+    """E2E tests for A/B setup and GET /ab-compare."""
 
     def test_01_ab_two_versions_visible_in_models_list(self):
-        """Les deux versions A/B apparaissent dans GET /models."""
+        """Both A/B versions appear in GET /models."""
         r = client.get(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -321,7 +321,7 @@ class TestABTestingE2E:
         assert "2.0.0" in versions
 
     def test_02_predict_on_ab_model_returns_valid_result(self):
-        """POST /predict sur modèle A/B → prédiction valide."""
+        """POST /predict on A/B model → valid prediction."""
         r = client.post(
             "/predict",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -332,7 +332,7 @@ class TestABTestingE2E:
 
     def test_03_ab_compare_endpoint_returns_200(self):
         """GET /models/{name}/ab-compare → 200."""
-        # Générer quelques prédictions d'abord
+        # Generate a few predictions first
         for _ in range(3):
             client.post(
                 "/predict",
@@ -347,23 +347,23 @@ class TestABTestingE2E:
         assert r.status_code == 200
 
     def test_04_ab_compare_has_versions_field(self):
-        """GET /ab-compare retourne une structure avec des données par version."""
+        """GET /ab-compare returns a structure with per-version data."""
         r = client.get(
             f"/models/{ADV_AB_MODEL}/ab-compare",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
         )
         assert r.status_code == 200
         data = r.json()
-        # La réponse doit contenir des infos sur les versions
+        # The response must contain info about the versions
         assert data is not None
 
     def test_05_ab_compare_requires_auth(self):
-        """GET /ab-compare sans token → 401 ou 403."""
+        """GET /ab-compare without token → 401 or 403."""
         r = client.get(f"/models/{ADV_AB_MODEL}/ab-compare")
         assert r.status_code in (401, 403)
 
     def test_06_ab_compare_unknown_model_returns_404(self):
-        """GET /ab-compare sur modèle inexistant → 404."""
+        """GET /ab-compare on a non-existent model → 404."""
         r = client.get(
             "/models/unknown_ab_model_xyz/ab-compare",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -371,7 +371,7 @@ class TestABTestingE2E:
         assert r.status_code == 404
 
     def test_07_ab_v2_has_ab_test_deployment_mode(self):
-        """La version 2.0.0 a deployment_mode='ab_test'."""
+        """Version 2.0.0 has deployment_mode='ab_test'."""
         r = client.get(
             "/models",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},

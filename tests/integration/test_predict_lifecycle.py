@@ -1,12 +1,12 @@
 """
-Tests d'intégration — cycle de vie complet d'une prédiction.
+Integration tests — complete prediction lifecycle.
 
-Workflow testé :
+Tested workflow:
   POST /models → POST /predict → GET /predictions → POST /observed-results
-  → GET /predictions/stats → vérification cohérence
+  → GET /predictions/stats → consistency verification
 
-Ces tests exercent plusieurs composants en enchaînant de vrais appels API
-avec SQLite in-memory + FakeRedis + MinIO mock.
+These tests exercise multiple components by chaining real API calls
+with SQLite in-memory + FakeRedis + MinIO mock.
 """
 
 import asyncio
@@ -53,7 +53,7 @@ def _make_pkl() -> bytes:
 
 
 def _inject_cache(model_name: str, version: str = MODEL_VERSION):
-    """Injecte le modèle dans Redis avec la bonne clé."""
+    """Inject the model into Redis with the correct key."""
     X, y = load_iris(return_X_y=True)
     model = LogisticRegression(max_iter=200).fit(X, y)
     model.feature_names_in_ = list(FEATURES.keys())
@@ -93,7 +93,7 @@ async def _setup():
 
 asyncio.run(_setup())
 
-# Créer le modèle une fois pour tous les tests
+# Create the model once for all tests
 _model_response = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -105,15 +105,15 @@ _inject_cache(PL_MODEL)
 
 
 # ---------------------------------------------------------------------------
-# Tests d'intégration
+# Integration tests
 # ---------------------------------------------------------------------------
 
 
 class TestPredictLifecycle:
     def test_predict_success_and_in_history(self):
-        """Prédiction → résultat dans l'historique."""
-        # Utilise ADMIN_TOKEN pour predict ET query afin d'éviter le lazy-load
-        # de p.user sur un utilisateur différent de celui qui requête (MissingGreenlet)
+        """Prediction → result in history."""
+        # Uses ADMIN_TOKEN for predict AND query to avoid lazy-loading
+        # p.user for a different user than the one querying (MissingGreenlet)
         r = client.post(
             "/predict",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -123,7 +123,7 @@ class TestPredictLifecycle:
         pred_result = r.json()
         assert "prediction" in pred_result
 
-        # Vérifier que la prédiction est dans l'historique
+        # Verify that the prediction is in history
         now = datetime.utcnow()
         hist = client.get(
             "/predictions",
@@ -142,7 +142,7 @@ class TestPredictLifecycle:
         assert PL_MODEL in model_names
 
     def test_batch_predict_then_history(self):
-        """Prédiction batch → plusieurs entrées dans l'historique."""
+        """Batch prediction → multiple entries in history."""
         batch_inputs = [{"features": FEATURES} for _ in range(3)]
         r = client.post(
             "/predict-batch",
@@ -154,7 +154,7 @@ class TestPredictLifecycle:
         assert len(data["predictions"]) == 3
 
     def test_predict_with_id_obs_then_add_observed_result(self):
-        """Prédiction avec id_obs puis ajout de résultat observé."""
+        """Prediction with id_obs then adding an observed result."""
         obs_id = "lifecycle-integ-obs-1"
         r_pred = client.post(
             "/predict",
@@ -163,7 +163,7 @@ class TestPredictLifecycle:
         )
         assert r_pred.status_code == 200
 
-        # Ajouter le résultat observé — le corps attend {"data": [...]} avec date_time
+        # Add the observed result — body expects {"data": [...]} with date_time
         r_obs = client.post(
             "/observed-results",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -183,8 +183,8 @@ class TestPredictLifecycle:
         assert data["upserted"] >= 1
 
     def test_prediction_stats_after_predictions(self):
-        """Après prédictions, GET /predictions/stats renvoie des stats pour le modèle."""
-        # Faire quelques prédictions
+        """After predictions, GET /predictions/stats returns stats for the model."""
+        # Make a few predictions
         for _ in range(2):
             client.post(
                 "/predict",
@@ -204,7 +204,7 @@ class TestPredictLifecycle:
         )
         assert r.status_code == 200
         data = r.json()
-        # Les stats doivent avoir au moins un résultat pour PL_MODEL
+        # Stats must have at least one result for PL_MODEL
         if isinstance(data, list):
             model_stats = [s for s in data if s.get("model_name") == PL_MODEL]
             assert len(model_stats) > 0
@@ -212,20 +212,20 @@ class TestPredictLifecycle:
             assert data.get("total_predictions", 0) >= 0
 
     def test_predict_missing_features_returns_422_or_500(self):
-        """Prédiction avec features incomplètes → erreur (422 validation ou 500 runtime)."""
+        """Prediction with incomplete features → error (422 validation or 500 runtime)."""
         r = client.post(
             "/predict",
             headers={"Authorization": f"Bearer {USER_TOKEN}"},
             json={
                 "model_name": PL_MODEL,
-                "features": {},  # features vides
+                "features": {},  # empty features
             },
         )
-        # Selon implémentation, 422 (validation Pydantic) ou 500 (erreur sklearn)
+        # Depending on implementation, 422 (Pydantic validation) or 500 (sklearn error)
         assert r.status_code in (422, 500)
 
     def test_predict_unknown_model_returns_error(self):
-        """Prédiction sur modèle inexistant → 404."""
+        """Prediction on a non-existent model → 404."""
         r = client.post(
             "/predict",
             headers={"Authorization": f"Bearer {USER_TOKEN}"},
@@ -234,9 +234,9 @@ class TestPredictLifecycle:
         assert r.status_code == 404
 
     def test_get_predictions_pagination(self):
-        """GET /predictions avec pagination → limit et offset fonctionnent."""
-        # D'abord générer quelques prédictions avec ADMIN_TOKEN (même utilisateur
-        # que celui qui requête) pour éviter le lazy-load cross-user (MissingGreenlet)
+        """GET /predictions with pagination → limit and offset work."""
+        # First generate some predictions with ADMIN_TOKEN (same user
+        # as the one querying) to avoid cross-user lazy-load (MissingGreenlet)
         for _ in range(3):
             client.post(
                 "/predict",
@@ -260,7 +260,7 @@ class TestPredictLifecycle:
         assert len(data["predictions"]) <= 2
 
     def test_observed_result_overwrites_on_same_id_obs(self):
-        """POST /observed-results deux fois avec le même id_obs → upsert (pas de duplication)."""
+        """POST /observed-results twice with same id_obs → upsert (no duplication)."""
         obs_id = "lifecycle-upsert-obs-99"
         ts = datetime.utcnow().isoformat()
 
@@ -283,7 +283,7 @@ class TestPredictLifecycle:
         )
         assert r1.status_code == 200
 
-        # Deuxième POST avec même id_obs mais résultat différent
+        # Second POST with same id_obs but different result
         r2 = client.post(
             "/observed-results",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},

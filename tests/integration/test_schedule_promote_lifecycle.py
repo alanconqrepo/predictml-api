@@ -1,13 +1,13 @@
 """
-Tests d'intégration — cycle de vie schedule + auto-promotion.
+Integration tests — schedule + auto-promotion lifecycle.
 
-Workflow testé :
-  POST /models (avec train_file)
-  → PATCH /models/{name}/policy (configurer auto-promotion)
-  → PATCH /models/{name}/{version}/schedule (configurer le cron)
-  → POST /models/{name}/{version}/retrain (simuler retrain avec mock subprocess)
-  → Vérifier auto_promoted dans la réponse
-  → Désactiver le schedule
+Tested workflow:
+  POST /models (with train_file)
+  → PATCH /models/{name}/policy (configure auto-promotion)
+  → PATCH /models/{name}/{version}/schedule (configure cron)
+  → POST /models/{name}/{version}/retrain (simulate retrain with subprocess mock)
+  → Verify auto_promoted in the response
+  → Disable the schedule
 """
 
 import asyncio
@@ -92,7 +92,7 @@ _minio_mock.upload_file_bytes.return_value = {
 
 
 async def _mock_exec_success(*args, **kwargs):
-    """Subprocess mock → crée un vrai modèle joblib et retourne JSON metrics."""
+    """Subprocess mock → creates a real joblib model and returns JSON metrics."""
     env = kwargs.get("env", {})
     output_path = env.get("OUTPUT_MODEL_PATH", "")
     if output_path:
@@ -113,7 +113,7 @@ async def _mock_exec_success(*args, **kwargs):
     return proc
 
 
-# Créer le modèle de test une fois
+# Create the test model once
 _r = client.post(
     "/models",
     headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -131,7 +131,7 @@ assert _r.status_code == 201, _r.text
 
 class TestPolicyEndpointInteg:
     def test_set_auto_promote_policy(self):
-        """PATCH /models/{name}/policy → policy stockée."""
+        """PATCH /models/{name}/policy → policy stored."""
         resp = client.patch(
             f"/models/{SP_MODEL}/policy",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -147,7 +147,7 @@ class TestPolicyEndpointInteg:
         assert data["promotion_policy"]["min_accuracy"] == pytest.approx(0.90)
 
     def test_set_policy_without_auth_returns_403(self):
-        """PATCH /models/{name}/policy sans admin → 403."""
+        """PATCH /models/{name}/policy without admin → 403."""
         resp = client.patch(
             f"/models/{SP_MODEL}/policy",
             json={"auto_promote": False},
@@ -157,7 +157,7 @@ class TestPolicyEndpointInteg:
 
 class TestScheduleEndpointInteg:
     def test_set_schedule_stores_next_run_at(self):
-        """PATCH /models/{name}/{version}/schedule → next_run_at calculé."""
+        """PATCH /models/{name}/{version}/schedule → next_run_at calculated."""
         resp = client.patch(
             f"/models/{SP_MODEL}/{MODEL_VERSION}/schedule",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -174,7 +174,7 @@ class TestScheduleEndpointInteg:
         assert data["retrain_schedule"]["next_run_at"] is not None
 
     def test_disable_schedule(self):
-        """PATCH schedule avec enabled=False → schedule désactivé."""
+        """PATCH schedule with enabled=False → schedule disabled."""
         resp = client.patch(
             f"/models/{SP_MODEL}/{MODEL_VERSION}/schedule",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -188,7 +188,7 @@ class TestScheduleEndpointInteg:
         assert data["retrain_schedule"]["enabled"] is False
 
     def test_set_schedule_without_auth_returns_403(self):
-        """PATCH schedule sans admin → 403."""
+        """PATCH schedule without admin → 403."""
         resp = client.patch(
             f"/models/{SP_MODEL}/{MODEL_VERSION}/schedule",
             json={"cron": "0 3 * * *", "enabled": True},
@@ -198,8 +198,8 @@ class TestScheduleEndpointInteg:
 
 class TestRetrainWithAutoPromotion:
     def test_retrain_with_auto_promote_policy_satisfied(self):
-        """Retrain avec auto-promotion policy → 202 Accepted, promotion gérée par le worker."""
-        # Configurer la policy
+        """Retrain with auto-promotion policy → 202 Accepted, promotion handled by the worker."""
+        # Configure the policy
         client.patch(
             f"/models/{SP_MODEL}/policy",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -228,8 +228,8 @@ class TestRetrainWithAutoPromotion:
         assert "job_id" in data
 
     def test_retrain_high_accuracy_threshold_not_met(self):
-        """Retrain avec policy à seuil élevé → 202 Accepted, le worker gérera la policy."""
-        # Policy avec seuil élevé
+        """Retrain with high-threshold policy → 202 Accepted, worker will handle the policy."""
+        # Policy with high threshold
         client.patch(
             f"/models/{SP_MODEL}/policy",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
@@ -257,7 +257,7 @@ class TestRetrainWithAutoPromotion:
         assert data["status"] == "queued"
 
     def test_retrain_set_production_true_skips_auto_promote(self):
-        """set_production=True → 202 Accepted, le worker promotera manuellement."""
+        """set_production=True → 202 Accepted, the worker will promote manually."""
         resp = client.post(
             f"/models/{SP_MODEL}/{MODEL_VERSION}/retrain",
             headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},

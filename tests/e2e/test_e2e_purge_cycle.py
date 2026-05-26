@@ -1,13 +1,13 @@
 """
-Tests E2E — Cycle complet prédire → observer → purger → vérifier monitoring.
+E2E tests — Complete predict → observe → purge → verify monitoring cycle.
 
-Scénarios :
-  1. POST /models → N prédictions → GET /predictions/stats (compte initial)
-  2. Purge dry_run → stats inchangées
-  3. Purge réelle → prédictions supprimées
-  4. GET /predictions/stats post-purge → compte réduit
-  5. Purge sélective par modèle → seul le modèle ciblé affecté
-  6. GET /overview monitoring → cohérence avant/après purge
+Scenarios:
+  1. POST /models → N predictions → GET /predictions/stats (initial count)
+  2. Purge dry_run → stats unchanged
+  3. Real purge → predictions deleted
+  4. GET /predictions/stats post-purge → reduced count
+  5. Selective purge by model → only the targeted model affected
+  6. GET /overview monitoring → consistency before/after purge
 """
 
 import asyncio
@@ -82,7 +82,7 @@ async def _setup():
 
 asyncio.run(_setup())
 
-# Créer les modèles une fois
+# Create the models once
 for _name in [PURGE_E2E_MODEL_A, PURGE_E2E_MODEL_B]:
     _r = client.post(
         "/models",
@@ -121,14 +121,14 @@ class TestPurgeCycleE2E:
         return stats[0]["total_predictions"]
 
     def test_predictions_appear_in_stats(self):
-        """Prédictions faites → visibles dans GET /predictions/stats."""
+        """Predictions made → visible in GET /predictions/stats."""
         _predict(PURGE_E2E_MODEL_A, n=2)
 
         total = self._get_model_count(PURGE_E2E_MODEL_A)
         assert total >= 2
 
     def test_dry_run_purge_does_not_reduce_count(self):
-        """Dry-run → deleted_count retourné mais prédictions non supprimées."""
+        """Dry-run → deleted_count returned but predictions not deleted."""
         _predict(PURGE_E2E_MODEL_A, n=2)
 
         before = self._get_model_count(PURGE_E2E_MODEL_A)
@@ -145,7 +145,7 @@ class TestPurgeCycleE2E:
         assert after == before
 
     def test_real_purge_reduces_count(self):
-        """Purge réelle avec seuil très élevé → endpoint accessible, réponse cohérente."""
+        """Real purge with very high threshold → endpoint accessible, coherent response."""
         _predict(PURGE_E2E_MODEL_A, n=3)
 
         # Purge with high older_than_days (fresh predictions won't be deleted, but endpoint works)
@@ -164,13 +164,13 @@ class TestPurgeCycleE2E:
         assert data["deleted_count"] >= 0
 
     def test_purge_model_b_does_not_affect_model_a_count(self):
-        """Purge sélective modèle B → modèle A non affecté."""
+        """Selective purge of model B → model A unaffected."""
         _predict(PURGE_E2E_MODEL_A, n=2)
         _predict(PURGE_E2E_MODEL_B, n=2)
 
         before_a = self._get_model_count(PURGE_E2E_MODEL_A)
 
-        # Purge seulement modèle B (older_than_days >= 1 required)
+        # Purge only model B (older_than_days >= 1 required)
         client.delete(
             "/predictions/purge",
             headers=_headers(),
@@ -186,7 +186,7 @@ class TestPurgeCycleE2E:
         assert after_a == before_a
 
     def test_purge_response_structure(self):
-        """La réponse de purge contient tous les champs documentés."""
+        """The purge response contains all documented fields."""
         resp = client.delete(
             "/predictions/purge",
             headers=_headers(),
@@ -205,7 +205,7 @@ class TestPurgeCycleE2E:
         assert data["dry_run"] is True
 
     def test_monitoring_overview_coherent_after_purge(self):
-        """GET /monitoring/overview → endpoint accessible et retourne structure attendue."""
+        """GET /monitoring/overview → endpoint accessible and returns expected structure."""
         _predict(PURGE_E2E_MODEL_A, n=1)
 
         resp = client.get(
@@ -222,7 +222,7 @@ class TestPurgeCycleE2E:
         assert "models" in data
 
     def test_purge_older_than_future_deletes_nothing(self):
-        """Purge avec older_than_days très élevé → deleted_count=0 (dry_run)."""
+        """Purge with very high older_than_days → deleted_count=0 (dry_run)."""
         resp = client.delete(
             "/predictions/purge",
             headers=_headers(),

@@ -1,17 +1,17 @@
 """
-Tests unitaires — DBService CRUD (src/services/db_service.py).
+Unit tests — DBService CRUD (src/services/db_service.py).
 
-Stratégie :
-  Utilise _TestSessionLocal de conftest (SQLite in-memory) pour tester les
-  méthodes de DBService en isolation sans passer par l'API HTTP.
-  N'inclut PAS upsert_observed_results (PostgreSQL-only, déjà couvert via test_observed_results.py).
+Strategy:
+  Uses _TestSessionLocal from conftest (SQLite in-memory) to test
+  DBService methods in isolation without going through the HTTP API.
+  Does NOT include upsert_observed_results (PostgreSQL-only, already covered via test_observed_results.py).
 
-Tokens : préfixe "test-token-dbcrud-" pour éviter les collisions.
+Tokens: prefix "test-token-dbcrud-" to avoid collisions.
 
-Couvre :
-- Utilisateurs : create, get_by_token, get_by_id, get_all, delete, update, last_login
-- Prédictions : create, count_today
-- Modèles : create_metadata, get_metadata, get_all_active, deactivate
+Covers:
+- Users: create, get_by_token, get_by_id, get_all, delete, update, last_login
+- Predictions: create, count_today
+- Models: create_metadata, get_metadata, get_all_active, deactivate
 """
 
 import asyncio
@@ -23,22 +23,22 @@ import pytest
 from src.services.db_service import DBService
 from tests.conftest import _TestSessionLocal
 
-# Tokens uniques pour ce module
+# Unique tokens for this module
 ADMIN_TOKEN = "test-token-dbcrud-admin-zz00"
 USER_TOKEN = "test-token-dbcrud-user-zz01"
 
-# Modèle de référence pour les tests
+# Reference model for tests
 MODEL_NAME = "dbcrud_test_model"
 MODEL_VERSION = "1.0.0"
 
 
 # ---------------------------------------------------------------------------
-# Setup : créer les utilisateurs de base une seule fois
+# Setup: create base users once
 # ---------------------------------------------------------------------------
 
 
 async def _setup():
-    """Crée les utilisateurs admin et user si absents."""
+    """Create admin and user accounts if not present."""
     async with _TestSessionLocal() as db:
         if not await DBService.get_user_by_token(db, ADMIN_TOKEN):
             await DBService.create_user(
@@ -64,15 +64,15 @@ asyncio.run(_setup())
 
 
 # ---------------------------------------------------------------------------
-# Tests utilisateurs
+# User tests
 # ---------------------------------------------------------------------------
 
 
 class TestUserCRUD:
-    """Tests CRUD sur les utilisateurs."""
+    """CRUD tests for users."""
 
     def test_create_user_returns_user_with_id(self):
-        """create_user() retourne un User avec id, username, email, api_token."""
+        """create_user() returns a User with id, username, email, api_token."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -93,7 +93,7 @@ class TestUserCRUD:
         asyncio.run(_run())
 
     def test_get_user_by_token_returns_user(self):
-        """get_user_by_token() retourne l'utilisateur pour un token connu."""
+        """get_user_by_token() returns the user for a known token."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -104,7 +104,7 @@ class TestUserCRUD:
         asyncio.run(_run())
 
     def test_get_user_by_token_returns_none_for_unknown(self):
-        """get_user_by_token() retourne None pour un token inconnu."""
+        """get_user_by_token() returns None for an unknown token."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -114,7 +114,7 @@ class TestUserCRUD:
         asyncio.run(_run())
 
     def test_get_user_by_id_returns_user(self):
-        """get_user_by_id() retourne l'utilisateur pour un id connu."""
+        """get_user_by_id() returns the user for a known id."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -126,7 +126,7 @@ class TestUserCRUD:
         asyncio.run(_run())
 
     def test_get_user_by_id_returns_none_for_unknown(self):
-        """get_user_by_id() retourne None pour un id inexistant."""
+        """get_user_by_id() returns None for a non-existent id."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -136,7 +136,7 @@ class TestUserCRUD:
         asyncio.run(_run())
 
     def test_get_all_users_includes_admin(self):
-        """get_all_users() retourne une liste incluant l'admin créé."""
+        """get_all_users() returns a list including the created admin."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -147,7 +147,7 @@ class TestUserCRUD:
         asyncio.run(_run())
 
     def test_delete_user_removes_from_db(self):
-        """delete_user() supprime l'utilisateur et get_user_by_id retourne None ensuite."""
+        """delete_user() removes the user and get_user_by_id returns None afterwards."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -169,7 +169,7 @@ class TestUserCRUD:
         asyncio.run(_run())
 
     def test_delete_user_returns_false_for_unknown_id(self):
-        """delete_user() retourne False si l'utilisateur n'existe pas."""
+        """delete_user() returns False if the user does not exist."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -179,7 +179,7 @@ class TestUserCRUD:
         asyncio.run(_run())
 
     def test_update_user_changes_email(self):
-        """update_user() modifie l'email et le persiste en base."""
+        """update_user() changes the email and persists it in the database."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -198,7 +198,7 @@ class TestUserCRUD:
         asyncio.run(_run())
 
     def test_update_user_regenerates_token(self):
-        """update_user(regenerate_token=True) génère un token différent de l'original."""
+        """update_user(regenerate_token=True) generates a token different from the original."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -217,7 +217,7 @@ class TestUserCRUD:
         asyncio.run(_run())
 
     def test_update_user_returns_none_for_unknown_id(self):
-        """update_user() retourne None pour un id inexistant."""
+        """update_user() returns None for a non-existent id."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -227,7 +227,7 @@ class TestUserCRUD:
         asyncio.run(_run())
 
     def test_update_user_last_login_sets_timestamp(self):
-        """update_user_last_login() met à jour le champ last_login."""
+        """update_user_last_login() updates the last_login field."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -244,15 +244,15 @@ class TestUserCRUD:
 
 
 # ---------------------------------------------------------------------------
-# Tests prédictions
+# Prediction tests
 # ---------------------------------------------------------------------------
 
 
 class TestPredictionCRUD:
-    """Tests sur la création et le comptage des prédictions."""
+    """Tests for prediction creation and counting."""
 
     def test_create_prediction_returns_prediction_with_id(self):
-        """create_prediction() retourne une Prediction avec id non null."""
+        """create_prediction() returns a Prediction with a non-null id."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -273,11 +273,11 @@ class TestPredictionCRUD:
         asyncio.run(_run())
 
     def test_count_predictions_today_counts_only_today(self):
-        """get_user_prediction_count_today() compte uniquement les prédictions d'aujourd'hui."""
+        """get_user_prediction_count_today() counts only today's predictions."""
 
         async def _run():
             async with _TestSessionLocal() as db:
-                # Créer un utilisateur dédié avec token unique
+                # Create a dedicated user with a unique token
                 token = "test-token-dbcrud-countday-aa"
                 if not await DBService.get_user_by_token(db, token):
                     await DBService.create_user(
@@ -290,7 +290,7 @@ class TestPredictionCRUD:
 
                 count_before = await DBService.get_user_prediction_count_today(db, user.id)
 
-                # Créer 2 prédictions aujourd'hui
+                # Create 2 predictions today
                 for _ in range(2):
                     await DBService.create_prediction(
                         db,
@@ -310,15 +310,15 @@ class TestPredictionCRUD:
 
 
 # ---------------------------------------------------------------------------
-# Tests métadonnées modèles
+# Model metadata tests
 # ---------------------------------------------------------------------------
 
 
 class TestModelMetadataCRUD:
-    """Tests sur le CRUD des métadonnées de modèles."""
+    """CRUD tests for model metadata."""
 
     def test_create_model_metadata_persists(self):
-        """create_model_metadata() retourne un objet avec name et version corrects."""
+        """create_model_metadata() returns an object with correct name and version."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -339,7 +339,7 @@ class TestModelMetadataCRUD:
         asyncio.run(_run())
 
     def test_get_model_metadata_by_version(self):
-        """get_model_metadata() avec version spécifique retourne le bon modèle."""
+        """get_model_metadata() with a specific version returns the correct model."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -359,7 +359,7 @@ class TestModelMetadataCRUD:
         asyncio.run(_run())
 
     def test_get_model_metadata_unknown_version_returns_none(self):
-        """get_model_metadata() retourne None pour une version inconnue."""
+        """get_model_metadata() returns None for an unknown version."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -371,7 +371,7 @@ class TestModelMetadataCRUD:
         asyncio.run(_run())
 
     def test_get_all_active_models_includes_active(self):
-        """get_all_active_models() liste uniquement les modèles is_active=True."""
+        """get_all_active_models() lists only models with is_active=True."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -391,7 +391,7 @@ class TestModelMetadataCRUD:
         asyncio.run(_run())
 
     def test_deactivate_model_sets_is_active_false(self):
-        """deactivate_model() désactive le modèle et get_model_metadata ne le retourne plus."""
+        """deactivate_model() deactivates the model and get_model_metadata no longer returns it."""
 
         async def _run():
             async with _TestSessionLocal() as db:
@@ -412,7 +412,7 @@ class TestModelMetadataCRUD:
         asyncio.run(_run())
 
     def test_deactivate_model_returns_false_for_unknown(self):
-        """deactivate_model() retourne False si le modèle n'existe pas."""
+        """deactivate_model() returns False if the model does not exist."""
 
         async def _run():
             async with _TestSessionLocal() as db:

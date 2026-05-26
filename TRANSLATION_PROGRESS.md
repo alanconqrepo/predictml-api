@@ -142,10 +142,23 @@
 
 ## Batch 9 — `tests/` part C (remaining)
 
-- [ ] `tests/test_db_service_crud.py`
-- [ ] `tests/test_monitoring_api.py`
-- [ ] `tests/test_input_validation.py`
-- [ ] All remaining test files (integration/, e2e/, unit/ subdirs if present)
+- [x] `tests/test_db_service_crud.py`
+- [x] `tests/test_monitoring_api.py`
+- [x] `tests/test_input_validation.py`
+- [x] `tests/integration/test_ab_monitoring.py`
+- [x] `tests/integration/test_drift_flow.py`
+- [x] `tests/integration/test_performance_flow.py`
+- [x] `tests/integration/test_predict_lifecycle.py`
+- [x] `tests/integration/test_purge_lifecycle.py`
+- [x] `tests/integration/test_retrain_lifecycle.py`
+- [x] `tests/integration/test_rollback_workflow.py`
+- [x] `tests/integration/test_schedule_promote_lifecycle.py`
+- [x] `tests/e2e/test_e2e_advanced_workflows.py`
+- [x] `tests/e2e/test_e2e_golden_tests_gate.py`
+- [x] `tests/e2e/test_e2e_ml_lifecycle.py`
+- [x] `tests/e2e/test_e2e_monitoring_alerting.py`
+- [x] `tests/e2e/test_e2e_purge_cycle.py`
+- [x] `tests/e2e/test_e2e_user_management.py`
 
 ---
 
