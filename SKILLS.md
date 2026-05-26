@@ -1,106 +1,106 @@
-# PredictML API — Guide pour agent IA
+# PredictML API — AI agent guide
 
-Ce document explique comment interagir avec **PredictML API** en tant qu'utilisateur ou agent IA. Il couvre l'objectif du projet, la structure du code, toutes les routes disponibles, le cycle de vie des modèles, la détection de drift et le ré-entraînement.
-
----
-
-## Objectif du projet
-
-PredictML API est une plateforme ML-as-a-Service qui permet de :
-
-- **Déployer** des modèles scikit-learn (`.joblib`) via une API REST
-- **Servir des prédictions** en temps réel (unitaires ou batch)
-- **Versionner** les modèles avec gestion de trafic A/B et déploiement shadow
-- **Monitorer** les performances et détecter le drift des features
-- **Ré-entraîner** automatiquement un modèle à partir d'un script `train.py`
-- **Auditer** toutes les modifications via un historique complet avec rollback
-
-Les modèles sont stockés dans **MinIO**, les expériences tracées dans **MLflow**, les métadonnées dans **PostgreSQL**, et les modèles chargés sont mis en cache dans **Redis**.
+This document explains how to interact with **PredictML API** as a user or AI agent. It covers the project objective, code structure, all available routes, model lifecycle, drift detection, and retraining.
 
 ---
 
-## Structure du projet
+## Project objective
+
+PredictML API is an ML-as-a-Service platform that enables:
+
+- **Deploy** scikit-learn models (`.joblib`) via a REST API
+- **Serve predictions** in real time (single or batch)
+- **Version** models with A/B traffic management and shadow deployment
+- **Monitor** performance and detect feature drift
+- **Automatically retrain** a model from a `train.py` script
+- **Audit** all changes via a full history with rollback
+
+Models are stored in **MinIO**, experiments tracked in **MLflow**, metadata in **PostgreSQL**, and loaded models are cached in **Redis**.
+
+---
+
+## Project structure
 
 ```
 src/
 ├── api/
-│   ├── models.py          # CRUD modèles, retrain, drift, A/B, historique
-│   ├── predict.py         # Prédictions unitaires, batch, SHAP
-│   ├── users.py           # Gestion utilisateurs (admin)
-│   ├── observed_results.py# Résultats observés (ground truth)
-│   └── monitoring.py      # Dashboard monitoring global et par modèle
+│   ├── models.py          # Model CRUD, retrain, drift, A/B, history
+│   ├── predict.py         # Single, batch predictions, SHAP
+│   ├── users.py           # User management (admin)
+│   ├── observed_results.py# Observed results (ground truth)
+│   └── monitoring.py      # Global and per-model monitoring dashboard
 ├── core/
-│   ├── config.py          # Variables d'environnement et settings
-│   └── security.py        # Vérification token, rate limiting
+│   ├── config.py          # Environment variables and settings
+│   └── security.py        # Token verification, rate limiting
 ├── db/
-│   ├── models.py          # Modèles ORM SQLAlchemy
-│   └── database.py        # Session async PostgreSQL
+│   ├── models.py          # SQLAlchemy ORM models
+│   └── database.py        # Async PostgreSQL session
 ├── services/
-│   ├── model_service.py   # Chargement, cache Redis, routing A/B
-│   ├── db_service.py      # Accès données (prédictions, utilisateurs, modèles)
-│   └── minio_service.py   # Upload/download artefacts MinIO
-├── schemas/               # Schémas Pydantic (requêtes / réponses)
-└── main.py                # App FastAPI, montage des routers
+│   ├── model_service.py   # Loading, Redis cache, A/B routing
+│   ├── db_service.py      # Data access (predictions, users, models)
+│   └── minio_service.py   # MinIO artifact upload/download
+├── schemas/               # Pydantic schemas (requests / responses)
+└── main.py                # FastAPI app, router mounting
 
-streamlit_app/             # Dashboard admin Streamlit (port 8501)
-tests/                     # Tests pytest (sans Docker)
-smoke-tests/               # Tests manuels contre l'API live
-init_data/                 # Scripts d'initialisation et example_train.py
-alembic/                   # Migrations de base de données
+streamlit_app/             # Streamlit admin dashboard (port 8501)
+tests/                     # pytest tests (no Docker)
+smoke-tests/               # Manual tests against the live API
+init_data/                 # Initialization scripts and example_train.py
+alembic/                   # Database migrations
 ```
 
 ---
 
-## Authentification
+## Authentication
 
-Toutes les routes protégées nécessitent un **Bearer token** dans le header :
+All protected routes require a **Bearer token** in the header:
 
 ```
 Authorization: Bearer <api_token>
 ```
 
-Les tokens sont générés à la création d'un utilisateur (et lors d'un renouvellement). Ils sont validés en base de données à chaque requête.
+Tokens are generated at user creation (and upon renewal). They are validated in the database on each request.
 
-### Rôles utilisateur
+### User roles
 
-| Rôle | Accès |
+| Role | Access |
 |------|-------|
-| `admin` | Accès complet (gestion utilisateurs, modèles, retrain) |
-| `user` | Prédictions, lecture des modèles et historique |
-| `readonly` | Lecture seule |
+| `admin` | Full access (user management, models, retrain) |
+| `user` | Predictions, model reading and history |
+| `readonly` | Read-only |
 
 ### Rate limiting
 
-Les routes `/predict` et `/predict-batch` sont soumises à un quota journalier (`rate_limit_per_day`, défaut 1000). Une requête dépassant le quota retourne `429 Too Many Requests`.
+The `/predict` and `/predict-batch` routes are subject to a daily quota (`rate_limit_per_day`, default 1000). A request exceeding the quota returns `429 Too Many Requests`.
 
 ---
 
-## Cycle de vie d'un modèle
+## Model lifecycle
 
-### 1. Créer un modèle (première version)
+### 1. Create a model (first version)
 
 ```bash
 POST /models
 Content-Type: multipart/form-data
 Authorization: Bearer <token>
 
-Champs obligatoires :
-  name        (string)   : Nom unique du modèle
-  version     (string)   : Version (ex: "1.0.0")
-  file        (fichier)  : Fichier .joblib (OU mlflow_run_id)
+Required fields:
+  name        (string)   : Unique model name
+  version     (string)   : Version (e.g. "1.0.0")
+  file        (file)     : .joblib file (OR mlflow_run_id)
 
-Champs optionnels :
+Optional fields:
   description, algorithm, accuracy, f1_score
   features_count, classes (JSON array)
   training_params (JSON object)
   training_dataset (string)
-  feature_baseline (JSON)   : profil baseline pour le drift
-  tags (JSON array)         : ex. ["production", "finance"]
-  webhook_url               : URL POST appelée après chaque prédiction
-  train_file (fichier)      : script train.py pour le ré-entraînement
+  feature_baseline (JSON)   : baseline profile for drift
+  tags (JSON array)         : e.g. ["production", "finance"]
+  webhook_url               : POST URL called after each prediction
+  train_file (file)         : train.py script for retraining
 ```
 
-**Exemple curl :**
+**curl example:**
 ```bash
 curl -X POST http://localhost:8000/models \
   -H "Authorization: Bearer <token>" \
@@ -113,7 +113,7 @@ curl -X POST http://localhost:8000/models \
   -F "train_file=@init_data/train_churn.py"
 ```
 
-### 2. Mettre en production une version
+### 2. Set a version to production
 
 ```bash
 PATCH /models/{name}/{version}
@@ -125,11 +125,11 @@ Authorization: Bearer <token>
 }
 ```
 
-> Positionner `is_production: true` sur une version **démote automatiquement** toutes les autres versions du même modèle.
+> Setting `is_production: true` on a version **automatically demotes** all other versions of the same model.
 
-### 3. Créer une nouvelle version manuellement
+### 3. Manually create a new version
 
-Même appel que la création, avec un nouveau `version` (ex: `"1.1.0"`). La nouvelle version n'est pas en production par défaut.
+Same call as creation, with a new `version` (e.g. `"1.1.0"`). The new version is not in production by default.
 
 ```bash
 curl -X POST http://localhost:8000/models \
@@ -140,14 +140,14 @@ curl -X POST http://localhost:8000/models \
   -F "accuracy=0.94"
 ```
 
-### 4. Mettre à jour les métadonnées
+### 4. Update metadata
 
 ```bash
 PATCH /models/{name}/{version}
 Content-Type: application/json
 Authorization: Bearer <token>
 
-Champs disponibles (tous optionnels) :
+Available fields (all optional):
 {
   "description": "string",
   "is_production": true/false,
@@ -163,14 +163,14 @@ Champs disponibles (tous optionnels) :
 }
 ```
 
-### 5. Supprimer une version
+### 5. Delete a version
 
 ```bash
 DELETE /models/{name}/{version}
 Authorization: Bearer <token>
 ```
 
-### 6. Supprimer toutes les versions d'un modèle
+### 6. Delete all versions of a model
 
 ```bash
 DELETE /models/{name}
@@ -179,9 +179,9 @@ Authorization: Bearer <token>
 
 ---
 
-## Prédictions
+## Predictions
 
-### Prédiction unitaire
+### Single prediction
 
 ```bash
 POST /predict
@@ -190,8 +190,8 @@ Authorization: Bearer <token>
 
 {
   "model_name": "churn_model",
-  "model_version": "1.0.0",   # optionnel — utilise la version en prod si omis
-  "id_obs": "client_42",       # optionnel — identifiant d'observation
+  "model_version": "1.0.0",   # optional — uses production version if omitted
+  "id_obs": "client_42",       # optional — observation identifier
   "features": {
     "age": 35,
     "tenure_months": 24,
@@ -200,7 +200,7 @@ Authorization: Bearer <token>
 }
 ```
 
-**Réponse :**
+**Response:**
 ```json
 {
   "model_name": "churn_model",
@@ -213,9 +213,9 @@ Authorization: Bearer <token>
 }
 ```
 
-> Si `model_version` est omis, le routing A/B/Shadow s'applique automatiquement. `selected_version` indique la version choisie.
+> If `model_version` is omitted, A/B/Shadow routing applies automatically. `selected_version` indicates the chosen version.
 
-### Prédiction batch
+### Batch prediction
 
 ```bash
 POST /predict-batch
@@ -232,21 +232,21 @@ Authorization: Bearer <token>
 }
 ```
 
-> Le batch consomme autant d'appels que d'éléments dans `inputs` sur le quota journalier.
+> The batch consumes as many API calls as there are elements in `inputs` against the daily quota.
 
-### Historique des prédictions
+### Prediction history
 
 ```bash
 GET /predictions?name=churn_model&start=2025-01-01T00:00:00&end=2025-12-31T23:59:59
-  &version=1.0.0    # optionnel
-  &user=alice       # optionnel
-  &id_obs=client_42 # optionnel
-  &limit=100        # 1-1000, défaut 100
-  &cursor=450       # pagination curseur (id de la dernière prédiction vue)
+  &version=1.0.0    # optional
+  &user=alice       # optional
+  &id_obs=client_42 # optional
+  &limit=100        # 1-1000, default 100
+  &cursor=450       # cursor pagination (id of last seen prediction)
 Authorization: Bearer <token>
 ```
 
-### Explainabilité SHAP
+### SHAP explainability
 
 ```bash
 POST /explain
@@ -260,13 +260,13 @@ Authorization: Bearer <token>
 }
 ```
 
-**Réponse :** `shap_values` par feature + `base_value` (E[f(X)]). Fonctionne avec les modèles arbres (RandomForest, GradientBoosting…) et linéaires (LogisticRegression, Ridge…).
+**Response:** `shap_values` per feature + `base_value` (E[f(X)]). Works with tree models (RandomForest, GradientBoosting…) and linear models (LogisticRegression, Ridge…).
 
 ---
 
-## Résultats observés (ground truth)
+## Observed results (ground truth)
 
-Envoyer les vraies étiquettes pour calculer les performances réelles :
+Send real labels to calculate actual performance:
 
 ```bash
 POST /observed-results
@@ -285,22 +285,22 @@ Authorization: Bearer <token>
 }
 ```
 
-> L'appel est **upsert** : si `id_obs` + `model_name` existe déjà, la valeur est mise à jour.
+> The call is an **upsert**: if `id_obs` + `model_name` already exists, the value is updated.
 
-**Récupérer les résultats :**
+**Retrieve results:**
 ```bash
 GET /observed-results?model_name=churn_model&start=2025-01-01T00:00:00&end=2025-12-31T23:59:59
-  &id_obs=client_42  # optionnel
+  &id_obs=client_42  # optional
   &limit=100&offset=0
 ```
 
 ---
 
-## Drift et monitoring
+## Drift and monitoring
 
-### Prérequis : fournir un `feature_baseline`
+### Prerequisite: provide a `feature_baseline`
 
-Pour que la détection de drift fonctionne, le modèle doit avoir un profil baseline. Il peut être fourni à la création ou via PATCH :
+For drift detection to work, the model must have a baseline profile. It can be provided at creation or via PATCH:
 
 ```json
 "feature_baseline": {
@@ -310,59 +310,59 @@ Pour que la détection de drift fonctionne, le modèle doit avoir un profil base
 }
 ```
 
-### Rapport de drift par modèle
+### Per-model drift report
 
 ```bash
 GET /models/{name}/drift?version=1.0.0&days=7&min_predictions=30
 ```
 
-**Réponse par feature :**
-- `z_score` : |moyenne_prod - moyenne_baseline| / std_baseline
-- `psi` : Population Stability Index (binning sur les données de prod vs baseline)
-- `drift_status` : `ok` | `warning` | `critical` | `insufficient_data` | `no_baseline`
+**Response per feature:**
+- `z_score`: |mean_prod - mean_baseline| / std_baseline
+- `psi`: Population Stability Index (binning on prod data vs baseline)
+- `drift_status`: `ok` | `warning` | `critical` | `insufficient_data` | `no_baseline`
 
-**Seuils indicatifs :**
-- Z-score > 2 → warning ; > 3 → critical
-- PSI > 0.1 → warning ; > 0.2 → critical
+**Indicative thresholds:**
+- Z-score > 2 → warning; > 3 → critical
+- PSI > 0.1 → warning; > 0.2 → critical
 
-### Performance réelle (après observed_results)
+### Real-world performance (after observed_results)
 
 ```bash
 GET /models/{name}/performance?start=2025-01-01T00:00:00&end=2025-12-31T23:59:59
-  &version=1.0.0    # optionnel
-  &granularity=day  # optionnel : day | week | month
+  &version=1.0.0    # optional
+  &granularity=day  # optional: day | week | month
 ```
 
-Retourne accuracy/F1 (classification) ou MAE/RMSE/R² (régression) calculés sur les paires prédiction/résultat observé.
+Returns accuracy/F1 (classification) or MAE/RMSE/R² (regression) calculated on prediction/observed result pairs.
 
-### Monitoring global
+### Global monitoring
 
 ```bash
 GET /monitoring/overview?start=2025-01-01T00:00:00&end=2025-12-31T23:59:59
 ```
 
-Retourne un tableau de bord global : total prédictions, taux d'erreur, latence p95, statut de drift et de santé par modèle.
+Returns a global dashboard: total predictions, error rate, p95 latency, drift and health status per model.
 
-### Monitoring détaillé par modèle
+### Detailed per-model monitoring
 
 ```bash
 GET /monitoring/model/{name}?start=2025-01-01T00:00:00&end=2025-12-31T23:59:59
 ```
 
-Retourne : stats par version, timeseries journalière, performance par jour, drift des features, comparaison A/B, dernières erreurs.
+Returns: stats per version, daily timeseries, performance per day, feature drift, A/B comparison, latest errors.
 
 ---
 
-## Ré-entraînement (retrain en cas de drift)
+## Retraining (retrain on drift)
 
-### Flux complet
+### Complete flow
 
-1. Détecter le drift via `GET /models/{name}/drift` ou observer une dégradation de performance via `GET /models/{name}/performance`
-2. Déclencher le ré-entraînement via `POST /models/{name}/{version}/retrain`
-3. L'API télécharge le `train.py` stocké dans MinIO, l'exécute dans un sous-processus isolé (timeout 600 s) et crée une nouvelle version
-4. Optionnellement, promouvoir la nouvelle version en production
+1. Detect drift via `GET /models/{name}/drift` or observe performance degradation via `GET /models/{name}/performance`
+2. Trigger retraining via `POST /models/{name}/{version}/retrain`
+3. The API downloads the `train.py` stored in MinIO, runs it in an isolated subprocess (timeout 600s), and creates a new version
+4. Optionally, promote the new version to production
 
-### Déclencher un ré-entraînement
+### Trigger a retrain
 
 ```bash
 POST /models/{name}/{version}/retrain
@@ -372,12 +372,12 @@ Authorization: Bearer <admin_token>
 {
   "start_date": "2025-01-01",
   "end_date":   "2025-12-31",
-  "new_version": "1.2.0",      # optionnel — auto-généré si null
-  "set_production": false       # promouvoir automatiquement en production
+  "new_version": "1.2.0",      # optional — auto-generated if null
+  "set_production": false       # automatically promote to production
 }
 ```
 
-**Réponse :**
+**Response:**
 ```json
 {
   "model_name": "churn_model",
@@ -391,30 +391,30 @@ Authorization: Bearer <admin_token>
 }
 ```
 
-### Contrat du script `train.py`
+### `train.py` script contract
 
-Le script fourni à l'upload doit respecter les contraintes suivantes (vérifiées statiquement au moment de l'upload) :
+The script provided at upload must respect the following constraints (verified statically at upload time):
 
-| Contrainte | Détail |
+| Constraint | Detail |
 |---|---|
-| Syntaxe Python valide | Vérifié via `ast.parse()` |
-| Lire `TRAIN_START_DATE` | `os.environ["TRAIN_START_DATE"]` (format YYYY-MM-DD) |
-| Lire `TRAIN_END_DATE` | `os.environ["TRAIN_END_DATE"]` |
-| Lire `OUTPUT_MODEL_PATH` | Chemin où écrire le `.joblib` |
-| Sauvegarder le modèle | `joblib.dump` ou `save_model` |
-| Retourner les métriques | Dernière ligne JSON sur stdout : `{"accuracy": 0.94, "f1_score": 0.93}` |
+| Valid Python syntax | Verified via `ast.parse()` |
+| Read `TRAIN_START_DATE` | `os.environ["TRAIN_START_DATE"]` (format YYYY-MM-DD) |
+| Read `TRAIN_END_DATE` | `os.environ["TRAIN_END_DATE"]` |
+| Read `OUTPUT_MODEL_PATH` | Path where to write the `.joblib` |
+| Save the model | `joblib.dump` or `save_model` |
+| Return metrics | Last JSON line on stdout: `{"accuracy": 0.94, "f1_score": 0.93}` |
 
-**Variables d'environnement injectées automatiquement :**
+**Automatically injected environment variables:**
 
 | Variable | Description |
 |---|---|
-| `TRAIN_START_DATE` | Date début (YYYY-MM-DD) |
-| `TRAIN_END_DATE` | Date fin (YYYY-MM-DD) |
-| `OUTPUT_MODEL_PATH` | Chemin absolu du `.joblib` à produire |
-| `MLFLOW_TRACKING_URI` | URI MLflow (optionnel) |
-| `MODEL_NAME` | Nom du modèle source |
+| `TRAIN_START_DATE` | Start date (YYYY-MM-DD) |
+| `TRAIN_END_DATE` | End date (YYYY-MM-DD) |
+| `OUTPUT_MODEL_PATH` | Absolute path of the `.joblib` to produce |
+| `MLFLOW_TRACKING_URI` | MLflow URI (optional) |
+| `MODEL_NAME` | Source model name |
 
-**Squelette minimal de `train.py` :**
+**Minimal `train.py` skeleton:**
 ```python
 import os, joblib, json
 import pandas as pd
@@ -424,7 +424,7 @@ TRAIN_START_DATE  = os.environ["TRAIN_START_DATE"]
 TRAIN_END_DATE    = os.environ["TRAIN_END_DATE"]
 OUTPUT_MODEL_PATH = os.environ["OUTPUT_MODEL_PATH"]
 
-# Charger les données filtrées par date
+# Load date-filtered data
 df = pd.read_csv("data.csv")
 df = df[(df["date"] >= TRAIN_START_DATE) & (df["date"] <= TRAIN_END_DATE)]
 
@@ -438,17 +438,17 @@ accuracy = model.score(X, y)
 
 joblib.dump(model, OUTPUT_MODEL_PATH)
 
-# Retourner les métriques — doit être la dernière ligne JSON sur stdout
+# Return metrics — must be the last JSON line on stdout
 print(json.dumps({"accuracy": accuracy, "f1_score": accuracy}))
 ```
 
 ---
 
-## Déploiement A/B et Shadow
+## A/B and Shadow deployment
 
 ### A/B testing
 
-Configurer deux versions avec `deployment_mode: "ab_test"` et un `traffic_weight` (0.0–1.0, somme ≤ 1.0) :
+Configure two versions with `deployment_mode: "ab_test"` and a `traffic_weight` (0.0–1.0, sum ≤ 1.0):
 
 ```bash
 PATCH /models/churn_model/1.0.0
@@ -458,54 +458,54 @@ PATCH /models/churn_model/1.1.0
 { "deployment_mode": "ab_test", "traffic_weight": 0.3 }
 ```
 
-Lors d'un appel `/predict` sans `model_version`, le routing est aléatoire pondéré. `selected_version` dans la réponse indique la version choisie.
+On a `/predict` call without `model_version`, routing is weighted random. `selected_version` in the response indicates the chosen version.
 
 ### Shadow deployment
 
-Tester une nouvelle version en parallèle sans l'exposer :
+Test a new version in parallel without exposing it:
 
 ```bash
 PATCH /models/churn_model/1.1.0
 { "deployment_mode": "shadow" }
 ```
 
-Les prédictions shadow sont enregistrées (`is_shadow: true`) mais ne sont pas retournées au client. La comparaison se fait via `GET /models/{name}/ab-compare`.
+Shadow predictions are recorded (`is_shadow: true`) but not returned to the client. Comparison is done via `GET /models/{name}/ab-compare`.
 
-### Comparaison A/B
+### A/B comparison
 
 ```bash
 GET /models/{name}/ab-compare?days=30
 ```
 
-Retourne pour chaque version : nombre de prédictions, taux d'erreur, latences p50/p95, distribution des prédictions, taux d'accord shadow/production.
+Returns for each version: prediction count, error rate, p50/p95 latencies, prediction distribution, shadow/production agreement rate.
 
 ---
 
-## Historique et rollback
+## History and rollback
 
-### Consulter l'historique d'un modèle
+### View model history
 
 ```bash
 GET /models/{name}/history?limit=50&offset=0
 GET /models/{name}/{version}/history?limit=50&offset=0
 ```
 
-Chaque entrée contient : `action` (CREATED, UPDATED, SET_PRODUCTION, ROLLBACK, DELETED), `snapshot` (état complet des métadonnées), `changed_fields`, `timestamp`, `changed_by_username`.
+Each entry contains: `action` (CREATED, UPDATED, SET_PRODUCTION, ROLLBACK, DELETED), `snapshot` (full metadata state), `changed_fields`, `timestamp`, `changed_by_username`.
 
-### Rollback vers un état précédent
+### Rollback to a previous state
 
 ```bash
 POST /models/{name}/{version}/rollback/{history_id}
 Authorization: Bearer <admin_token>
 ```
 
-Restaure les métadonnées du modèle à l'état capturé dans `history_id`. Un nouvel enregistrement ROLLBACK est créé dans l'historique.
+Restores model metadata to the state captured in `history_id`. A new ROLLBACK record is created in the history.
 
 ---
 
-## Gestion des utilisateurs (admin)
+## User management (admin)
 
-### Créer un utilisateur
+### Create a user
 
 ```bash
 POST /users
@@ -516,59 +516,59 @@ Authorization: Bearer <admin_token>
   "username": "alice",
   "email": "alice@example.com",
   "role": "user",        # user | admin | readonly
-  "rate_limit": 500      # quota journalier, 1-100000
+  "rate_limit": 500      # daily quota, 1-100000
 }
 ```
 
-Le `api_token` est retourné **uniquement** à la création.
+The `api_token` is returned **only** at creation.
 
-### Lister, consulter, modifier, supprimer
+### List, view, modify, delete
 
 ```bash
-GET    /users                   # tous les utilisateurs (admin)
-GET    /users/{id}              # un utilisateur (admin ou soi-même)
-PATCH  /users/{id}              # modifier rôle, statut, quota, renouveler token
-DELETE /users/{id}              # supprimer (impossible sur son propre compte)
+GET    /users                   # all users (admin)
+GET    /users/{id}              # a user (admin or self)
+PATCH  /users/{id}              # modify role, status, quota, renew token
+DELETE /users/{id}              # delete (not possible on own account)
 ```
 
-### Renouveler un token
+### Renew a token
 
 ```bash
 PATCH /users/{id}
 { "regenerate_token": true }
 ```
 
-Le nouveau token est retourné dans la réponse.
+The new token is returned in the response.
 
 ---
 
-## Routes de service
+## Service routes
 
 ```bash
-GET /         # Informations API et modèles disponibles (pas d'auth)
-GET /health   # Statut DB et cache Redis (pas d'auth)
-GET /models/cached  # Modèles actuellement en cache Redis
+GET /         # API information and available models (no auth)
+GET /health   # DB and Redis cache status (no auth)
+GET /models/cached  # Models currently in Redis cache
 ```
 
 ---
 
-## Statistiques de prédictions
+## Prediction statistics
 
 ```bash
 GET /predictions/stats?model_name=churn_model&days=30
 ```
 
-Retourne par modèle : total prédictions, taux d'erreur, latences moyennes p50/p95.
+Returns per model: total predictions, error rate, average p50/p95 latencies.
 
 ---
 
-## Conseils pour un agent IA
+## Tips for an AI agent
 
-1. **Toujours fournir un `feature_baseline`** à la création du modèle pour activer la détection de drift.
-2. **Fournir un `train_file`** à la création si le ré-entraînement automatique est prévu.
-3. **Utiliser `id_obs`** dans chaque prédiction pour pouvoir relier les résultats observés aux prédictions.
-4. **Envoyer les `observed_results`** régulièrement pour que les métriques de performance réelle soient calculées.
-5. **Surveiller `drift_status`** via `GET /models/{name}/drift` avant de décider un retrain.
-6. **Ne pas mettre `set_production: true`** sur un retrain sans avoir vérifié les métriques retournées dans la réponse.
-7. **Utiliser `model_version: null`** dans `/predict` pour bénéficier du routing automatique en A/B ou shadow.
-8. **L'admin token** pour ce projet est `<ADMIN_TOKEN>` (à ne jamais exposer publiquement).
+1. **Always provide a `feature_baseline`** at model creation to enable drift detection.
+2. **Provide a `train_file`** at creation if automatic retraining is planned.
+3. **Use `id_obs`** in each prediction to be able to link observed results to predictions.
+4. **Send `observed_results`** regularly so that real-world performance metrics can be calculated.
+5. **Monitor `drift_status`** via `GET /models/{name}/drift` before deciding on a retrain.
+6. **Do not set `set_production: true`** on a retrain without having verified the metrics returned in the response.
+7. **Use `model_version: null`** in `/predict` to benefit from automatic A/B or shadow routing.
+8. **The admin token** for this project is `<ADMIN_TOKEN>` (never expose publicly).

@@ -1,14 +1,14 @@
 # predictml-api
 
-API FastAPI de prédiction ML avec PostgreSQL, MinIO et MLflow. Dashboard admin Streamlit.
+FastAPI ML prediction API with PostgreSQL, MinIO and MLflow. Streamlit admin dashboard.
 
 ## Stack
 
-- **API** : FastAPI async — port 8000
-- **Dashboard** : Streamlit Admin — port 8501
-- **DB** : PostgreSQL 16 — port 5433
-- **Stockage modèles** : MinIO — port 9000 / console 9001
-- **Experiment tracking** : MLflow — port 5000
+- **API**: FastAPI async — port 8000
+- **Dashboard**: Streamlit Admin — port 8501
+- **DB**: PostgreSQL 16 — port 5433
+- **Model storage**: MinIO — port 9000 / console 9001
+- **Experiment tracking**: MLflow — port 5000
 
 ## Structure
 
@@ -16,52 +16,52 @@ API FastAPI de prédiction ML avec PostgreSQL, MinIO et MLflow. Dashboard admin 
 src/
 ├── api/            # Endpoints (models.py, predict.py, users.py, observed_results.py)
 ├── core/           # Config & auth (config.py, security.py)
-├── db/             # ORM SQLAlchemy + service DB
-├── services/       # Logique métier (db_service, model_service, minio_service)
+├── db/             # SQLAlchemy ORM + DB service
+├── services/       # Business logic (db_service, model_service, minio_service)
 ├── schemas/        # Pydantic
 └── main.py
 
-streamlit_app/      # Dashboard admin multipage
-├── app.py          # Login + accueil
+streamlit_app/      # Multi-page admin dashboard
+├── app.py          # Login + home
 ├── utils/          # api_client.py, auth.py
 └── pages/          # 1_Users, 2_Models, 3_Predictions, 4_Stats, 5_Code_Example
 
-tests/              # Pytest — tests automatisés
-smoke-tests/        # Tests manuels contre Docker live
-init_data/          # Scripts one-shot (create_multiple_models, init_db)
-Models/             # Fichiers .joblib locaux
+tests/              # Pytest — automated tests
+smoke-tests/        # Manual tests against live Docker
+init_data/          # One-shot scripts (create_multiple_models, init_db)
+Models/             # Local .joblib files
 notebooks/          # Jupyter
-alembic/            # Migrations DB
+alembic/            # DB migrations
 ```
 
-## Qualité de code
+## Code quality
 
-Les règles de codage sont définies dans **[CODING_STANDARDS.md](./CODING_STANDARDS.md)**.
+Coding rules are defined in **[CODING_STANDARDS.md](./CODING_STANDARDS.md)**.
 
 ```bash
-# Vérifier le lint
+# Check lint
 ruff check src/
 
-# Vérifier le formatage
+# Check formatting
 black --check src/
 
-# Corriger automatiquement
+# Auto-fix
 ruff check src/ --fix && black src/
 ```
 
-## Commandes clés
+## Key commands
 
 ```bash
-# Démarrer
+# Start
 docker-compose up -d
 
-# Initialiser (premier déploiement uniquement)
+# Initialize (first deployment only)
 docker exec predictml-api python init_data/init_db.py
 
-# Tests automatisés (voir section Tests pour les prérequis)
+# Automated tests (see Tests section for prerequisites)
 pytest tests/ -v
 
-# Smoke tests (Docker requis)
+# Smoke tests (Docker required)
 python smoke-tests/test_multimodel_api.py
 
 # Logs
@@ -74,63 +74,63 @@ docker exec -it predictml-postgres psql -U postgres -d sklearn_api
 
 ## Credentials
 
-| Service | Valeur |
+| Service | Value |
 |---|---|
 | Admin token | `<ADMIN_TOKEN>` |
 | DB | `postgres / postgres` |
 | MinIO | `minioadmin / minioadmin` |
 
-## Dépendances
+## Dependencies
 
-Toute nouvelle dépendance doit être ajoutée dans **les deux fichiers** :
-- `requirements.txt` — utilisé par le Dockerfile de l'API
-- `pyproject.toml` — utilisé par la CI GitHub Actions
+Any new dependency must be added in **both files**:
+- `requirements.txt` — used by the API Dockerfile
+- `pyproject.toml` — used by the CI GitHub Actions
 
-Pour le dashboard Streamlit, les dépendances sont dans `streamlit_app/requirements.txt`.
+For the Streamlit dashboard, dependencies are in `streamlit_app/requirements.txt`.
 
 ## Tests
 
-Les tests dans `tests/` utilisent `TestClient` de FastAPI — aucun Docker requis.
-Ils couvrent : auth, endpoints publics, logique du `ModelService`.
+Tests in `tests/` use FastAPI's `TestClient` — no Docker required.
+They cover: auth, public endpoints, `ModelService` logic.
 
-### Prérequis
+### Prerequisites
 
-`pytest` est installé via **uv tool** (pas dans le venv du projet) :
+`pytest` is installed via **uv tool** (not in the project venv):
 
 ```bash
-# Installation initiale (une seule fois)
+# Initial install (once only)
 WITH_ARGS=$(cat requirements.txt | grep -v '^#' | grep -v '^$' | sed 's/^/--with /' | tr '\n' ' ')
 uv tool install pytest --with fakeredis --with aiosqlite --with asyncpg $WITH_ARGS
 ```
 
-> Le `pytest` système (`/root/.local/bin/pytest`) est distinct du Python du projet.
-> Ne pas utiliser `python -m pytest` — le module n'est pas installé dans ce Python.
+> The system `pytest` (`/root/.local/bin/pytest`) is separate from the project Python.
+> Do not use `python -m pytest` — the module is not installed in this Python.
 
-### Lancer les tests
+### Run tests
 
 ```bash
-pytest tests/ -v                              # tous les tests
-pytest tests/test_api.py                      # endpoints de base uniquement
-pytest tests/test_predictions_purge.py -v     # purge RGPD uniquement
-pytest tests/test_ab_significance.py -v       # significativité A/B
-pytest tests/test_auto_promotion_policy.py -v # auto-promotion post-retrain
+pytest tests/ -v                              # all tests
+pytest tests/test_api.py                      # basic endpoints only
+pytest tests/test_predictions_purge.py -v     # GDPR purge only
+pytest tests/test_ab_significance.py -v       # A/B significance
+pytest tests/test_auto_promotion_policy.py -v # post-retrain auto-promotion
 
-# Filtrer par mot-clé
+# Filter by keyword
 pytest tests/ -k "purge" -v
 pytest tests/ -k "admin" -v
 
-# Arrêter au premier échec
+# Stop at first failure
 pytest tests/ -x -v
 
-# Sans les warnings
+# Without warnings
 pytest tests/ -v -p no:warnings
 ```
 
-### Fichiers de tests par fonctionnalité
+### Test files by feature
 
-| Fichier | Fonctionnalité |
+| File | Feature |
 |---|---|
-| `test_api.py` | Endpoints de base, auth, health |
+| `test_api.py` | Basic endpoints, auth, health |
 | `test_predict_post.py` | POST /predict |
 | `test_predictions_get.py` | GET /predictions |
 | `test_predictions_purge.py` | DELETE /predictions/purge |
@@ -143,47 +143,47 @@ pytest tests/ -v -p no:warnings
 | `test_retrain.py` | POST /models/{name}/{version}/retrain |
 | `test_scheduled_retraining.py` | PATCH /models/{name}/{version}/schedule |
 | `test_auto_promotion_policy.py` | PATCH /models/{name}/policy |
-| `test_ab_shadow.py` | Routage A/B et shadow |
+| `test_ab_shadow.py` | A/B and shadow routing |
 | `test_ab_significance.py` | GET /models/{name}/ab-compare |
 | `test_feature_importance.py` | GET /models/{name}/feature-importance |
 | `test_observed_results.py` | POST/GET /observed-results |
-| `test_users.py` | Gestion utilisateurs |
-| `test_security.py` | Auth et tokens |
+| `test_users.py` | User management |
+| `test_security.py` | Auth and tokens |
 | `test_rate_limit.py` | Rate limiting |
-| `test_drift.py` | Détection de drift |
+| `test_drift.py` | Drift detection |
 | `test_db_service_crud.py` | DBService (CRUD) |
-| `test_monitoring_api.py` | Endpoints monitoring |
-| `test_input_validation.py` | Validation schéma d'entrée + mode strict /predict |
+| `test_monitoring_api.py` | Monitoring endpoints |
+| `test_input_validation.py` | Input schema validation + strict mode /predict |
 
 ### Notes
 
-- La DB de test est SQLite en mémoire — les tables sont recréées à chaque session pytest.
-- MinIO et Redis sont mockés (pas de serveurs requis).
-- Certains tests `async def` nécessitent `pytest-asyncio` (non installé par défaut) — ils échouent avec "async def functions are not natively supported" ; ce sont des échecs pré-existants sans impact sur les fonctionnalités.
+- The test DB is in-memory SQLite — tables are recreated at each pytest session.
+- MinIO and Redis are mocked (no servers required).
+- Some `async def` tests require `pytest-asyncio` (not installed by default) — they fail with "async def functions are not natively supported"; these are pre-existing failures with no impact on functionality.
 
-Les smoke tests dans `smoke-tests/` nécessitent Docker et frappent l'API live.
+Smoke tests in `smoke-tests/` require Docker and hit the live API.
 
-## Endpoints principaux
+## Main endpoints
 
-- `POST /predict` — Prédiction (Bearer auth) ; `?strict_validation=true` pour validation stricte du schéma
-- `GET /predictions` — Historique (Bearer auth)
-- `GET/POST/PATCH/DELETE /models` — Gestion modèles
-- `GET/POST/PATCH/DELETE /users` — Gestion utilisateurs (admin)
-- `POST/GET /observed-results` — Résultats observés
-- `PATCH /users/{id}` avec `{"regenerate_token": true}` — Renouveler un token (admin)
-- `POST /models/{name}/{version}/retrain` — Ré-entraîner un modèle (admin)
-- `PATCH /models/{name}/{version}/schedule` — Configurer le planning cron de ré-entraînement (admin)
-- `PATCH /models/{name}/policy` — Définir la politique d'auto-promotion post-retrain (admin)
-- `POST /models/{name}/{version}/validate-input` — Valider le schéma d'entrée sans prédire (Bearer auth)
-- `GET /models/{name}/feature-importance` — Importance globale des features (SHAP agrégé, Bearer auth)
-- `GET /models/{name}/ab-compare` — Comparaison A/B avec test de significativité statistique (Bearer auth)
-- `DELETE /predictions/purge` — Purge RGPD des prédictions anciennes (admin)
+- `POST /predict` — Prediction (Bearer auth); `?strict_validation=true` for strict schema validation
+- `GET /predictions` — History (Bearer auth)
+- `GET/POST/PATCH/DELETE /models` — Model management
+- `GET/POST/PATCH/DELETE /users` — User management (admin)
+- `POST/GET /observed-results` — Observed results
+- `PATCH /users/{id}` with `{"regenerate_token": true}` — Renew a token (admin)
+- `POST /models/{name}/{version}/retrain` — Retrain a model (admin)
+- `PATCH /models/{name}/{version}/schedule` — Configure the retraining cron schedule (admin)
+- `PATCH /models/{name}/policy` — Define the post-retrain auto-promotion policy (admin)
+- `POST /models/{name}/{version}/validate-input` — Validate input schema without predicting (Bearer auth)
+- `GET /models/{name}/feature-importance` — Global feature importance (aggregated SHAP, Bearer auth)
+- `GET /models/{name}/ab-compare` — A/B comparison with statistical significance test (Bearer auth)
+- `DELETE /predictions/purge` — GDPR purge of old predictions (admin)
 
-## Fonctionnalité Validation du schéma d'entrée
+## Feature: Input schema validation
 
-### Pourquoi
+### Why
 
-Les pannes silencieuses les plus fréquentes en ML en production proviennent de pipelines envoyant des features manquantes, renommées ou dans le mauvais type. L'endpoint `/predict` acceptait n'importe quel JSON — les incohérences causaient des erreurs 500 non explicites ou, pire, des prédictions silencieusement fausses.
+The most frequent silent failures in ML production come from pipelines sending missing, renamed, or wrongly-typed features. The `/predict` endpoint accepted any JSON — inconsistencies caused unexplained 500 errors or, worse, silently wrong predictions.
 
 ### Signature
 
@@ -192,7 +192,7 @@ POST /models/{name}/{version}/validate-input
 Body: { "petal_length": 5.1, "petal_width": 1.8, "sepal_length": 6.3 }
 ```
 
-### Réponse
+### Response
 
 ```json
 {
@@ -208,41 +208,41 @@ Body: { "petal_length": 5.1, "petal_width": 1.8, "sepal_length": 6.3 }
 }
 ```
 
-### Source des features attendues (priorité)
+### Source of expected features (priority)
 
-1. `feature_names_in_` du modèle sklearn chargé (entraîné avec un DataFrame pandas)
-2. Clés de `feature_baseline` stockées dans les métadonnées du modèle
-3. Si aucun schéma : `valid=true`, `expected_features=null`
+1. `feature_names_in_` from the loaded sklearn model (trained with a pandas DataFrame)
+2. Keys of `feature_baseline` stored in model metadata
+3. If no schema: `valid=true`, `expected_features=null`
 
-### Mode strict sur /predict
+### Strict mode on /predict
 
-Ajouter `?strict_validation=true` à `/predict` pour rejeter avec 422 si des features **inattendues** sont présentes (en plus des features manquantes déjà vérifiées par défaut).
+Add `?strict_validation=true` to `/predict` to reject with 422 if **unexpected** features are present (in addition to missing features already checked by default).
 
 ```bash
 curl -X POST "http://localhost:8000/predict?strict_validation=true" \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"model_name": "iris", "features": {"sepal_length": 5.1, "extra_col": 99}}'
-# → 422 avec detail.errors listant les features inattendues
+# → 422 with detail.errors listing the unexpected features
 ```
 
-### Implémentation
+### Implementation
 
-- Endpoint : `POST /models/{name}/{version}/validate-input` dans `src/api/models.py`
-- Service : `src/services/input_validation_service.py` (`validate_input_features`, `resolve_expected_features`)
-- Schémas : `ValidateInputResponse`, `InputValidationError`, `InputValidationWarning` dans `src/schemas/model.py`
-- Param strict : `?strict_validation=true` sur `POST /predict` dans `src/api/predict.py`
-- Tests : `tests/test_input_validation.py` (23 tests)
+- Endpoint: `POST /models/{name}/{version}/validate-input` in `src/api/models.py`
+- Service: `src/services/input_validation_service.py` (`validate_input_features`, `resolve_expected_features`)
+- Schemas: `ValidateInputResponse`, `InputValidationError`, `InputValidationWarning` in `src/schemas/model.py`
+- Strict param: `?strict_validation=true` on `POST /predict` in `src/api/predict.py`
+- Tests: `tests/test_input_validation.py` (23 tests)
 
-### Tableau des fichiers de tests
+### Test files table
 
-| Fichier | Fonctionnalité |
+| File | Feature |
 |---|---|
-| `test_input_validation.py` | Validation schéma d'entrée + mode strict /predict |
+| `test_input_validation.py` | Input schema validation + strict mode /predict |
 
-## Fonctionnalité A/B Significativité statistique
+## Feature: A/B Statistical Significance
 
-L'endpoint `GET /models/{name}/ab-compare` enrichit sa réponse avec un bloc `ab_significance` :
+The `GET /models/{name}/ab-compare` endpoint enriches its response with an `ab_significance` block:
 
 ```json
 {
@@ -259,75 +259,75 @@ L'endpoint `GET /models/{name}/ab-compare` enrichit sa réponse avec un bloc `ab
 }
 ```
 
-### Logique de sélection du test
+### Test selection logic
 
-| Condition | Test utilisé | Métrique |
+| Condition | Test used | Metric |
 |---|---|---|
-| ≥ 1 erreur observée dans l'un des groupes | Chi-² sur tableau de contingence | `error_rate` |
-| 0 erreur + temps de réponse disponibles | Mann-Whitney U | `response_time_ms` |
-| Données insuffisantes (< 2 versions actives) | — | `ab_significance: null` |
+| ≥ 1 observed error in either group | Chi-² on contingency table | `error_rate` |
+| 0 errors + response times available | Mann-Whitney U | `response_time_ms` |
+| Insufficient data (< 2 active versions) | — | `ab_significance: null` |
 
-### Calcul de `min_samples_needed`
+### `min_samples_needed` calculation
 
-- **Chi-²** : formule de puissance basée sur l'effet de taille de Cohen h (comparaison de proportions)
-- **Mann-Whitney U** : formule basée sur Cohen d (distributions continues)
-- Puissance cible : 80 % — seuil : `confidence_level` (défaut 95 %)
+- **Chi-²**: power formula based on Cohen h effect size (proportion comparison)
+- **Mann-Whitney U**: formula based on Cohen d (continuous distributions)
+- Target power: 80% — threshold: `confidence_level` (default 95%)
 
-### Implémentation
+### Implementation
 
-- Service : `src/services/ab_significance_service.py`
-- Tests unitaires : `tests/test_ab_significance.py` (20 tests)
+- Service: `src/services/ab_significance_service.py`
+- Unit tests: `tests/test_ab_significance.py` (20 tests)
 
-## Fonctionnalité Retrain (ré-entraînement)
+## Feature: Retrain (retraining)
 
-### Comment ça fonctionne
+### How it works
 
-1. À l'upload d'un modèle (`POST /models`), fournir optionnellement un script `train_file`
-   (fichier Python `train.py`).
-2. Si fourni, le script est **validé statiquement** puis stocké dans MinIO
+1. When uploading a model (`POST /models`), optionally provide a `train_file` script
+   (Python file `train.py`).
+2. If provided, the script is **statically validated** then stored in MinIO
    (`{name}/v{version}_train.py`).
-3. L'admin peut déclencher un ré-entraînement via `POST /models/{name}/{version}/retrain`
-   en précisant une plage de dates.
-4. Le script s'exécute dans un **sous-processus isolé** (timeout 600 s) avec les variables
-   d'environnement injectées automatiquement.
-5. Le `.joblib` produit est uploadé dans MinIO et enregistré comme **nouvelle version** du modèle.
-6. Si `set_production: true`, la nouvelle version est automatiquement mise en production.
-7. L'intégralité des logs `stdout`/`stderr` est retournée dans la réponse et affichée dans
-   le dashboard Streamlit.
+3. The admin can trigger a retrain via `POST /models/{name}/{version}/retrain`
+   by specifying a date range.
+4. The script runs in an **isolated subprocess** (timeout 600s) with environment
+   variables automatically injected.
+5. The produced `.joblib` is uploaded to MinIO and registered as a **new version** of the model.
+6. If `set_production: true`, the new version is automatically set to production.
+7. The full `stdout`/`stderr` logs are returned in the response and displayed in
+   the Streamlit dashboard.
 
-### Contraintes du script `train.py` (vérifiées à l'upload)
+### `train.py` script constraints (checked at upload)
 
-Le script doit impérativement :
+The script must:
 
-| Contrainte | Détail |
+| Constraint | Detail |
 |---|---|
-| Syntaxe Python valide | Vérifié via `ast.parse()` |
-| Référencer `TRAIN_START_DATE` | Lire `os.environ["TRAIN_START_DATE"]` |
-| Référencer `TRAIN_END_DATE` | Lire `os.environ["TRAIN_END_DATE"]` |
-| Référencer `OUTPUT_MODEL_PATH` | Chemin où sauvegarder le `.joblib` |
-| Sauvegarder le modèle | Appel à `joblib.dump` ou `save_model` |
+| Valid Python syntax | Verified via `ast.parse()` |
+| Reference `TRAIN_START_DATE` | Read `os.environ["TRAIN_START_DATE"]` |
+| Reference `TRAIN_END_DATE` | Read `os.environ["TRAIN_END_DATE"]` |
+| Reference `OUTPUT_MODEL_PATH` | Path where to save the `.joblib` |
+| Save the model | Call `joblib.dump` or `save_model` |
 
-### Variables d'environnement injectées par l'API
+### Environment variables injected by the API
 
 | Variable | Description |
 |---|---|
-| `TRAIN_START_DATE` | Date début (YYYY-MM-DD) |
-| `TRAIN_END_DATE` | Date fin (YYYY-MM-DD) |
-| `OUTPUT_MODEL_PATH` | Chemin absolu pour le `.joblib` produit |
-| `MLFLOW_TRACKING_URI` | URI MLflow (optionnel) |
-| `MODEL_NAME` | Nom du modèle source (optionnel) |
+| `TRAIN_START_DATE` | Start date (YYYY-MM-DD) |
+| `TRAIN_END_DATE` | End date (YYYY-MM-DD) |
+| `OUTPUT_MODEL_PATH` | Absolute path for the produced `.joblib` |
+| `MLFLOW_TRACKING_URI` | MLflow URI (optional) |
+| `MODEL_NAME` | Source model name (optional) |
 
-### Retour des métriques
+### Returning metrics
 
-Pour que l'API mette à jour `accuracy` et `f1_score` de la nouvelle version,
-imprimer sur **stdout** un JSON sur la **dernière ligne JSON** de la sortie :
+For the API to update `accuracy` and `f1_score` of the new version,
+print on **stdout** a JSON on the **last JSON line** of the output:
 
 ```json
 {"accuracy": 0.95, "f1_score": 0.94}
 ```
 
-Les clés optionnelles suivantes enrichissent le champ `training_stats` de la nouvelle version
-(snapshot automatique des données d'entraînement) :
+The following optional keys enrich the `training_stats` field of the new version
+(automatic snapshot of training data):
 
 ```python
 print(json.dumps({
@@ -339,23 +339,23 @@ print(json.dumps({
 }))
 ```
 
-`train_start_date`, `train_end_date` et `trained_at` sont toujours renseignés automatiquement.
-`n_rows`, `feature_stats` et `label_distribution` sont `null` si absents du JSON stdout.
+`train_start_date`, `train_end_date` and `trained_at` are always automatically populated.
+`n_rows`, `feature_stats` and `label_distribution` are `null` if absent from the stdout JSON.
 
-### Upload avec train.py
+### Upload with train.py
 
 ```bash
 curl -X POST http://localhost:8000/models \
   -H "Authorization: Bearer <token>" \
-  -F "name=mon_modele" -F "version=1.0.0" \
-  -F "file=@mon_modele.joblib" \
+  -F "name=my_model" -F "version=1.0.0" \
+  -F "file=@my_model.joblib" \
   -F "train_file=@init_data/example_train.py"
 ```
 
-### Lancer un ré-entraînement
+### Trigger a retrain
 
 ```bash
-curl -X POST http://localhost:8000/models/mon_modele/1.0.0/retrain \
+curl -X POST http://localhost:8000/models/my_model/1.0.0/retrain \
   -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -366,49 +366,49 @@ curl -X POST http://localhost:8000/models/mon_modele/1.0.0/retrain \
   }'
 ```
 
-Un exemple complet de `train.py` respectant le contrat est disponible dans
+A complete `train.py` example respecting the contract is available in
 `init_data/example_train.py`.
 
-Voir aussi `documentation/TRAIN_SCRIPT_GUIDE.md` — section « Sécurité & sandbox »
-pour les détails sur la liste blanche d'imports et les limites de ressources.
+See also `documentation/TRAIN_SCRIPT_GUIDE.md` — section "Security & sandbox"
+for details on the import whitelist and resource limits.
 
-## Fonctionnalité Auto-promotion post-retrain
+## Feature: Post-retrain auto-promotion
 
-### Comment ça fonctionne
+### How it works
 
-1. L'admin définit une politique via `PATCH /models/{name}/policy`.
-2. La politique est stockée dans `ModelMetadata.promotion_policy` (champ JSON)
-   et propagée à **toutes les versions actives** du modèle.
-3. À la fin de chaque ré-entraînement (`POST /models/{name}/{version}/retrain`),
-   si `auto_promote: true` :
-   - Récupère les paires (prédiction, résultat observé) historiques du modèle.
-   - Si `len(paires) < min_sample_validation` → non promu.
-   - Si `min_accuracy` défini : vérifie l'accuracy sur les N dernières paires.
-   - Si `max_latency_p95_ms` défini : vérifie le P95 de latence des prédictions.
-   - Si tous les critères sont satisfaits → `is_production = true` automatiquement.
-4. La réponse du retrain inclut `auto_promoted: true|false` et `auto_promote_reason`.
+1. The admin defines a policy via `PATCH /models/{name}/policy`.
+2. The policy is stored in `ModelMetadata.promotion_policy` (JSON field)
+   and propagated to **all active versions** of the model.
+3. At the end of each retrain (`POST /models/{name}/{version}/retrain`),
+   if `auto_promote: true`:
+   - Retrieves historical (prediction, observed result) pairs for the model.
+   - If `len(pairs) < min_sample_validation` → not promoted.
+   - If `min_accuracy` defined: verifies accuracy on the last N pairs.
+   - If `max_latency_p95_ms` defined: verifies P95 latency of predictions.
+   - If all criteria are met → `is_production = true` automatically.
+4. The retrain response includes `auto_promoted: true|false` and `auto_promote_reason`.
 
-### Champs de la politique
+### Policy fields
 
-| Champ | Type | Défaut | Description |
+| Field | Type | Default | Description |
 |---|---|---|---|
-| `min_accuracy` | float [0–1] | null | Précision minimale requise |
-| `max_latency_p95_ms` | float > 0 | null | Latence P95 maximale en ms |
-| `min_sample_validation` | int ≥ 1 | 10 | Nombre minimal de paires de validation |
-| `auto_promote` | bool | false | Activer l'auto-promotion |
+| `min_accuracy` | float [0–1] | null | Minimum required accuracy |
+| `max_latency_p95_ms` | float > 0 | null | Maximum P95 latency in ms |
+| `min_sample_validation` | int ≥ 1 | 10 | Minimum number of validation pairs |
+| `auto_promote` | bool | false | Enable auto-promotion |
 
-### Sémantique de `auto_promoted` dans la réponse du retrain
+### Semantics of `auto_promoted` in the retrain response
 
-| Valeur | Signification |
+| Value | Meaning |
 |---|---|
-| `null` | Pas de policy configurée, ou `set_production=True` (promotion manuelle) |
-| `false` | Policy évaluée : critères non satisfaits (voir `auto_promote_reason`) |
-| `true` | Policy évaluée : critères satisfaits, version promue en production |
+| `null` | No policy configured, or `set_production=True` (manual promotion) |
+| `false` | Policy evaluated: criteria not met (see `auto_promote_reason`) |
+| `true` | Policy evaluated: criteria met, version promoted to production |
 
-### Définir une politique
+### Define a policy
 
 ```bash
-curl -X PATCH http://localhost:8000/models/mon_modele/policy \
+curl -X PATCH http://localhost:8000/models/my_model/policy \
   -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -419,32 +419,32 @@ curl -X PATCH http://localhost:8000/models/mon_modele/policy \
   }'
 ```
 
-### Implémentation
+### Implementation
 
-- Endpoint : `PATCH /models/{name}/policy` dans `src/api/models.py`
-- Service d'évaluation : `src/services/auto_promotion_service.py`
-- Champ DB : `promotion_policy` (JSON) dans `src/db/models/model_metadata.py`
-- Migration : `alembic/versions/20260419_5ab8c1f0_add_promotion_policy.py`
-- Tests : `tests/test_auto_promotion_policy.py` (25 tests)
+- Endpoint: `PATCH /models/{name}/policy` in `src/api/models.py`
+- Evaluation service: `src/services/auto_promotion_service.py`
+- DB field: `promotion_policy` (JSON) in `src/db/models/model_metadata.py`
+- Migration: `alembic/versions/20260419_5ab8c1f0_add_promotion_policy.py`
+- Tests: `tests/test_auto_promotion_policy.py` (25 tests)
 
-## Fonctionnalité Purge RGPD (rétention des données)
+## Feature: GDPR Purge (data retention)
 
-### Pourquoi
+### Why
 
-La table `predictions` grossit indéfiniment. Sur un déploiement actif (1 000 prédictions/jour),
-elle atteint 365 000 lignes/an. Sans politique de rétention, les performances des requêtes
-analytiques se dégradent et la conformité RGPD devient un problème.
+The `predictions` table grows indefinitely. On an active deployment (1,000 predictions/day),
+it reaches 365,000 rows/year. Without a retention policy, analytical query performance
+degrades and GDPR compliance becomes an issue.
 
 ### Signature
 
 ```
 DELETE /predictions/purge
-  ?older_than_days=90    # supprimer les prédictions > 90 jours
-  &model_name=iris       # optionnel : purger un seul modèle
-  &dry_run=true          # simuler sans supprimer (défaut : true)
+  ?older_than_days=90    # delete predictions > 90 days old
+  &model_name=iris       # optional: purge a single model
+  &dry_run=true          # simulate without deleting (default: true)
 ```
 
-### Réponse
+### Response
 
 ```json
 {
@@ -456,69 +456,69 @@ DELETE /predictions/purge
 }
 ```
 
-- `linked_observed_results_count > 0` → avertissement : des prédictions supprimées sont liées à des
-  `observed_results` (perte de données de performance historiques).
+- `linked_observed_results_count > 0` → warning: deleted predictions are linked to
+  `observed_results` (loss of historical performance data).
 
-### Comportement
+### Behavior
 
-- `dry_run=true` par défaut — aucune suppression sans confirmation explicite (`dry_run=false`).
-- Filtre SQL : `WHERE timestamp < now() - interval 'N days'` + filtre optionnel `model_name`.
-- Admin uniquement.
+- `dry_run=true` by default — no deletion without explicit confirmation (`dry_run=false`).
+- SQL filter: `WHERE timestamp < now() - interval 'N days'` + optional `model_name` filter.
+- Admin only.
 
-### Implémentation
+### Implementation
 
-- Endpoint : `DELETE /predictions/purge` dans `src/api/predict.py`
-- Service DB : `DBService.purge_predictions()` dans `src/services/db_service.py`
-- Schéma réponse : `PurgeResponse` dans `src/schemas/prediction.py`
-- Tests : `tests/test_predictions_purge.py` (16 tests)
+- Endpoint: `DELETE /predictions/purge` in `src/api/predict.py`
+- DB service: `DBService.purge_predictions()` in `src/services/db_service.py`
+- Response schema: `PurgeResponse` in `src/schemas/prediction.py`
+- Tests: `tests/test_predictions_purge.py` (16 tests)
 
-### Exemple
+### Example
 
 ```bash
-# Simuler une purge (dry_run par défaut)
+# Simulate a purge (dry_run by default)
 curl -X DELETE "http://localhost:8000/predictions/purge?older_than_days=90" \
   -H "Authorization: Bearer <admin_token>"
 
-# Purger réellement les prédictions iris > 90 jours
+# Actually purge iris predictions > 90 days old
 curl -X DELETE "http://localhost:8000/predictions/purge?older_than_days=90&model_name=iris&dry_run=false" \
   -H "Authorization: Bearer <admin_token>"
 ```
 
-## Fonctionnalité Ré-entraînement Planifié
+## Feature: Scheduled Retraining
 
-### Comment ça fonctionne
+### How it works
 
-1. L'admin configure un planning cron via `PATCH /models/{name}/{version}/schedule`.
-2. Le planning est stocké dans `ModelMetadata.retrain_schedule` (champ JSON).
-3. Au démarrage de l'API, le scheduler APScheduler charge tous les modèles ayant
-   `retrain_schedule.enabled=True` depuis la DB et crée un job cron par version.
-4. À chaque déclenchement, le job :
-   - Acquiert un **verrou Redis** (`SET NX EX 700`) pour éviter les exécutions simultanées
-     en environnement multi-réplicas.
-   - Calcule `TRAIN_START_DATE = today - lookback_days` et `TRAIN_END_DATE = today`.
-   - Exécute la logique de retrain (identique à l'endpoint manuel) dans un sous-processus
-     (timeout 600 s).
-   - Crée une nouvelle version avec `trained_by="scheduler"`.
-   - Si `auto_promote=True` et que le modèle a une `promotion_policy`, évalue l'auto-promotion.
-   - Met à jour `last_run_at` et `next_run_at` sur la version source.
-5. Pour modifier ou désactiver un planning, rappeler l'endpoint avec `enabled=false`.
+1. The admin configures a cron schedule via `PATCH /models/{name}/{version}/schedule`.
+2. The schedule is stored in `ModelMetadata.retrain_schedule` (JSON field).
+3. At API startup, the APScheduler scheduler loads all models with
+   `retrain_schedule.enabled=True` from the DB and creates one cron job per version.
+4. On each trigger, the job:
+   - Acquires a **Redis lock** (`SET NX EX 700`) to prevent simultaneous executions
+     in a multi-replica environment.
+   - Computes `TRAIN_START_DATE = today - lookback_days` and `TRAIN_END_DATE = today`.
+   - Executes the retrain logic (identical to the manual endpoint) in a subprocess
+     (timeout 600s).
+   - Creates a new version with `trained_by="scheduler"`.
+   - If `auto_promote=True` and the model has a `promotion_policy`, evaluates auto-promotion.
+   - Updates `last_run_at` and `next_run_at` on the source version.
+5. To modify or disable a schedule, call the endpoint again with `enabled=false`.
 
-### Champs de `retrain_schedule`
+### `retrain_schedule` fields
 
-| Champ | Type | Défaut | Description |
+| Field | Type | Default | Description |
 |---|---|---|---|
-| `cron` | string | null | Expression cron 5 champs (ex : `"0 3 * * 1"`) |
-| `lookback_days` | int ≥ 1 | 30 | Jours d'historique → `TRAIN_START_DATE` |
-| `auto_promote` | bool | false | Évaluer la `promotion_policy` après chaque retrain |
-| `enabled` | bool | true | `false` = pause sans effacer le schedule |
-| `last_run_at` | datetime | null | Horodatage du dernier déclenchement (UTC, naive) |
-| `next_run_at` | datetime | null | Prochain déclenchement calculé (UTC, naive) |
+| `cron` | string | null | 5-field cron expression (e.g. `"0 3 * * 1"`) |
+| `lookback_days` | int ≥ 1 | 30 | History days → `TRAIN_START_DATE` |
+| `auto_promote` | bool | false | Evaluate `promotion_policy` after each retrain |
+| `enabled` | bool | true | `false` = pause without clearing the schedule |
+| `last_run_at` | datetime | null | Last trigger timestamp (UTC, naive) |
+| `next_run_at` | datetime | null | Next calculated trigger (UTC, naive) |
 
-### Configurer un planning
+### Configure a schedule
 
 ```bash
-# Chaque lundi à 03h00 UTC, fenêtre de 30 jours
-curl -X PATCH http://localhost:8000/models/mon_modele/1.0.0/schedule \
+# Every Monday at 03:00 UTC, 30-day window
+curl -X PATCH http://localhost:8000/models/my_model/1.0.0/schedule \
   -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -528,23 +528,23 @@ curl -X PATCH http://localhost:8000/models/mon_modele/1.0.0/schedule \
     "enabled": true
   }'
 
-# Désactiver le planning
-curl -X PATCH http://localhost:8000/models/mon_modele/1.0.0/schedule \
+# Disable the schedule
+curl -X PATCH http://localhost:8000/models/my_model/1.0.0/schedule \
   -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
   -d '{"cron": "0 3 * * 1", "enabled": false}'
 ```
 
-### Point de vigilance multi-réplicas
+### Multi-replica caveat
 
-Le verrou Redis `retrain_lock:{name}:{version}` (TTL 700 s) garantit qu'un seul replica
-exécute le job à la fois. Si l'API tourne sans Redis (test, dev), le job s'exécutera quand
-même — le lock est pris via le FakeRedis en mémoire.
+The Redis lock `retrain_lock:{name}:{version}` (TTL 700s) ensures that only one replica
+runs the job at a time. If the API runs without Redis (test, dev), the job will still
+execute — the lock is acquired via in-memory FakeRedis.
 
-### Implémentation
+### Implementation
 
-- Endpoint : `PATCH /models/{name}/{version}/schedule` dans `src/api/models.py`
-- Scheduler : `src/tasks/retrain_scheduler.py`
-- Champ DB : `retrain_schedule` (JSON) dans `src/db/models/model_metadata.py`
-- Migration : `alembic/versions/20260419_6bc2d3e1_add_retrain_schedule.py`
-- Tests : `tests/test_scheduled_retraining.py` (17 tests)
+- Endpoint: `PATCH /models/{name}/{version}/schedule` in `src/api/models.py`
+- Scheduler: `src/tasks/retrain_scheduler.py`
+- DB field: `retrain_schedule` (JSON) in `src/db/models/model_metadata.py`
+- Migration: `alembic/versions/20260419_6bc2d3e1_add_retrain_schedule.py`
+- Tests: `tests/test_scheduled_retraining.py` (17 tests)
