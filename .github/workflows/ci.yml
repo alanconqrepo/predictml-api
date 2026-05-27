@@ -27,27 +27,13 @@ jobs:
       - name: Check formatting with black
         run: black --check src/
 
+  # Tests use an in-memory SQLite database (conftest.py overrides all DB connections).
+  # No PostgreSQL or MinIO service containers are required.
   test-linux:
     name: Tests (Linux)
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
-          POSTGRES_DB: sklearn_api
-        ports:
-          - 5434:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     env:
-      DATABASE_URL: postgresql+asyncpg://postgres:${{ secrets.CI_DB_PASSWORD }}@localhost:5434/sklearn_api
       MINIO_ENDPOINT: localhost:9002
       MINIO_ACCESS_KEY: ${{ secrets.CI_MINIO_ACCESS_KEY }}
       MINIO_SECRET_KEY: ${{ secrets.CI_MINIO_SECRET_KEY }}
@@ -73,7 +59,6 @@ jobs:
     name: Tests (Windows)
     runs-on: windows-latest
 
-    # Tests use SQLite in-memory (conftest.py overrides DB) — no service containers needed.
     env:
       MINIO_ENDPOINT: localhost:9002
       MINIO_ACCESS_KEY: ${{ secrets.CI_MINIO_ACCESS_KEY }}
