@@ -51,6 +51,10 @@ import src.tasks.retrain_scheduler  # noqa: E402 — must be imported before pat
 patch("src.api.models.minio_service", _minio_mock).start()
 # Covers lazy imports from the scheduler and retrain_service
 patch("src.services.minio_service.minio_service", _minio_mock).start()
+# model_service is imported transitively by src.api.models before patching,
+# so its local binding to minio_service points to the original client.
+# Patch it explicitly to prevent real MinIO connections in tests.
+patch("src.services.model_service.minio_service", _minio_mock).start()
 
 # Mock MLflow service globally — tests do not require an MLflow server
 _mlflow_mock = MagicMock()
