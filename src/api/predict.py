@@ -954,7 +954,9 @@ async def predict(
             if settings.PREDICTION_STREAM_ENABLED:
                 _published = await _publish_prediction_to_stream(_prediction_payload)
                 if not _published:
-                    _saved_prediction = await DBService.create_prediction(db=db, **_prediction_payload)
+                    _saved_prediction = await DBService.create_prediction(
+                        db=db, **_prediction_payload
+                    )
             else:
                 _saved_prediction = await DBService.create_prediction(db=db, **_prediction_payload)
 
