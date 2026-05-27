@@ -248,7 +248,7 @@ class TestRequireEnvFunction:
 
         key = "PYTEST_INSECURE_PROD_VAR_XYZ"
         with _env_patch({key: "bad_val", "DEBUG": "false"}):
-            with pytest.raises(EnvironmentError, match="non sécurisée"):
+            with pytest.raises(EnvironmentError, match="insecure"):
                 _require_env(key, "bad_val", {"bad_val"})
 
     def test_missing_var_with_default_returns_default(self):

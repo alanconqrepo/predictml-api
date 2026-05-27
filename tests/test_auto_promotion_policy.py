@@ -376,7 +376,7 @@ class TestAutoPromotionInRetrain:
                 patch("asyncio.create_subprocess_exec", new=AsyncMock(side_effect=_mock_exec_success)),
                 patch(
                     "src.services.auto_promotion_service.evaluate_auto_promotion",
-                    new=AsyncMock(return_value=(False, "Échantillons insuffisants : 0/3 requis.")),
+                    new=AsyncMock(return_value=(False, "Insufficient samples for validation: 0/3 required.")),
                 ),
             ):
                 return await do_retrain(
@@ -393,7 +393,7 @@ class TestAutoPromotionInRetrain:
         result = asyncio.run(_run())
         assert result["success"] is True
         assert result["auto_promoted"] is False
-        assert "insuffisant" in result["auto_promote_reason"].lower()
+        assert "insufficient" in result["auto_promote_reason"].lower()
         assert result["is_production"] is False
 
     def test_retrain_auto_promote_success(self):
@@ -435,7 +435,7 @@ class TestAutoPromotionInRetrain:
                 patch(
                     "src.services.auto_promotion_service.evaluate_auto_promotion",
                     new=AsyncMock(
-                        return_value=(False, "Précision insuffisante : 0.7500 < 0.8000 requis.")
+                        return_value=(False, "Insufficient accuracy: 0.7500 < 0.8000 required.")
                     ),
                 ),
             ):
@@ -453,7 +453,7 @@ class TestAutoPromotionInRetrain:
         result = asyncio.run(_run())
         assert result["success"] is True
         assert result["auto_promoted"] is False
-        assert "précision" in result["auto_promote_reason"].lower()
+        assert "accuracy" in result["auto_promote_reason"].lower()
         assert result["is_production"] is False
 
     def test_retrain_auto_promote_latency_fails(self):
@@ -466,7 +466,7 @@ class TestAutoPromotionInRetrain:
                 patch(
                     "src.services.auto_promotion_service.evaluate_auto_promotion",
                     new=AsyncMock(
-                        return_value=(False, "Latence P95 trop élevée : 350.0ms > 200.0ms max.")
+                        return_value=(False, "P95 latency too high: 350.0ms > 200.0ms max.")
                     ),
                 ),
             ):
@@ -483,7 +483,7 @@ class TestAutoPromotionInRetrain:
 
         result = asyncio.run(_run())
         assert result["auto_promoted"] is False
-        assert "latence" in result["auto_promote_reason"].lower()
+        assert "latency" in result["auto_promote_reason"].lower()
 
     def test_retrain_set_production_overrides_auto_promotion(self):
         """set_production=True: manual promotion, auto_promoted is None."""
@@ -563,7 +563,7 @@ class TestEvaluateAutoPromotion:
         ):
             ok, reason = self._run(evaluate_auto_promotion(db, "m", policy))
         assert ok is False
-        assert "insuffisant" in reason.lower()
+        assert "insufficient" in reason.lower()
 
     def test_sufficient_samples_accuracy_ok_returns_true(self):
         pairs = self._make_pairs(10, correct_ratio=1.0)  # 100% accuracy
@@ -586,7 +586,7 @@ class TestEvaluateAutoPromotion:
         ):
             ok, reason = self._run(evaluate_auto_promotion(db, "m", policy))
         assert ok is False
-        assert "précision" in reason.lower()
+        assert "accuracy" in reason.lower()
 
     def test_no_accuracy_threshold_skips_accuracy_check(self):
         """Without min_accuracy, no accuracy check is performed."""
@@ -633,7 +633,7 @@ class TestEvaluateAutoPromotion:
         ):
             ok, reason = self._run(evaluate_auto_promotion(db, "m", policy))
         assert ok is False
-        assert "latence" in reason.lower()
+        assert "latency" in reason.lower()
 
     def test_no_latency_data_skips_latency_check(self):
         """No latency data → latency criterion ignored."""
@@ -829,7 +829,7 @@ class TestAutoDemotion:
         policy = {"auto_demote": False}
         ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
         assert ok is False
-        assert "désactivée" in reason.lower()
+        assert "disabled" in reason.lower()
         db.execute.assert_not_called()
 
     def test_no_production_model_returns_false(self):
@@ -1058,7 +1058,7 @@ class TestAutoDemotion:
             ok, reason = self._run(evaluate_auto_demotion(db, "m", policy))
 
         assert ok is True
-        assert "accuracy" in reason.lower() or "précision" in reason.lower() or "insuffisant" in reason.lower()
+        assert "accuracy" in reason.lower() or "insufficient" in reason.lower()
 
     def test_accuracy_above_threshold_no_demotion(self):
         prod = self._make_prod_meta(feature_baseline=None)

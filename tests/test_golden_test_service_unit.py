@@ -187,13 +187,13 @@ class TestParseCsv:
     def test_empty_expected_output_value_raises(self):
         """Valeur expected_output vide dans une ligne → ValueError."""
         csv = b"f1,expected_output\n1.0,\n"
-        with pytest.raises(ValueError, match="vide"):
+        with pytest.raises(ValueError, match="empty"):
             GoldenTestService.parse_csv(csv)
 
     def test_empty_csv_no_data_rows_raises(self):
         """CSV avec uniquement le header → ValueError."""
         csv = b"f1,expected_output\n"
-        with pytest.raises(ValueError, match="aucune ligne"):
+        with pytest.raises(ValueError, match="no data rows"):
             GoldenTestService.parse_csv(csv)
 
 

@@ -15,6 +15,7 @@ import asyncio
 import csv
 import json
 import os
+import sys
 import tempfile
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -294,7 +295,7 @@ async def do_retrain(  # noqa: C901 — complexity inherent to the pipeline
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                "python",
+                sys.executable,
                 script_path,
                 env=env,
                 stdout=asyncio.subprocess.PIPE,

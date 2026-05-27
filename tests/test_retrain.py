@@ -546,7 +546,7 @@ class TestRetrainEndpoint:
             },
         )
         assert r.status_code == 409
-        assert "existe déjà" in r.json()["detail"]
+        assert "already exists" in r.json()["detail"]
 
     # --- Success (202 + job_id with ARQ) ---
 

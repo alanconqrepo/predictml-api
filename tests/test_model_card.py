@@ -314,7 +314,7 @@ def test_card_markdown_contains_generated_at():
         f"/models/{CARD_MODEL}/{VERSION}/card",
         headers={**AUTH, "Accept": "text/markdown"},
     )
-    assert "Généré le" in r.text
+    assert "Generated on" in r.text
 
 
 def test_card_markdown_content_disposition():

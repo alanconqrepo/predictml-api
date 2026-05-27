@@ -190,7 +190,7 @@ def test_create_model_duplicate_name():
         data={"name": f"{TEST_MODEL_NAME}_dup", "version": "1.0.0"},
     )
     assert response.status_code == 409
-    assert "existe déjà" in response.json()["detail"]
+    assert "already exists" in response.json()["detail"]
 
 
 def test_create_model_empty_file():

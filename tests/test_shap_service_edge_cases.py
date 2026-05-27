@@ -169,4 +169,4 @@ class TestComputeShapExplanationUnsupportedModel:
             compute_shap_explanation(model, ["f1", "f2"], x, 0, None)
 
         assert exc_info.value.status_code == 422
-        assert "non supporté" in exc_info.value.detail
+        assert "not supported" in exc_info.value.detail

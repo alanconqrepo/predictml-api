@@ -199,7 +199,7 @@ def test_compute_baseline_no_predictions():
          patch("src.api.models.DBService.get_feature_production_stats", AsyncMock(return_value={})):
         r = client.post("/models/iris/1.0.0/compute-baseline", headers=AUTH_HEADERS)
     assert r.status_code == 422
-    assert "insuffisantes" in r.json()["detail"].lower()
+    assert "insufficient" in r.json()["detail"].lower()
 
 
 def test_compute_baseline_insufficient_predictions():

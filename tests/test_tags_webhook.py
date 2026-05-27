@@ -210,7 +210,7 @@ class TestUploadSize:
                 files={"file": ("model.joblib", io.BytesIO(big_bytes), "application/octet-stream")},
             )
         assert r.status_code == 413
-        assert "taille maximale" in r.json()["detail"].lower()
+        assert "maximum allowed size" in r.json()["detail"].lower()
 
     def test_upload_valid_size_succeeds(self):
         """POST /models avec fichier dans la limite → pas de 413 (201 ou autre erreur)."""

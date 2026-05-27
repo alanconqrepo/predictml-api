@@ -109,7 +109,7 @@ def test_submit_request_duplicate_pending_email():
         json={"username": f"{PREFIX}_dup_b", "email": email},
     )
     assert r.status_code == 409
-    assert "en attente" in r.json()["detail"]
+    assert "already pending" in r.json()["detail"]
 
 
 def test_submit_request_existing_user_email():
