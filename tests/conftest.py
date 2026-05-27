@@ -189,6 +189,29 @@ async def _setup():
 asyncio.run(_setup())
 
 
+def pytest_sessionfinish(session, exitstatus):
+    """Dispose the SQLAlchemy engine after the test session.
+
+    aiosqlite runs each connection in a background thread. With NullPool, those
+    threads stay alive until the engine is explicitly disposed. On Windows,
+    Python 3.13 waits for all threads to finish before exiting the process, so
+    pytest hangs indefinitely unless we dispose the engine here.
+    """
+    try:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_test_engine.dispose())
+        loop.close()
+    except Exception:
+        pass
+    finally:
+        try:
+            import os
+            if os.path.exists(_test_db_file):
+                os.remove(_test_db_file)
+        except Exception:
+            pass
+
+
 async def _override_get_db():
     async with _TestSessionLocal() as session:
         try:
