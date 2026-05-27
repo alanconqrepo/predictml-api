@@ -102,6 +102,9 @@ class PredictionInput(BaseModel):
 class PredictionOutput(BaseModel):
     """Result of a prediction"""
 
+    id: Optional[int] = Field(
+        None, description="Database ID of the logged prediction (None if store=false)"
+    )
     model_name: str = Field(..., description="Name of the model used")
     model_version: str = Field(..., description="Version of the model used")
     id_obs: Optional[str] = Field(None, description="Observation identifier (if provided)")
