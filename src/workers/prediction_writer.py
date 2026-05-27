@@ -238,7 +238,8 @@ async def run() -> None:
         logger.info("Shutdown signal received", signal=sig)
         running = False
 
-    signal.signal(signal.SIGTERM, _stop)
+    if sys.platform != "win32":  # SIGTERM is not available on Windows
+        signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
 
     logger.info(

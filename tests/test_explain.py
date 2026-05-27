@@ -299,7 +299,7 @@ def test_explain_missing_features_returns_422():
             json={"model_name": EX_RF_MODEL, "features": {"f1": 1.0}},  # manque f2, f3
         )
         assert response.status_code == 422
-        assert "manquantes" in response.json()["detail"].lower()
+        assert "missing" in response.json()["detail"].lower()
     finally:
         asyncio.run(model_service.clear_cache(key))
 

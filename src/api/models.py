@@ -9,6 +9,7 @@ import json
 import math
 import os
 import re
+import sys
 import tempfile
 import time
 from datetime import datetime, timedelta, timezone
@@ -358,7 +359,7 @@ async def _run_train_subprocess(
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                "python",
+                sys.executable,
                 script_path,
                 env=env,
                 stdout=asyncio.subprocess.PIPE,

@@ -19,6 +19,7 @@ import asyncio
 import csv
 import json
 import os
+import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -291,7 +292,7 @@ async def _do_retrain(name: str, version: str) -> None:
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                "python",
+                sys.executable,
                 script_path,
                 env=env,
                 stdout=asyncio.subprocess.PIPE,

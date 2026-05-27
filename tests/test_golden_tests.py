@@ -504,7 +504,7 @@ class TestGoldenTestAutoPromotion:
         should, reason = asyncio.run(self._run_evaluate(policy))
         # Sans min_golden_test_pass_rate, le résultat dépend d'autres critères
         assert isinstance(should, bool)
-        assert "régression" not in reason
+        assert "regression" not in reason
 
     def test_golden_tests_no_version_skips_check(self):
         """Sans version → check golden tests ignoré même si policy définie."""
@@ -538,7 +538,7 @@ class TestGoldenTestAutoPromotion:
         ):
             should, reason = asyncio.run(self._run_evaluate(policy))
         # pass_rate=0.9 >= 0.8 → golden tests ne bloquent pas
-        assert "régression" not in reason
+        assert "regression" not in reason
 
     def test_golden_tests_fail_blocks_promotion(self):
         """pass_rate < seuil → auto_promote_reason mentionne les golden tests."""
@@ -559,7 +559,7 @@ class TestGoldenTestAutoPromotion:
         ):
             should, reason = asyncio.run(self._run_evaluate(policy))
         assert should is False
-        assert "régression" in reason
+        assert "regression" in reason
         assert "80.00%" in reason
         assert "95.00%" in reason
 
@@ -582,4 +582,4 @@ class TestGoldenTestAutoPromotion:
         ):
             should, reason = asyncio.run(self._run_evaluate(policy))
         # total_tests=0 → golden test check ignoré, ne bloque pas
-        assert "régression" not in reason
+        assert "regression" not in reason

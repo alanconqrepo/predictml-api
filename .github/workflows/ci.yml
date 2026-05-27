@@ -27,27 +27,13 @@ jobs:
       - name: Check formatting with black
         run: black --check src/
 
-  test:
-    name: Tests
+  # Tests use an in-memory SQLite database (conftest.py overrides all DB connections).
+  # No PostgreSQL or MinIO service containers are required.
+  test-linux:
+    name: Tests (Linux)
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
-          POSTGRES_DB: sklearn_api
-        ports:
-          - 5434:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     env:
-      DATABASE_URL: postgresql+asyncpg://postgres:${{ secrets.CI_DB_PASSWORD }}@localhost:5434/sklearn_api
       MINIO_ENDPOINT: localhost:9002
       MINIO_ACCESS_KEY: ${{ secrets.CI_MINIO_ACCESS_KEY }}
       MINIO_SECRET_KEY: ${{ secrets.CI_MINIO_SECRET_KEY }}
@@ -64,7 +50,33 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest pytest-cov httpx anyio pytest-asyncio email-validator fakeredis
+        run: pip install -r requirements.txt pytest pytest-cov httpx anyio pytest-asyncio email-validator fakeredis aiosqlite asyncpg
 
       - name: Run tests
-        run: python -m pytest tests/ -v
+        run: pytest tests/ -v --tb=short -p no:warnings
+
+  test-windows:
+    name: Tests (Windows)
+    runs-on: windows-latest
+
+    env:
+      MINIO_ENDPOINT: localhost:9002
+      MINIO_ACCESS_KEY: ${{ secrets.CI_MINIO_ACCESS_KEY }}
+      MINIO_SECRET_KEY: ${{ secrets.CI_MINIO_SECRET_KEY }}
+      SECRET_KEY: ${{ secrets.CI_SECRET_KEY }}
+      ADMIN_TOKEN: ${{ secrets.CI_ADMIN_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-cov httpx anyio pytest-asyncio email-validator fakeredis aiosqlite asyncpg
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short -p no:warnings
