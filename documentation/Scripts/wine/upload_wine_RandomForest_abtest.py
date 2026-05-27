@@ -2,14 +2,14 @@
 upload_wine_RandomForest_abtest.py — Wine v1.1.0 (RandomForest) — production + ab_test
 ========================================================================================
 
-Upload wine-regressor v1.1.0 avec RandomForestRegressor en production + A/B test.
+Upload wine-regressor v1.1.0 with RandomForestRegressor in production + A/B test.
 
-Déploiement :
+Deployment:
   - is_production = True
-  - deployment_mode = "ab_test" (routage partagé avec v1.0.0)
+  - deployment_mode = "ab_test" (shared routing with v1.0.0)
   - tag "Example"
 
-Usage :
+Usage:
   API_TOKEN=<token> python upload_wine_RandomForest_abtest.py
 """
 
@@ -47,10 +47,10 @@ SCRIPT_DIR        = os.path.dirname(os.path.abspath(__file__))
 TRAIN_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "train_wine_RandomForest.py")
 
 if not API_TOKEN:
-    print("❌  API_TOKEN non défini.")
+    print("❌  API_TOKEN not defined.")
     sys.exit(1)
 if not os.path.exists(TRAIN_SCRIPT_PATH):
-    print(f"❌  train_wine_RandomForest.py introuvable : {TRAIN_SCRIPT_PATH}")
+    print(f"❌  train_wine_RandomForest.py not found: {TRAIN_SCRIPT_PATH}")
     sys.exit(1)
 
 HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
@@ -59,17 +59,17 @@ HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
 
 try:
     requests.get(f"{API_URL}/health", timeout=5).raise_for_status()
-    print(f"✅  API accessible : {API_URL}")
+    print(f"✅  API reachable: {API_URL}")
 except Exception as e:
-    print(f"❌  API inaccessible : {e}")
+    print(f"❌  API unreachable: {e}")
     sys.exit(1)
 
-# ── 2. Entraînement ───────────────────────────────────────────────────────────
+# ── 2. Training ───────────────────────────────────────────────────────────────
 
 tmp_pkl = tempfile.NamedTemporaryFile(suffix=".joblib", delete=False)
 tmp_pkl.close()
 
-print(f"⏳  Entraînement RandomForestRegressor ({TRAIN_START} → {TRAIN_END})…")
+print(f"⏳  Training RandomForestRegressor ({TRAIN_START} → {TRAIN_END})…")
 
 train_env = {
     **os.environ,
@@ -90,7 +90,7 @@ result = subprocess.run(
 )
 
 if result.returncode != 0:
-    print("❌  train_wine_RandomForest.py a échoué :")
+    print("❌  train_wine_RandomForest.py failed:")
     print(result.stderr)
     os.unlink(tmp_pkl.name)
     sys.exit(1)
@@ -111,11 +111,11 @@ mae           = metrics.get("mae")
 rmse          = metrics.get("rmse")
 hyperparams   = metrics.get("hyperparameters")
 mlflow_run_id = metrics.get("mlflow_run_id")
-print(f"✅  Entraînement — R²={r2} MAE={mae} RMSE={rmse}" + (f" | MLflow={mlflow_run_id}" if mlflow_run_id else ""))
+print(f"✅  Training — R²={r2} MAE={mae} RMSE={rmse}" + (f" | MLflow={mlflow_run_id}" if mlflow_run_id else ""))
 
 # ── 3. Upload ─────────────────────────────────────────────────────────────────
 
-print(f"⏳  Upload {MODEL_NAME} v{MODEL_VERSION} (ab_test)…")
+print(f"⏳  Uploading {MODEL_NAME} v{MODEL_VERSION} (ab_test)…")
 
 try:
     with open(tmp_pkl.name, "rb") as pkl_fh, open(TRAIN_SCRIPT_PATH, "rb") as train_fh:
@@ -143,12 +143,12 @@ try:
             data=data, timeout=180,
         )
         _upload_elapsed = time.perf_counter() - _upload_t0
-        print(f"  [TIMING] POST /models répondu en {_upload_elapsed:.2f}s — status {response.status_code}")
+        print(f"  [TIMING] POST /models responded in {_upload_elapsed:.2f}s — status {response.status_code}")
 finally:
     os.unlink(tmp_pkl.name)
 
 if response.status_code == 409:
-    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} existe déjà — PATCH ab_test…")
+    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} already exists — PATCH ab_test…")
     patch_payload = {"is_production": True, "deployment_mode": "ab_test", "traffic_weight": 0.5}
     if hyperparams:
         patch_payload["hyperparameters"] = hyperparams
@@ -159,21 +159,21 @@ if response.status_code == 409:
             json=patch_payload, timeout=30,
         )
     except Exception as _e:
-        print(f"    [WARN] PATCH existe-déjà échoué : {_e} — continuons")
+        print(f"    [WARN] PATCH already-exists failed: {_e} — continuing")
         sys.exit(0)
     print(f"✅  PATCH OK" if patch_resp.status_code == 200 else f"❌  PATCH {patch_resp.status_code}")
     sys.exit(0)
 
 if response.status_code not in (200, 201):
-    print(f"❌  Erreur {response.status_code} : {response.text[:300]}")
+    print(f"❌  Error {response.status_code}: {response.text[:300]}")
     sys.exit(1)
 
 res = response.json()
-print(f"✅  Modèle uploadé — ID={res.get('id')} version={res.get('version')}")
+print(f"✅  Model uploaded — ID={res.get('id')} version={res.get('version')}")
 
 # ── 4. PATCH → production + ab_test ──────────────────────────────────────────
 
-print(f"⏳  Mise en production + mode ab_test…")
+print(f"⏳  Setting to production + ab_test mode…")
 
 patch_body: dict = {"is_production": True, "deployment_mode": "ab_test", "traffic_weight": 0.5, "tags": ["Example"]}
 if metrics.get("feature_stats"):
@@ -186,9 +186,9 @@ patch = requests.patch(
 )
 
 if patch.status_code == 200:
-    print(f"✅  Production + ab_test activé sur wine-regressor v{MODEL_VERSION}.")
+    print(f"✅  Production + ab_test enabled on wine-regressor v{MODEL_VERSION}.")
 else:
-    print(f"⚠️   PATCH échoué ({patch.status_code}) : {patch.text[:200]}")
+    print(f"⚠️   PATCH failed ({patch.status_code}): {patch.text[:200]}")
 
-print(f"\n   → wine-regressor v{MODEL_VERSION} en A/B test avec v1.0.0")
-print(f"   → Comparaison : GET /models/wine-regressor/ab-compare")
+print(f"\n   → wine-regressor v{MODEL_VERSION} in A/B test with v1.0.0")
+print(f"   → Compare: GET /models/wine-regressor/ab-compare")

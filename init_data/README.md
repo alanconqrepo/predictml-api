@@ -1,64 +1,64 @@
 # init_data
 
-Scripts d'initialisation à exécuter **une seule fois** lors du premier déploiement.
+Initialization scripts to run **once only** on first deployment.
 
-## Ordre d'exécution
+## Execution order
 
-### Étape 1 — Créer les modèles sklearn localement
+### Step 1 — Create sklearn models locally
 
 ```bash
 python init_data/create_multiple_models.py
 ```
 
-**Ce que ça fait :** entraîne 3 modèles scikit-learn (iris, wine, cancer) et les sauvegarde en `.joblib` dans `Models/`.
+**What it does:** trains 3 scikit-learn models (iris, wine, cancer) and saves them as `.joblib` files in `Models/`.
 
-**Quand :** avant `init_db.py`, si le dossier `Models/` est vide ou inexistant.
+**When:** before `init_db.py`, if the `Models/` directory is empty or missing.
 
 ---
 
-### Étape 2 — Initialiser la base de données et uploader les modèles
+### Step 2 — Initialize the database and upload the models
 
 ```bash
-# Dans le conteneur Docker (recommandé)
+# Inside the Docker container (recommended)
 docker exec predictml-api python init_data/init_db.py
 
-# Ou en local si les services sont accessibles
+# Or locally if services are accessible
 python init_data/init_db.py
 ```
 
-**Ce que ça fait :**
-1. Crée les tables PostgreSQL (`users`, `predictions`, `model_metadata`)
-2. Crée l'utilisateur admin avec un token généré aléatoirement
-3. Upload tous les `.joblib` de `Models/` vers MinIO et les enregistre en base
+**What it does:**
+1. Creates the PostgreSQL tables (`users`, `predictions`, `model_metadata`)
+2. Creates the admin user with a randomly generated token
+3. Uploads all `.joblib` files from `Models/` to MinIO and registers them in the database
 
-**Quand :** une seule fois après le premier `docker-compose up -d --build`.
+**When:** once, after the first `docker-compose up -d --build`.
 
-> **Important :** le token admin est affiché une seule fois dans le terminal. Sauvegardez-le immédiatement.
+> **Important:** the admin token is displayed only once in the terminal. Save it immediately.
 
 ---
 
-## Prérequis
+## Prerequisites
 
-Les services Docker doivent être démarrés avant l'étape 2 :
+Docker services must be started before step 2:
 
 ```bash
 docker-compose up -d
 ```
 
-## Ré-initialisation
+## Re-initialization
 
-Si vous avez besoin de repartir de zéro :
+If you need to start from scratch:
 
 ```bash
-# Supprimer les volumes et recréer
+# Remove volumes and recreate
 docker-compose down -v
 docker-compose up -d --build
 docker exec predictml-api python init_data/init_db.py
 ```
 
-## Résumé
+## Summary
 
-| Script | Prérequis | Fréquence |
+| Script | Prerequisites | Frequency |
 |---|---|---|
-| `create_multiple_models.py` | Python + scikit-learn | Une fois (ou si `Models/` est vide) |
-| `init_db.py` | Docker démarré | Une fois par déploiement |
+| `create_multiple_models.py` | Python + scikit-learn | Once (or if `Models/` is empty) |
+| `init_db.py` | Docker started | Once per deployment |

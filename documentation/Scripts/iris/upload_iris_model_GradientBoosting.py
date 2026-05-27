@@ -1,24 +1,24 @@
 """
-upload_iris_model_GradientBoosting.py — Entraîne et uploade un modèle Iris (GradientBoosting) via l'API PredictML
+upload_iris_model_GradientBoosting.py — Trains and uploads an Iris model (GradientBoosting) via the PredictML API
 =================================================================================================================
 
-Ce script tourne LOCALEMENT. Il :
-  1. Exécute train_iris_GradientBoosting.py en subprocess pour produire le .joblib
-  2. Uploade le .joblib + train_iris_GradientBoosting.py via POST /models (version 1.1.0)
-  3. Ajoute le tag "Example" — le modèle n'est PAS mis en production
+This script runs LOCALLY. It:
+  1. Executes train_iris_GradientBoosting.py as a subprocess to produce the .joblib
+  2. Uploads the .joblib + train_iris_GradientBoosting.py via POST /models (version 1.1.0)
+  3. Adds the tag "Example" — the model is NOT set to production
 
-Usage :
+Usage:
   API_URL=http://localhost:8000 API_TOKEN=<token> python upload_iris_model_GradientBoosting.py
 
-Variables d'environnement :
-  API_URL        URL de l'API          (défaut : http://localhost:8000)
-  API_TOKEN      Token Bearer — requis
-  MODEL_NAME     Nom du modèle         (défaut : iris-classifier)
-  MODEL_VERSION  Version               (défaut : 1.1.0)
-  TRAIN_START    Date début training   (défaut : 2024-01-01)
-  TRAIN_END      Date fin training     (défaut : 2024-12-31)
+Environment variables:
+  API_URL        API URL               (default: http://localhost:8000)
+  API_TOKEN      Bearer token — required
+  MODEL_NAME     Model name            (default: iris-classifier)
+  MODEL_VERSION  Version               (default: 1.1.0)
+  TRAIN_START    Training start date   (default: 2024-01-01)
+  TRAIN_END      Training end date     (default: 2024-12-31)
 
-Prérequis Python :
+Python requirements:
   pip install requests scikit-learn numpy pandas
 """
 
@@ -40,7 +40,7 @@ API_TOKEN = os.environ.get("API_TOKEN", os.environ.get("ADMIN_TOKEN", ""))
 
 MODEL_NAME    = os.environ.get("MODEL_NAME",    "iris-classifier")
 MODEL_VERSION = os.environ.get("MODEL_VERSION", "1.1.0")
-DESCRIPTION   = "GradientBoostingClassifier entraîné sur le dataset Iris (exemple)"
+DESCRIPTION   = "GradientBoostingClassifier trained on the Iris dataset (example)"
 ALGORITHM     = "GradientBoosting"
 
 TRAIN_START = os.environ.get("TRAIN_START", "2024-01-01")
@@ -62,32 +62,32 @@ TRAIN_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "train_iris_GradientBoosting.py")
 # ── Validation ────────────────────────────────────────────────────────────────
 
 if not API_TOKEN:
-    print("❌  API_TOKEN non défini.")
-    print("    Lancez : API_TOKEN=<votre_token> python upload_iris_model_GradientBoosting.py")
+    print("❌  API_TOKEN not defined.")
+    print("    Run: API_TOKEN=<your_token> python upload_iris_model_GradientBoosting.py")
     sys.exit(1)
 
 if not os.path.exists(TRAIN_SCRIPT_PATH):
-    print(f"❌  train_iris_GradientBoosting.py introuvable : {TRAIN_SCRIPT_PATH}")
+    print(f"❌  train_iris_GradientBoosting.py not found: {TRAIN_SCRIPT_PATH}")
     sys.exit(1)
 
 HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
 
-# ── 1. Vérification que l'API est accessible ──────────────────────────────────
+# ── 1. Check that the API is reachable ────────────────────────────────────────
 
 try:
     health = requests.get(f"{API_URL}/health", timeout=5)
     health.raise_for_status()
-    print(f"✅  API accessible : {API_URL}")
+    print(f"✅  API reachable: {API_URL}")
 except Exception as e:
-    print(f"❌  API inaccessible ({API_URL}) : {e}")
+    print(f"❌  API unreachable ({API_URL}): {e}")
     sys.exit(1)
 
-# ── 2. Exécution de train_iris_GradientBoosting.py ────────────────────────────
+# ── 2. Run train_iris_GradientBoosting.py ─────────────────────────────────────
 
 tmp_pkl = tempfile.NamedTemporaryFile(suffix=".joblib", delete=False)
 tmp_pkl.close()
 
-print(f"⏳  Entraînement via train_iris_GradientBoosting.py ({TRAIN_START} → {TRAIN_END})…")
+print(f"⏳  Training via train_iris_GradientBoosting.py ({TRAIN_START} → {TRAIN_END})…")
 
 train_env = {
     **os.environ,
@@ -114,7 +114,7 @@ result = subprocess.run(
 )
 
 if result.returncode != 0:
-    print("❌  train_iris_GradientBoosting.py a échoué :")
+    print("❌  train_iris_GradientBoosting.py failed:")
     print(result.stderr)
     os.unlink(tmp_pkl.name)
     sys.exit(1)
@@ -122,7 +122,7 @@ if result.returncode != 0:
 if result.stderr:
     print(result.stderr.strip())
 
-# Récupération des métriques depuis la dernière ligne JSON de stdout
+# Retrieve metrics from the last JSON line of stdout
 metrics = {}
 for line in reversed(result.stdout.strip().splitlines()):
     try:
@@ -140,12 +140,12 @@ classes          = metrics.get("classes")
 training_dataset = metrics.get("training_dataset")
 mlflow_run_id    = metrics.get("mlflow_run_id")
 hyperparameters  = metrics.get("hyperparameters")
-print(f"✅  Entraînement terminé — Accuracy : {acc} | F1 : {f1}"
-      + (f" | MLflow run : {mlflow_run_id}" if mlflow_run_id else ""))
+print(f"✅  Training complete — Accuracy: {acc} | F1: {f1}"
+      + (f" | MLflow run: {mlflow_run_id}" if mlflow_run_id else ""))
 
 # ── 3. Upload via POST /models ────────────────────────────────────────────────
 
-print(f"⏳  Upload de {MODEL_NAME} v{MODEL_VERSION}…")
+print(f"⏳  Uploading {MODEL_NAME} v{MODEL_VERSION}…")
 
 try:
     with open(tmp_pkl.name, "rb") as pkl_fh, open(TRAIN_SCRIPT_PATH, "rb") as train_fh:
@@ -190,14 +190,14 @@ try:
             timeout=180,
         )
         _upload_elapsed = time.perf_counter() - _upload_t0
-        print(f"  [TIMING] POST /models répondu en {_upload_elapsed:.2f}s — status {response.status_code}")
+        print(f"  [TIMING] POST /models responded in {_upload_elapsed:.2f}s — status {response.status_code}")
 finally:
     os.unlink(tmp_pkl.name)
 
-# ── 4. Résultat upload ────────────────────────────────────────────────────────
+# ── 4. Upload result ──────────────────────────────────────────────────────────
 
 if response.status_code == 409:
-    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} existe déjà — mise à jour via PATCH…")
+    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} already exists — updating via PATCH…")
     patch_payload = {"is_production": True, "deployment_mode": "ab_test", "traffic_weight": 0.5}
     if hyperparameters:
         patch_payload["hyperparameters"] = hyperparameters
@@ -209,34 +209,34 @@ if response.status_code == 409:
             timeout=30,
         )
     except Exception as _e:
-        print(f"    [WARN] PATCH existe-déjà échoué : {_e} — continuons")
+        print(f"    [WARN] PATCH already-exists failed: {_e} — continuing")
         sys.exit(0)
     if patch_resp.status_code == 200:
-        print(f"✅  Mode ab_test et hyperparamètres mis à jour.")
+        print(f"✅  ab_test mode and hyperparameters updated.")
     else:
-        print(f"❌  PATCH échoué ({patch_resp.status_code}) : {patch_resp.text[:200]}")
+        print(f"❌  PATCH failed ({patch_resp.status_code}): {patch_resp.text[:200]}")
     sys.exit(0)
 
 if response.status_code not in (200, 201):
-    print(f"\n❌  Erreur {response.status_code}")
+    print(f"\n❌  Error {response.status_code}")
     try:
         body = response.json()
-        print(f"   Détail : {json.dumps(body, indent=2, ensure_ascii=False)}")
+        print(f"   Detail: {json.dumps(body, indent=2, ensure_ascii=False)}")
     except Exception:
-        print(f"   Réponse : {response.text[:500]}")
+        print(f"   Response: {response.text[:500]}")
     sys.exit(1)
 
 res = response.json()
-print(f"\n✅  Modèle uploadé avec succès !")
-print(f"   Nom       : {res.get('name')}")
+print(f"\n✅  Model uploaded successfully!")
+print(f"   Name      : {res.get('name')}")
 print(f"   Version   : {res.get('version')}")
 print(f"   ID        : {res.get('id')}")
-print(f"   Algorithme: {ALGORITHM}")
+print(f"   Algorithm : {ALGORITHM}")
 
-# ── 5. Ajout du tag "Example", feature_baseline et training_dataset ────────────
-#      Le modèle n'est PAS mis en production (is_production reste false)
+# ── 5. Add tag "Example", feature_baseline and training_dataset ────────────────
+#      The model is NOT set to production (is_production remains false)
 
-print(f"⏳  Ajout du tag 'Example', baseline des features et dataset de lineage…")
+print(f"⏳  Adding tag 'Example', feature baseline and lineage dataset…")
 
 patch_body: dict = {"is_production": True, "deployment_mode": "ab_test", "traffic_weight": 0.5, "tags": ["Example"]}
 if metrics.get("feature_stats"):
@@ -254,12 +254,12 @@ patch = requests.patch(
 if patch.status_code == 200:
     extras = []
     if "feature_baseline" in patch_body:
-        extras.append("baseline des features")
-    print(f"✅  Modèle passé en production (ab_test){(' avec ' + ', '.join(extras)) if extras else ''}.")
+        extras.append("feature baseline")
+    print(f"✅  Model set to production (ab_test){(' with ' + ', '.join(extras)) if extras else ''}.")
 else:
-    print(f"⚠️   PATCH échoué ({patch.status_code}) : {patch.text[:200]}")
+    print(f"⚠️   PATCH failed ({patch.status_code}): {patch.text[:200]}")
 
-print(f"\n   → iris-classifier v{MODEL_VERSION} en A/B test avec v1.0.0")
-print(f"   → Comparaison : GET {API_URL}/models/{MODEL_NAME}/ab-compare")
-print(f"   → Ré-entraîner :")
+print(f"\n   → iris-classifier v{MODEL_VERSION} in A/B test with v1.0.0")
+print(f"   → Comparison: GET {API_URL}/models/{MODEL_NAME}/ab-compare")
+print(f"   → Retrain:")
 print(f"       POST {API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}/retrain")

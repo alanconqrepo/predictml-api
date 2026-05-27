@@ -1,19 +1,19 @@
 """
-Script pour créer plusieurs modèles d'exemple avec MLflow.
+Script to create several example models with MLflow.
 
-Chaque modèle est :
-- Entraîné directement (sans Pipeline avancé)
-- Loggé dans MLflow (params, métriques, artefact dans s3://mlflow/)
-- Enregistré via POST /models avec mlflow_run_id (pas d'upload MinIO séparé)
+Each model is:
+- Trained directly (without an advanced Pipeline)
+- Logged to MLflow (params, metrics, artifact in s3://mlflow/)
+- Registered via POST /models with mlflow_run_id (no separate MinIO upload)
 
-Ordre d'exécution :
+Execution order:
     docker-compose up -d
     python init_data/create_multiple_models.py
 """
 import os
 import sys
 
-# Fix encoding sur Windows (cp1252 ne supporte pas les emojis MLflow)
+# Fix encoding on Windows (cp1252 does not support MLflow emojis)
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -40,7 +40,7 @@ API_TOKEN = os.environ.get("API_TOKEN", "")
 
 
 def configure_mlflow():
-    """Configure MLflow avec MinIO comme backend d'artefacts."""
+    """Configure MLflow with MinIO as the artifact backend."""
     os.environ["MLFLOW_S3_ENDPOINT_URL"] = f"http://{MINIO_ENDPOINT}"
     os.environ["AWS_ACCESS_KEY_ID"] = MINIO_ACCESS_KEY
     os.environ["AWS_SECRET_ACCESS_KEY"] = MINIO_SECRET_KEY
@@ -50,11 +50,11 @@ def configure_mlflow():
                    secret_key=MINIO_SECRET_KEY, secure=False)
     if not client.bucket_exists("mlflow"):
         client.make_bucket("mlflow")
-        print("   Bucket 'mlflow' cree dans MinIO")
+        print("   Bucket 'mlflow' created in MinIO")
 
 
 def train_and_register(name, model, X_train, X_test, y_train, y_test, params, description, classes):
-    """Entraîne le modèle, logue dans MLflow, enregistre via POST /models."""
+    """Train the model, log to MLflow, register via POST /models."""
     mlflow.set_experiment(name)
     with mlflow.start_run(run_name=f"{name}_v{MODEL_VERSION}"):
         model.fit(X_train, y_train)
@@ -73,7 +73,7 @@ def train_and_register(name, model, X_train, X_test, y_train, y_test, params, de
         print(f"   Accuracy : {acc:.4f}  |  F1 : {f1:.4f}")
         print(f"   MLflow run ID : {run_id}")
 
-    # Enregistrer via POST /models (mlflow_run_id uniquement, pas d'upload MinIO séparé)
+    # Register via POST /models (mlflow_run_id only, no separate MinIO upload)
     import json
     response = requests.post(
         f"{API_URL}/models",
@@ -94,12 +94,12 @@ def train_and_register(name, model, X_train, X_test, y_train, y_test, params, de
     )
 
     if response.status_code == 201:
-        print(f"   Modele enregistre via API (id={response.json()['id']})")
+        print(f"   Model registered via API (id={response.json()['id']})")
     elif response.status_code == 409:
-        print(f"   Modele '{name}' existe deja — ignore")
+        print(f"   Model '{name}' already exists — skipped")
     else:
-        print(f"   ERREUR API {response.status_code}: {response.text}")
-        raise RuntimeError(f"Echec enregistrement {name}: {response.status_code}")
+        print(f"   API ERROR {response.status_code}: {response.text}")
+        raise RuntimeError(f"Registration failed for {name}: {response.status_code}")
 
 
 def create_iris():
@@ -146,12 +146,12 @@ def create_cancer():
 
 def main():
     print("=" * 60)
-    print("Creation des modeles avec MLflow")
+    print("Creating models with MLflow")
     print(f"MLflow : {MLFLOW_TRACKING_URI}")
     print(f"API    : {API_URL}")
     print("=" * 60)
 
-    print("\nConfiguration MLflow + MinIO...")
+    print("\nConfiguring MLflow + MinIO...")
     configure_mlflow()
 
     create_iris()
@@ -159,7 +159,7 @@ def main():
     create_cancer()
 
     print("\n" + "=" * 60)
-    print("Tous les modeles ont ete crees, logues dans MLflow et enregistres via l'API.")
+    print("All models have been created, logged in MLflow and registered via the API.")
     print("=" * 60)
 
 

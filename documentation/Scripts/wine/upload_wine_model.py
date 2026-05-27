@@ -1,27 +1,27 @@
 """
-upload_wine_model.py — Entraîne et uploade un modèle Wine (Régression) via l'API PredictML
+upload_wine_model.py — Trains and uploads a Wine model (Regression) via the PredictML API
 ===========================================================================================
 
-Ce script tourne LOCALEMENT. Il :
-  1. Exécute train_wine.py en subprocess pour produire le .joblib
-  2. Uploade le .joblib + train_wine.py via POST /models
-  3. Met le modèle en production avec le tag "Example" et la baseline des features
+This script runs LOCALLY. It:
+  1. Executes train_wine.py in a subprocess to produce the .joblib
+  2. Uploads the .joblib + train_wine.py via POST /models
+  3. Sets the model to production with the "Example" tag and the feature baseline
 
-Modèle : GradientBoostingRegressor — prédit la teneur en alcool (variable continue)
-         à partir des 12 autres mesures chimiques du dataset Wine sklearn.
+Model: GradientBoostingRegressor — predicts alcohol content (continuous target)
+       from the 12 other chemical measurements in the sklearn Wine dataset.
 
-Usage :
+Usage:
   API_URL=http://localhost:8000 API_TOKEN=<token> python upload_wine_model.py
 
-Variables d'environnement :
-  API_URL        URL de l'API          (défaut : http://localhost:80)
-  API_TOKEN      Token Bearer — requis
-  MODEL_NAME     Nom du modèle         (défaut : wine-regressor)
-  MODEL_VERSION  Version               (défaut : 1.0.0)
-  TRAIN_START    Date début training   (défaut : 2024-01-01)
-  TRAIN_END      Date fin training     (défaut : 2024-12-31)
+Environment variables:
+  API_URL        API URL               (default: http://localhost:80)
+  API_TOKEN      Bearer token — required
+  MODEL_NAME     Model name            (default: wine-regressor)
+  MODEL_VERSION  Version               (default: 1.0.0)
+  TRAIN_START    Training start date   (default: 2024-01-01)
+  TRAIN_END      Training end date     (default: 2024-12-31)
 
-Prérequis Python :
+Python prerequisites:
   pip install requests scikit-learn numpy pandas
 """
 
@@ -43,13 +43,13 @@ API_TOKEN = os.environ.get("API_TOKEN", os.environ.get("ADMIN_TOKEN", ""))
 
 MODEL_NAME    = os.environ.get("MODEL_NAME",    "wine-regressor")
 MODEL_VERSION = os.environ.get("MODEL_VERSION", "1.0.0")
-DESCRIPTION   = "GradientBoostingRegressor entraîné sur le dataset Wine (régression — cible : teneur en alcool)"
+DESCRIPTION   = "GradientBoostingRegressor trained on the Wine dataset (regression — target: alcohol content)"
 ALGORITHM     = "GradientBoosting"
 
 TRAIN_START = os.environ.get("TRAIN_START", "2024-01-01")
 TRAIN_END   = os.environ.get("TRAIN_END",   "2024-12-31")
 
-RETRAIN_IN_API = False  # True = relance train.py côté API (librairies du serveur)
+RETRAIN_IN_API = False  # True = re-run train.py on the API side (server libraries)
 
 MLFLOW_TRACKING_URI      = os.environ.get("MLFLOW_TRACKING_URI",      "http://localhost:5000")
 MLFLOW_TRACKING_USERNAME = os.environ.get("MLFLOW_TRACKING_USERNAME", "admin")
@@ -67,32 +67,32 @@ TRAIN_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "train_wine.py")
 # ── Validation ────────────────────────────────────────────────────────────────
 
 if not API_TOKEN:
-    print("❌  API_TOKEN non défini.")
-    print("    Lancez : API_TOKEN=<votre_token> python upload_wine_model.py")
+    print("❌  API_TOKEN not defined.")
+    print("    Run: API_TOKEN=<your_token> python upload_wine_model.py")
     sys.exit(1)
 
 if not os.path.exists(TRAIN_SCRIPT_PATH):
-    print(f"❌  train_wine.py introuvable : {TRAIN_SCRIPT_PATH}")
+    print(f"❌  train_wine.py not found: {TRAIN_SCRIPT_PATH}")
     sys.exit(1)
 
 HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
 
-# ── 1. Vérification que l'API est accessible ──────────────────────────────────
+# ── 1. Check that the API is reachable ────────────────────────────────────────
 
 try:
     health = requests.get(f"{API_URL}/health", timeout=5)
     health.raise_for_status()
-    print(f"✅  API accessible : {API_URL}")
+    print(f"✅  API reachable: {API_URL}")
 except Exception as e:
-    print(f"❌  API inaccessible ({API_URL}) : {e}")
+    print(f"❌  API unreachable ({API_URL}): {e}")
     sys.exit(1)
 
-# ── 2. Exécution de train_wine.py ─────────────────────────────────────────────
+# ── 2. Execute train_wine.py ──────────────────────────────────────────────────
 
 tmp_pkl = tempfile.NamedTemporaryFile(suffix=".joblib", delete=False)
 tmp_pkl.close()
 
-print(f"⏳  Entraînement via train_wine.py ({TRAIN_START} → {TRAIN_END})…")
+print(f"⏳  Training via train_wine.py ({TRAIN_START} → {TRAIN_END})…")
 
 train_env = {
     **os.environ,
@@ -119,7 +119,7 @@ result = subprocess.run(
 )
 
 if result.returncode != 0:
-    print("❌  train_wine.py a échoué :")
+    print("❌  train_wine.py failed:")
     print(result.stderr)
     os.unlink(tmp_pkl.name)
     sys.exit(1)
@@ -127,7 +127,7 @@ if result.returncode != 0:
 if result.stderr:
     print(result.stderr.strip())
 
-# Récupération des métriques depuis la dernière ligne JSON de stdout
+# Retrieve metrics from the last JSON line of stdout
 metrics = {}
 for line in reversed(result.stdout.strip().splitlines()):
     try:
@@ -145,13 +145,13 @@ mlflow_run_id    = metrics.get("mlflow_run_id")
 hyperparameters  = metrics.get("hyperparameters")
 dependencies     = metrics.get("dependencies", {})
 print(
-    f"✅  Entraînement terminé — R² : {r2} | MAE : {mae} | RMSE : {rmse}"
-    + (f" | MLflow run : {mlflow_run_id}" if mlflow_run_id else "")
+    f"✅  Training complete — R²: {r2} | MAE: {mae} | RMSE: {rmse}"
+    + (f" | MLflow run: {mlflow_run_id}" if mlflow_run_id else "")
 )
 
 # ── 3. Upload via POST /models ────────────────────────────────────────────────
 
-print(f"⏳  Upload de {MODEL_NAME} v{MODEL_VERSION}…")
+print(f"⏳  Uploading {MODEL_NAME} v{MODEL_VERSION}…")
 
 try:
     with open(tmp_pkl.name, "rb") as pkl_fh, open(TRAIN_SCRIPT_PATH, "rb") as train_fh:
@@ -161,7 +161,7 @@ try:
             "description": DESCRIPTION,
             "algorithm":   ALGORITHM,
         }
-        # Pour la régression : accuracy = R² (meilleur proxy pour l'affichage dashboard)
+        # For regression: accuracy = R² (best proxy for dashboard display)
         if r2 is not None:
             data["accuracy"] = str(round(r2, 4))
         if features_count is not None:
@@ -170,7 +170,7 @@ try:
             data["training_dataset"] = training_dataset
         if mlflow_run_id:
             data["mlflow_run_id"] = mlflow_run_id
-        # training_metrics : métriques de régression complètes
+        # training_metrics: full regression metrics
         _tm = {k: round(v, 4) for k, v in {
             "mae":  mae,
             "rmse": rmse,
@@ -196,14 +196,14 @@ try:
             timeout=180,
         )
         _upload_elapsed = time.perf_counter() - _upload_t0
-        print(f"  [TIMING] POST /models répondu en {_upload_elapsed:.2f}s — status {response.status_code}")
+        print(f"  [TIMING] POST /models responded in {_upload_elapsed:.2f}s — status {response.status_code}")
 finally:
     os.unlink(tmp_pkl.name)
 
-# ── 4. Résultat upload ────────────────────────────────────────────────────────
+# ── 4. Upload result ──────────────────────────────────────────────────────────
 
 if response.status_code == 409:
-    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} existe déjà — mise à jour via PATCH…")
+    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} already exists — updating via PATCH…")
     patch_payload = {"is_production": True, "deployment_mode": "ab_test", "traffic_weight": 0.5}
     if hyperparameters:
         patch_payload["hyperparameters"] = hyperparameters
@@ -215,33 +215,33 @@ if response.status_code == 409:
             timeout=30,
         )
     except Exception as _e:
-        print(f"    [WARN] PATCH existe-déjà échoué : {_e} — continuons")
+        print(f"    [WARN] PATCH already-exists failed: {_e} — continuing")
         sys.exit(0)
     if patch_resp.status_code == 200:
-        print(f"✅  Mode ab_test mis à jour.")
+        print(f"✅  ab_test mode updated.")
     else:
-        print(f"❌  PATCH échoué ({patch_resp.status_code}) : {patch_resp.text[:200]}")
+        print(f"❌  PATCH failed ({patch_resp.status_code}): {patch_resp.text[:200]}")
     sys.exit(0)
 
 if response.status_code not in (200, 201):
-    print(f"\n❌  Erreur {response.status_code}")
+    print(f"\n❌  Error {response.status_code}")
     try:
         body = response.json()
-        print(f"   Détail : {json.dumps(body, indent=2, ensure_ascii=False)}")
+        print(f"   Detail: {json.dumps(body, indent=2, ensure_ascii=False)}")
     except Exception:
-        print(f"   Réponse : {response.text[:500]}")
+        print(f"   Response: {response.text[:500]}")
     sys.exit(1)
 
 res = response.json()
-print(f"\n✅  Modèle uploadé avec succès !")
-print(f"   Nom       : {res.get('name')}")
+print(f"\n✅  Model uploaded successfully!")
+print(f"   Name      : {res.get('name')}")
 print(f"   Version   : {res.get('version')}")
 print(f"   ID        : {res.get('id')}")
-print(f"   Algorithme: {ALGORITHM}")
+print(f"   Algorithm : {ALGORITHM}")
 
-# ── 5. Mise en production + tag "Example" + feature_baseline ─────────────────
+# ── 5. Set to production + tag "Example" + feature_baseline ──────────────────
 
-print(f"⏳  Mise en production, tag 'Example' et baseline des features…")
+print(f"⏳  Setting to production, adding 'Example' tag and feature baseline…")
 
 patch_body: dict = {"is_production": True, "deployment_mode": "ab_test", "traffic_weight": 0.5, "tags": ["Example"]}
 if metrics.get("feature_stats"):
@@ -269,11 +269,11 @@ patch = requests.patch(
 
 if patch.status_code == 200:
     baseline_ok = "feature_baseline" in patch_body
-    print(f"✅  Modèle passé en production (ab_test)"
-          f"{' avec baseline des features' if baseline_ok else ''}.")
+    print(f"✅  Model set to production (ab_test)"
+          f"{' with feature baseline' if baseline_ok else ''}.")
 else:
-    print(f"⚠️   PATCH échoué ({patch.status_code}) : {patch.text[:200]}")
+    print(f"⚠️   PATCH failed ({patch.status_code}): {patch.text[:200]}")
 
-print(f"\n   → wine-regressor v{MODEL_VERSION} en A/B test (prêt pour v1.1.0)")
-print(f"   → Ré-entraîner :")
+print(f"\n   → wine-regressor v{MODEL_VERSION} in A/B test (ready for v1.1.0)")
+print(f"   → Retrain:")
 print(f"       POST {API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}/retrain")

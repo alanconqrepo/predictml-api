@@ -1,22 +1,22 @@
 """
-Smoke tests pour l'API predictml — tests contre l'API live Docker.
+Smoke tests for the predictml API — tests against the live Docker API.
 
-PRÉREQUIS :
+PREREQUISITES:
     docker-compose up -d
-    Attendre que l'API soit prête sur http://localhost:8000
+    Wait for the API to be ready at http://localhost:8000
 
-DIFFÉRENCE AVEC pytest tests/ :
-    - Ce script  -> frappe l'API live (Docker requis, vraie DB, vrai MinIO)
-    - pytest tests/ -> utilise TestClient FastAPI en mémoire (aucun Docker, MinIO mocké)
+DIFFERENCE WITH pytest tests/:
+    - This script  -> hits the live API (Docker required, real DB, real MinIO)
+    - pytest tests/ -> uses FastAPI TestClient in memory (no Docker, MinIO mocked)
 
-EXÉCUTION :
+EXECUTION:
     python smoke-tests/test_multimodel_api.py
 
-    Variables d'environnement requises :
-        API_TOKEN=<admin_token>              (OBLIGATOIRE — token admin du docker-compose)
+    Required environment variables:
+        API_TOKEN=<admin_token>              (REQUIRED — admin token from docker-compose)
 
-    Variables d'environnement optionnelles :
-        API_BASE_URL=http://localhost:8000   (défaut)
+    Optional environment variables:
+        API_BASE_URL=http://localhost:8000   (default)
 """
 import os
 import sys
@@ -32,15 +32,15 @@ import requests
 BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 API_TOKEN = os.environ.get("API_TOKEN", "")
 if not API_TOKEN:
-    print("ERREUR : la variable d'environnement API_TOKEN est requise.", file=sys.stderr)
-    print("  export API_TOKEN=<votre_token_admin>", file=sys.stderr)
+    print("ERROR: the environment variable API_TOKEN is required.", file=sys.stderr)
+    print("  export API_TOKEN=<your_admin_token>", file=sys.stderr)
     sys.exit(1)
 
 AUTH = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
 PUBLIC = {"Content-Type": "application/json"}
 
 # ---------------------------------------------------------------------------
-# Résultats globaux
+# Global results
 # ---------------------------------------------------------------------------
 results = {"passed": 0, "failed": 0, "skipped": 0}
 
@@ -107,13 +107,13 @@ def test_health():
 # ---------------------------------------------------------------------------
 
 def test_models_list() -> list:
-    """Retourne la liste des modèles disponibles (ou [] si échec)."""
+    """Returns the list of available models (or [] on failure)."""
     label = "GET /models"
     try:
         r = requests.get(f"{BASE_URL}/models", timeout=5)
         if r.status_code == 200 and isinstance(r.json(), list):
             models = r.json()
-            _ok(f"{label}  ({len(models)} modèles)")
+            _ok(f"{label}  ({len(models)} models)")
             return models
         _fail(label, f"status={r.status_code} body={r.text[:200]}")
     except Exception as e:
@@ -127,7 +127,7 @@ def test_models_cached():
         r = requests.get(f"{BASE_URL}/models/cached", timeout=5)
         if r.status_code == 200 and "cached_models" in r.json():
             data = r.json()
-            _ok(f"{label}  ({data['count']} en cache)")
+            _ok(f"{label}  ({data['count']} cached)")
             return True
         _fail(label, f"status={r.status_code} body={r.text[:200]}")
     except Exception as e:
@@ -136,7 +136,7 @@ def test_models_cached():
 
 
 def test_model_get(name: str, version: str) -> dict | None:
-    """Retourne les métadonnées du modèle, ou None si introuvable."""
+    """Returns the model metadata, or None if not found."""
     label = f"GET /models/{name}/{version}"
     try:
         r = requests.get(f"{BASE_URL}/models/{name}/{version}", timeout=10)
@@ -150,7 +150,7 @@ def test_model_get(name: str, version: str) -> dict | None:
             _ok(f"{label}  ({info})")
             return data
         if r.status_code == 404:
-            _skip(label, "modèle absent de la base")
+            _skip(label, "model not found in database")
             return None
         _fail(label, f"status={r.status_code} body={r.text[:200]}")
     except Exception as e:
@@ -159,13 +159,13 @@ def test_model_get(name: str, version: str) -> dict | None:
 
 
 def test_model_get_not_found():
-    label = "GET /models/ghost_model/9.9.9  -> 404 attendu"
+    label = "GET /models/ghost_model/9.9.9  -> 404 expected"
     try:
         r = requests.get(f"{BASE_URL}/models/ghost_model/9.9.9", timeout=5)
         if r.status_code == 404:
             _ok(label)
             return True
-        _fail(label, f"status={r.status_code} (attendu 404)")
+        _fail(label, f"status={r.status_code} (expected 404)")
     except Exception as e:
         _fail(label, str(e))
     return False
@@ -196,8 +196,8 @@ def test_model_patch(name: str, version: str) -> bool:
 
 def test_predict_with_model(models: list) -> bool:
     """
-    Cherche le premier modèle chargé avec feature_names_in_ et teste POST /predict.
-    Skip gracieusement si aucun modèle compatible n'est disponible.
+    Finds the first loaded model with feature_names_in_ and tests POST /predict.
+    Skips gracefully if no compatible model is available.
     """
     label = "POST /predict  (dict features)"
 
@@ -223,13 +223,13 @@ def test_predict_with_model(models: list) -> bool:
     if not candidate:
         _skip(
             label,
-            "aucun modèle chargé avec feature_names_in_ disponible "
-            "(entraîner un modèle avec DataFrame pandas, ex: create_multiple_advanced_models.py)"
+            "no loaded model with feature_names_in_ available "
+            "(train a model with a pandas DataFrame, e.g. create_multiple_advanced_models.py)"
         )
         return None  # type: ignore
 
     name, version = candidate
-    # Construire le dict de features avec des valeurs réalistes (0.5 par défaut)
+    # Build the features dict with realistic values (0.5 by default)
     features = {fn: 0.5 for fn in feature_names}
 
     payload = {
@@ -242,8 +242,8 @@ def test_predict_with_model(models: list) -> bool:
     try:
         r = requests.post(f"{BASE_URL}/predict", json=payload, headers=AUTH, timeout=10)
         if r.status_code == 200:
-            _ok(f"{label}  (modèle={name} v{version})")
-            return r.json().get("id_obs")  # retourner l'id_obs pour observed-results
+            _ok(f"{label}  (model={name} v{version})")
+            return r.json().get("id_obs")  # return id_obs for observed-results
         _fail(label, f"status={r.status_code} body={r.text[:300]}")
     except Exception as e:
         _fail(label, str(e))
@@ -251,7 +251,7 @@ def test_predict_with_model(models: list) -> bool:
 
 
 def test_predict_invalid_model():
-    label = "POST /predict  modèle inexistant -> 404 attendu"
+    label = "POST /predict  non-existent model -> 404 expected"
     payload = {
         "model_name": "ghost_model",
         "features": {"x": 1.0},
@@ -261,15 +261,15 @@ def test_predict_invalid_model():
         if r.status_code == 404:
             _ok(label)
             return True
-        _fail(label, f"status={r.status_code} (attendu 404)")
+        _fail(label, f"status={r.status_code} (expected 404)")
     except Exception as e:
         _fail(label, str(e))
     return False
 
 
 def test_predict_features_as_list():
-    """Vérifie que l'API rejette les features au format liste (attendu 422)."""
-    label = "POST /predict  features=liste -> 422 attendu"
+    """Verifies that the API rejects features in list format (expected 422)."""
+    label = "POST /predict  features=list -> 422 expected"
     payload = {
         "model_name": "iris_model",
         "features": [5.1, 3.5, 1.4, 0.2],
@@ -279,30 +279,30 @@ def test_predict_features_as_list():
         if r.status_code == 422:
             _ok(label)
             return True
-        _fail(label, f"status={r.status_code} (attendu 422 — features liste non autorisée)")
+        _fail(label, f"status={r.status_code} (expected 422 — list features not allowed)")
     except Exception as e:
         _fail(label, str(e))
     return False
 
 
 def test_predict_no_auth():
-    label = "POST /predict  sans token -> 401 attendu"
+    label = "POST /predict  no token -> 401 expected"
     payload = {"model_name": "iris_model", "features": {"x": 1.0}}
     try:
         r = requests.post(f"{BASE_URL}/predict", json=payload, timeout=5)
         if r.status_code == 401:
             _ok(label)
             return True
-        _fail(label, f"status={r.status_code} (attendu 401)")
+        _fail(label, f"status={r.status_code} (expected 401)")
     except Exception as e:
         _fail(label, str(e))
     return False
 
 
 def test_predictions_history(model_name: str | None):
-    label = "GET /predictions  (historique)"
+    label = "GET /predictions  (history)"
     if not model_name:
-        _skip(label, "aucun modèle disponible pour filtrer")
+        _skip(label, "no model available to filter on")
         return None  # type: ignore
 
     start = (datetime.utcnow() - timedelta(days=30)).isoformat()
@@ -326,13 +326,13 @@ def test_predictions_history(model_name: str | None):
 
 
 def test_predictions_missing_params():
-    label = "GET /predictions  sans params -> 422 attendu"
+    label = "GET /predictions  no params -> 422 expected"
     try:
         r = requests.get(f"{BASE_URL}/predictions", headers=AUTH, timeout=5)
         if r.status_code == 422:
             _ok(label)
             return True
-        _fail(label, f"status={r.status_code} (attendu 422)")
+        _fail(label, f"status={r.status_code} (expected 422)")
     except Exception as e:
         _fail(label, str(e))
     return False
@@ -343,8 +343,8 @@ def test_predictions_missing_params():
 # ---------------------------------------------------------------------------
 
 def test_users_create() -> tuple[int | None, str | None]:
-    """Crée un utilisateur temporaire. Retourne (user_id, token) ou (None, None)."""
-    label = "POST /users  (créer user temporaire)"
+    """Creates a temporary user. Returns (user_id, token) or (None, None)."""
+    label = "POST /users  (create temporary user)"
     unique = uuid.uuid4().hex[:8]
     payload = {
         "username": f"smoke_{unique}",
@@ -365,11 +365,11 @@ def test_users_create() -> tuple[int | None, str | None]:
 
 
 def test_users_list():
-    label = "GET /users  (liste admin)"
+    label = "GET /users  (admin list)"
     try:
         r = requests.get(f"{BASE_URL}/users", headers=AUTH, timeout=5)
         if r.status_code == 200 and isinstance(r.json(), list):
-            _ok(f"{label}  ({len(r.json())} utilisateurs)")
+            _ok(f"{label}  ({len(r.json())} users)")
             return True
         _fail(label, f"status={r.status_code} body={r.text[:200]}")
     except Exception as e:
@@ -380,7 +380,7 @@ def test_users_list():
 def test_users_get(user_id: int | None):
     label = f"GET /users/{user_id}"
     if user_id is None:
-        _skip(label, "user_id non disponible")
+        _skip(label, "user_id not available")
         return None  # type: ignore
     try:
         r = requests.get(f"{BASE_URL}/users/{user_id}", headers=AUTH, timeout=5)
@@ -396,7 +396,7 @@ def test_users_get(user_id: int | None):
 def test_users_delete(user_id: int | None):
     label = f"DELETE /users/{user_id}  (cleanup)"
     if user_id is None:
-        _skip(label, "user_id non disponible")
+        _skip(label, "user_id not available")
         return None  # type: ignore
     try:
         r = requests.delete(f"{BASE_URL}/users/{user_id}", headers=AUTH, timeout=5)
@@ -410,13 +410,13 @@ def test_users_delete(user_id: int | None):
 
 
 def test_users_no_auth():
-    label = "GET /users  sans token -> 401 attendu"
+    label = "GET /users  no token -> 401 expected"
     try:
         r = requests.get(f"{BASE_URL}/users", timeout=5)
         if r.status_code == 401:
             _ok(label)
             return True
-        _fail(label, f"status={r.status_code} (attendu 401)")
+        _fail(label, f"status={r.status_code} (expected 401)")
     except Exception as e:
         _fail(label, str(e))
     return False
@@ -429,7 +429,7 @@ def test_users_no_auth():
 def test_observed_results_post(model_name: str | None, id_obs: str | None):
     label = "POST /observed-results"
     if not model_name:
-        _skip(label, "aucun modèle disponible")
+        _skip(label, "no model available")
         return None  # type: ignore
 
     obs_id = id_obs if id_obs else f"smoke-obs-{uuid.uuid4().hex[:8]}"
@@ -459,7 +459,7 @@ def test_observed_results_post(model_name: str | None, id_obs: str | None):
 def test_observed_results_get(model_name: str | None):
     label = "GET /observed-results"
     if not model_name:
-        _skip(label, "aucun modèle disponible")
+        _skip(label, "no model available")
         return None  # type: ignore
     try:
         r = requests.get(
@@ -479,13 +479,13 @@ def test_observed_results_get(model_name: str | None):
 
 
 def test_observed_results_no_auth():
-    label = "GET /observed-results  sans token -> 401 attendu"
+    label = "GET /observed-results  no token -> 401 expected"
     try:
         r = requests.get(f"{BASE_URL}/observed-results", timeout=5)
         if r.status_code == 401:
             _ok(label)
             return True
-        _fail(label, f"status={r.status_code} (attendu 401)")
+        _fail(label, f"status={r.status_code} (expected 401)")
     except Exception as e:
         _fail(label, str(e))
     return False
@@ -501,18 +501,18 @@ if __name__ == "__main__":
     print(f"  URL    : {BASE_URL}")
     print(f"  Token  : {API_TOKEN[:12]}...")
     print()
-    print("  PRÉREQUIS : docker-compose up -d")
+    print("  PREREQUISITES: docker-compose up -d")
     print()
-    print("  DIFFERENCE AVEC pytest tests/ :")
-    print("    - Smoke tests  : API live Docker (vraie DB, vrai MinIO)")
-    print("    - pytest tests/: TestClient en memoire, sans Docker")
+    print("  DIFFERENCE WITH pytest tests/:")
+    print("    - Smoke tests  : live Docker API (real DB, real MinIO)")
+    print("    - pytest tests/: in-memory TestClient, no Docker")
     print("=" * 60)
 
     # ── Infrastructure ───────────────────────────────────────────────────────
     _section("Infrastructure")
     root_ok = test_root()
     if not root_ok:
-        print("\n  L'API ne répond pas. Vérifiez : docker-compose up -d")
+        print("\n  The API is not responding. Check: docker-compose up -d")
         sys.exit(1)
     test_health()
 
@@ -522,7 +522,7 @@ if __name__ == "__main__":
     test_models_cached()
     test_model_get_not_found()
 
-    # Tenter GET /models/{name}/{version} sur le premier modèle disponible
+    # Try GET /models/{name}/{version} on the first available model
     first_model_name = None
     first_model_version = None
     if available_models:
@@ -534,8 +534,8 @@ if __name__ == "__main__":
         meta = test_model_get(first_model_name, first_model_version)
         test_model_patch(first_model_name, first_model_version)
     else:
-        _skip(f"GET /models/{{name}}/{{version}}", "aucun modèle en base")
-        _skip(f"PATCH /models/{{name}}/{{version}}", "aucun modèle en base")
+        _skip(f"GET /models/{{name}}/{{version}}", "no model in database")
+        _skip(f"PATCH /models/{{name}}/{{version}}", "no model in database")
 
     # ── Predictions ──────────────────────────────────────────────────────────
     _section("Predictions")
@@ -561,11 +561,11 @@ if __name__ == "__main__":
     test_observed_results_get(first_model_name)
     test_observed_results_no_auth()
 
-    # ── Résumé ───────────────────────────────────────────────────────────────
+    # ── Summary ───────────────────────────────────────────────────────────────
     print()
     print("=" * 60)
     total = results["passed"] + results["failed"] + results["skipped"]
-    print(f"  Résultat : {results['passed']} PASSED / {results['failed']} FAILED / {results['skipped']} SKIPPED  (total: {total})")
+    print(f"  Result: {results['passed']} PASSED / {results['failed']} FAILED / {results['skipped']} SKIPPED  (total: {total})")
     print("=" * 60)
 
     sys.exit(0 if results["failed"] == 0 else 1)

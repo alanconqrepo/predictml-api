@@ -1,27 +1,27 @@
 """
-send_ground_truth_titanic.py — Vérité terrain Titanic avec dégradation temporelle
+send_ground_truth_titanic.py — Titanic ground truth with temporal degradation
 ==================================================================================
 
-Charge titanic_predictions_log.json (produit par send_predictions_titanic.py) et
-calcule la vraie classe selon les règles de chaque phase, puis envoie les
+Loads titanic_predictions_log.json (produced by send_predictions_titanic.py) and
+computes the true class according to the rules for each phase, then sends the
 observed_results via POST /observed-results.
 
-Règles de vérité terrain :
-  Phase 1-2 : true_class = résultat de la probabilité de survie tirée au sort
-              (enregistré dans le log par send_predictions_titanic.py)
-  Phase 3   : si pclass == "3rd" ET age > 40
-              → true_class = 0 (décédé) — nouvelle règle déterministe
-              Simule un changement de contexte : dans ce scénario fictif,
-              les passagers 3ème classe de plus de 40 ans n'ont aucune chance,
-              même si le modèle (entraîné avant ce changement) prédit "survivant".
+Ground truth rules:
+  Phase 1-2: true_class = result of the survival probability drawn at random
+              (recorded in the log by send_predictions_titanic.py)
+  Phase 3  : if pclass == "3rd" AND age > 40
+              → true_class = 0 (deceased) — new deterministic rule
+              Simulates a context change: in this fictional scenario,
+              3rd class passengers over 40 have no chance,
+              even if the model (trained before this change) predicts "survivor".
 
-Usage :
+Usage:
   API_URL=http://localhost:8000 API_TOKEN=<token> python send_ground_truth_titanic.py
 
-Variables d'environnement :
-  API_URL    URL de l'API  (défaut : http://localhost:80)
-  API_TOKEN  Token Bearer — requis
-  MODEL_NAME Nom du modèle (défaut : titanic-survival)
+Environment variables:
+  API_URL    API URL   (default: http://localhost:80)
+  API_TOKEN  Bearer token — required
+  MODEL_NAME Model name (default: titanic-survival)
 """
 
 import json
@@ -49,58 +49,58 @@ BATCH_SIZE = 50
 # ── Validation ─────────────────────────────────────────────────────────────────
 
 if not API_TOKEN:
-    print("❌  API_TOKEN non défini.")
+    print("❌  API_TOKEN not defined.")
     sys.exit(1)
 
 try:
     r = requests.get(f"{API_URL}/health", timeout=5)
     r.raise_for_status()
-    print(f"✅  API accessible : {API_URL}\n")
+    print(f"✅  API reachable: {API_URL}\n")
 except Exception as e:
-    print(f"❌  API inaccessible ({API_URL}) : {e}")
+    print(f"❌  API unreachable ({API_URL}): {e}")
     sys.exit(1)
 
 if not os.path.exists(LOG_FILE):
-    print(f"❌  Log introuvable : {LOG_FILE}")
-    print("    Lancez d'abord : python send_predictions_titanic.py")
+    print(f"❌  Log not found: {LOG_FILE}")
+    print("    Run first: python send_predictions_titanic.py")
     sys.exit(1)
 
-# ── Chargement du log ──────────────────────────────────────────────────────────
+# ── Load log ──────────────────────────────────────────────────────────────────
 
 with open(LOG_FILE, encoding="utf-8") as f:
     log = json.load(f)
 
 if not log:
-    print("❌  Log vide : aucune prédiction à labelliser. Relancez send_predictions_titanic.py.")
+    print("❌  Empty log: no predictions to label. Re-run send_predictions_titanic.py.")
     sys.exit(1)
 
-print(f"  {len(log)} entrées chargées depuis {LOG_FILE}\n")
+print(f"  {len(log)} entries loaded from {LOG_FILE}\n")
 
-# ── Règle de vérité terrain ────────────────────────────────────────────────────
+# ── Ground truth rule ────────────────────────────────────────────────────────
 
 
 def compute_true_class(entry: dict) -> int:
-    """Retourne la vraie classe (survived) selon la phase et les features.
+    """Returns the true class (survived) according to the phase and features.
 
-    Phase 1-2 : on utilise le true_class enregistré lors de la génération
-                (tirage probabiliste basé sur les distributions réelles).
-    Phase 3   : nouvelle règle déterministe — 3rd class + âge > 40 → décédé (0).
+    Phase 1-2: uses the true_class recorded at generation time
+               (probabilistic draw based on real distributions).
+    Phase 3  : new deterministic rule — 3rd class + age > 40 → deceased (0).
     """
     if entry["phase"] < 3:
         return entry["true_class"]
 
-    # Phase 3 : règle déterministe sur les passagers 3ème classe seniors
+    # Phase 3: deterministic rule for senior 3rd class passengers
     pclass = entry["features"].get("pclass", "")
     age = entry["features"].get("age", 0.0)
     if pclass == "3rd" and age > 40:
-        return 0  # décédé — règle fictive post-changement de contexte
+        return 0  # deceased — fictional post-context-change rule
     return entry["true_class"]
 
 
-# ── Construction des observed results ─────────────────────────────────────────
+# ── Build observed results ─────────────────────────────────────────────────
 
 print("=" * 68)
-print("  Calcul de la vérité terrain par phase")
+print("  Computing ground truth per phase")
 print("=" * 68)
 
 observed_data = []
@@ -124,20 +124,20 @@ for entry in log:
 
 for phase in [1, 2, 3]:
     s = phase_stats[phase]
-    line = f"  Phase {phase} : {s['total']:4d} obs"
+    line = f"  Phase {phase}: {s['total']:4d} obs"
     if s["overridden"]:
         pct = s["overridden"] / s["total"] * 100
-        line += f"  ({s['overridden']} reclassifiées → décédé" f" (3rd class > 40 ans), {pct:.0f}%)"
+        line += f"  ({s['overridden']} reclassified → deceased" f" (3rd class > 40 yrs), {pct:.0f}%)"
     else:
-        line += "  (distribution stable)"
+        line += "  (stable distribution)"
     print(line)
 
 print()
 
-# ── Envoi en batches ───────────────────────────────────────────────────────────
+# ── Send in batches ───────────────────────────────────────────────────────────
 
 print("=" * 68)
-print("  Envoi des observed results (POST /observed-results)")
+print("  Sending observed results (POST /observed-results)")
 print("=" * 68)
 
 total_upserted = 0
@@ -155,13 +155,13 @@ for i in range(0, len(observed_data), BATCH_SIZE):
         end_idx = min(i + BATCH_SIZE, len(observed_data))
         print(f"  [{i + 1:4d} – {end_idx:4d}]  ✅  {n} upserted")
     else:
-        print(f"  [{i + 1:4d} – ...]  ❌  Erreur {r.status_code} : {r.text[:100]}")
+        print(f"  [{i + 1:4d} – ...]  ❌  Error {r.status_code}: {r.text[:100]}")
 
-# ── Vérification de couverture ─────────────────────────────────────────────────
+# ── Coverage check ─────────────────────────────────────────────────────────────
 
 print()
 print("=" * 68)
-print("  Couverture ground truth (GET /observed-results/stats)")
+print("  Ground truth coverage (GET /observed-results/stats)")
 print("=" * 68)
 
 r = requests.get(
@@ -172,27 +172,27 @@ r = requests.get(
 )
 if r.status_code == 200:
     stats = r.json()
-    print(f"\n  Modèle      : {MODEL_NAME}")
+    print(f"\n  Model       : {MODEL_NAME}")
     print(
-        f"  Labellisées : {stats.get('labeled_count', '?')}"
+        f"  Labeled     : {stats.get('labeled_count', '?')}"
         f" / {stats.get('total_predictions', '?')}"
     )
-    print(f"  Couverture  : {stats.get('coverage_rate', 0.0):.1%}")
+    print(f"  Coverage    : {stats.get('coverage_rate', 0.0):.1%}")
 else:
-    print(f"  (stats indisponibles — {r.status_code})")
+    print(f"  (stats unavailable — {r.status_code})")
 
-# ── Résumé ─────────────────────────────────────────────────────────────────────
+# ── Summary ─────────────────────────────────────────────────────────────────────
 
 print()
 print("=" * 68)
 print(f"  Total upserted    : {total_upserted}")
 print()
-print("  Scénario de dégradation simulé :")
-print("  Phase 1 (stable) → ~80% accuracy  (distribution réaliste Titanic)")
-print("  Phase 2 (drift)  → ~65% accuracy  (âges jeunes, tarifs élevés, biais 1ère classe)")
-print("  Phase 3 (règle)  → ~50% accuracy  (3rd class > 40 ans = décédé, nouvelle règle)")
+print("  Simulated degradation scenario:")
+print("  Phase 1 (stable) → ~80% accuracy  (realistic Titanic distribution)")
+print("  Phase 2 (drift)  → ~65% accuracy  (younger ages, higher fares, 1st class bias)")
+print("  Phase 3 (rule)   → ~50% accuracy  (3rd class > 40 yrs = deceased, new rule)")
 print()
-print("  Le modèle nécessite un retraining sur les données de production récentes.")
+print("  The model requires retraining on recent production data.")
 print()
-print(f"  → Dashboard : {API_URL.replace(':8000', ':8501')}/Models")
+print(f"  → Dashboard: {API_URL.replace(':8000', ':8501')}/Models")
 print("=" * 68)

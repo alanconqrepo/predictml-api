@@ -1,31 +1,31 @@
 """
-send_ground_truth_cancer.py — Vérité terrain Cancer avec dégradation temporelle
+send_ground_truth_cancer.py — Cancer ground truth with temporal degradation
 ================================================================================
 
-Charge cancer_predictions_log.json (produit par send_predictions_cancer.py) et
-calcule la vraie classe selon les règles de chaque phase, puis envoie les
+Loads cancer_predictions_log.json (produced by send_predictions_cancer.py) and
+computes the true class according to each phase's rules, then sends
 observed_results via POST /observed-results.
 
-Règles de vérité terrain :
-  Phase 1   : true_class = classe d'échantillonnage originale (0=malignant, 1=benign)
-              → ~94% accuracy (modèle stable)
+Ground truth rules:
+  Phase 1   : true_class = original sampling class (0=malignant, 1=benign)
+              → ~94% accuracy (stable model)
 
-  Phase 2   : true_class = classe d'échantillonnage originale
-              Les cas BÉNINS ont des features driftées → le modèle les prédit MALINS.
-              → ~60% accuracy (confusion bénin/malin due au drift du scanner)
+  Phase 2   : true_class = original sampling class
+              BENIGN cases have drifted features → model predicts them as MALIGNANT.
+              → ~60% accuracy (benign/malignant confusion due to scanner drift)
 
-  Phase 3   : nouveau protocole de détection précoce — certains cas MALINS "doux"
-              (mean_radius < 18 ET mean_concavity < 0.15) sont reclassifiés BÉNINS.
-              Le modèle (entraîné sur l'ancien protocole) les prédit toujours MALINS.
-              → ~38% accuracy (erreur systématique sur les malins légers)
+  Phase 3   : new early detection protocol — some "mild" MALIGNANT cases
+              (mean_radius < 18 AND mean_concavity < 0.15) are reclassified as BENIGN.
+              The model (trained on the old protocol) still predicts them as MALIGNANT.
+              → ~38% accuracy (systematic error on mild malignant cases)
 
-Usage :
+Usage:
   API_URL=http://localhost:8000 API_TOKEN=<token> python send_ground_truth_cancer.py
 
-Variables d'environnement :
-  API_URL    URL de l'API  (défaut : http://localhost:80)
-  API_TOKEN  Token Bearer — requis
-  MODEL_NAME Nom du modèle (défaut : cancer-classifier)
+Environment variables:
+  API_URL    API URL       (default: http://localhost:80)
+  API_TOKEN  Bearer token — required
+  MODEL_NAME Model name    (default: cancer-classifier)
 """
 
 import json
@@ -46,11 +46,11 @@ API_URL    = os.environ.get("API_URL",    "http://localhost:80")
 API_TOKEN  = os.environ.get("API_TOKEN",  os.environ.get("ADMIN_TOKEN", ""))
 MODEL_NAME = os.environ.get("MODEL_NAME", "cancer-classifier")
 
-# Seuils du nouveau protocole de détection précoce (phase 3)
-# Un cas malin "doux" sous ces seuils est reclassifié bénin par les nouvelles guidelines.
-# Le modèle (entraîné avant) continue de le prédire malin → erreur systématique.
-RADIUS_THR    = 18.0   # mean_radius  < 18 mm  → "doux"
-CONCAVITY_THR = 0.15   # mean_concavity < 0.15 → faible irrégularité
+# Thresholds for the new early detection protocol (phase 3)
+# A "mild" malignant case below these thresholds is reclassified as benign by the new guidelines.
+# The model (trained before) continues to predict it as malignant → systematic error.
+RADIUS_THR    = 18.0   # mean_radius  < 18 mm  → "mild"
+CONCAVITY_THR = 0.15   # mean_concavity < 0.15 → low irregularity
 
 HEADERS    = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
 LOG_FILE   = os.path.join(os.path.dirname(__file__), "cancer_predictions_log.json")
@@ -59,56 +59,56 @@ BATCH_SIZE = 50
 # ── Validation ─────────────────────────────────────────────────────────────────
 
 if not API_TOKEN:
-    print("❌  API_TOKEN non défini.")
+    print("❌  API_TOKEN not defined.")
     sys.exit(1)
 
 try:
     r = requests.get(f"{API_URL}/health", timeout=5)
     r.raise_for_status()
-    print(f"✅  API accessible : {API_URL}\n")
+    print(f"✅  API accessible: {API_URL}\n")
 except Exception as e:
-    print(f"❌  API inaccessible ({API_URL}) : {e}")
+    print(f"❌  API unreachable ({API_URL}): {e}")
     sys.exit(1)
 
 if not os.path.exists(LOG_FILE):
-    print(f"❌  Log introuvable : {LOG_FILE}")
-    print("    Lancez d'abord : python send_predictions_cancer.py")
+    print(f"❌  Log not found: {LOG_FILE}")
+    print("    Run first: python send_predictions_cancer.py")
     sys.exit(1)
 
-# ── Chargement du log ──────────────────────────────────────────────────────────
+# ── Log loading ────────────────────────────────────────────────────────────────
 
 with open(LOG_FILE, encoding="utf-8") as f:
     log = json.load(f)
 
 if not log:
-    print("❌  Log vide : aucune prédiction à labelliser. Relancez send_predictions_cancer.py.")
+    print("❌  Empty log: no predictions to label. Re-run send_predictions_cancer.py.")
     sys.exit(1)
 
-print(f"  {len(log)} entrées chargées depuis {LOG_FILE}\n")
+print(f"  {len(log)} entries loaded from {LOG_FILE}\n")
 
-# ── Règle de vérité terrain ────────────────────────────────────────────────────
+# ── Ground truth rule ─────────────────────────────────────────────────────────
 
 
 def compute_true_class(entry: dict) -> int:
-    """Retourne la vraie classe selon la phase et les features."""
+    """Returns the true class based on the phase and features."""
     if entry["phase"] < 3:
         return entry["true_class"]
 
-    # Phase 3 — nouveau protocole de détection précoce :
-    # les cas MALINS avec faible radius ET faible concavité sont reclassifiés BÉNINS.
-    # Le modèle (entraîné avant ce protocole) continue de les prédire MALINS → erreur.
-    if entry["true_class"] == 0:  # malin à l'origine
+    # Phase 3 — new early detection protocol:
+    # MALIGNANT cases with low radius AND low concavity are reclassified as BENIGN.
+    # The model (trained before this protocol) still predicts them as MALIGNANT → error.
+    if entry["true_class"] == 0:  # originally malignant
         mean_radius    = entry["features"].get("mean radius",    0.0)
         mean_concavity = entry["features"].get("mean concavity", 0.0)
         if mean_radius < RADIUS_THR and mean_concavity < CONCAVITY_THR:
-            return 1  # reclassifié bénin — nouvelles guidelines
+            return 1  # reclassified as benign — new guidelines
     return entry["true_class"]
 
 
-# ── Construction des observed results ─────────────────────────────────────────
+# ── Building observed results ──────────────────────────────────────────────────
 
 print("=" * 72)
-print("  Calcul de la vérité terrain par phase")
+print("  Computing ground truth by phase")
 print("=" * 72)
 
 observed_data = []
@@ -134,19 +134,19 @@ for phase in [1, 2, 3]:
     if s["overridden"]:
         pct = s["overridden"] / s["total"] * 100
         line += (
-            f"  ({s['overridden']} reclassifiées → benign"
-            f" par nouveau protocole, {pct:.0f}%)"
+            f"  ({s['overridden']} reclassified → benign"
+            f" by new protocol, {pct:.0f}%)"
         )
     else:
-        line += "  (distribution stable)"
+        line += "  (stable distribution)"
     print(line)
 
 print()
 
-# ── Envoi en batches ───────────────────────────────────────────────────────────
+# ── Sending in batches ────────────────────────────────────────────────────────
 
 print("=" * 72)
-print("  Envoi des observed results (POST /observed-results)")
+print("  Sending observed results (POST /observed-results)")
 print("=" * 72)
 
 total_upserted = 0
@@ -164,13 +164,13 @@ for i in range(0, len(observed_data), BATCH_SIZE):
         end_idx = min(i + BATCH_SIZE, len(observed_data))
         print(f"  [{i + 1:4d} – {end_idx:4d}]  ✅  {n} upserted")
     else:
-        print(f"  [{i + 1:4d} – ...]  ❌  Erreur {r.status_code} : {r.text[:100]}")
+        print(f"  [{i + 1:4d} – ...]  ❌  Error {r.status_code} : {r.text[:100]}")
 
-# ── Vérification de couverture ─────────────────────────────────────────────────
+# ── Coverage check ────────────────────────────────────────────────────────────
 
 print()
 print("=" * 72)
-print("  Couverture ground truth (GET /observed-results/stats)")
+print("  Ground truth coverage (GET /observed-results/stats)")
 print("=" * 72)
 
 r = requests.get(
@@ -181,30 +181,30 @@ r = requests.get(
 )
 if r.status_code == 200:
     stats = r.json()
-    print(f"\n  Modèle      : {MODEL_NAME}")
+    print(f"\n  Model       : {MODEL_NAME}")
     print(
-        f"  Labellisées : {stats.get('labeled_count', '?')}"
+        f"  Labeled     : {stats.get('labeled_count', '?')}"
         f" / {stats.get('total_predictions', '?')}"
     )
-    print(f"  Couverture  : {stats.get('coverage_rate', 0.0):.1%}")
+    print(f"  Coverage    : {stats.get('coverage_rate', 0.0):.1%}")
 else:
-    print(f"  (stats indisponibles — {r.status_code})")
+    print(f"  (stats unavailable — {r.status_code})")
 
-# ── Résumé ─────────────────────────────────────────────────────────────────────
+# ── Summary ────────────────────────────────────────────────────────────────────
 
 print()
 print("=" * 72)
 print(f"  Total upserted   : {total_upserted}")
 print()
-print("  Scénario de dégradation simulé :")
-print("  Phase 1 (stable)    → ~94% accuracy  (distribution originale)")
-print("  Phase 2 (drift)     → ~60% accuracy  (bénins driftés → zone maligne)")
+print("  Simulated degradation scenario:")
+print("  Phase 1 (stable)    → ~94% accuracy  (original distribution)")
+print("  Phase 2 (drift)     → ~60% accuracy  (benign cases drifted → malignant zone)")
 print(
-    f"  Phase 3 (protocole) → ~38% accuracy"
-    f"  (malins doux reclassifiés bénins : radius<{RADIUS_THR} & concavity<{CONCAVITY_THR})"
+    f"  Phase 3 (protocol)  → ~38% accuracy"
+    f"  (mild malignant cases reclassified as benign: radius<{RADIUS_THR} & concavity<{CONCAVITY_THR})"
 )
 print()
-print("  Le modèle nécessite un retraining sur les données de production récentes.")
+print("  The model requires retraining on recent production data.")
 print()
 print(f"  → Dashboard : {API_URL.replace(':8000', ':8501')}/Models")
 print("=" * 72)

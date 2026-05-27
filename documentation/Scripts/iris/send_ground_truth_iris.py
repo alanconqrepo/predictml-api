@@ -1,26 +1,26 @@
 """
-send_ground_truth_iris.py — Vérité terrain Iris avec dégradation temporelle
+send_ground_truth_iris.py — Iris ground truth with temporal degradation
 ============================================================================
 
-Charge iris_predictions_log.json (produit par send_predictions_iris.py) et
-calcule la vraie classe selon les règles de chaque phase, puis envoie les
+Loads iris_predictions_log.json (produced by send_predictions_iris.py) and
+computes the true class according to each phase's rules, then sends
 observed_results via POST /observed-results.
 
-Règles de vérité terrain :
-  Phase 1-2 : true_class = classe d'échantillonnage originale
-  Phase 3   : si petal_length > 4.5 ET petal_width > 1.5
-              → true_class = 2 (virginica) — nouvelle règle déterministe
-              Seuil abaissé (était 5.0/1.7) pour couvrir plus de versicolor driftés.
-              Simule un changement biologique : pétales moyennement grands = virginica,
-              même si le modèle (entraîné avant) prédit versicolor.
+Ground truth rules:
+  Phase 1-2: true_class = original sampling class
+  Phase 3:   if petal_length > 4.5 AND petal_width > 1.5
+              → true_class = 2 (virginica) — new deterministic rule
+              Lowered threshold (was 5.0/1.7) to cover more drifted versicolor.
+              Simulates a biological change: medium-large petals = virginica,
+              even if the model (trained earlier) predicts versicolor.
 
-Usage :
+Usage:
   API_URL=http://localhost:8000 API_TOKEN=<token> python send_ground_truth_iris.py
 
-Variables d'environnement :
-  API_URL    URL de l'API  (défaut : http://localhost:80)
-  API_TOKEN  Token Bearer — requis
-  MODEL_NAME Nom du modèle (défaut : iris-classifier)
+Environment variables:
+  API_URL    API URL       (default: http://localhost:80)
+  API_TOKEN  Bearer token — required
+  MODEL_NAME Model name    (default: iris-classifier)
 """
 
 import json
@@ -48,53 +48,53 @@ BATCH_SIZE = 50
 # ── Validation ─────────────────────────────────────────────────────────────────
 
 if not API_TOKEN:
-    print("❌  API_TOKEN non défini.")
+    print("❌  API_TOKEN not defined.")
     sys.exit(1)
 
 try:
     r = requests.get(f"{API_URL}/health", timeout=5)
     r.raise_for_status()
-    print(f"✅  API accessible : {API_URL}\n")
+    print(f"✅  API accessible: {API_URL}\n")
 except Exception as e:
-    print(f"❌  API inaccessible ({API_URL}) : {e}")
+    print(f"❌  API unreachable ({API_URL}): {e}")
     sys.exit(1)
 
 if not os.path.exists(LOG_FILE):
-    print(f"❌  Log introuvable : {LOG_FILE}")
-    print("    Lancez d'abord : python send_predictions_iris.py")
+    print(f"❌  Log not found: {LOG_FILE}")
+    print("    Run first: python send_predictions_iris.py")
     sys.exit(1)
 
-# ── Chargement du log ──────────────────────────────────────────────────────────
+# ── Log loading ────────────────────────────────────────────────────────────────
 
 with open(LOG_FILE, encoding="utf-8") as f:
     log = json.load(f)
 
 if not log:
-    print("❌  Log vide : aucune prédiction à labelliser. Relancez send_predictions_iris.py.")
+    print("❌  Empty log: no predictions to label. Re-run send_predictions_iris.py.")
     sys.exit(1)
 
-print(f"  {len(log)} entrées chargées depuis {LOG_FILE}\n")
+print(f"  {len(log)} entries loaded from {LOG_FILE}\n")
 
-# ── Règle de vérité terrain ────────────────────────────────────────────────────
+# ── Ground truth rule ──────────────────────────────────────────────────────────
 
 
 def compute_true_class(entry: dict) -> int:
-    """Retourne la vraie classe selon la phase et les features."""
+    """Returns the true class according to the phase and features."""
     if entry["phase"] < 3:
         return entry["true_class"]
 
-    # Phase 3 : nouvelle règle déterministe (seuil abaissé → plus de reclassifications)
+    # Phase 3: new deterministic rule (lowered threshold → more reclassifications)
     petal_len = entry["features"].get("petal length (cm)", 0.0)
     petal_wid = entry["features"].get("petal width (cm)", 0.0)
     if petal_len > 4.5 and petal_wid > 1.5:
-        return 2  # virginica — nouvelle règle élargie
+        return 2  # virginica — expanded rule
     return entry["true_class"]
 
 
-# ── Construction des observed results ─────────────────────────────────────────
+# ── Building observed results ─────────────────────────────────────────────────
 
 print("=" * 68)
-print("  Calcul de la vérité terrain par phase")
+print("  Computing ground truth by phase")
 print("=" * 68)
 
 observed_data = []
@@ -116,20 +116,20 @@ for entry in log:
 
 for phase in [1, 2, 3]:
     s = phase_stats[phase]
-    line = f"  Phase {phase} : {s['total']:4d} obs"
+    line = f"  Phase {phase}: {s['total']:4d} obs"
     if s["overridden"]:
         pct = s["overridden"] / s["total"] * 100
-        line += f"  ({s['overridden']} reclassifiées → virginica par nouvelle règle, {pct:.0f}%)"
+        line += f"  ({s['overridden']} reclassified → virginica by new rule, {pct:.0f}%)"
     else:
-        line += "  (distribution stable)"
+        line += "  (stable distribution)"
     print(line)
 
 print()
 
-# ── Envoi en batches ───────────────────────────────────────────────────────────
+# ── Sending in batches ────────────────────────────────────────────────────────
 
 print("=" * 68)
-print("  Envoi des observed results (POST /observed-results)")
+print("  Sending observed results (POST /observed-results)")
 print("=" * 68)
 
 total_upserted = 0
@@ -147,13 +147,13 @@ for i in range(0, len(observed_data), BATCH_SIZE):
         end_idx = min(i + BATCH_SIZE, len(observed_data))
         print(f"  [{i + 1:4d} – {end_idx:4d}]  ✅  {n} upserted")
     else:
-        print(f"  [{i + 1:4d} – ...]  ❌  Erreur {r.status_code} : {r.text[:100]}")
+        print(f"  [{i + 1:4d} – ...]  ❌  Error {r.status_code} : {r.text[:100]}")
 
-# ── Vérification de couverture ─────────────────────────────────────────────────
+# ── Coverage check ─────────────────────────────────────────────────────────────
 
 print()
 print("=" * 68)
-print("  Couverture ground truth (GET /observed-results/stats)")
+print("  Ground truth coverage (GET /observed-results/stats)")
 print("=" * 68)
 
 r = requests.get(
@@ -164,27 +164,27 @@ r = requests.get(
 )
 if r.status_code == 200:
     stats = r.json()
-    print(f"\n  Modèle      : {MODEL_NAME}")
+    print(f"\n  Model       : {MODEL_NAME}")
     print(
-        f"  Labellisées : {stats.get('labeled_count', '?')}"
+        f"  Labeled     : {stats.get('labeled_count', '?')}"
         f" / {stats.get('total_predictions', '?')}"
     )
-    print(f"  Couverture  : {stats.get('coverage_rate', 0.0):.1%}")
+    print(f"  Coverage    : {stats.get('coverage_rate', 0.0):.1%}")
 else:
-    print(f"  (stats indisponibles — {r.status_code})")
+    print(f"  (stats unavailable — {r.status_code})")
 
-# ── Résumé ─────────────────────────────────────────────────────────────────────
+# ── Summary ────────────────────────────────────────────────────────────────────
 
 print()
 print("=" * 68)
 print(f"  Total upserted   : {total_upserted}")
 print()
-print("  Scénario de dégradation simulé :")
-print("  Phase 1 (stable) → ~93% accuracy  (population iris originale)")
-print("  Phase 2 (drift)  → ~65% accuracy  (pétales grandissants, frontières floues)")
-print("  Phase 3 (règle)  → ~40% accuracy  (seuil abaissé : pétales moyens déjà virginica)")
+print("  Simulated degradation scenario:")
+print("  Phase 1 (stable) → ~93% accuracy  (original iris population)")
+print("  Phase 2 (drift)  → ~65% accuracy  (growing petals, blurred boundaries)")
+print("  Phase 3 (rule)   → ~40% accuracy  (lowered threshold: medium petals already virginica)")
 print()
-print("  Le modèle nécessite un retraining sur les données de production récentes.")
+print("  The model requires retraining on recent production data.")
 print()
 print(f"  → Dashboard : {API_URL.replace(':8000', ':8501')}/Models")
 print("=" * 68)

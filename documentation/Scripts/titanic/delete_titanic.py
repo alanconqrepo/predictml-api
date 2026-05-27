@@ -1,28 +1,28 @@
 """
-delete_titanic.py — Nettoyage complet du modèle titanic-survival via l'API PredictML
+delete_titanic.py — Full cleanup of the titanic-survival model via the PredictML API
 ======================================================================================
 
-Ce script supprime dans l'ordre :
-  1. Toutes les prédictions du modèle  (DELETE /predictions/purge)
-  2. Toutes les versions du modèle     (DELETE /models/{name})
+This script deletes in order:
+  1. All predictions for the model  (DELETE /predictions/purge)
+  2. All model versions             (DELETE /models/{name})
 
-Il affiche ensuite le nombre de résultats observés restants (ground truth) et
-explique pourquoi ils ne peuvent pas être supprimés via l'API.
+It then displays the number of remaining observed results (ground truth) and
+explains why they cannot be deleted via the API.
 
-Usage :
-  python delete_titanic.py                     # dry-run → affiche ce qui sera supprimé
-  python delete_titanic.py --yes               # supprime sans confirmation
+Usage:
+  python delete_titanic.py                     # dry-run → shows what will be deleted
+  python delete_titanic.py --yes               # deletes without confirmation
 
-Variables d'environnement :
-  API_URL        URL de l'API          (défaut : http://localhost:80)
-  API_TOKEN      Token Bearer admin — requis
-  MODEL_NAME     Nom du modèle        (défaut : titanic-survival)
+Environment variables:
+  API_URL        API URL                (default: http://localhost:80)
+  API_TOKEN      Bearer admin token — required
+  MODEL_NAME     Model name            (default: titanic-survival)
 
-Prérequis Python :
+Python prerequisites:
   pip install requests python-dotenv
 
-Ce script supprime la totalité des données, y compris les prédictions récentes
-et les observed_results (ground truth) associés.
+This script deletes all data, including recent predictions
+and associated observed_results (ground truth).
 """
 
 import json
@@ -48,33 +48,33 @@ HEADERS_JSON = {**HEADERS, "Content-Type": "application/json"}
 # ── Validation ────────────────────────────────────────────────────────────────
 
 if not API_TOKEN:
-    print("❌  API_TOKEN non défini.")
-    print("    Lancez : API_TOKEN=<votre_token> python delete_titanic.py [--yes]")
+    print("❌  API_TOKEN not defined.")
+    print("    Run: API_TOKEN=<your_token> python delete_titanic.py [--yes]")
     sys.exit(1)
 
-# ── 0. Vérification API ───────────────────────────────────────────────────────
+# ── 0. API check ───────────────────────────────────────────────────────────────
 
 try:
     r = requests.get(f"{API_URL}/health", timeout=5)
     r.raise_for_status()
-    print(f"✅  API accessible : {API_URL}")
+    print(f"✅  API reachable: {API_URL}")
 except Exception as e:
-    print(f"❌  API inaccessible ({API_URL}) : {e}")
+    print(f"❌  API unreachable ({API_URL}): {e}")
     sys.exit(1)
 
 print()
 if DRY_RUN:
     print("=" * 62)
-    print("  MODE DRY-RUN — aucune suppression (ajoutez --yes pour exécuter)")
+    print("  DRY-RUN MODE — no deletion (add --yes to execute)")
     print("=" * 62)
 else:
     print("=" * 62)
-    print(f"  SUPPRESSION RÉELLE pour le modèle : {MODEL_NAME}")
+    print(f"  REAL DELETION for model: {MODEL_NAME}")
     print("=" * 62)
 
-# ── 1. Inventaire — modèles ───────────────────────────────────────────────────
+# ── 1. Inventory — models ───────────────────────────────────────────────────────
 
-print(f"\n[1/3] Récupération des versions de '{MODEL_NAME}'…")
+print(f"\n[1/3] Fetching versions of '{MODEL_NAME}'…")
 
 r = requests.get(f"{API_URL}/models", headers=HEADERS, params={"name": MODEL_NAME}, timeout=10)
 
@@ -82,22 +82,22 @@ if r.status_code == 200:
     all_models = r.json()
     versions = [m for m in all_models if m.get("name") == MODEL_NAME]
     if versions:
-        print(f"      {len(versions)} version(s) trouvée(s) :")
+        print(f"      {len(versions)} version(s) found:")
         for v in versions:
             prod = " [PRODUCTION]" if v.get("is_production") else ""
             print(f"        • v{v.get('version')}{prod}")
     else:
-        print(f"      Aucune version trouvée pour '{MODEL_NAME}'.")
+        print(f"      No versions found for '{MODEL_NAME}'.")
 elif r.status_code == 404:
     versions = []
-    print(f"      Aucun modèle '{MODEL_NAME}' trouvé.")
+    print(f"      No model '{MODEL_NAME}' found.")
 else:
-    print(f"      ⚠️  GET /models a répondu {r.status_code} : {r.text[:120]}")
+    print(f"      ⚠️  GET /models responded {r.status_code}: {r.text[:120]}")
     versions = []
 
-# ── 2. Inventaire — prédictions ───────────────────────────────────────────────
+# ── 2. Inventory — predictions ───────────────────────────────────────────────────
 
-print("\n[2/3] Simulation de purge des prédictions et observed_results (older_than_days=0)…")
+print("\n[2/3] Simulating purge of predictions and observed_results (older_than_days=0)…")
 
 r = requests.delete(
     f"{API_URL}/predictions/purge",
@@ -113,42 +113,42 @@ if r.status_code == 200:
     predictions_to_delete = purge_preview.get("deleted_count", 0)
     linked_gt = purge_preview.get("linked_observed_results_count", 0)
     oldest_remaining = purge_preview.get("oldest_remaining")
-    print(f"      {predictions_to_delete} prédiction(s) à supprimer")
-    print(f"      {linked_gt} observed_result(s) associé(s) à supprimer")
+    print(f"      {predictions_to_delete} prediction(s) to delete")
+    print(f"      {linked_gt} associated observed_result(s) to delete")
     if oldest_remaining:
-        print(f"      Plus ancienne après purge : {oldest_remaining}")
+        print(f"      Oldest remaining after purge: {oldest_remaining}")
 else:
-    print(f"      ⚠️  GET purge dry-run a répondu {r.status_code} : {r.text[:120]}")
+    print(f"      ⚠️  GET purge dry-run responded {r.status_code}: {r.text[:120]}")
 
-# ── 3. Inventaire — observed results ─────────────────────────────────────────
+# ── 3. Inventory — observed results ─────────────────────────────────────────
 
-print("\n[3/3] Les observed_results seront supprimés en cascade avec les prédictions.")
+print("\n[3/3] observed_results will be deleted in cascade with predictions.")
 observed_total = linked_gt
 
-# ── Confirmation / sortie dry-run ─────────────────────────────────────────────
+# ── Confirmation / dry-run exit ─────────────────────────────────────────────────
 
 print()
 print("─" * 62)
-print("  Résumé de ce qui sera supprimé :")
-print(f"    • {len(versions)} version(s) du modèle '{MODEL_NAME}'")
-print(f"    • {predictions_to_delete} prédiction(s)")
-print(f"    • {observed_total} observed_result(s) (supprimés en cascade)")
+print("  Summary of what will be deleted:")
+print(f"    • {len(versions)} version(s) of model '{MODEL_NAME}'")
+print(f"    • {predictions_to_delete} prediction(s)")
+print(f"    • {observed_total} observed_result(s) (deleted in cascade)")
 print("─" * 62)
 
 if DRY_RUN:
     print()
-    print("  Relancez avec --yes pour exécuter la suppression :")
+    print("  Re-run with --yes to execute the deletion:")
     print("    python delete_titanic.py --yes")
     sys.exit(0)
 
 print()
 
-# ── Exécution 1 : purge des prédictions ──────────────────────────────────────
+# ── Execution 1: purge predictions ──────────────────────────────────────────────
 
-print("  ÉTAPE 1 — Purge des prédictions…")
+print("  STEP 1 — Purging predictions…")
 
 if predictions_to_delete == 0:
-    print("  ✅  Aucune prédiction à supprimer.")
+    print("  ✅  No predictions to delete.")
 else:
     r = requests.delete(
         f"{API_URL}/predictions/purge",
@@ -161,23 +161,23 @@ else:
         result = r.json()
         deleted = result.get("deleted_count", 0)
         deleted_obs = result.get("deleted_observed_results_count", 0)
-        print(f"  ✅  {deleted} prédiction(s) supprimée(s).")
+        print(f"  ✅  {deleted} prediction(s) deleted.")
         if deleted_obs:
-            print(f"  ✅  {deleted_obs} observed_result(s) supprimé(s) en cascade.")
+            print(f"  ✅  {deleted_obs} observed_result(s) deleted in cascade.")
     else:
-        print(f"  ❌  Erreur {r.status_code} lors de la purge :")
+        print(f"  ❌  Error {r.status_code} during purge:")
         try:
             print(f"      {json.dumps(r.json(), indent=2, ensure_ascii=False)}")
         except Exception:
             print(f"      {r.text[:300]}")
 
-# ── Exécution 2 : suppression du modèle ──────────────────────────────────────
+# ── Execution 2: delete model ──────────────────────────────────────────────────
 
 print()
-print(f"  ÉTAPE 2 — Suppression de toutes les versions de '{MODEL_NAME}'…")
+print(f"  STEP 2 — Deleting all versions of '{MODEL_NAME}'…")
 
 if not versions:
-    print(f"  ✅  Aucun modèle '{MODEL_NAME}' à supprimer.")
+    print(f"  ✅  No model '{MODEL_NAME}' to delete.")
 else:
     r = requests.delete(
         f"{API_URL}/models/{MODEL_NAME}",
@@ -191,23 +191,23 @@ else:
         mlflow_del = result.get("mlflow_runs_deleted", [])
         minio_del = result.get("minio_objects_deleted", [])
 
-        print(f"  ✅  {len(deleted_v)} version(s) supprimée(s) : {deleted_v}")
+        print(f"  ✅  {len(deleted_v)} version(s) deleted: {deleted_v}")
         if mlflow_del:
-            print(f"      {len(mlflow_del)} run(s) MLflow supprimé(s)")
+            print(f"      {len(mlflow_del)} MLflow run(s) deleted")
         if minio_del:
-            print(f"      {len(minio_del)} objet(s) MinIO supprimé(s)")
+            print(f"      {len(minio_del)} MinIO object(s) deleted")
     elif r.status_code == 404:
-        print(f"  ✅  Modèle '{MODEL_NAME}' déjà absent.")
+        print(f"  ✅  Model '{MODEL_NAME}' already absent.")
     else:
-        print(f"  ❌  Erreur {r.status_code} lors de la suppression du modèle :")
+        print(f"  ❌  Error {r.status_code} while deleting model:")
         try:
             print(f"      {json.dumps(r.json(), indent=2, ensure_ascii=False)}")
         except Exception:
             print(f"      {r.text[:300]}")
 
-# ── Résumé final ──────────────────────────────────────────────────────────────
+# ── Final summary ──────────────────────────────────────────────────────────────
 
 print()
 print("=" * 62)
-print("  Nettoyage terminé.")
+print("  Cleanup complete.")
 print("=" * 62)

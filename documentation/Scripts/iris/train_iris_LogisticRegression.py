@@ -1,19 +1,19 @@
 """
-train_iris_LogisticRegression.py — Script de ré-entraînement PredictML — Iris (LogisticRegression)
-====================================================================================================
+train_iris_LogisticRegression.py — PredictML retraining script — Iris (LogisticRegression)
+============================================================================================
 
-Modèle   : LogisticRegression (C=0.5, solver=lbfgs, max_iter=500)
-Dataset  : scikit-learn Iris — classification 3 classes
-Différences vs v1.0.0 RandomForest :
-  - Modèle linéaire (pas d'ensemble) — interprétabilité maximale
-  - Régularisation L2 avec C=0.5 (plus forte que le défaut C=1.0)
-  - Pas d'hyperparamètre d'arbre (max_depth, n_estimators)
+Model  : LogisticRegression (C=0.5, solver=lbfgs, max_iter=500)
+Dataset: scikit-learn Iris — 3-class classification
+Differences vs v1.0.0 RandomForest:
+  - Linear model (no ensemble) — maximum interpretability
+  - L2 regularization with C=0.5 (stronger than default C=1.0)
+  - No tree hyperparameters (max_depth, n_estimators)
 
-CONTRAT D'INTERFACE
+INTERFACE CONTRACT
 -------------------------------------------------------------------------------------
-  TRAIN_START_DATE   : date de début  — format YYYY-MM-DD
-  TRAIN_END_DATE     : date de fin    — format YYYY-MM-DD
-  OUTPUT_MODEL_PATH  : chemin absolu où sauvegarder le .joblib produit
+  TRAIN_START_DATE   : start date  — format YYYY-MM-DD
+  TRAIN_END_DATE     : end date    — format YYYY-MM-DD
+  OUTPUT_MODEL_PATH  : absolute path to save the produced .joblib
 """
 
 import json
@@ -57,7 +57,7 @@ def _ts(label: str) -> None:
     elapsed = (datetime.now() - _T0).total_seconds()
     print(f"[TIMING] {label} — +{elapsed:.2f}s", file=sys.stderr)
 
-# ── 1. Variables d'environnement ──────────────────────────────────────────────
+# ── 1. Environment variables ──────────────────────────────────────────────────
 
 TRAIN_START_DATE  = os.environ.get("TRAIN_START_DATE", "2024-01-01")
 TRAIN_END_DATE    = os.environ.get("TRAIN_END_DATE",   "2024-12-31")
@@ -93,9 +93,9 @@ if not _in_docker:
         )
 
 print(f"[{MODEL_NAME}] LogisticRegression — {TRAIN_START_DATE} → {TRAIN_END_DATE}", file=sys.stderr)
-_ts("démarrage")
+_ts("startup")
 
-# ── 2. Données ────────────────────────────────────────────────────────────────
+# ── 2. Data ───────────────────────────────────────────────────────────────────
 
 iris = load_iris()
 X_full = pd.DataFrame(iris.data, columns=iris.feature_names)
@@ -109,14 +109,14 @@ rng = np.random.default_rng(seed=(delta_days + 13) % 1000)
 indices = rng.choice(len(X_full), size=n_samples, replace=False)
 X, y = X_full.iloc[indices], y_full[indices]
 
-print(f"[{MODEL_NAME}] {n_samples} exemples.", file=sys.stderr)
-_ts("données chargées")
+print(f"[{MODEL_NAME}] {n_samples} samples.", file=sys.stderr)
+_ts("data loaded")
 
 if n_samples < 20:
-    print(json.dumps({"error": f"Pas assez de données ({n_samples} < 20)"}))
+    print(json.dumps({"error": f"Not enough data ({n_samples} < 20)"}))
     sys.exit(1)
 
-# ── 3. Entraînement (Pipeline : StandardScaler + LogisticRegression) ──────────
+# ── 3. Training (Pipeline: StandardScaler + LogisticRegression) ──────────────
 
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42, stratify=y if n_samples >= 30 else None
@@ -129,16 +129,16 @@ HYPERPARAMS = {
     "class_weight": "balanced",
     "random_state": 42,
 }
-# Pipeline avec StandardScaler pour que LR converge proprement
+# Pipeline with StandardScaler so LR converges cleanly
 model = Pipeline([
     ("scaler", StandardScaler()),
     ("clf",    LogisticRegression(**HYPERPARAMS)),
 ])
-_ts("avant fit")
+_ts("before fit")
 model.fit(X_train, y_train)
-_ts("après fit")
+_ts("after fit")
 
-# ── 4. Évaluation ─────────────────────────────────────────────────────────────
+# ── 4. Evaluation ─────────────────────────────────────────────────────────────
 
 y_pred    = model.predict(X_test)
 acc       = float(accuracy_score(y_test, y_pred))
@@ -147,13 +147,13 @@ precision = float(precision_score(y_test, y_pred, average="weighted", zero_divis
 recall    = float(recall_score(y_test, y_pred, average="weighted", zero_division=0))
 
 print(f"[{MODEL_NAME}] Acc={acc:.4f} F1={f1:.4f} P={precision:.4f} R={recall:.4f}", file=sys.stderr)
-_ts("évaluation")
+_ts("evaluation")
 
-# ── 5. Sauvegarde modèle ──────────────────────────────────────────────────────
+# ── 5. Model saving ───────────────────────────────────────────────────────────
 
 joblib.dump(model, OUTPUT_MODEL_PATH)
-print(f"[{MODEL_NAME}] Modèle (Pipeline) → {OUTPUT_MODEL_PATH}", file=sys.stderr)
-_ts("modèle sauvegardé")
+print(f"[{MODEL_NAME}] Model (Pipeline) → {OUTPUT_MODEL_PATH}", file=sys.stderr)
+_ts("model saved")
 
 # ── 5b. Dataset CSV → MinIO ───────────────────────────────────────────────────
 
@@ -177,7 +177,7 @@ try:
         _dataset_minio_path = _object_key
         print(f"[{MODEL_NAME}] Dataset → MinIO {_bucket}/{_object_key}", file=sys.stderr)
 except Exception as _e:
-    print(f"[{MODEL_NAME}] Dataset ignoré : {_e}", file=sys.stderr)
+    print(f"[{MODEL_NAME}] Dataset skipped: {_e}", file=sys.stderr)
 
 # ── 6. Feature stats ──────────────────────────────────────────────────────────
 
@@ -197,7 +197,7 @@ label_distribution = {
     for c in np.unique(y_train)
 }
 
-# ── 7. MLflow (dégradation gracieuse) ────────────────────────────────────────
+# ── 7. MLflow (graceful degradation) ─────────────────────────────────────────
 
 mlflow_run_id = None
 if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
@@ -218,11 +218,11 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
                 )
                 mlflow.sklearn.log_model(model, artifact_path="model", signature=_sig)
             except Exception as _art:
-                print(f"[{MODEL_NAME}] MLflow artifact ignoré : {_art}", file=sys.stderr)
+                print(f"[{MODEL_NAME}] MLflow artifact skipped: {_art}", file=sys.stderr)
             mlflow_run_id = run.info.run_id
-        print(f"[{MODEL_NAME}] MLflow run : {mlflow_run_id}", file=sys.stderr)
+        print(f"[{MODEL_NAME}] MLflow run: {mlflow_run_id}", file=sys.stderr)
     except Exception as exc:
-        print(f"[{MODEL_NAME}] MLflow indisponible : {exc}", file=sys.stderr)
+        print(f"[{MODEL_NAME}] MLflow unavailable: {exc}", file=sys.stderr)
 
 # ── 8. JSON stdout ────────────────────────────────────────────────────────────
 

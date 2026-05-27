@@ -216,19 +216,19 @@
 
 ## Batch 13 — `init_data/` + `smoke-tests/` + `alembic/` + `documentation/Scripts/`
 
-- [ ] `init_data/example_train.py`
-- [ ] `init_data/seed_sample_data.py`
-- [ ] `init_data/resign_models.py`
-- [ ] `init_data/create_multiple_advanced_models.py`
-- [ ] `init_data/init_db.py`
-- [ ] `init_data/create_multiple_models.py`
-- [ ] `init_data/migrate_add_feature_baseline.py`
-- [ ] `init_data/README.md`
-- [ ] `smoke-tests/test_multimodel_api.py`
-- [ ] `smoke-tests/README.md`
-- [ ] `alembic/versions/*.py` (3 files)
-- [ ] `documentation/Scripts/cancer/` (11 files)
-- [ ] `documentation/Scripts/iris/` (11 files)
-- [ ] `documentation/Scripts/titanic/` (5 files)
-- [ ] `documentation/Scripts/wine/` (12 files)
-- [ ] `Models/README.md`
+- [x] `init_data/example_train.py`
+- [x] `init_data/seed_sample_data.py`
+- [x] `init_data/resign_models.py`
+- [x] `init_data/create_multiple_advanced_models.py`
+- [x] `init_data/init_db.py`
+- [x] `init_data/create_multiple_models.py`
+- [x] `init_data/migrate_add_feature_baseline.py`
+- [x] `init_data/README.md`
+- [x] `smoke-tests/test_multimodel_api.py`
+- [x] `smoke-tests/README.md`
+- [x] `alembic/versions/*.py` (3 files)
+- [x] `documentation/Scripts/cancer/` (11 files)
+- [x] `documentation/Scripts/iris/` (11 files)
+- [x] `documentation/Scripts/titanic/` (5 files)
+- [x] `documentation/Scripts/wine/` (11 files)
+- [x] `Models/README.md`

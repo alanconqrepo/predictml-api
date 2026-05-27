@@ -19,7 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # model_metadata : champs A/B Testing
+    # model_metadata: A/B Testing fields
     op.add_column(
         "model_metadata",
         sa.Column("traffic_weight", sa.Float(), nullable=True),
@@ -29,7 +29,7 @@ def upgrade() -> None:
         sa.Column("deployment_mode", sa.String(20), nullable=True),
     )
 
-    # predictions : flag shadow
+    # predictions: shadow flag
     op.add_column(
         "predictions",
         sa.Column(
@@ -40,9 +40,9 @@ def upgrade() -> None:
         ),
     )
 
-    # Index pour filtrage rapide des prédictions shadow
+    # Index for fast filtering of shadow predictions
     op.create_index("ix_predictions_is_shadow", "predictions", ["is_shadow"])
-    # Index composé pour les requêtes de comparaison A/B
+    # Composite index for A/B comparison queries
     op.create_index(
         "ix_predictions_model_shadow",
         "predictions",

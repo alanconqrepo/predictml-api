@@ -1,30 +1,30 @@
 """
-send_predictions_iris.py — 900 prédictions Iris étalées sur 45 jours
+send_predictions_iris.py — 900 Iris predictions spread over 45 days
 =====================================================================
 
-Simule une dégradation progressive du modèle en production :
+Simulates a progressive degradation of the model in production:
 
-  Phase 1 (J-45 → J-31, 15 jours) : distribution stable, ~93% accuracy
-  Phase 2 (J-30 → J-16, 15 jours) : drift des features (pétales grandissants)
-    — versicolor glisse vers la zone virginica, confusion massive → ~65% accuracy
-  Phase 3 (J-15 → J-1,  15 jours) : nouvelle règle déterministe — toute fleur
-    avec petal_length > 4.5 ET petal_width > 1.5 est en réalité virginica,
-    même si le modèle (entraîné sur l'ancienne distribution) prédit versicolor.
-    Couverture plus large qu'avant → ~40% accuracy
+  Phase 1 (D-45 → D-31, 15 days) : stable distribution, ~93% accuracy
+  Phase 2 (D-30 → D-16, 15 days) : feature drift (growing petals)
+    — versicolor drifts toward the virginica zone, massive confusion → ~65% accuracy
+  Phase 3 (D-15 → D-1,  15 days) : new deterministic rule — any flower
+    with petal_length > 4.5 AND petal_width > 1.5 is actually virginica,
+    even if the model (trained on the old distribution) predicts versicolor.
+    Wider coverage than before → ~40% accuracy
 
-Produit iris_predictions_log.json — utilisé par send_ground_truth_iris.py.
+Produces iris_predictions_log.json — used by send_ground_truth_iris.py.
 
-Usage :
+Usage:
   API_URL=http://localhost:8000 API_TOKEN=<token> python send_predictions_iris.py
 
-Variables d'environnement :
-  API_URL        URL de l'API              (défaut : http://localhost:80)
-  API_TOKEN      Token Bearer — requis
-  MODEL_NAME     Nom du modèle             (défaut : iris-classifier)
-  MODEL_VERSION  Version (optionnel)
-  TOTAL_DAYS     Nombre de jours           (défaut : 45)
-  N_PER_DAY      Prédictions par jour      (défaut : 20)
-  SLEEP_BETWEEN  Pause entre batches (s)   (défaut : 7)
+Environment variables:
+  API_URL        API URL                   (default: http://localhost:80)
+  API_TOKEN      Bearer token — required
+  MODEL_NAME     Model name                (default: iris-classifier)
+  MODEL_VERSION  Version (optional)
+  TOTAL_DAYS     Number of days            (default: 45)
+  N_PER_DAY      Predictions per day       (default: 20)
+  SLEEP_BETWEEN  Pause between batches (s) (default: 7)
 """
 
 import json
@@ -56,7 +56,7 @@ SLEEP_BETWEEN = float(os.environ.get("SLEEP_BETWEEN", "7"))
 HEADERS  = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
 LOG_FILE = os.path.join(os.path.dirname(__file__), "iris_predictions_log.json")
 
-# ── Distributions par classe (μ, σ) — source : sklearn.datasets.load_iris() ───
+# ── Per-class distributions (μ, σ) — source: sklearn.datasets.load_iris() ─────
 
 CLASS_PARAMS = {
     0: {  # setosa
@@ -79,23 +79,23 @@ CLASS_PARAMS = {
     },
 }
 
-# Proportions [setosa, versicolor, virginica] par phase
+# Proportions [setosa, versicolor, virginica] per phase
 PHASE_PROPORTIONS = {
-    1: [0.40, 0.40, 0.20],   # stable et équilibré
-    2: [0.15, 0.50, 0.35],   # plus de versicolor qui vont dériver vers la zone virginica
-    3: [0.05, 0.30, 0.65],   # dominance virginica → modèle massivement erroné
+    1: [0.40, 0.40, 0.20],   # stable and balanced
+    2: [0.15, 0.50, 0.35],   # more versicolor drifting toward the virginica zone
+    3: [0.05, 0.30, 0.65],   # virginica dominance → model massively wrong
 }
 
-# Drift cumulatif par jour, actif à partir du jour 16 (début phase 2)
-# Valeurs doublées pour une dégradation visible sur le graphique
+# Cumulative drift per day, active from day 16 (start of phase 2)
+# Values doubled for a visible degradation on the chart
 DRIFT_PER_DAY = {
-    "petal length (cm)":  0.08,   # +0.08 cm/j → +1.2 cm sur 15 jours
-    "petal width (cm)":   0.04,   # +0.04 cm/j → +0.6 cm sur 15 jours
+    "petal length (cm)":  0.08,   # +0.08 cm/day → +1.2 cm over 15 days
+    "petal width (cm)":   0.04,   # +0.04 cm/day → +0.6 cm over 15 days
     "sepal length (cm)":  0.02,
     "sepal width (cm)":  -0.02,
 }
 
-# Bornes botaniquement plausibles
+# Botanically plausible bounds
 FEATURE_BOUNDS = {
     "sepal length (cm)": (3.5, 9.0),
     "sepal width (cm)":  (1.5, 5.5),
@@ -141,19 +141,19 @@ def sample_features(cls: int, cum_drift: int, rng: random.Random) -> dict:
 # ── Validation ─────────────────────────────────────────────────────────────────
 
 if not API_TOKEN:
-    print("❌  API_TOKEN non défini.")
-    print("    Lancez : API_TOKEN=<token> python send_predictions_iris.py")
+    print("❌  API_TOKEN not defined.")
+    print("    Run: API_TOKEN=<token> python send_predictions_iris.py")
     sys.exit(1)
 
 try:
     r = requests.get(f"{API_URL}/health", timeout=5)
     r.raise_for_status()
-    print(f"✅  API accessible : {API_URL}\n")
+    print(f"✅  API accessible: {API_URL}\n")
 except Exception as e:
-    print(f"❌  API inaccessible ({API_URL}) : {e}")
+    print(f"❌  API unreachable ({API_URL}): {e}")
     sys.exit(1)
 
-# ── Génération et envoi ────────────────────────────────────────────────────────
+# ── Generation and sending ────────────────────────────────────────────────────
 
 rng  = random.Random(42)
 now  = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
@@ -161,8 +161,8 @@ log  = []
 phase_counts = {1: 0, 2: 0, 3: 0}
 
 print("=" * 68)
-print(f"  Envoi de {TOTAL_DAYS * N_PER_DAY} prédictions iris sur {TOTAL_DAYS} jours")
-print(f"  Phases : 1=stable (j1-15)  2=drift (j16-30)  3=règle (j31-45)")
+print(f"  Sending {TOTAL_DAYS * N_PER_DAY} iris predictions over {TOTAL_DAYS} days")
+print(f"  Phases: 1=stable (d1-15)  2=drift (d16-30)  3=rule (d31-45)")
 print("=" * 68)
 
 for day_idx in range(TOTAL_DAYS):
@@ -203,12 +203,12 @@ for day_idx in range(TOTAL_DAYS):
             f"{API_URL}/predict-batch", headers=HEADERS, json=payload, timeout=120
         )
     except requests.exceptions.Timeout:
-        print(f"  [{timestamp[:10]}]  ⏱  Timeout — batch ignoré (réessayez avec SLEEP_BETWEEN plus grand)")
+        print(f"  [{timestamp[:10]}]  ⏱  Timeout — batch skipped (retry with a larger SLEEP_BETWEEN)")
         if day_idx < TOTAL_DAYS - 1 and SLEEP_BETWEEN > 0:
             time.sleep(SLEEP_BETWEEN)
         continue
     except requests.exceptions.RequestException as exc:
-        print(f"  [{timestamp[:10]}]  ❌  Erreur réseau : {exc}")
+        print(f"  [{timestamp[:10]}]  ❌  Network error: {exc}")
         if day_idx < TOTAL_DAYS - 1 and SLEEP_BETWEEN > 0:
             time.sleep(SLEEP_BETWEEN)
         continue
@@ -219,7 +219,7 @@ for day_idx in range(TOTAL_DAYS):
         drift_label = f"+{cum_drift * DRIFT_PER_DAY['petal length (cm)']:.2f}cm" if cum_drift else "baseline"
         print(
             f"  [{timestamp[:10]}]  phase={phase}  petal_drift={drift_label:<10}"
-            f"  ✅  {N_PER_DAY} prédictions"
+            f"  ✅  {N_PER_DAY} predictions"
         )
     else:
         print(
@@ -235,18 +235,18 @@ with open(LOG_FILE, "w", encoding="utf-8") as f:
     json.dump(log, f, ensure_ascii=False, indent=2)
 
 if not log:
-    print("\n❌  Aucune prédiction n'a été enregistrée — vérifiez les erreurs ci-dessus.")
+    print("\n❌  No prediction was recorded — check the errors above.")
     sys.exit(1)
 
-# ── Résumé ─────────────────────────────────────────────────────────────────────
+# ── Summary ────────────────────────────────────────────────────────────────────
 
 print()
 print("=" * 68)
-print(f"  Total envoyé     : {len(log)} prédictions")
-print(f"  Phase 1 (stable) : {phase_counts[1]:4d} obs  — accuracy attendue ~93%")
-print(f"  Phase 2 (drift)  : {phase_counts[2]:4d} obs  — accuracy attendue ~65%")
-print(f"  Phase 3 (règle)  : {phase_counts[3]:4d} obs  — accuracy attendue ~40%")
-print(f"  Log sauvegardé   : {LOG_FILE}")
+print(f"  Total sent       : {len(log)} predictions")
+print(f"  Phase 1 (stable) : {phase_counts[1]:4d} obs  — expected accuracy ~93%")
+print(f"  Phase 2 (drift)  : {phase_counts[2]:4d} obs  — expected accuracy ~65%")
+print(f"  Phase 3 (rule)   : {phase_counts[3]:4d} obs  — expected accuracy ~40%")
+print(f"  Log saved        : {LOG_FILE}")
 print()
-print("  → Lancez maintenant : python send_ground_truth_iris.py")
+print("  → Run next: python send_ground_truth_iris.py")
 print("=" * 68)

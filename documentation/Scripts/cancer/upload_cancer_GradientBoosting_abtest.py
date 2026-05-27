@@ -2,15 +2,15 @@
 upload_cancer_GradientBoosting_abtest.py — cancer-classifier v1.1.0 (GradientBoosting) — ab_test
 ==================================================================================================
 
-Upload cancer-classifier v1.1.0 avec GradientBoostingClassifier en mode ab_test.
+Upload cancer-classifier v1.1.0 with GradientBoostingClassifier in ab_test mode.
 
-Déploiement :
+Deployment:
   - is_production = True
   - deployment_mode = "ab_test"
   - traffic_weight = 0.5
   - tag "Example"
 
-Usage :
+Usage:
   API_TOKEN=<token> python upload_cancer_GradientBoosting_abtest.py
 """
 
@@ -31,7 +31,7 @@ API_TOKEN = os.environ.get("API_TOKEN", os.environ.get("ADMIN_TOKEN", ""))
 
 MODEL_NAME    = os.environ.get("MODEL_NAME",    "cancer-classifier")
 MODEL_VERSION = os.environ.get("MODEL_VERSION", "1.1.0")
-DESCRIPTION   = "GradientBoostingClassifier cancer — ab_test (v1.1.0) — 100 arbres, max_depth=4"
+DESCRIPTION   = "GradientBoostingClassifier cancer — ab_test (v1.1.0) — 100 trees, max_depth=4"
 ALGORITHM     = "GradientBoosting"
 
 TRAIN_START = os.environ.get("TRAIN_START", "2024-01-01")
@@ -49,10 +49,10 @@ SCRIPT_DIR        = os.path.dirname(os.path.abspath(__file__))
 TRAIN_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "train_cancer_GradientBoosting.py")
 
 if not API_TOKEN:
-    print("❌  API_TOKEN non défini.")
+    print("❌  API_TOKEN not defined.")
     sys.exit(1)
 if not os.path.exists(TRAIN_SCRIPT_PATH):
-    print(f"❌  train_cancer_GradientBoosting.py introuvable : {TRAIN_SCRIPT_PATH}")
+    print(f"❌  train_cancer_GradientBoosting.py not found: {TRAIN_SCRIPT_PATH}")
     sys.exit(1)
 
 HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
@@ -61,17 +61,17 @@ HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
 
 try:
     requests.get(f"{API_URL}/health", timeout=5).raise_for_status()
-    print(f"✅  API accessible : {API_URL}")
+    print(f"✅  API reachable: {API_URL}")
 except Exception as e:
-    print(f"❌  API inaccessible ({API_URL}) : {e}")
+    print(f"❌  API unreachable ({API_URL}): {e}")
     sys.exit(1)
 
-# ── 2. Entraînement ───────────────────────────────────────────────────────────
+# ── 2. Training ───────────────────────────────────────────────────────────────
 
 tmp_pkl = tempfile.NamedTemporaryFile(suffix=".joblib", delete=False)
 tmp_pkl.close()
 
-print(f"⏳  Entraînement via train_cancer_GradientBoosting.py ({TRAIN_START} → {TRAIN_END})…")
+print(f"⏳  Training via train_cancer_GradientBoosting.py ({TRAIN_START} → {TRAIN_END})…")
 
 result = subprocess.run(
     [sys.executable, TRAIN_SCRIPT_PATH],
@@ -92,7 +92,7 @@ result = subprocess.run(
 )
 
 if result.returncode != 0:
-    print("❌  Entraînement échoué :")
+    print("❌  Training failed:")
     print(result.stderr)
     os.unlink(tmp_pkl.name)
     sys.exit(1)
@@ -154,14 +154,14 @@ try:
             data=data, timeout=180,
         )
         _upload_elapsed = time.perf_counter() - _upload_t0
-        print(f"  [TIMING] POST /models répondu en {_upload_elapsed:.2f}s — status {response.status_code}")
+        print(f"  [TIMING] POST /models responded in {_upload_elapsed:.2f}s — status {response.status_code}")
 finally:
     os.unlink(tmp_pkl.name)
 
-# ── 4. Résultat ───────────────────────────────────────────────────────────────
+# ── 4. Result ─────────────────────────────────────────────────────────────────
 
 if response.status_code == 409:
-    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} existe déjà — PATCH…")
+    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} already exists — PATCH…")
     try:
         patch_resp = requests.patch(
             f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
@@ -170,17 +170,17 @@ if response.status_code == 409:
             timeout=30,
         )
     except Exception as _e:
-        print(f"    [WARN] PATCH existe-déjà échoué : {_e} — continuons")
+        print(f"    [WARN] PATCH already-exists failed: {_e} — continuing")
         sys.exit(0)
-    print("✅  Mis à jour." if patch_resp.status_code == 200 else f"❌  PATCH échoué ({patch_resp.status_code})")
+    print("✅  Updated." if patch_resp.status_code == 200 else f"❌  PATCH failed ({patch_resp.status_code})")
     sys.exit(0)
 
 if response.status_code not in (200, 201):
-    print(f"❌  Erreur {response.status_code} : {response.text[:300]}")
+    print(f"❌  Error {response.status_code}: {response.text[:300]}")
     sys.exit(1)
 
 res = response.json()
-print(f"✅  {res.get('name')} v{res.get('version')} uploadé (id={res.get('id')})")
+print(f"✅  {res.get('name')} v{res.get('version')} uploaded (id={res.get('id')})")
 
 # ── 5. PATCH production + baseline ───────────────────────────────────────────
 
@@ -195,4 +195,4 @@ patch = requests.patch(
     headers={**HEADERS, "Content-Type": "application/json"},
     json=patch_body, timeout=30,
 )
-print("✅  Passé en production (ab_test)." if patch.status_code == 200 else f"⚠️   PATCH échoué ({patch.status_code})")
+print("✅  Set to production (ab_test)." if patch.status_code == 200 else f"⚠️   PATCH failed ({patch.status_code})")

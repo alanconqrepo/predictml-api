@@ -1,35 +1,35 @@
 """
-send_predictions_cancer.py — 900 prédictions Cancer étalées sur 45 jours
+send_predictions_cancer.py — 900 Cancer predictions spread over 45 days
 =========================================================================
 
-Simule une dégradation progressive du modèle cancer-classifier (classification
-binaire : 0=malignant, 1=benign) sur 45 jours :
+Simulates a progressive degradation of the cancer-classifier model (binary
+classification: 0=malignant, 1=benign) over 45 days:
 
-  Phase 1 (J-45 → J-31, 15 jours) : distribution stable, ~94% accuracy
+  Phase 1 (D-45 → D-31, 15 days) : stable distribution, ~94% accuracy
 
-  Phase 2 (J-30 → J-16, 15 jours) : dérive de calibration du scanner —
-    le scanner sur-estime radius, area et perimeter des tissus BÉNINS uniquement.
-    Les cas bénins glissent dans la zone maligne du modèle → ~60% accuracy.
-    (Le drift s'accumule : +30 mm²/j sur worst_area, +0.25/j sur worst_radius)
+  Phase 2 (D-30 → D-16, 15 days) : scanner calibration drift —
+    the scanner overestimates radius, area and perimeter for BENIGN tissues only.
+    Benign cases drift into the model's malignant zone → ~60% accuracy.
+    (Drift accumulates: +30 mm²/day on worst_area, +0.25/day on worst_radius)
 
-  Phase 3 (J-15 → J-1,  15 jours) : nouveau protocole de détection précoce —
-    certains cas MALINS "doux" (mean_radius < 18 ET mean_concavity < 0.15)
-    sont désormais reclassifiés BÉNINS par les nouvelles guidelines. Le modèle
-    (entraîné sur l'ancien protocole) les prédit toujours malins → ~38% accuracy.
+  Phase 3 (D-15 → D-1,  15 days) : new early detection protocol —
+    some "mild" MALIGNANT cases (mean_radius < 18 AND mean_concavity < 0.15)
+    are now reclassified as BENIGN by the new guidelines. The model
+    (trained on the old protocol) still predicts them as malignant → ~38% accuracy.
 
-Produit cancer_predictions_log.json — utilisé par send_ground_truth_cancer.py.
+Produces cancer_predictions_log.json — used by send_ground_truth_cancer.py.
 
-Usage :
+Usage:
   API_URL=http://localhost:8000 API_TOKEN=<token> python send_predictions_cancer.py
 
-Variables d'environnement :
-  API_URL        URL de l'API              (défaut : http://localhost:80)
-  API_TOKEN      Token Bearer — requis
-  MODEL_NAME     Nom du modèle             (défaut : cancer-classifier)
-  MODEL_VERSION  Version (optionnel)
-  TOTAL_DAYS     Nombre de jours           (défaut : 45)
-  N_PER_DAY      Prédictions par jour      (défaut : 20)
-  SLEEP_BETWEEN  Pause entre batches (s)   (défaut : 7)
+Environment variables:
+  API_URL        API URL                   (default: http://localhost:80)
+  API_TOKEN      Bearer token — required
+  MODEL_NAME     Model name                (default: cancer-classifier)
+  MODEL_VERSION  Version (optional)
+  TOTAL_DAYS     Number of days            (default: 45)
+  N_PER_DAY      Predictions per day       (default: 20)
+  SLEEP_BETWEEN  Pause between batches (s) (default: 7)
 """
 
 import json
@@ -61,7 +61,7 @@ SLEEP_BETWEEN = float(os.environ.get("SLEEP_BETWEEN", "7"))
 HEADERS  = {"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"}
 LOG_FILE = os.path.join(os.path.dirname(__file__), "cancer_predictions_log.json")
 
-# ── Distributions par classe (μ, σ) — source : sklearn breast_cancer ──────────
+# ── Per-class distributions (μ, σ) — source: sklearn breast_cancer ───────────
 # 0 = malignant,  1 = benign
 
 CLASS_PARAMS = {
@@ -131,29 +131,29 @@ CLASS_PARAMS = {
     },
 }
 
-# Proportions [malignant, benign] par phase
+# [malignant, benign] proportions per phase
 PHASE_PROPORTIONS = {
-    1: [0.37, 0.63],   # distribution originale du dataset
-    2: [0.45, 0.55],   # plus de cas malins
-    3: [0.55, 0.45],   # majorité maligne (population plus agressive)
+    1: [0.37, 0.63],   # original dataset distribution
+    2: [0.45, 0.55],   # more malignant cases
+    3: [0.55, 0.45],   # malignant majority (more aggressive population)
 }
 
-# Drift cumulatif par jour, actif à partir du jour 16 (début phase 2)
-# Appliqué UNIQUEMENT aux cas BÉNINS (cls==1) — simule une dérive de calibration
-# du scanner qui sur-estime les mesures des tissus bénins, les faisant glisser
-# progressivement dans la zone de décision maligne du modèle.
+# Cumulative drift per day, active from day 16 (start of phase 2)
+# Applied ONLY to BENIGN cases (cls==1) — simulates a scanner calibration drift
+# that overestimates measurements of benign tissues, gradually pushing them
+# into the model's malignant decision zone.
 DRIFT_PER_DAY = {
-    "mean radius":       0.20,   # +3 mm sur 15j → bénins ressemblent à malins
-    "mean perimeter":    1.30,   # +19.5 mm sur 15j
-    "mean area":         25.0,   # +375 mm² sur 15j  (μ bénin 559 → 934)
-    "worst radius":      0.25,   # +3.75 mm sur 15j
-    "worst perimeter":   1.60,   # +24 mm sur 15j
-    "worst area":        30.0,   # +450 mm² sur 15j  (μ bénin 559 → 1009)
-    "worst concavity":   0.010,  # +0.15 sur 15j
-    "mean concavity":    0.007,  # +0.105 sur 15j
+    "mean radius":       0.20,   # +3 mm over 15d → benign resemble malignant
+    "mean perimeter":    1.30,   # +19.5 mm over 15d
+    "mean area":         25.0,   # +375 mm² over 15d  (μ benign 559 → 934)
+    "worst radius":      0.25,   # +3.75 mm over 15d
+    "worst perimeter":   1.60,   # +24 mm over 15d
+    "worst area":        30.0,   # +450 mm² over 15d  (μ benign 559 → 1009)
+    "worst concavity":   0.010,  # +0.15 over 15d
+    "mean concavity":    0.007,  # +0.105 over 15d
 }
 
-# Bornes physiquement plausibles
+# Physically plausible bounds
 FEATURE_BOUNDS = {
     "mean radius":             (5.0,  30.0),
     "mean texture":            (8.0,  40.0),
@@ -218,9 +218,9 @@ def sample_features(cls: int, cum_drift: int, rng: random.Random) -> dict:
     features = {}
     for feat in FEATURE_NAMES:
         mu, sigma = CLASS_PARAMS[cls][feat]
-        # Drift appliqué UNIQUEMENT aux cas bénins (cls==1) :
-        # le scanner sur-estime les mesures des tissus bénins → ils glissent
-        # progressivement dans la zone de décision maligne du modèle.
+        # Drift applied ONLY to benign cases (cls==1):
+        # the scanner over-estimates measurements of benign tissue → they drift
+        # progressively into the malignant decision zone of the model.
         drift = DRIFT_PER_DAY.get(feat, 0.0) * cum_drift if cls == 1 else 0.0
         val   = rng.gauss(mu + drift, sigma)
         lo, hi = FEATURE_BOUNDS[feat]
@@ -231,8 +231,8 @@ def sample_features(cls: int, cum_drift: int, rng: random.Random) -> dict:
 # ── Validation ─────────────────────────────────────────────────────────────────
 
 if not API_TOKEN:
-    print("❌  API_TOKEN non défini.")
-    print("    Lancez : API_TOKEN=<token> python send_predictions_cancer.py")
+    print("❌  API_TOKEN not defined.")
+    print("    Run: API_TOKEN=<token> python send_predictions_cancer.py")
     sys.exit(1)
 
 try:
@@ -243,7 +243,7 @@ except Exception as e:
     print(f"❌  API inaccessible ({API_URL}) : {e}")
     sys.exit(1)
 
-# ── Génération et envoi ────────────────────────────────────────────────────────
+# ── Generation and sending ────────────────────────────────────────────────────
 
 rng  = random.Random(42)
 now  = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
@@ -251,7 +251,7 @@ log  = []
 phase_counts = {1: 0, 2: 0, 3: 0}
 
 print("=" * 72)
-print(f"  Envoi de {TOTAL_DAYS * N_PER_DAY} prédictions cancer sur {TOTAL_DAYS} jours")
+print(f"  Sending {TOTAL_DAYS * N_PER_DAY} cancer predictions over {TOTAL_DAYS} days")
 print(f"  Phases : 1=stable (j1-15)  2=drift scanner (j16-30)  3=protocole (j31-45)")
 print("=" * 72)
 
@@ -293,12 +293,12 @@ for day_idx in range(TOTAL_DAYS):
             f"{API_URL}/predict-batch", headers=HEADERS, json=payload, timeout=120
         )
     except requests.exceptions.Timeout:
-        print(f"  [{timestamp[:10]}]  ⏱  Timeout — batch ignoré (réessayez avec SLEEP_BETWEEN plus grand)")
+        print(f"  [{timestamp[:10]}]  ⏱  Timeout — batch skipped (retry with a larger SLEEP_BETWEEN)")
         if day_idx < TOTAL_DAYS - 1 and SLEEP_BETWEEN > 0:
             time.sleep(SLEEP_BETWEEN)
         continue
     except requests.exceptions.RequestException as exc:
-        print(f"  [{timestamp[:10]}]  ❌  Erreur réseau : {exc}")
+        print(f"  [{timestamp[:10]}]  ❌  Network error: {exc}")
         if day_idx < TOTAL_DAYS - 1 and SLEEP_BETWEEN > 0:
             time.sleep(SLEEP_BETWEEN)
         continue
@@ -310,11 +310,11 @@ for day_idx in range(TOTAL_DAYS):
         drift_label = f"+{area_drift:.0f}mm²" if area_drift else "baseline"
         print(
             f"  [{timestamp[:10]}]  phase={phase}  area_drift={drift_label:<10}"
-            f"  ✅  {N_PER_DAY} prédictions"
+            f"  ✅  {N_PER_DAY} predictions"
         )
     else:
         print(
-            f"  [{timestamp[:10]}]  ❌  Erreur {r.status_code} : {r.text[:120]}"
+            f"  [{timestamp[:10]}]  ❌  Error {r.status_code}: {r.text[:120]}"
         )
 
     if day_idx < TOTAL_DAYS - 1 and SLEEP_BETWEEN > 0:
@@ -326,18 +326,18 @@ with open(LOG_FILE, "w", encoding="utf-8") as f:
     json.dump(log, f, ensure_ascii=False, indent=2)
 
 if not log:
-    print("\n❌  Aucune prédiction n'a été enregistrée — vérifiez les erreurs ci-dessus.")
+    print("\n❌  No prediction was recorded — check the errors above.")
     sys.exit(1)
 
-# ── Résumé ─────────────────────────────────────────────────────────────────────
+# ── Summary ────────────────────────────────────────────────────────────────────
 
 print()
 print("=" * 72)
-print(f"  Total envoyé     : {len(log)} prédictions")
-print(f"  Phase 1 (stable) : {phase_counts[1]:4d} obs  — accuracy attendue ~94%")
-print(f"  Phase 2 (drift)  : {phase_counts[2]:4d} obs  — accuracy attendue ~60%")
-print(f"  Phase 3 (règle)  : {phase_counts[3]:4d} obs  — accuracy attendue ~38%")
-print(f"  Log sauvegardé   : {LOG_FILE}")
+print(f"  Total sent       : {len(log)} predictions")
+print(f"  Phase 1 (stable) : {phase_counts[1]:4d} obs  — expected accuracy ~94%")
+print(f"  Phase 2 (drift)  : {phase_counts[2]:4d} obs  — expected accuracy ~60%")
+print(f"  Phase 3 (rule)   : {phase_counts[3]:4d} obs  — expected accuracy ~38%")
+print(f"  Log saved        : {LOG_FILE}")
 print()
-print("  → Lancez maintenant : python send_ground_truth_cancer.py")
+print("  → Run next: python send_ground_truth_cancer.py")
 print("=" * 72)
