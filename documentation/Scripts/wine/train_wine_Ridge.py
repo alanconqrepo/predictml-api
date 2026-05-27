@@ -1,20 +1,20 @@
 """
-train_wine_Ridge.py — Script de ré-entraînement PredictML — Wine (Ridge Regression)
+train_wine_Ridge.py — PredictML retraining script — Wine (Ridge Regression)
 =====================================================================================
 
-Modèle   : Pipeline StandardScaler + Ridge (alpha=2.0)
-Dataset  : scikit-learn Wine — régression (cible : teneur en alcool)
-Différences vs v1.0.0 GradientBoosting :
-  - Modèle linéaire régularisé (Ridge) au lieu d'ensemble non-linéaire
-  - StandardScaler nécessaire pour Ridge (features non normalisées)
-  - alpha=2.0 (régularisation plus forte que le défaut 1.0)
-  - Très rapide à entraîner, bonne interprétabilité des coefficients
+Model    : Pipeline StandardScaler + Ridge (alpha=2.0)
+Dataset  : scikit-learn Wine — regression (target: alcohol content)
+Differences vs v1.0.0 GradientBoosting:
+  - Regularized linear model (Ridge) instead of non-linear ensemble
+  - StandardScaler required for Ridge (non-normalized features)
+  - alpha=2.0 (stronger regularization than the default 1.0)
+  - Very fast to train, good coefficient interpretability
 
-CONTRAT D'INTERFACE
+INTERFACE CONTRACT
 -------------------------------------------------------------------------------------
-  TRAIN_START_DATE   : date de début  — format YYYY-MM-DD
-  TRAIN_END_DATE     : date de fin    — format YYYY-MM-DD
-  OUTPUT_MODEL_PATH  : chemin absolu où sauvegarder le .joblib produit
+  TRAIN_START_DATE   : start date  — format YYYY-MM-DD
+  TRAIN_END_DATE     : end date    — format YYYY-MM-DD
+  OUTPUT_MODEL_PATH  : absolute path where the produced .joblib should be saved
 """
 
 import json
@@ -58,7 +58,7 @@ def _ts(label: str) -> None:
     elapsed = (datetime.now() - _T0).total_seconds()
     print(f"[TIMING] {label} — +{elapsed:.2f}s", file=sys.stderr)
 
-# ── 1. Variables d'environnement ──────────────────────────────────────────────
+# ── 1. Environment variables ──────────────────────────────────────────────────
 
 TRAIN_START_DATE  = os.environ.get("TRAIN_START_DATE", "2024-01-01")
 TRAIN_END_DATE    = os.environ.get("TRAIN_END_DATE",   "2024-12-31")
@@ -94,9 +94,9 @@ if not _in_docker:
         )
 
 print(f"[{MODEL_NAME}] Ridge regression — {TRAIN_START_DATE} → {TRAIN_END_DATE}", file=sys.stderr)
-_ts("démarrage")
+_ts("startup")
 
-# ── 2. Données ────────────────────────────────────────────────────────────────
+# ── 2. Data ───────────────────────────────────────────────────────────────────
 
 wine = load_wine()
 all_feature_names = list(wine.feature_names)
@@ -115,19 +115,19 @@ rng = np.random.default_rng(seed=(delta_days + 17) % 1000)
 indices = rng.choice(len(X_full), size=n_samples, replace=False)
 X, y = X_full.iloc[indices], y_full[indices]
 
-print(f"[{MODEL_NAME}] {n_samples} exemples.", file=sys.stderr)
-_ts("données chargées")
+print(f"[{MODEL_NAME}] {n_samples} samples.", file=sys.stderr)
+_ts("data loaded")
 
 if n_samples < 20:
-    print(json.dumps({"error": f"Pas assez de données ({n_samples} < 20)"}))
+    print(json.dumps({"error": f"Not enough data ({n_samples} < 20)"}))
     sys.exit(1)
 
-# ── 3. Entraînement ───────────────────────────────────────────────────────────
+# ── 3. Training ───────────────────────────────────────────────────────────────
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
 HYPERPARAMS = {
-    "alpha":   2.0,    # régularisation L2 plus forte que le défaut (1.0)
+    "alpha":   2.0,    # stronger L2 regularization than the default (1.0)
     "solver":  "auto",
     "fit_intercept": True,
     "max_iter": 1000,
@@ -136,11 +136,11 @@ model = Pipeline([
     ("scaler", StandardScaler()),
     ("reg",    Ridge(**HYPERPARAMS)),
 ])
-_ts("avant fit")
+_ts("before fit")
 model.fit(X_train, y_train)
-_ts("après fit")
+_ts("after fit")
 
-# ── 4. Évaluation ─────────────────────────────────────────────────────────────
+# ── 4. Evaluation ─────────────────────────────────────────────────────────────
 
 y_pred = model.predict(X_test)
 mae    = float(mean_absolute_error(y_test, y_pred))
@@ -148,13 +148,13 @@ rmse   = float(np.sqrt(mean_squared_error(y_test, y_pred)))
 r2     = float(r2_score(y_test, y_pred))
 
 print(f"[{MODEL_NAME}] MAE={mae:.4f} RMSE={rmse:.4f} R²={r2:.4f}", file=sys.stderr)
-_ts("évaluation")
+_ts("evaluation")
 
-# ── 5. Sauvegarde modèle ──────────────────────────────────────────────────────
+# ── 5. Model saving ───────────────────────────────────────────────────────────
 
 joblib.dump(model, OUTPUT_MODEL_PATH)
-print(f"[{MODEL_NAME}] Modèle (Pipeline) → {OUTPUT_MODEL_PATH}", file=sys.stderr)
-_ts("modèle sauvegardé")
+print(f"[{MODEL_NAME}] Model (Pipeline) → {OUTPUT_MODEL_PATH}", file=sys.stderr)
+_ts("model saved")
 
 # ── 5b. Dataset CSV → MinIO ───────────────────────────────────────────────────
 
@@ -179,7 +179,7 @@ try:
         _dataset_minio_path = _object_key
         print(f"[{MODEL_NAME}] Dataset → MinIO {_bucket}/{_object_key}", file=sys.stderr)
 except Exception as _e:
-    print(f"[{MODEL_NAME}] Dataset ignoré : {_e}", file=sys.stderr)
+    print(f"[{MODEL_NAME}] Dataset skipped: {_e}", file=sys.stderr)
 
 # ── 6. Feature stats ──────────────────────────────────────────────────────────
 
@@ -208,7 +208,7 @@ for _v in y_train:
     _qcounts[_idx] += 1
 label_distribution = {_qlabels[i]: round(_qcounts[i] / len(y_train), 4) for i in range(4)}
 
-# ── 7. MLflow (dégradation gracieuse) ────────────────────────────────────────
+# ── 7. MLflow (graceful degradation) ─────────────────────────────────────────
 
 mlflow_run_id = None
 if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
@@ -227,11 +227,11 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
                 _sig = mlflow.models.infer_signature(X_test.astype("float64"), model.predict(X_test.astype("float64")))
                 mlflow.sklearn.log_model(model, artifact_path="model", signature=_sig)
             except Exception as _art:
-                print(f"[{MODEL_NAME}] MLflow artifact ignoré : {_art}", file=sys.stderr)
+                print(f"[{MODEL_NAME}] MLflow artifact skipped: {_art}", file=sys.stderr)
             mlflow_run_id = run.info.run_id
-        print(f"[{MODEL_NAME}] MLflow run : {mlflow_run_id}", file=sys.stderr)
+        print(f"[{MODEL_NAME}] MLflow run: {mlflow_run_id}", file=sys.stderr)
     except Exception as exc:
-        print(f"[{MODEL_NAME}] MLflow indisponible : {exc}", file=sys.stderr)
+        print(f"[{MODEL_NAME}] MLflow unavailable: {exc}", file=sys.stderr)
 
 # ── 8. JSON stdout ────────────────────────────────────────────────────────────
 
@@ -252,5 +252,5 @@ output = {
 if mlflow_run_id:
     output["mlflow_run_id"] = mlflow_run_id
 
-_ts("fin script")
+_ts("end of script")
 print(json.dumps(output))

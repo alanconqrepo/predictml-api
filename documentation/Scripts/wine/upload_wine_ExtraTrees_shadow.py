@@ -1,15 +1,15 @@
 """
-upload_wine_ExtraTrees_shadow.py — Wine v1.2.0 (ExtraTrees) — mode shadow
+upload_wine_ExtraTrees_shadow.py — Wine v1.2.0 (ExtraTrees) — shadow mode
 ==========================================================================
 
-Upload wine-regressor v1.2.0 avec ExtraTreesRegressor en mode shadow.
+Upload wine-regressor v1.2.0 with ExtraTreesRegressor in shadow mode.
 
-Déploiement :
+Deployment:
   - is_production = False
-  - deployment_mode = "shadow" (prédictions en parallèle, non exposées)
+  - deployment_mode = "shadow" (parallel predictions, not exposed)
   - tag "Example"
 
-Usage :
+Usage:
   API_TOKEN=<token> python upload_wine_ExtraTrees_shadow.py
 """
 
@@ -29,7 +29,7 @@ API_TOKEN = os.environ.get("API_TOKEN", os.environ.get("ADMIN_TOKEN", ""))
 
 MODEL_NAME    = os.environ.get("MODEL_NAME",    "wine-regressor")
 MODEL_VERSION = os.environ.get("MODEL_VERSION", "1.2.0")
-DESCRIPTION   = "ExtraTreesRegressor wine — shadow (v1.2.0) — splits aléatoires, max_depth=6"
+DESCRIPTION   = "ExtraTreesRegressor wine — shadow (v1.2.0) — random splits, max_depth=6"
 ALGORITHM     = "ExtraTrees"
 
 TRAIN_START = os.environ.get("TRAIN_START", "2024-01-01")
@@ -47,25 +47,25 @@ SCRIPT_DIR        = os.path.dirname(os.path.abspath(__file__))
 TRAIN_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "train_wine_ExtraTrees.py")
 
 if not API_TOKEN:
-    print("❌  API_TOKEN non défini.")
+    print("❌  API_TOKEN not defined.")
     sys.exit(1)
 if not os.path.exists(TRAIN_SCRIPT_PATH):
-    print(f"❌  train_wine_ExtraTrees.py introuvable : {TRAIN_SCRIPT_PATH}")
+    print(f"❌  train_wine_ExtraTrees.py not found: {TRAIN_SCRIPT_PATH}")
     sys.exit(1)
 
 HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
 
 try:
     requests.get(f"{API_URL}/health", timeout=5).raise_for_status()
-    print(f"✅  API accessible : {API_URL}")
+    print(f"✅  API reachable: {API_URL}")
 except Exception as e:
-    print(f"❌  API inaccessible : {e}")
+    print(f"❌  API unreachable: {e}")
     sys.exit(1)
 
 tmp_pkl = tempfile.NamedTemporaryFile(suffix=".joblib", delete=False)
 tmp_pkl.close()
 
-print(f"⏳  Entraînement ExtraTreesRegressor ({TRAIN_START} → {TRAIN_END})…")
+print(f"⏳  Training ExtraTreesRegressor ({TRAIN_START} → {TRAIN_END})…")
 
 train_env = {
     **os.environ,
@@ -86,7 +86,7 @@ result = subprocess.run(
 )
 
 if result.returncode != 0:
-    print("❌  train_wine_ExtraTrees.py a échoué :")
+    print("❌  train_wine_ExtraTrees.py failed:")
     print(result.stderr)
     os.unlink(tmp_pkl.name)
     sys.exit(1)
@@ -107,9 +107,9 @@ mae           = metrics.get("mae")
 rmse          = metrics.get("rmse")
 hyperparams   = metrics.get("hyperparameters")
 mlflow_run_id = metrics.get("mlflow_run_id")
-print(f"✅  Entraînement — R²={r2} MAE={mae} RMSE={rmse}" + (f" | MLflow={mlflow_run_id}" if mlflow_run_id else ""))
+print(f"✅  Training — R²={r2} MAE={mae} RMSE={rmse}" + (f" | MLflow={mlflow_run_id}" if mlflow_run_id else ""))
 
-print(f"⏳  Upload {MODEL_NAME} v{MODEL_VERSION} (shadow)…")
+print(f"⏳  Uploading {MODEL_NAME} v{MODEL_VERSION} (shadow)…")
 
 try:
     with open(tmp_pkl.name, "rb") as pkl_fh, open(TRAIN_SCRIPT_PATH, "rb") as train_fh:
@@ -137,12 +137,12 @@ try:
             data=data, timeout=180,
         )
         _upload_elapsed = time.perf_counter() - _upload_t0
-        print(f"  [TIMING] POST /models répondu en {_upload_elapsed:.2f}s — status {response.status_code}")
+        print(f"  [TIMING] POST /models responded in {_upload_elapsed:.2f}s — status {response.status_code}")
 finally:
     os.unlink(tmp_pkl.name)
 
 if response.status_code == 409:
-    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} existe déjà — PATCH shadow…")
+    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} already exists — PATCH shadow…")
     patch_payload = {"deployment_mode": "shadow"}
     if hyperparams:
         patch_payload["hyperparameters"] = hyperparams
@@ -153,19 +153,19 @@ if response.status_code == 409:
             json=patch_payload, timeout=30,
         )
     except Exception as _e:
-        print(f"    [WARN] PATCH existe-déjà échoué : {_e} — continuons")
+        print(f"    [WARN] PATCH already-exists failed: {_e} — continuing")
         sys.exit(0)
     print(f"✅  PATCH OK" if patch_resp.status_code == 200 else f"❌  PATCH {patch_resp.status_code}")
     sys.exit(0)
 
 if response.status_code not in (200, 201):
-    print(f"❌  Erreur {response.status_code} : {response.text[:300]}")
+    print(f"❌  Error {response.status_code}: {response.text[:300]}")
     sys.exit(1)
 
 res = response.json()
-print(f"✅  Modèle uploadé — ID={res.get('id')} version={res.get('version')}")
+print(f"✅  Model uploaded — ID={res.get('id')} version={res.get('version')}")
 
-print(f"⏳  Configuration shadow + tag 'Example'…")
+print(f"⏳  Configuring shadow + tag 'Example'…")
 
 patch_body: dict = {"deployment_mode": "shadow", "tags": ["Example"]}
 if metrics.get("feature_stats"):
@@ -178,8 +178,8 @@ patch = requests.patch(
 )
 
 if patch.status_code == 200:
-    print(f"✅  Mode shadow activé sur wine-regressor v{MODEL_VERSION}.")
+    print(f"✅  Shadow mode enabled on wine-regressor v{MODEL_VERSION}.")
 else:
-    print(f"⚠️   PATCH shadow échoué ({patch.status_code}) : {patch.text[:200]}")
+    print(f"⚠️   PATCH shadow failed ({patch.status_code}): {patch.text[:200]}")
 
-print(f"\n   → wine-regressor v{MODEL_VERSION} en mode shadow")
+print(f"\n   → wine-regressor v{MODEL_VERSION} in shadow mode")

@@ -2,10 +2,10 @@
 train_cancer_LogisticRegression.py — Breast Cancer — LogisticRegression (v1.3.0 uploaded)
 ===========================================================================================
 
-Contrat d'interface identique à train_cancer.py.
-Algorithme : Pipeline(StandardScaler → LogisticRegression)
-La normalisation est indispensable pour la régression logistique sur ce dataset
-dont les features ont des échelles très différentes (ex: area ~1000 vs symmetry ~0.18).
+Same interface contract as train_cancer.py.
+Algorithm: Pipeline(StandardScaler → LogisticRegression)
+Normalization is required for logistic regression on this dataset
+whose features have very different scales (e.g. area ~1000 vs symmetry ~0.18).
 """
 
 import json
@@ -49,7 +49,7 @@ def _ts(label: str) -> None:
     elapsed = (datetime.now() - _T0).total_seconds()
     print(f"[TIMING] {label} — +{elapsed:.2f}s", file=sys.stderr)
 
-# ── 1. Variables d'environnement ─────────────────────────────────────────────
+# ── 1. Environment variables ──────────────────────────────────────────────────
 
 TRAIN_START_DATE  = os.environ.get("TRAIN_START_DATE", "2025-01-01")
 TRAIN_END_DATE    = os.environ.get("TRAIN_END_DATE",   "2025-02-01")
@@ -80,9 +80,9 @@ if not _in_docker:
         )
 
 print(f"[{MODEL_NAME}] LogisticRegression (Pipeline) — {TRAIN_START_DATE} → {TRAIN_END_DATE}", file=sys.stderr)
-_ts("démarrage")
+_ts("startup")
 
-# ── 2. Données ────────────────────────────────────────────────────────────────
+# ── 2. Data ───────────────────────────────────────────────────────────────────
 
 cancer = load_breast_cancer()
 X_full = pd.DataFrame(cancer.data, columns=cancer.feature_names)
@@ -97,10 +97,10 @@ indices    = rng.choice(len(X_full), size=n_samples, replace=False)
 X, y       = X_full.iloc[indices], y_full[indices]
 
 if n_samples < 20:
-    print(json.dumps({"error": f"Pas assez de données ({n_samples} < 20)"}))
+    print(json.dumps({"error": f"Not enough data ({n_samples} < 20)"}))
     sys.exit(1)
 
-# ── 3. Entraînement ───────────────────────────────────────────────────────────
+# ── 3. Training ───────────────────────────────────────────────────────────────
 
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42, stratify=y if n_samples >= 40 else None
@@ -117,11 +117,11 @@ model = Pipeline([
     ("scaler", StandardScaler()),
     ("lr",     LogisticRegression(**HYPERPARAMS)),
 ])
-_ts("avant fit")
+_ts("before fit")
 model.fit(X_train, y_train)
-_ts("après fit")
+_ts("after fit")
 
-# ── 4. Évaluation ─────────────────────────────────────────────────────────────
+# ── 4. Evaluation ─────────────────────────────────────────────────────────────
 
 y_pred  = model.predict(X_test)
 y_proba = model.predict_proba(X_test)[:, 1]
@@ -133,10 +133,10 @@ roc_auc   = float(roc_auc_score(y_test,   y_proba))
 
 print(f"[{MODEL_NAME}] Acc={acc:.4f} F1={f1:.4f} ROC-AUC={roc_auc:.4f}", file=sys.stderr)
 
-# ── 5. Sauvegarde ─────────────────────────────────────────────────────────────
+# ── 5. Saving ─────────────────────────────────────────────────────────────────
 
 joblib.dump(model, OUTPUT_MODEL_PATH)
-print(f"[{MODEL_NAME}] Pipeline (Scaler+LR) sauvegardé → {OUTPUT_MODEL_PATH}", file=sys.stderr)
+print(f"[{MODEL_NAME}] Pipeline (Scaler+LR) saved → {OUTPUT_MODEL_PATH}", file=sys.stderr)
 
 _dataset_minio_path = None
 try:
@@ -157,9 +157,9 @@ try:
         _s3.upload_file(_csv_local, _bucket, _object_key)
         _dataset_minio_path = _object_key
 except Exception as _e:
-    print(f"[{MODEL_NAME}] Sauvegarde dataset ignorée : {_e}", file=sys.stderr)
+    print(f"[{MODEL_NAME}] Dataset saving skipped: {_e}", file=sys.stderr)
 
-# ── 6. Statistiques ───────────────────────────────────────────────────────────
+# ── 6. Statistics ─────────────────────────────────────────────────────────────
 
 feature_names = list(cancer.feature_names)
 feature_stats = {
@@ -193,11 +193,11 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
                 _sig = mlflow.models.infer_signature(X_test.astype("float64"), model.predict_proba(X_test.astype("float64")))
                 mlflow.sklearn.log_model(model, artifact_path="model", signature=_sig)
             except Exception as _ae:
-                print(f"[{MODEL_NAME}] Artifact ignoré : {_ae}", file=sys.stderr)
+                print(f"[{MODEL_NAME}] Artifact skipped: {_ae}", file=sys.stderr)
             mlflow_run_id = run.info.run_id
-        print(f"[{MODEL_NAME}] Run MLflow : {mlflow_run_id}", file=sys.stderr)
+        print(f"[{MODEL_NAME}] MLflow run: {mlflow_run_id}", file=sys.stderr)
     except Exception as exc:
-        print(f"[{MODEL_NAME}] MLflow indisponible : {exc}", file=sys.stderr)
+        print(f"[{MODEL_NAME}] MLflow unavailable: {exc}", file=sys.stderr)
 
 # ── 8. JSON stdout ────────────────────────────────────────────────────────────
 

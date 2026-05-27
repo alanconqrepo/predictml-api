@@ -1,23 +1,23 @@
 """
-upload_cancer_model.py — Entraîne et uploade cancer-classifier v1.0.0 via l'API PredictML
+upload_cancer_model.py — Trains and uploads cancer-classifier v1.0.0 via the PredictML API
 ===========================================================================================
 
-Ce script tourne LOCALEMENT. Il :
-  1. Exécute train_cancer.py en subprocess pour produire le .joblib
-  2. Uploade le .joblib + train_cancer.py via POST /models
+This script runs LOCALLY. It:
+  1. Executes train_cancer.py in a subprocess to produce the .joblib
+  2. Uploads the .joblib + train_cancer.py via POST /models
 
-Déploiement : is_production = True, deployment_mode = "ab_test", traffic_weight = 0.5
+Deployment: is_production = True, deployment_mode = "ab_test", traffic_weight = 0.5
 
-Usage :
+Usage:
   API_URL=http://localhost:8000 API_TOKEN=<token> python upload_cancer_model.py
 
-Variables d'environnement :
-  API_URL        URL de l'API          (défaut : http://localhost:8000)
-  API_TOKEN      Token Bearer — requis
-  MODEL_NAME     Nom du modèle         (défaut : cancer-classifier)
-  MODEL_VERSION  Version               (défaut : 1.0.0)
-  TRAIN_START    Date début training   (défaut : 2024-01-01)
-  TRAIN_END      Date fin training     (défaut : 2024-12-31)
+Environment variables:
+  API_URL        API URL                 (default: http://localhost:8000)
+  API_TOKEN      Bearer token — required
+  MODEL_NAME     Model name              (default: cancer-classifier)
+  MODEL_VERSION  Version                 (default: 1.0.0)
+  TRAIN_START    Training start date     (default: 2024-01-01)
+  TRAIN_END      Training end date       (default: 2024-12-31)
 """
 
 import json
@@ -38,13 +38,13 @@ API_TOKEN = os.environ.get("API_TOKEN", os.environ.get("ADMIN_TOKEN", ""))
 
 MODEL_NAME    = os.environ.get("MODEL_NAME",    "cancer-classifier")
 MODEL_VERSION = os.environ.get("MODEL_VERSION", "1.0.0")
-DESCRIPTION   = "RandomForestClassifier entraîné sur le dataset Breast Cancer Wisconsin (classification binaire : malignant vs benign)"
+DESCRIPTION   = "RandomForestClassifier trained on the Breast Cancer Wisconsin dataset (binary classification: malignant vs benign)"
 ALGORITHM     = "RandomForest"
 
 TRAIN_START = os.environ.get("TRAIN_START", "2024-01-01")
 TRAIN_END   = os.environ.get("TRAIN_END",   "2024-12-31")
 
-RETRAIN_IN_API = False  # True = relance train.py côté API (librairies du serveur)
+RETRAIN_IN_API = False  # True = re-run train.py on the API side (server libraries)
 
 MLFLOW_TRACKING_URI      = os.environ.get("MLFLOW_TRACKING_URI",      "http://localhost:5000")
 MLFLOW_TRACKING_USERNAME = os.environ.get("MLFLOW_TRACKING_USERNAME", "admin")
@@ -61,32 +61,32 @@ TRAIN_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "train_cancer.py")
 # ── Validation ────────────────────────────────────────────────────────────────
 
 if not API_TOKEN:
-    print("❌  API_TOKEN non défini.")
-    print("    Lancez : API_TOKEN=<votre_token> python upload_cancer_model.py")
+    print("❌  API_TOKEN not defined.")
+    print("    Run: API_TOKEN=<your_token> python upload_cancer_model.py")
     sys.exit(1)
 
 if not os.path.exists(TRAIN_SCRIPT_PATH):
-    print(f"❌  train_cancer.py introuvable : {TRAIN_SCRIPT_PATH}")
+    print(f"❌  train_cancer.py not found: {TRAIN_SCRIPT_PATH}")
     sys.exit(1)
 
 HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
 
-# ── 1. Vérification API ───────────────────────────────────────────────────────
+# ── 1. API check ──────────────────────────────────────────────────────────────
 
 try:
     health = requests.get(f"{API_URL}/health", timeout=5)
     health.raise_for_status()
-    print(f"✅  API accessible : {API_URL}")
+    print(f"✅  API reachable: {API_URL}")
 except Exception as e:
-    print(f"❌  API inaccessible ({API_URL}) : {e}")
+    print(f"❌  API unreachable ({API_URL}): {e}")
     sys.exit(1)
 
-# ── 2. Entraînement ───────────────────────────────────────────────────────────
+# ── 2. Training ───────────────────────────────────────────────────────────────
 
 tmp_pkl = tempfile.NamedTemporaryFile(suffix=".joblib", delete=False)
 tmp_pkl.close()
 
-print(f"⏳  Entraînement via train_cancer.py ({TRAIN_START} → {TRAIN_END})…")
+print(f"⏳  Training via train_cancer.py ({TRAIN_START} → {TRAIN_END})…")
 
 train_env = {
     **os.environ,
@@ -108,7 +108,7 @@ result = subprocess.run(
 )
 
 if result.returncode != 0:
-    print("❌  train_cancer.py a échoué :")
+    print("❌  train_cancer.py failed:")
     print(result.stderr)
     os.unlink(tmp_pkl.name)
     sys.exit(1)
@@ -136,14 +136,14 @@ mlflow_run_id    = metrics.get("mlflow_run_id")
 hyperparameters  = metrics.get("hyperparameters")
 dependencies     = metrics.get("dependencies", {})
 print(
-    f"✅  Entraînement terminé — Accuracy : {acc} | F1 : {f1}"
-    f" | ROC-AUC : {roc_auc}"
-    + (f" | MLflow run : {mlflow_run_id}" if mlflow_run_id else "")
+    f"✅  Training complete — Accuracy: {acc} | F1: {f1}"
+    f" | ROC-AUC: {roc_auc}"
+    + (f" | MLflow run: {mlflow_run_id}" if mlflow_run_id else "")
 )
 
 # ── 3. Upload via POST /models ────────────────────────────────────────────────
 
-print(f"⏳  Upload de {MODEL_NAME} v{MODEL_VERSION}…")
+print(f"⏳  Uploading {MODEL_NAME} v{MODEL_VERSION}…")
 
 try:
     with open(tmp_pkl.name, "rb") as pkl_fh, open(TRAIN_SCRIPT_PATH, "rb") as train_fh:
@@ -192,14 +192,14 @@ try:
             timeout=180,
         )
         _upload_elapsed = time.perf_counter() - _upload_t0
-        print(f"  [TIMING] POST /models répondu en {_upload_elapsed:.2f}s — status {response.status_code}")
+        print(f"  [TIMING] POST /models responded in {_upload_elapsed:.2f}s — status {response.status_code}")
 finally:
     os.unlink(tmp_pkl.name)
 
-# ── 4. Résultat upload ────────────────────────────────────────────────────────
+# ── 4. Upload result ──────────────────────────────────────────────────────────
 
 if response.status_code == 409:
-    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} existe déjà — mise à jour via PATCH…")
+    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} already exists — updating via PATCH…")
     patch_payload = {"is_production": True, "deployment_mode": "ab_test", "traffic_weight": 0.5}
     if hyperparameters:
         patch_payload["hyperparameters"] = hyperparameters
@@ -210,32 +210,32 @@ if response.status_code == 409:
             json=patch_payload, timeout=30,
         )
     except Exception as _e:
-        print(f"    [WARN] PATCH existe-déjà échoué : {_e} — continuons")
+        print(f"    [WARN] PATCH already-exists failed: {_e} — continuing")
         sys.exit(0)
     if patch_resp.status_code == 200:
-        print(f"✅  Mode ab_test et hyperparamètres mis à jour.")
+        print(f"✅  ab_test mode and hyperparameters updated.")
     else:
-        print(f"❌  PATCH échoué ({patch_resp.status_code}) : {patch_resp.text[:200]}")
+        print(f"❌  PATCH failed ({patch_resp.status_code}): {patch_resp.text[:200]}")
     sys.exit(0)
 
 if response.status_code not in (200, 201):
-    print(f"\n❌  Erreur {response.status_code}")
+    print(f"\n❌  Error {response.status_code}")
     try:
         body = response.json()
-        print(f"   Détail : {json.dumps(body, indent=2, ensure_ascii=False)}")
+        print(f"   Detail: {json.dumps(body, indent=2, ensure_ascii=False)}")
     except Exception:
-        print(f"   Réponse : {response.text[:500]}")
+        print(f"   Response: {response.text[:500]}")
     sys.exit(1)
 
 res = response.json()
-print(f"\n✅  Modèle uploadé avec succès !")
-print(f"   Nom     : {res.get('name')}")
+print(f"\n✅  Model uploaded successfully!")
+print(f"   Name    : {res.get('name')}")
 print(f"   Version : {res.get('version')}")
 print(f"   ID      : {res.get('id')}")
 
-# ── 5. Mise en production + feature_baseline ──────────────────────────────────
+# ── 5. Set to production + feature_baseline ───────────────────────────────────
 
-print(f"⏳  Mise en production, tag 'Example' et baseline des features…")
+print(f"⏳  Setting to production, adding 'Example' tag and feature baseline…")
 
 patch_body = {"is_production": True, "deployment_mode": "ab_test", "traffic_weight": 0.5, "tags": ["Example"]}
 if metrics.get("feature_stats"):
@@ -263,11 +263,11 @@ patch = requests.patch(
 
 if patch.status_code == 200:
     baseline_ok = "feature_baseline" in patch_body
-    print(f"✅  Modèle passé en production (ab_test) avec le tag 'Example'"
-          f"{' et baseline des features' if baseline_ok else ''}.")
+    print(f"✅  Model set to production (ab_test) with 'Example' tag"
+          f"{' and feature baseline' if baseline_ok else ''}.")
 else:
-    print(f"⚠️   PATCH échoué ({patch.status_code}) : {patch.text[:200]}")
+    print(f"⚠️   PATCH failed ({patch.status_code}): {patch.text[:200]}")
 
-print(f"\n   → Dashboard : {API_URL.replace(':8000', ':8501')}/Models")
-print(f"   → Ré-entraîner :")
+print(f"\n   → Dashboard: {API_URL.replace(':8000', ':8501')}/Models")
+print(f"   → Retrain:")
 print(f"       POST {API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}/retrain")

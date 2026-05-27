@@ -20,15 +20,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Crée le schéma initial : tables users, model_metadata, predictions, observed_results."""
+    """Creates the initial schema: users, model_metadata, predictions, observed_results tables."""
 
-    # Enum PostgreSQL pour les rôles utilisateur (idempotent)
+    # PostgreSQL enum for user roles (idempotent)
     op.execute(
         "DO $$ BEGIN CREATE TYPE userrole AS ENUM ('admin', 'user', 'readonly');"
         " EXCEPTION WHEN duplicate_object THEN NULL; END $$"
     )
 
-    # Table users
+    # users table
     op.create_table(
         "users",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -52,7 +52,7 @@ def upgrade() -> None:
     op.create_index("ix_users_email", "users", ["email"], unique=True)
     op.create_index("ix_users_api_token", "users", ["api_token"], unique=True)
 
-    # Table model_metadata
+    # model_metadata table
     op.create_table(
         "model_metadata",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -94,7 +94,7 @@ def upgrade() -> None:
     op.create_index("ix_model_metadata_user_id_creator", "model_metadata", ["user_id_creator"])
     op.create_index("ix_model_metadata_is_active", "model_metadata", ["is_active"])
 
-    # Table predictions
+    # predictions table
     op.create_table(
         "predictions",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -120,7 +120,7 @@ def upgrade() -> None:
     op.create_index("ix_predictions_id_obs", "predictions", ["id_obs"])
     op.create_index("ix_predictions_timestamp", "predictions", ["timestamp"])
 
-    # Table observed_results
+    # observed_results table
     op.create_table(
         "observed_results",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -140,7 +140,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Supprime toutes les tables et l'enum userrole."""
+    """Drops all tables and the userrole enum."""
     op.drop_table("observed_results")
     op.drop_table("predictions")
     op.drop_table("model_metadata")

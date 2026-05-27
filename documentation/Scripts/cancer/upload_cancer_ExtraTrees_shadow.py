@@ -1,15 +1,15 @@
 """
-upload_cancer_ExtraTrees_shadow.py — cancer-classifier v1.2.0 (ExtraTrees) — mode shadow
+upload_cancer_ExtraTrees_shadow.py — cancer-classifier v1.2.0 (ExtraTrees) — shadow mode
 ==========================================================================================
 
-Upload cancer-classifier v1.2.0 avec ExtraTreesClassifier en mode shadow.
+Upload cancer-classifier v1.2.0 with ExtraTreesClassifier in shadow mode.
 
-Déploiement :
+Deployment:
   - is_production = False
-  - deployment_mode = "shadow" (prédictions en parallèle, non exposées au client)
+  - deployment_mode = "shadow" (parallel predictions, not exposed to the client)
   - tag "Example"
 
-Usage :
+Usage:
   API_TOKEN=<token> python upload_cancer_ExtraTrees_shadow.py
 """
 
@@ -29,7 +29,7 @@ API_TOKEN = os.environ.get("API_TOKEN", os.environ.get("ADMIN_TOKEN", ""))
 
 MODEL_NAME    = os.environ.get("MODEL_NAME",    "cancer-classifier")
 MODEL_VERSION = os.environ.get("MODEL_VERSION", "1.2.0")
-DESCRIPTION   = "ExtraTreesClassifier cancer — shadow (v1.2.0) — splits aléatoires, max_depth=8"
+DESCRIPTION   = "ExtraTreesClassifier cancer — shadow (v1.2.0) — random splits, max_depth=8"
 ALGORITHM     = "ExtraTrees"
 
 TRAIN_START = os.environ.get("TRAIN_START", "2024-01-01")
@@ -47,25 +47,25 @@ SCRIPT_DIR        = os.path.dirname(os.path.abspath(__file__))
 TRAIN_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "train_cancer_ExtraTrees.py")
 
 if not API_TOKEN:
-    print("❌  API_TOKEN non défini.")
+    print("❌  API_TOKEN not defined.")
     sys.exit(1)
 if not os.path.exists(TRAIN_SCRIPT_PATH):
-    print(f"❌  train_cancer_ExtraTrees.py introuvable : {TRAIN_SCRIPT_PATH}")
+    print(f"❌  train_cancer_ExtraTrees.py not found: {TRAIN_SCRIPT_PATH}")
     sys.exit(1)
 
 HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
 
 try:
     requests.get(f"{API_URL}/health", timeout=5).raise_for_status()
-    print(f"✅  API accessible : {API_URL}")
+    print(f"✅  API reachable: {API_URL}")
 except Exception as e:
-    print(f"❌  API inaccessible ({API_URL}) : {e}")
+    print(f"❌  API unreachable ({API_URL}): {e}")
     sys.exit(1)
 
 tmp_pkl = tempfile.NamedTemporaryFile(suffix=".joblib", delete=False)
 tmp_pkl.close()
 
-print(f"⏳  Entraînement ExtraTrees ({TRAIN_START} → {TRAIN_END})…")
+print(f"⏳  Training ExtraTrees ({TRAIN_START} → {TRAIN_END})…")
 
 result = subprocess.run(
     [sys.executable, TRAIN_SCRIPT_PATH],
@@ -86,7 +86,7 @@ result = subprocess.run(
 )
 
 if result.returncode != 0:
-    print("❌  Entraînement échoué :")
+    print("❌  Training failed:")
     print(result.stderr)
     os.unlink(tmp_pkl.name)
     sys.exit(1)
@@ -146,12 +146,12 @@ try:
             data=data, timeout=180,
         )
         _upload_elapsed = time.perf_counter() - _upload_t0
-        print(f"  [TIMING] POST /models répondu en {_upload_elapsed:.2f}s — status {response.status_code}")
+        print(f"  [TIMING] POST /models responded in {_upload_elapsed:.2f}s — status {response.status_code}")
 finally:
     os.unlink(tmp_pkl.name)
 
 if response.status_code == 409:
-    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} existe déjà — PATCH shadow…")
+    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} already exists — PATCH shadow…")
     try:
         patch_resp = requests.patch(
             f"{API_URL}/models/{MODEL_NAME}/{MODEL_VERSION}",
@@ -160,17 +160,17 @@ if response.status_code == 409:
             timeout=30,
         )
     except Exception as _e:
-        print(f"    [WARN] PATCH existe-déjà échoué : {_e} — continuons")
+        print(f"    [WARN] PATCH already-exists failed: {_e} — continuing")
         sys.exit(0)
-    print("✅  Mode shadow mis à jour." if patch_resp.status_code == 200 else f"❌  PATCH échoué ({patch_resp.status_code})")
+    print("✅  Shadow mode updated." if patch_resp.status_code == 200 else f"❌  PATCH failed ({patch_resp.status_code})")
     sys.exit(0)
 
 if response.status_code not in (200, 201):
-    print(f"❌  Erreur {response.status_code} : {response.text[:300]}")
+    print(f"❌  Error {response.status_code}: {response.text[:300]}")
     sys.exit(1)
 
 res = response.json()
-print(f"✅  {res.get('name')} v{res.get('version')} uploadé (id={res.get('id')})")
+print(f"✅  {res.get('name')} v{res.get('version')} uploaded (id={res.get('id')})")
 
 patch_body = {"is_production": False, "deployment_mode": "shadow", "tags": ["Example"]}
 if metrics.get("feature_stats"):
@@ -183,4 +183,4 @@ patch = requests.patch(
     headers={**HEADERS, "Content-Type": "application/json"},
     json=patch_body, timeout=30,
 )
-print("✅  Mode shadow configuré." if patch.status_code == 200 else f"⚠️   PATCH échoué ({patch.status_code})")
+print("✅  Shadow mode configured." if patch.status_code == 200 else f"⚠️   PATCH failed ({patch.status_code})")

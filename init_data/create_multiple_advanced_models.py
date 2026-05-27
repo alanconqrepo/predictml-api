@@ -1,12 +1,12 @@
 """
-Script de création de modèles avancés avec sklearn Pipelines et MLflow.
+Script for creating advanced models with sklearn Pipelines and MLflow.
 
-Chaque modèle est :
-- Entraîné dans un Pipeline sklearn (StandardScaler + éventuellement OneHotEncoder)
-- Loggé dans MLflow (params, métriques, artefact dans s3://mlflow/)
-- Uploadé via POST /models (s3://models/ + base de données)
+Each model is:
+- Trained in a sklearn Pipeline (StandardScaler + optionally OneHotEncoder)
+- Logged to MLflow (params, metrics, artifact in s3://mlflow/)
+- Uploaded via POST /models (s3://models/ + database)
 
-Ordre d'exécution :
+Execution order:
     docker-compose up -d
     python init_data/create_multiple_advanced_models.py
 """
@@ -15,7 +15,7 @@ import json
 import os
 import sys
 
-# Fix encoding sur Windows (cp1252 ne supporte pas les emojis MLflow)
+# Fix encoding on Windows (cp1252 does not support MLflow emojis)
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -50,7 +50,7 @@ API_TOKEN = os.environ.get("API_TOKEN", "")
 
 
 def configure_mlflow():
-    """Configure les variables d'environnement S3 et l'URI MLflow."""
+    """Configure S3 environment variables and the MLflow URI."""
     os.environ["MLFLOW_S3_ENDPOINT_URL"] = f"http://{MINIO_ENDPOINT}"
     os.environ["AWS_ACCESS_KEY_ID"] = MINIO_ACCESS_KEY
     os.environ["AWS_SECRET_ACCESS_KEY"] = MINIO_SECRET_KEY
@@ -61,11 +61,11 @@ def configure_mlflow():
     )
     if not client.bucket_exists("mlflow"):
         client.make_bucket("mlflow")
-        print("   Bucket 'mlflow' cree dans MinIO")
+        print("   Bucket 'mlflow' created in MinIO")
 
 
 # ---------------------------------------------------------------------------
-# Builders de pipelines
+# Pipeline builders
 # ---------------------------------------------------------------------------
 
 
@@ -94,7 +94,7 @@ def make_mixed_pipeline(numeric_cols: list, categorical_cols: list, estimator) -
 
 
 # ---------------------------------------------------------------------------
-# Entraînement + logging MLflow + upload via API
+# Training + MLflow logging + upload via API
 # ---------------------------------------------------------------------------
 
 
@@ -110,7 +110,7 @@ def train_and_register(
     classes: list = None,
 ) -> None:
     """
-    Entraîne le pipeline, logue dans MLflow, puis envoie le modèle via POST /models.
+    Trains the pipeline, logs to MLflow, then sends the model via POST /models.
     """
     mlflow.set_experiment(name)
     with mlflow.start_run(run_name=f"{name}_v{MODEL_VERSION}"):
@@ -130,7 +130,7 @@ def train_and_register(
         print(f"   Accuracy : {acc:.4f}  |  F1 : {f1:.4f}")
         print(f"   MLflow run ID : {run_id}")
 
-    # Envoyer via POST /models (mlflow_run_id uniquement, pas d'upload MinIO séparé)
+    # Send via POST /models (mlflow_run_id only, no separate MinIO upload)
     response = requests.post(
         f"{API_URL}/models",
         headers={"Authorization": f"Bearer {API_TOKEN}"},
@@ -150,16 +150,16 @@ def train_and_register(
     )
 
     if response.status_code == 201:
-        print(f"   Modele enregistre via API (id={response.json()['id']})")
+        print(f"   Model registered via API (id={response.json()['id']})")
     elif response.status_code == 409:
-        print(f"   Modele '{name}' existe deja — ignore")
+        print(f"   Model '{name}' already exists — skipped")
     else:
-        print(f"   ERREUR API {response.status_code}: {response.text}")
-        raise RuntimeError(f"Echec enregistrement {name}: {response.status_code}")
+        print(f"   API ERROR {response.status_code}: {response.text}")
+        raise RuntimeError(f"Registration failed for {name}: {response.status_code}")
 
 
 # ---------------------------------------------------------------------------
-# Modèles
+# Models
 # ---------------------------------------------------------------------------
 
 
@@ -183,7 +183,7 @@ def create_iris_advanced():
             "n_features": 4,
             "n_classes": 3,
         },
-        description="Iris dataset — RandomForest avec StandardScaler",
+        description="Iris dataset — RandomForest with StandardScaler",
         classes=[0, 1, 2],
     )
 
@@ -212,7 +212,7 @@ def create_wine_advanced():
             "n_features": 13,
             "n_classes": 3,
         },
-        description="Wine dataset — LogisticRegression avec StandardScaler",
+        description="Wine dataset — LogisticRegression with StandardScaler",
         classes=[0, 1, 2],
     )
 
@@ -243,7 +243,7 @@ def create_cancer_advanced():
             "n_features": 30,
             "n_classes": 2,
         },
-        description="Breast cancer dataset — GradientBoosting avec StandardScaler",
+        description="Breast cancer dataset — GradientBoosting with StandardScaler",
         classes=[0, 1],
     )
 
@@ -253,14 +253,14 @@ def create_titanic_model():
     print("      Features : age, fare, parch, sibsp (num) + pclass, sex, embarked (cat)")
 
     rng = np.random.default_rng(42)
-    n = 891  # référence : taille réelle du dataset Titanic
+    n = 891  # reference: actual size of the Titanic dataset
 
-    # Features catégorielles
+    # Categorical features
     pclass_vals = rng.choice(["1st", "2nd", "3rd"], size=n, p=[0.24, 0.21, 0.55])
     sex_vals = rng.choice(["male", "female"], size=n, p=[0.65, 0.35])
     embarked_vals = rng.choice(["S", "C", "Q"], size=n, p=[0.72, 0.19, 0.09])
 
-    # Features numériques
+    # Numeric features
     age_mu = np.where(pclass_vals == "1st", 39.0, np.where(pclass_vals == "2nd", 29.0, 25.0))
     age_vals = rng.normal(age_mu, 14.0).clip(1.0, 80.0).round(1)
     fare_mu = np.where(pclass_vals == "1st", 87.0, np.where(pclass_vals == "2nd", 21.0, 13.0))
@@ -268,14 +268,14 @@ def create_titanic_model():
     sibsp_vals = rng.choice([0, 1, 2, 3, 4], size=n, p=[0.68, 0.16, 0.10, 0.04, 0.02])
     parch_vals = rng.choice([0, 1, 2, 3, 4], size=n, p=[0.76, 0.13, 0.07, 0.03, 0.01])
 
-    # Cible : survie probabiliste
+    # Target: probabilistic survival
     base_surv = np.where(sex_vals == "female", 0.74, 0.19)
     class_bonus = np.where(pclass_vals == "1st", 0.15, np.where(pclass_vals == "3rd", -0.10, 0.0))
     age_bonus = np.where(age_vals < 12, 0.15, 0.0)
     survival_prob = np.clip(base_surv + class_bonus + age_bonus, 0.05, 0.95)
     survived = (rng.uniform(size=n) < survival_prob).astype(int)
 
-    # DataFrame pandas → pipeline.feature_names_in_ contiendra les 7 noms de colonnes
+    # pandas DataFrame -> pipeline.feature_names_in_ will contain the 7 column names
     NUMERIC_FEATURES = ["age", "fare", "parch", "sibsp"]
     CATEGORICAL_FEATURES = ["pclass", "sex", "embarked"]
     df = pd.DataFrame(
@@ -294,7 +294,7 @@ def create_titanic_model():
 
     X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
-    # Utiliser les noms de colonnes (pas les indices) pour que feature_names_in_ soit défini
+    # Use column names (not indices) so that feature_names_in_ is defined
     pipeline = make_mixed_pipeline(
         numeric_cols=NUMERIC_FEATURES,
         categorical_cols=CATEGORICAL_FEATURES,
@@ -322,10 +322,10 @@ def create_titanic_model():
             "n_samples": n,
         },
         description=(
-            "Dataset synthetique inspire du Titanic — features mixtes num + cat. "
-            "Predit la survie (0=mort, 1=survivant). "
-            "Numeriques : age, fare, parch, sibsp. "
-            "Categorielles : pclass (1st/2nd/3rd), sex (male/female), embarked (S/C/Q)."
+            "Synthetic dataset inspired by the Titanic — mixed num + cat features. "
+            "Predicts survival (0=deceased, 1=survivor). "
+            "Numeric: age, fare, parch, sibsp. "
+            "Categorical: pclass (1st/2nd/3rd), sex (male/female), embarked (S/C/Q)."
         ),
         classes=[0, 1],
     )
@@ -381,7 +381,7 @@ def create_loan_model():
             "n_categorical_features": 3,
             "n_samples": n,
         },
-        description="Dataset synthetique (pret bancaire) — features mixtes num + cat",
+        description="Synthetic dataset (bank loan) — mixed num + cat features",
         classes=[0, 1],
     )
 
@@ -393,12 +393,12 @@ def create_loan_model():
 
 def main():
     print("=" * 60)
-    print("Creation des modeles avances avec Pipelines + MLflow")
+    print("Creating advanced models with Pipelines + MLflow")
     print(f"MLflow : {MLFLOW_TRACKING_URI}")
     print(f"API    : {API_URL}")
     print("=" * 60)
 
-    print("\nConfiguration MLflow + MinIO...")
+    print("\nConfiguring MLflow + MinIO...")
     configure_mlflow()
 
     create_iris_advanced()
@@ -408,7 +408,7 @@ def main():
     create_loan_model()
 
     print("\n" + "=" * 60)
-    print("Tous les modeles ont ete crees, logues dans MLflow et enregistres via l'API.")
+    print("All models have been created, logged in MLflow and registered via the API.")
     print("=" * 60)
 
 

@@ -1,35 +1,35 @@
 """
-train_cancer.py — Script de ré-entraînement PredictML — Breast Cancer (binaire)
+train_cancer.py — PredictML retraining script — Breast Cancer (binary)
 python .\train_cancer.py
 ================================================================================
 
-Ce script est conçu pour être uploadé avec votre modèle (champ "Script d'entraînement")
-afin de permettre le ré-entraînement automatique ou planifié depuis le dashboard.
+This script is designed to be uploaded with your model (field "Training script")
+to enable automatic or scheduled retraining from the dashboard.
 
-CONTRAT D'INTERFACE (variables d'environnement injectées automatiquement par l'API)
+INTERFACE CONTRACT (environment variables automatically injected by the API)
 -------------------------------------------------------------------------------------
-  TRAIN_START_DATE   : date de début  — format YYYY-MM-DD
-  TRAIN_END_DATE     : date de fin    — format YYYY-MM-DD
-  OUTPUT_MODEL_PATH  : chemin absolu où sauvegarder le .joblib produit
+  TRAIN_START_DATE   : start date  — format YYYY-MM-DD
+  TRAIN_END_DATE     : end date    — format YYYY-MM-DD
+  OUTPUT_MODEL_PATH  : absolute path where to save the produced .joblib
 
-Variables optionnelles :
-  MLFLOW_TRACKING_URI      : URI du serveur MLflow (ex: http://localhost:5000)
-  MLFLOW_TRACKING_USERNAME : identifiant MLflow (si auth activée)
-  MLFLOW_TRACKING_PASSWORD : mot de passe MLflow (si auth activée)
-  MODEL_NAME               : nom du modèle source
+Optional variables:
+  MLFLOW_TRACKING_URI      : MLflow server URI (e.g. http://localhost:5000)
+  MLFLOW_TRACKING_USERNAME : MLflow username (if auth enabled)
+  MLFLOW_TRACKING_PASSWORD : MLflow password (if auth enabled)
+  MODEL_NAME               : source model name
 
-SORTIE ATTENDUE
+EXPECTED OUTPUT
 ---------------
-  - Modèle sauvegardé à OUTPUT_MODEL_PATH via joblib.dump()
-  - Dernière ligne JSON sur stdout avec au minimum :
+  - Model saved at OUTPUT_MODEL_PATH via joblib.dump()
+  - Last JSON line on stdout with at minimum:
       {"accuracy": 0.95, "f1_score": 0.94}
-  - Logs de progression sur stderr
-  - Code de sortie 0 si succès
+  - Progress logs on stderr
+  - Exit code 0 on success
 
-MODULES AUTORISÉS par le sandbox PredictML
+ALLOWED MODULES by the PredictML sandbox
 -------------------------------------------
   os, sys, json, joblib, datetime, dotenv, numpy, pandas, sklearn, mlflow
-  (subprocess, requests, socket, urllib sont bloqués)
+  (subprocess, requests, socket, urllib are blocked)
 """
 
 import json
@@ -73,11 +73,11 @@ def _ts(label: str) -> None:
     elapsed = (datetime.now() - _T0).total_seconds()
     print(f"[TIMING] {label} — +{elapsed:.2f}s", file=sys.stderr)
 
-# ── 1. Variables d'environnement ─────────────────────────────────────────────
+# ── 1. Environment variables ──────────────────────────────────────────────────
 
 if DEBUG:
     print(f"""
-    -------------   AVANT SURCHARGE  ------------
+    -------------   BEFORE OVERRIDE  ------------
     [ENV] TRAIN_START_DATE           = {os.environ.get("TRAIN_START_DATE")}
     [ENV] TRAIN_END_DATE             = {os.environ.get("TRAIN_END_DATE")}
     [ENV] OUTPUT_MODEL_PATH          = {os.environ.get("OUTPUT_MODEL_PATH")}
@@ -123,22 +123,22 @@ if not _in_docker:
         )
 
 print(
-    f"[{MODEL_NAME}] Ré-entraînement du {TRAIN_START_DATE} au {TRAIN_END_DATE}",
+    f"[{MODEL_NAME}] Retraining from {TRAIN_START_DATE} to {TRAIN_END_DATE}",
     file=sys.stderr,
 )
-print(f"[{MODEL_NAME}] Sortie : {OUTPUT_MODEL_PATH}", file=sys.stderr)
-_ts("démarrage")
+print(f"[{MODEL_NAME}] Output: {OUTPUT_MODEL_PATH}", file=sys.stderr)
+_ts("startup")
 
-# ── 2. Chargement des données ─────────────────────────────────────────────────
+# ── 2. Data loading ───────────────────────────────────────────────────────────
 
-print(f"[{MODEL_NAME}] Chargement du dataset Breast Cancer Wisconsin…", file=sys.stderr)
-_ts("avant chargement données")
+print(f"[{MODEL_NAME}] Loading Breast Cancer Wisconsin dataset...", file=sys.stderr)
+_ts("before data loading")
 
 cancer = load_breast_cancer()
 X_full = pd.DataFrame(cancer.data, columns=cancer.feature_names)
 y_full = cancer.target
 
-# Simulation d'un filtre temporel : taille proportionnelle à la plage de dates
+# Simulate a time filter: size proportional to the date range
 start = datetime.strptime(TRAIN_START_DATE, "%Y-%m-%d")
 end   = datetime.strptime(TRAIN_END_DATE,   "%Y-%m-%d")
 delta_days = max(1, (end - start).days)
@@ -148,22 +148,22 @@ rng     = np.random.default_rng(seed=delta_days % 1000)
 indices = rng.choice(len(X_full), size=n_samples, replace=False)
 X, y    = X_full.iloc[indices], y_full[indices]
 
-print(f"[{MODEL_NAME}] {n_samples} exemples retenus sur {len(X_full)} disponibles.", file=sys.stderr)
-_ts("après chargement données")
+print(f"[{MODEL_NAME}] {n_samples} samples selected out of {len(X_full)} available.", file=sys.stderr)
+_ts("after data loading")
 
 if n_samples < 20:
-    print(json.dumps({"error": f"Pas assez de données ({n_samples} exemples < 20 requis)"}))
+    print(json.dumps({"error": f"Not enough data ({n_samples} samples < 20 required)"}))
     sys.exit(1)
 
-# ── 3. Entraînement ───────────────────────────────────────────────────────────
+# ── 3. Training ───────────────────────────────────────────────────────────────
 
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42, stratify=y if n_samples >= 40 else None
 )
 
 print(
-    f"[{MODEL_NAME}] Entraînement sur {len(X_train)} exemples, "
-    f"évaluation sur {len(X_test)}…",
+    f"[{MODEL_NAME}] Training on {len(X_train)} samples, "
+    f"evaluating on {len(X_test)}...",
     file=sys.stderr,
 )
 
@@ -178,11 +178,11 @@ HYPERPARAMS = {
     "n_jobs":            -1,
 }
 model = RandomForestClassifier(**HYPERPARAMS)
-_ts("avant fit")
+_ts("before fit")
 model.fit(X_train, y_train)
-_ts("après fit")
+_ts("after fit")
 
-# ── 4. Évaluation ─────────────────────────────────────────────────────────────
+# ── 4. Evaluation ─────────────────────────────────────────────────────────────
 
 y_pred     = model.predict(X_test)
 y_proba    = model.predict_proba(X_test)[:, 1]
@@ -193,20 +193,20 @@ recall     = float(recall_score(y_test,    y_pred, average="binary", zero_divisi
 roc_auc    = float(roc_auc_score(y_test,   y_proba))
 
 print(
-    f"[{MODEL_NAME}] Accuracy : {acc:.4f} | F1 : {f1:.4f}"
-    f" | Precision : {precision:.4f} | Recall : {recall:.4f} | ROC-AUC : {roc_auc:.4f}",
+    f"[{MODEL_NAME}] Accuracy: {acc:.4f} | F1: {f1:.4f}"
+    f" | Precision: {precision:.4f} | Recall: {recall:.4f} | ROC-AUC: {roc_auc:.4f}",
     file=sys.stderr,
 )
-_ts("après évaluation")
+_ts("after evaluation")
 
-# ── 5. Sauvegarde du modèle ───────────────────────────────────────────────────
+# ── 5. Model saving ───────────────────────────────────────────────────────────
 
 joblib.dump(model, OUTPUT_MODEL_PATH)
 
-print(f"[{MODEL_NAME}] Modèle sauvegardé → {OUTPUT_MODEL_PATH}", file=sys.stderr)
-_ts("après sauvegarde modèle")
+print(f"[{MODEL_NAME}] Model saved → {OUTPUT_MODEL_PATH}", file=sys.stderr)
+_ts("after model saving")
 
-# ── 5b. Sauvegarde du dataset d'entraînement → MinIO ─────────────────────────
+# ── 5b. Save training dataset → MinIO ────────────────────────────────────────
 
 _dataset_minio_path = None
 
@@ -216,7 +216,7 @@ try:
     _csv_filename = f"{MODEL_NAME}_{TRAIN_START_DATE}_{TRAIN_END_DATE}_train.csv"
     _csv_local = os.path.join(os.path.dirname(OUTPUT_MODEL_PATH), _csv_filename)
     _df_train.to_csv(_csv_local, index=False)
-    print(f"[{MODEL_NAME}] Dataset CSV créé ({len(_df_train)} lignes) → {_csv_local}", file=sys.stderr)
+    print(f"[{MODEL_NAME}] CSV dataset created ({len(_df_train)} rows) → {_csv_local}", file=sys.stderr)
 
     _minio_endpoint_url = os.environ.get("MLFLOW_S3_ENDPOINT_URL", "")
     _aws_key    = os.environ.get("AWS_ACCESS_KEY_ID", "")
@@ -234,16 +234,16 @@ try:
         _object_key = f"{MODEL_NAME}/datasets/{_csv_filename}"
         _s3.upload_file(_csv_local, _bucket, _object_key)
         _dataset_minio_path = _object_key
-        print(f"[{MODEL_NAME}] Dataset uploadé dans MinIO → {_bucket}/{_object_key}", file=sys.stderr)
+        print(f"[{MODEL_NAME}] Dataset uploaded to MinIO → {_bucket}/{_object_key}", file=sys.stderr)
     else:
-        print(f"[{MODEL_NAME}] Dataset non uploadé dans MinIO (boto3={'ok' if _BOTO3_AVAILABLE else 'absent'}, endpoint='{_minio_endpoint_url}')", file=sys.stderr)
+        print(f"[{MODEL_NAME}] Dataset not uploaded to MinIO (boto3={'ok' if _BOTO3_AVAILABLE else 'missing'}, endpoint='{_minio_endpoint_url}')", file=sys.stderr)
 
 except Exception as _ds_exc:
-    print(f"[{MODEL_NAME}] Sauvegarde dataset ignorée : {_ds_exc}", file=sys.stderr)
+    print(f"[{MODEL_NAME}] Dataset saving skipped: {_ds_exc}", file=sys.stderr)
 
-_ts("après sauvegarde dataset")
+_ts("after dataset saving")
 
-# ── 6. Statistiques ───────────────────────────────────────────────────────────
+# ── 6. Statistics ─────────────────────────────────────────────────────────────
 
 feature_names = list(cancer.feature_names)
 
@@ -259,13 +259,13 @@ feature_stats = {
 }
 
 total_train = len(y_train)
-# Clés = index entier (str) — correspond à prediction_result::text dans la DB
+# Keys = integer index (str) — corresponds to prediction_result::text in the DB
 label_distribution = {
     str(int(cls)): round(float(np.sum(y_train == cls)) / total_train, 4)
     for cls in np.unique(y_train)
 }
 
-# ── 7. Logging MLflow ─────────────────────────────────────────────────────────
+# ── 7. MLflow logging ─────────────────────────────────────────────────────────
 
 mlflow_run_id = None
 
@@ -319,26 +319,26 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
             try:
                 mlflow.sklearn.log_model(model, artifact_path="model", signature=_signature)
             except Exception as art_exc:
-                print(f"[{MODEL_NAME}] Artifact ignoré (MinIO inaccessible) : {art_exc}", file=sys.stderr)
+                print(f"[{MODEL_NAME}] Artifact skipped (MinIO unreachable): {art_exc}", file=sys.stderr)
 
             if _dataset_minio_path and os.path.exists(_csv_local):
                 try:
                     mlflow.log_artifact(_csv_local, artifact_path="dataset")
                 except Exception as _art_ds_exc:
-                    print(f"[{MODEL_NAME}] Artifact dataset ignoré : {_art_ds_exc}", file=sys.stderr)
+                    print(f"[{MODEL_NAME}] Dataset artifact skipped: {_art_ds_exc}", file=sys.stderr)
 
             mlflow_run_id = run.info.run_id
 
-        print(f"[{MODEL_NAME}] Run MLflow créé : {mlflow_run_id}", file=sys.stderr)
+        print(f"[{MODEL_NAME}] MLflow run created: {mlflow_run_id}", file=sys.stderr)
 
     except Exception as exc:
-        print(f"[{MODEL_NAME}] MLflow indisponible — ré-entraînement continue : {exc}", file=sys.stderr)
+        print(f"[{MODEL_NAME}] MLflow unavailable — retraining continues: {exc}", file=sys.stderr)
         mlflow_run_id = None
 else:
-    reason = "mlflow non installé" if not _MLFLOW_AVAILABLE else "MLFLOW_TRACKING_URI non défini"
-    print(f"[{MODEL_NAME}] MLflow ignoré ({reason}).", file=sys.stderr)
+    reason = "mlflow not installed" if not _MLFLOW_AVAILABLE else "MLFLOW_TRACKING_URI not defined"
+    print(f"[{MODEL_NAME}] MLflow skipped ({reason}).", file=sys.stderr)
 
-# ── 8. JSON stdout — DERNIÈRE LIGNE ──────────────────────────────────────────
+# ── 8. JSON stdout — LAST LINE ────────────────────────────────────────────────
 
 output = {
     "accuracy":           round(acc, 4),
@@ -351,8 +351,8 @@ output = {
     "classes":            list(cancer.target_names),
     "hyperparameters":    HYPERPARAMS,
     "training_dataset":   _dataset_minio_path or "scikit-learn Breast Cancer Wisconsin dataset — 569 observations, 2 classes",
-    # confidence_threshold : 0.70 — seuil plus élevé qu'iris car la décision (malignant/benign)
-    # est critique. En dessous de 70 % de confiance, la prédiction est marquée low_confidence=True.
+    # confidence_threshold: 0.70 — higher threshold than iris because the decision (malignant/benign)
+    # is critical. Below 70% confidence, the prediction is flagged low_confidence=True.
     "confidence_threshold": 0.70,
     "feature_stats":      feature_stats,
     "label_distribution": label_distribution,
@@ -369,5 +369,5 @@ for _pkg in ("scikit-learn", "numpy", "pandas", "joblib"):
         pass
 output["dependencies"] = _deps
 
-_ts("fin script")
+_ts("end of script")
 print(json.dumps(output))

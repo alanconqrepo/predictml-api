@@ -1,6 +1,6 @@
 """
-Script d'initialisation de la base de données et MinIO.
-Idempotent : peut être relancé sans créer de doublons.
+Database and MinIO initialization script.
+Idempotent: can be re-run without creating duplicates.
 """
 import asyncio
 import os
@@ -19,14 +19,14 @@ from src.core.config import settings
 
 async def create_default_user():
     """
-    Crée l'utilisateur admin s'il n'existe pas encore.
-    Le token est lu depuis ADMIN_TOKEN (env) ; sinon généré aléatoirement.
-    Idempotent : ne fait rien si 'admin' existe déjà.
+    Creates the admin user if it does not already exist.
+    The token is read from ADMIN_TOKEN (env); otherwise generated randomly.
+    Idempotent: does nothing if 'admin' already exists.
     """
     async with AsyncSessionLocal() as db:
         existing = await db.execute(select(User).where(User.username == "admin"))
         if existing.scalar_one_or_none():
-            print("   Utilisateur admin deja present — ignore.")
+            print("   Admin user already present — skipped.")
             return
 
         admin_token = os.environ.get("ADMIN_TOKEN") or secrets.token_urlsafe(32)
@@ -44,46 +44,46 @@ async def create_default_user():
         await db.commit()
         await db.refresh(user)
 
-        print(f"\n   Utilisateur admin cree!")
+        print(f"\n   Admin user created!")
         print(f"   Username : {user.username}")
         if not os.environ.get("ADMIN_TOKEN"):
-            # Token généré aléatoirement — à conserver de façon sécurisée
+            # Randomly generated token — store it securely
             print(f"   API Token: {admin_token}")
-            print(f"   SAUVEGARDEZ CE TOKEN - Il ne sera plus affiche!")
+            print(f"   SAVE THIS TOKEN - It will not be displayed again!")
         else:
-            print(f"   API Token: défini via ADMIN_TOKEN (variable d'environnement)")
+            print(f"   API Token: set via ADMIN_TOKEN (environment variable)")
         print()
 
         return user
 
 
 async def upload_local_models_to_minio():
-    """Upload les modèles locaux vers MinIO"""
+    """Upload local models to MinIO"""
     models_dir = Path("Models")
 
     if not models_dir.exists():
-        print("Dossier Models/ introuvable")
+        print("Models/ directory not found")
         return
 
     joblib_files = list(models_dir.glob("*.joblib")) + list(models_dir.glob("*.pkl"))
 
     if not joblib_files:
-        print("Aucun fichier modèle (.joblib ou .pkl) trouvé dans Models/")
+        print("No model files (.joblib or .pkl) found in Models/")
         return
 
     async with AsyncSessionLocal() as db:
         for model_file in joblib_files:
             try:
-                print(f"\nUpload de {model_file.name}...")
+                print(f"\nUploading {model_file.name}...")
 
-                # Charger le modèle
+                # Load the model
                 model = joblib.load(model_file)
 
-                # Nom et version
+                # Name and version
                 model_name = model_file.stem
                 version = "1.0.0"
 
-                # Upload vers MinIO
+                # Upload to MinIO
                 object_key = f"{model_name}/{version}.joblib"
                 upload_result = minio_service.upload_model(
                     model=model,
@@ -91,14 +91,14 @@ async def upload_local_models_to_minio():
                     metadata={"original_filename": model_file.name}
                 )
 
-                # Enregistrer les métadonnées en DB
+                # Save metadata to DB
                 metadata = ModelMetadata(
                     name=model_name,
                     version=version,
                     minio_bucket=settings.MINIO_BUCKET,
                     minio_object_key=object_key,
                     file_size_bytes=upload_result["size"],
-                    description=f"Modele {model_name} - Version initiale",
+                    description=f"Model {model_name} - Initial version",
                     is_active=True,
                     is_production=True
                 )
@@ -106,21 +106,21 @@ async def upload_local_models_to_minio():
                 db.add(metadata)
                 await db.commit()
 
-                print(f"   {model_name} v{version} uploade et enregistre")
+                print(f"   {model_name} v{version} uploaded and registered")
 
             except Exception as e:
-                print(f"   Erreur pour {model_file.name}: {e}")
+                print(f"   Error for {model_file.name}: {e}")
                 continue
 
 
 async def main():
-    """Fonction principale d'initialisation"""
+    """Main initialization function"""
     print("=" * 60)
-    print("Initialisation de la Base de Donnees et MinIO")
+    print("Database and MinIO Initialization")
     print("=" * 60)
 
-    # 1. Appliquer les migrations Alembic (crée ou met à jour le schéma)
-    print("\n1. Application des migrations Alembic...")
+    # 1. Apply Alembic migrations (creates or updates the schema)
+    print("\n1. Applying Alembic migrations...")
     import os
     import subprocess
     import sys
@@ -137,22 +137,22 @@ async def main():
     if result.returncode != 0:
         print(result.stderr)
         raise RuntimeError(f"Alembic upgrade failed (code {result.returncode})")
-    print("   Migrations appliquees")
+    print("   Migrations applied")
 
-    # 2. Créer l'utilisateur admin
-    print("\n2. Creation de l'utilisateur admin...")
+    # 2. Create the admin user
+    print("\n2. Creating the admin user...")
     await create_default_user()
 
-    # 3. Upload des modèles vers MinIO
-    print("\n3. Upload des modeles vers MinIO...")
+    # 3. Upload models to MinIO
+    print("\n3. Uploading models to MinIO...")
     await upload_local_models_to_minio()
 
     print("\n" + "=" * 60)
-    print("Initialisation terminee!")
+    print("Initialization complete!")
     print("=" * 60)
-    print("\nProchaines etapes:")
-    print("   1. Sauvegardez le token API admin ci-dessus")
-    print("   2. Testez avec: curl -H 'Authorization: Bearer <TOKEN>' http://localhost:8000/models")
+    print("\nNext steps:")
+    print("   1. Save the admin API token shown above")
+    print("   2. Test with: curl -H 'Authorization: Bearer <TOKEN>' http://localhost:8000/models")
     print()
 
 

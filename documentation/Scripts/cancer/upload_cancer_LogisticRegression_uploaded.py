@@ -2,15 +2,15 @@
 upload_cancer_LogisticRegression_uploaded.py — cancer-classifier v1.3.0 (LogisticRegression)
 ==============================================================================================
 
-Upload cancer-classifier v1.3.0 avec Pipeline(StandardScaler+LogisticRegression).
-Statut : uploadé uniquement — pas en production, pas en shadow.
+Upload cancer-classifier v1.3.0 with Pipeline(StandardScaler+LogisticRegression).
+Status: uploaded only — not in production, not in shadow.
 
-Déploiement :
+Deployment:
   - is_production = False
-  - deployment_mode = None  (aucun routage)
+  - deployment_mode = None  (no routing)
   - tag "Example"
 
-Usage :
+Usage:
   API_TOKEN=<token> python upload_cancer_LogisticRegression_uploaded.py
 """
 
@@ -30,7 +30,7 @@ API_TOKEN = os.environ.get("API_TOKEN", os.environ.get("ADMIN_TOKEN", ""))
 
 MODEL_NAME    = os.environ.get("MODEL_NAME",    "cancer-classifier")
 MODEL_VERSION = os.environ.get("MODEL_VERSION", "1.3.0")
-DESCRIPTION   = "Pipeline(StandardScaler+LogisticRegression) cancer — uploadé (v1.3.0) — modèle interprétable, calibré avec class_weight=balanced"
+DESCRIPTION   = "Pipeline(StandardScaler+LogisticRegression) cancer — uploaded (v1.3.0) — interpretable model, calibrated with class_weight=balanced"
 ALGORITHM     = "LogisticRegression"
 
 TRAIN_START = os.environ.get("TRAIN_START", "2024-01-01")
@@ -48,25 +48,25 @@ SCRIPT_DIR        = os.path.dirname(os.path.abspath(__file__))
 TRAIN_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "train_cancer_LogisticRegression.py")
 
 if not API_TOKEN:
-    print("❌  API_TOKEN non défini.")
+    print("❌  API_TOKEN not defined.")
     sys.exit(1)
 if not os.path.exists(TRAIN_SCRIPT_PATH):
-    print(f"❌  train_cancer_LogisticRegression.py introuvable : {TRAIN_SCRIPT_PATH}")
+    print(f"❌  train_cancer_LogisticRegression.py not found: {TRAIN_SCRIPT_PATH}")
     sys.exit(1)
 
 HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
 
 try:
     requests.get(f"{API_URL}/health", timeout=5).raise_for_status()
-    print(f"✅  API accessible : {API_URL}")
+    print(f"✅  API reachable: {API_URL}")
 except Exception as e:
-    print(f"❌  API inaccessible ({API_URL}) : {e}")
+    print(f"❌  API unreachable ({API_URL}): {e}")
     sys.exit(1)
 
 tmp_pkl = tempfile.NamedTemporaryFile(suffix=".joblib", delete=False)
 tmp_pkl.close()
 
-print(f"⏳  Entraînement LogisticRegression (Pipeline) ({TRAIN_START} → {TRAIN_END})…")
+print(f"⏳  Training LogisticRegression (Pipeline) ({TRAIN_START} → {TRAIN_END})…")
 
 result = subprocess.run(
     [sys.executable, TRAIN_SCRIPT_PATH],
@@ -87,7 +87,7 @@ result = subprocess.run(
 )
 
 if result.returncode != 0:
-    print("❌  Entraînement échoué :")
+    print("❌  Training failed:")
     print(result.stderr)
     os.unlink(tmp_pkl.name)
     sys.exit(1)
@@ -147,20 +147,20 @@ try:
             data=data, timeout=180,
         )
         _upload_elapsed = time.perf_counter() - _upload_t0
-        print(f"  [TIMING] POST /models répondu en {_upload_elapsed:.2f}s — status {response.status_code}")
+        print(f"  [TIMING] POST /models responded in {_upload_elapsed:.2f}s — status {response.status_code}")
 finally:
     os.unlink(tmp_pkl.name)
 
 if response.status_code == 409:
-    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} existe déjà — pas de PATCH (uploadé uniquement).")
+    print(f"⚠️   {MODEL_NAME} v{MODEL_VERSION} already exists — no PATCH (uploaded only).")
     sys.exit(0)
 
 if response.status_code not in (200, 201):
-    print(f"❌  Erreur {response.status_code} : {response.text[:300]}")
+    print(f"❌  Error {response.status_code}: {response.text[:300]}")
     sys.exit(1)
 
 res = response.json()
-print(f"✅  {res.get('name')} v{res.get('version')} uploadé (id={res.get('id')})")
+print(f"✅  {res.get('name')} v{res.get('version')} uploaded (id={res.get('id')})")
 
 patch_body = {"tags": ["Example"]}
 if metrics.get("feature_stats"):
@@ -173,5 +173,5 @@ patch = requests.patch(
     headers={**HEADERS, "Content-Type": "application/json"},
     json=patch_body, timeout=30,
 )
-print("✅  Tag 'Example' ajouté (is_production=False, pas de deployment_mode)." if patch.status_code == 200 else f"⚠️   PATCH échoué ({patch.status_code})")
-print(f"\n   → Dashboard : {API_URL.replace(':8000', ':8501')}/Models")
+print("✅  Tag 'Example' added (is_production=False, no deployment_mode)." if patch.status_code == 200 else f"⚠️   PATCH failed ({patch.status_code})")
+print(f"\n   → Dashboard: {API_URL.replace(':8000', ':8501')}/Models")

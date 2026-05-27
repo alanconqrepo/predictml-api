@@ -1,64 +1,64 @@
 """
-Exemple de script train.py pour la fonctionnalité de ré-entraînement PredictML.
+Example train.py script for the PredictML retraining feature.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONTRAT D'INTERFACE — variables d'environnement OBLIGATOIRES
+INTERFACE CONTRACT — REQUIRED environment variables
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  TRAIN_START_DATE  : date de début au format YYYY-MM-DD
-                      (ex: "2025-01-01")
-  TRAIN_END_DATE    : date de fin au format YYYY-MM-DD
-                      (ex: "2025-12-31")
-  OUTPUT_MODEL_PATH : chemin absolu où sauvegarder le modèle produit (.joblib)
-                      (ex: "/tmp/abc123/output_model.joblib")
+  TRAIN_START_DATE  : start date in YYYY-MM-DD format
+                      (e.g. "2025-01-01")
+  TRAIN_END_DATE    : end date in YYYY-MM-DD format
+                      (e.g. "2025-12-31")
+  OUTPUT_MODEL_PATH : absolute path where the produced model (.joblib) must be saved
+                      (e.g. "/tmp/abc123/output_model.joblib")
 
-Variables d'environnement optionnelles injectées par l'API :
-  MLFLOW_TRACKING_URI : URI du serveur MLflow
-  MODEL_NAME          : nom du modèle source
-  TRAIN_DATA_PATH     : chemin vers le CSV des données de production exportées
-                        par l'API (prédictions + résultats observés).
-                        Absent lors du 1er entraînement (aucune donnée en prod).
+Optional environment variables injected by the API:
+  MLFLOW_TRACKING_URI : MLflow server URI
+  MODEL_NAME          : source model name
+  TRAIN_DATA_PATH     : path to the CSV of production data exported by the API
+                        (predictions + observed results).
+                        Absent on the first training run (no production data yet).
 
-IMPORTANT — MLflow est géré automatiquement par l'API :
-  L'API crée elle-même le run MLflow après l'exécution de ce script.
-  Vous n'avez PAS besoin d'appeler mlflow.start_run() ici.
-  Pour enrichir le logging MLflow, ajoutez les clés optionnelles ci-dessous
-  dans la sortie JSON stdout (section 6).
+IMPORTANT — MLflow is managed automatically by the API:
+  The API creates the MLflow run itself after this script finishes.
+  You do NOT need to call mlflow.start_run() here.
+  To enrich MLflow logging, add the optional keys below
+  to the stdout JSON output (section 6).
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FORMAT DU CSV TRAIN_DATA_PATH
+TRAIN_DATA_PATH CSV FORMAT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Colonnes : id_obs, input_features, prediction_result, observed_result,
-             timestamp, model_version, response_time_ms
+  Columns: id_obs, input_features, prediction_result, observed_result,
+           timestamp, model_version, response_time_ms
 
-  - input_features   : dict JSON des features envoyées à /predict
-  - observed_result  : valeur réelle observée (JSON), vide si non renseignée
-  - prediction_result: ce que le modèle avait prédit (JSON)
+  - input_features   : JSON dict of features sent to /predict
+  - observed_result  : actual observed value (JSON), empty if not provided
+  - prediction_result: what the model predicted (JSON)
 
-  Pour un train supervisé, filtrez les lignes où observed_result est non-vide :
+  For supervised training, filter rows where observed_result is non-empty:
     X = [json.loads(row["input_features"]) for row if row["observed_result"]]
     y = [json.loads(row["observed_result"]) for row if row["observed_result"]]
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SORTIE ATTENDUE
+EXPECTED OUTPUT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  1. Le modèle DOIT être sauvegardé à OUTPUT_MODEL_PATH via joblib.dump().
-  2. Imprimer sur stdout un JSON comme DERNIÈRE ligne JSON de la sortie :
+  1. The model MUST be saved to OUTPUT_MODEL_PATH via joblib.dump().
+  2. Print to stdout a JSON as the LAST JSON line of the output:
        {
-         "accuracy": 0.95,          # obligatoire pour mise à jour en DB
-         "f1_score": 0.94,          # obligatoire pour mise à jour en DB
-         "n_rows": 12450,           # optionnel — loggué dans MLflow
-         "feature_stats": {         # optionnel — loggué comme metrics MLflow
+         "accuracy": 0.95,          # required for DB update
+         "f1_score": 0.94,          # required for DB update
+         "n_rows": 12450,           # optional — logged in MLflow
+         "feature_stats": {         # optional — logged as MLflow metrics
            "sepal_length": {"mean": 5.8, "std": 0.83, "min": 4.3, "max": 7.9, "null_rate": 0.0}
          },
-         "label_distribution": {    # optionnel — loggué comme metrics MLflow
+         "label_distribution": {    # optional — logged as MLflow metrics
            "setosa": 0.33, "versicolor": 0.33, "virginica": 0.34
          }
        }
-  3. Les logs de progression peuvent être imprimés sur stderr à volonté.
-  4. Quitter avec code 0 si succès, code non-nul si échec.
+  3. Progress logs may be printed to stderr freely.
+  4. Exit with code 0 on success, non-zero on failure.
 """
 
 import csv
@@ -74,31 +74,31 @@ from sklearn.metrics import accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 1. Lecture des variables d'environnement (OBLIGATOIRES)
+# 1. Read environment variables (REQUIRED)
 # ──────────────────────────────────────────────────────────────────────────────
 TRAIN_START_DATE = os.environ["TRAIN_START_DATE"]
 TRAIN_END_DATE = os.environ["TRAIN_END_DATE"]
 OUTPUT_MODEL_PATH = os.environ["OUTPUT_MODEL_PATH"]
 
-# Variables optionnelles
+# Optional variables
 MODEL_NAME = os.environ.get("MODEL_NAME", "example_model")
 MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "")
-TRAIN_DATA_PATH = os.environ.get("TRAIN_DATA_PATH")  # absent lors du 1er train
+TRAIN_DATA_PATH = os.environ.get("TRAIN_DATA_PATH")  # absent on the first training run
 
 print(
-    f"[train.py] Ré-entraînement de '{MODEL_NAME}' "
-    f"du {TRAIN_START_DATE} au {TRAIN_END_DATE}",
+    f"[train.py] Retraining '{MODEL_NAME}' "
+    f"from {TRAIN_START_DATE} to {TRAIN_END_DATE}",
     file=sys.stderr,
 )
-print(f"[train.py] Sortie modèle : {OUTPUT_MODEL_PATH}", file=sys.stderr)
+print(f"[train.py] Model output: {OUTPUT_MODEL_PATH}", file=sys.stderr)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 2. Chargement des données
+# 2. Load data
 # ──────────────────────────────────────────────────────────────────────────────
 
 if TRAIN_DATA_PATH:
-    # ── Retrain : données de production exportées par l'API ──────────────────
-    print(f"[train.py] Chargement des données de production : {TRAIN_DATA_PATH}", file=sys.stderr)
+    # ── Retrain: production data exported by the API ──────────────────────────
+    print(f"[train.py] Loading production data: {TRAIN_DATA_PATH}", file=sys.stderr)
 
     features_list = []
     labels_list = []
@@ -107,7 +107,7 @@ if TRAIN_DATA_PATH:
     with open(TRAIN_DATA_PATH, newline="", encoding="utf-8") as csvfile:
         for row in csv.DictReader(csvfile):
             if not row["observed_result"]:
-                continue  # ignorer les prédictions sans résultat observé
+                continue  # skip predictions without an observed result
             features = json.loads(row["input_features"])
             label = json.loads(row["observed_result"])
             if feature_names is None:
@@ -117,25 +117,25 @@ if TRAIN_DATA_PATH:
 
     if not features_list:
         print(
-            json.dumps({"error": "Aucune donnée labellisée dans la fenêtre de dates."}),
+            json.dumps({"error": "No labelled data in the date window."}),
             flush=True,
         )
         sys.exit(1)
 
     X = np.array(features_list, dtype=float)
     y = np.array(labels_list)
-    print(f"[train.py] {len(X)} exemples labellisés chargés.", file=sys.stderr)
+    print(f"[train.py] {len(X)} labelled examples loaded.", file=sys.stderr)
 
 else:
-    # ── Premier train : dataset synthétique (aucune donnée prod disponible) ──
-    print("[train.py] TRAIN_DATA_PATH absent — utilisation du dataset Iris.", file=sys.stderr)
+    # ── First training run: synthetic dataset (no production data available) ──
+    print("[train.py] TRAIN_DATA_PATH absent — using the Iris dataset.", file=sys.stderr)
     from sklearn.datasets import load_iris
 
     iris = load_iris()
     X_full, y_full = iris.data, iris.target
     feature_names = list(iris.feature_names)
 
-    # Simulation d'un filtre temporel proportionnel à la plage de dates
+    # Simulate a temporal filter proportional to the date range
     start = datetime.strptime(TRAIN_START_DATE, "%Y-%m-%d")
     end = datetime.strptime(TRAIN_END_DATE, "%Y-%m-%d")
     delta_days = max(1, (end - start).days)
@@ -143,16 +143,16 @@ else:
     rng = np.random.default_rng(seed=delta_days % 1000)
     indices = rng.choice(len(X_full), size=n_samples, replace=False)
     X, y = X_full[indices], y_full[indices]
-    print(f"[train.py] {n_samples} exemples retenus.", file=sys.stderr)
+    print(f"[train.py] {n_samples} examples selected.", file=sys.stderr)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 3. Entraînement
+# 3. Training
 # ──────────────────────────────────────────────────────────────────────────────
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
 print(
-    f"[train.py] Entraînement sur {len(X_train)} exemples, "
-    f"évaluation sur {len(X_test)}…",
+    f"[train.py] Training on {len(X_train)} examples, "
+    f"evaluating on {len(X_test)}…",
     file=sys.stderr,
 )
 
@@ -160,23 +160,23 @@ model = RandomForestClassifier(n_estimators=100, random_state=42)
 model.fit(X_train, y_train)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 4. Évaluation
+# 4. Evaluation
 # ──────────────────────────────────────────────────────────────────────────────
 y_pred = model.predict(X_test)
 acc = float(accuracy_score(y_test, y_pred))
 f1 = float(f1_score(y_test, y_pred, average="weighted", zero_division=0))
 
-print(f"[train.py] Accuracy : {acc:.4f} | F1 Score : {f1:.4f}", file=sys.stderr)
+print(f"[train.py] Accuracy: {acc:.4f} | F1 Score: {f1:.4f}", file=sys.stderr)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 5. Sauvegarde du modèle (OBLIGATOIRE — utiliser joblib.dump)
+# 5. Save model (REQUIRED — use joblib.dump)
 # ──────────────────────────────────────────────────────────────────────────────
 joblib.dump(model, OUTPUT_MODEL_PATH)
 
-print(f"[train.py] Modèle sauvegardé : {OUTPUT_MODEL_PATH}", file=sys.stderr)
+print(f"[train.py] Model saved: {OUTPUT_MODEL_PATH}", file=sys.stderr)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 6. Capture des versions de librairies (lues par l'API pour requirements.txt)
+# 6. Capture library versions (read by the API for requirements.txt)
 # ──────────────────────────────────────────────────────────────────────────────
 import importlib.metadata as _imeta  # noqa: E402
 
@@ -188,7 +188,7 @@ for _pkg in ["scikit-learn", "numpy", "pandas", "mlflow", "python-dotenv"]:
         pass
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 7. Métriques sur stdout (dernière ligne JSON — lue par l'API pour MLflow + DB)
+# 7. Metrics to stdout (last JSON line — read by the API for MLflow + DB)
 # ──────────────────────────────────────────────────────────────────────────────
 feature_stats = {}
 if feature_names is not None:

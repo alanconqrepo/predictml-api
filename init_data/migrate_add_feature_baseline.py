@@ -1,8 +1,8 @@
 """
-Migration : ajout de la colonne feature_baseline dans model_metadata.
-Idempotent — utilise ADD COLUMN IF NOT EXISTS.
+Migration: add the feature_baseline column to model_metadata.
+Idempotent — uses ADD COLUMN IF NOT EXISTS.
 
-Exécution :
+Execution:
     docker exec predictml-api python init_data/migrate_add_feature_baseline.py
 """
 
@@ -14,7 +14,7 @@ from src.db.database import AsyncSessionLocal
 
 
 async def main() -> None:
-    print("Migration : ajout de feature_baseline dans model_metadata...")
+    print("Migration: adding feature_baseline to model_metadata...")
     async with AsyncSessionLocal() as db:
         await db.execute(
             text(
@@ -23,7 +23,7 @@ async def main() -> None:
             )
         )
         await db.commit()
-    print("Migration terminee.")
+    print("Migration complete.")
 
 
 if __name__ == "__main__":
