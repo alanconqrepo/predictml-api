@@ -934,6 +934,7 @@ async def predict(
         ).observe(response_time_ms / 1000)
 
         # Log the successful prediction — skipped if store=False (UI tests)
+        _saved_prediction = None
         if store:
             _prediction_payload = {
                 "user_id": user.id,
@@ -953,9 +954,9 @@ async def predict(
             if settings.PREDICTION_STREAM_ENABLED:
                 _published = await _publish_prediction_to_stream(_prediction_payload)
                 if not _published:
-                    await DBService.create_prediction(db=db, **_prediction_payload)
+                    _saved_prediction = await DBService.create_prediction(db=db, **_prediction_payload)
             else:
-                await DBService.create_prediction(db=db, **_prediction_payload)
+                _saved_prediction = await DBService.create_prediction(db=db, **_prediction_payload)
 
             # --- Dispatch shadow in background (shadow + non-selected A/B versions) ---
             for _sm in shadow_meta:
@@ -1014,6 +1015,7 @@ async def predict(
                 )
 
         return PredictionOutput(
+            id=_saved_prediction.id if store and _saved_prediction is not None else None,
             model_name=metadata.name,
             model_version=metadata.version,
             id_obs=input_data.id_obs,
