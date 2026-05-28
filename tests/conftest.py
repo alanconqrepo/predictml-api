@@ -29,6 +29,14 @@ os.environ.setdefault("MINIO_SECRET_KEY", "test-minio-secret-key-safe-value")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6399/0")  # bogus port — never contacted
 os.environ.setdefault("METRICS_TOKEN", "test-metrics-token-for-pytest")
 
+# Patch minio.Minio class BEFORE any src imports so MinIOService.__init__ never
+# creates a real HTTP client, regardless of import order. This prevents connection
+# attempts to localhost:9002 on Windows (where urllib3 probes eagerly).
+_mock_minio_client = MagicMock()
+_mock_minio_client.bucket_exists.return_value = True
+_mock_minio_client.make_bucket.return_value = None
+patch("minio.Minio", return_value=_mock_minio_client).start()
+
 # Mock MinIO globally — tests do not require a real MinIO server
 _minio_mock = MagicMock()
 _upload_return = {
@@ -51,6 +59,10 @@ import src.tasks.retrain_scheduler  # noqa: E402 — must be imported before pat
 patch("src.api.models.minio_service", _minio_mock).start()
 # Covers lazy imports from the scheduler and retrain_service
 patch("src.services.minio_service.minio_service", _minio_mock).start()
+# model_service is imported transitively by src.api.models before patching,
+# so its local binding to minio_service points to the original client.
+# Patch it explicitly to prevent real MinIO connections in tests.
+patch("src.services.model_service.minio_service", _minio_mock).start()
 
 # Mock MLflow service globally — tests do not require an MLflow server
 _mlflow_mock = MagicMock()
