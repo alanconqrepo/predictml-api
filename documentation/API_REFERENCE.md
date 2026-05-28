@@ -1235,6 +1235,7 @@ response = requests.post(
 
 ```json
 {
+  "id": 42,
   "model_name": "iris_model",
   "model_version": "1.0.0",
   "id_obs": "obs-2025-001",
@@ -1247,6 +1248,7 @@ response = requests.post(
 
 | Field | Description |
 |---|---|
+| `id` | Database ID of the logged prediction (`null` if `store=false`) |
 | `prediction` | Model result (class or value) |
 | `probability` | Per-class probabilities (if `predict_proba` available) |
 | `low_confidence` | `true` if max prob < model's `confidence_threshold` |

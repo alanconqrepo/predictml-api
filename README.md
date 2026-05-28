@@ -356,8 +356,8 @@ response = requests.post(
     }
 )
 print(response.json())
-# {"model_name": "iris_model", "model_version": "1.0", "prediction": 0,
-#  "probability": [0.97, 0.02, 0.01], "low_confidence": false}
+# {"id": 42, "model_name": "iris_model", "model_version": "1.0", "prediction": 0,
+#  "probability": [0.97, 0.02, 0.01], "low_confidence": false, "selected_version": null}
 
 # SHAP explainability
 explain = requests.post(
@@ -400,6 +400,12 @@ python smoke-tests/test_multimodel_api.py
 | [documentation/ARCHITECTURE.md](documentation/ARCHITECTURE.md) | Project structure, services, and data flows |
 | [documentation/DOCKER.md](documentation/DOCKER.md) | Docker commands, services, environment variables |
 | [documentation/DATABASE.md](documentation/DATABASE.md) | SQL schema, useful queries, Python connection |
+| [documentation/FAQ.md](documentation/FAQ.md) | Frequently asked questions — common scenarios and troubleshooting |
+| [documentation/DASHBOARD_GUIDE.md](documentation/DASHBOARD_GUIDE.md) | Streamlit admin dashboard guide — all pages |
+| [documentation/TRAIN_SCRIPT_GUIDE.md](documentation/TRAIN_SCRIPT_GUIDE.md) | Writing `train.py` scripts — contract, templates, and security |
+| [documentation/KPIS_REFERENCE.md](documentation/KPIS_REFERENCE.md) | KPI definitions and metric calculation methods |
+| [documentation/GRAFANA_OTEL.md](documentation/GRAFANA_OTEL.md) | Grafana LGTM setup and OpenTelemetry integration |
+| [documentation/SECURITY_MODEL_VALIDATION.md](documentation/SECURITY_MODEL_VALIDATION.md) | Model name/version format validation and security rules |
 
 ---
 

@@ -24,21 +24,36 @@ Models are stored in **MinIO**, experiments tracked in **MLflow**, metadata in *
 ```
 src/
 ├── api/
-│   ├── models.py          # Model CRUD, retrain, drift, A/B, history
-│   ├── predict.py         # Single, batch predictions, SHAP
-│   ├── users.py           # User management (admin)
-│   ├── observed_results.py# Observed results (ground truth)
-│   └── monitoring.py      # Global and per-model monitoring dashboard
+│   ├── models.py              # Model CRUD, retrain, drift, A/B, history
+│   ├── predict.py             # Single, batch predictions, SHAP
+│   ├── users.py               # User management (admin)
+│   ├── observed_results.py    # Observed results (ground truth)
+│   ├── monitoring.py          # Global and per-model monitoring dashboard
+│   ├── jobs.py                # ARQ job supervision (task runs)
+│   └── account_requests.py   # Account creation request workflow
 ├── core/
-│   ├── config.py          # Environment variables and settings
-│   └── security.py        # Token verification, rate limiting
+│   ├── config.py              # Environment variables and settings
+│   └── security.py           # Token verification, rate limiting
 ├── db/
-│   ├── models.py          # SQLAlchemy ORM models
-│   └── database.py        # Async PostgreSQL session
+│   ├── models.py              # SQLAlchemy ORM models
+│   └── database.py            # Async PostgreSQL session
 ├── services/
-│   ├── model_service.py   # Loading, Redis cache, A/B routing
-│   ├── db_service.py      # Data access (predictions, users, models)
-│   └── minio_service.py   # MinIO artifact upload/download
+│   ├── model_service.py           # Loading, Redis cache, A/B routing
+│   ├── db_service.py              # Data access (predictions, users, models)
+│   ├── minio_service.py           # MinIO artifact upload/download
+│   ├── drift_service.py           # Z-score + PSI + null rate drift
+│   ├── shap_service.py            # Local SHAP explanations
+│   ├── ab_significance_service.py # Chi-² / Mann-Whitney statistical tests
+│   ├── auto_promotion_service.py  # Auto-promotion + circuit breaker
+│   ├── golden_test_service.py     # Golden test CRUD + run
+│   ├── input_validation_service.py# Feature schema validation
+│   ├── supervision_reporter.py    # 6h supervision loop: drift, alerts, retrain
+│   ├── email_service.py           # Email alerts & weekly reports
+│   ├── webhook_service.py         # HTTP webhooks post-prediction
+│   ├── retrain_service.py         # Retrain orchestration
+│   ├── mlflow_service.py          # MLflow experiment tracking
+│   ├── metrics_service.py         # Aggregated metrics computation
+│   └── env_snapshot_service.py   # Environment snapshot at retrain time
 ├── schemas/               # Pydantic schemas (requests / responses)
 └── main.py                # FastAPI app, router mounting
 
@@ -203,6 +218,7 @@ Authorization: Bearer <token>
 **Response:**
 ```json
 {
+  "id": 42,
   "model_name": "churn_model",
   "model_version": "1.0.0",
   "id_obs": "client_42",
@@ -559,6 +575,275 @@ GET /predictions/stats?model_name=churn_model&days=30
 ```
 
 Returns per model: total predictions, error rate, average p50/p95 latencies.
+
+---
+
+## Input schema validation
+
+```bash
+POST /models/{name}/{version}/validate-input
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{"features": {"age": 35, "tenure_months": 24}}
+```
+
+Validates features against the model's expected schema **without consuming quota** or making a prediction. Returns `valid: true/false`, list of missing features, unexpected features, and type coercions. Also available inline: `POST /predict?strict_validation=true` rejects requests with unexpected features (422).
+
+---
+
+## Jobs / task runs
+
+```bash
+GET /jobs                       # paginated list of task runs (admin)
+GET /jobs/{job_id}              # full status of a job
+GET /jobs/{job_id}/logs         # real-time log streaming via SSE
+  ?model_name=churn_model       # optional filter
+  ?status=running               # optional filter: running | completed | failed
+  ?task_type=retrain            # optional filter
+```
+
+Visibility into background tasks (retrain, scheduled retrain). `/logs` streams stdout/stderr in real time via Server-Sent Events; archived logs are returned when the job is finished.
+
+---
+
+## Account requests
+
+```bash
+POST   /account-requests                       # submit signup request (public, no auth)
+GET    /account-requests?status=pending        # list requests (admin)
+GET    /account-requests/pending-count         # pending badge count (admin)
+PATCH  /account-requests/{id}/approve          # approve → creates user, returns token (admin)
+PATCH  /account-requests/{id}/reject           # reject with reason (admin)
+```
+
+Self-service account creation workflow. The Bearer token is returned once on approval.
+
+---
+
+## Golden tests (regression tests)
+
+```bash
+POST   /models/{name}/golden-tests                # create a test case
+GET    /models/{name}/golden-tests                # list all test cases
+DELETE /models/{name}/golden-tests/{id}           # delete (admin)
+POST   /models/{name}/golden-tests/upload-csv     # bulk import (admin)
+POST   /models/{name}/{version}/run-golden-tests  # run all tests on a version
+```
+
+Each test case stores `input_features` → `expected_output`. Run returns PASS/FAIL per case. Integrated into the auto-promotion policy via `min_golden_test_pass_rate` in `PATCH /models/{name}/policy`.
+
+---
+
+## Auto-promotion & Auto-demotion (circuit breaker)
+
+```bash
+PATCH /models/{name}/policy
+Content-Type: application/json
+Authorization: Bearer <admin_token>
+
+{
+  "auto_promote": true,
+  "min_accuracy": 0.90,
+  "max_latency_p95_ms": 200,
+  "min_sample_validation": 50,
+  "min_golden_test_pass_rate": 0.95,
+  "auto_demote": true,
+  "demote_on_drift": "critical",
+  "demote_on_accuracy_below": 0.80,
+  "demote_cooldown_hours": 24
+}
+```
+
+Auto-promotion criteria are evaluated after each retrain. Auto-demotion (circuit breaker) is evaluated every 6h by the supervision service.
+
+---
+
+## Model card
+
+```bash
+GET /models/{name}/{version}/card
+Accept: application/json          # default — structured JSON
+Accept: text/markdown             # returns a shareable .md file
+```
+
+Single-call summary: metadata, real-world performance, drift status, calibration, top-5 SHAP features, retrain info, and ground truth coverage.
+
+---
+
+## Cache warm-up
+
+```bash
+POST /models/{name}/{version}/warmup
+Authorization: Bearer <token>
+```
+
+Preloads a model into the Redis cache before the first prediction request. Reduces cold-start latency during deployments.
+
+---
+
+## Anomaly detection
+
+```bash
+GET /predictions/anomalies
+  ?model_name=churn_model   # required
+  ?days=7                   # default 7
+  ?z_threshold=3.0          # default 3.0
+  ?limit=100
+Authorization: Bearer <token>
+```
+
+Returns predictions where at least one feature has a z-score exceeding the threshold relative to `feature_baseline`. Requires a baseline to be configured.
+
+---
+
+## Leaderboard
+
+```bash
+GET /models/leaderboard
+  ?metric=accuracy          # accuracy | f1_score | latency_p95_ms | predictions_count
+  ?days=30
+```
+
+Ranks production models by a chosen metric over a configurable window. Result is cached (TTL).
+
+---
+
+## Confidence distribution
+
+```bash
+GET /models/{name}/confidence-distribution
+  ?version=1.0.0   # optional
+  ?days=7
+Authorization: Bearer <token>
+```
+
+Histogram of `max(probabilities)` over recent predictions. Helps decide whether to adjust `confidence_threshold`.
+
+---
+
+## Consolidated performance report
+
+```bash
+GET /models/{name}/performance-report
+  ?version=1.0.0   # optional
+  ?days=30
+Authorization: Bearer <token>
+```
+
+Aggregates real-world performance + drift + feature importance + calibration + A/B in a single call. Ideal for monitoring scripts or Grafana integrations.
+
+---
+
+## Probability calibration
+
+```bash
+GET /models/{name}/calibration
+  ?version=1.0.0   # optional
+  ?days=30
+Authorization: Bearer <token>
+```
+
+Returns Brier score and a reliability curve. `brier_score < 0.1` indicates a well-calibrated model; a positive overconfidence gap means the model overestimates its certainty.
+
+---
+
+## Confidence trend
+
+```bash
+GET /models/{name}/confidence-trend
+  ?version=1.0.0
+  ?days=30
+  ?window=day       # day | week
+Authorization: Bearer <token>
+```
+
+Evolution of average prediction confidence over time. Useful to detect gradual confidence degradation before it impacts accuracy.
+
+---
+
+## Output drift / label shift
+
+```bash
+GET /models/{name}/output-drift
+  ?version=1.0.0
+  ?days=30
+Authorization: Bearer <token>
+```
+
+Measures PSI on the prediction distribution relative to the `training_stats.label_distribution` reference stored at retrain time.
+
+---
+
+## Shadow compare
+
+```bash
+GET /models/{name}/shadow-compare
+  ?days=30
+Authorization: Bearer <token>
+```
+
+Enriched report comparing the shadow model and the production model: accuracy delta, confidence delta, latency delta, disagreement rate, and automatic promotion recommendation.
+
+---
+
+## Prediction export
+
+```bash
+GET /predictions/export
+  ?model_name=churn_model
+  ?format=csv                # csv | jsonl | parquet
+  ?start=2025-01-01T00:00:00
+  ?end=2025-12-31T23:59:59
+Authorization: Bearer <admin_token>
+```
+
+Streaming export of predictions — suitable for large datasets. Parquet loads all rows into memory before serialization.
+
+---
+
+## Single prediction lookup & post-hoc SHAP
+
+```bash
+GET /predictions/{id}           # retrieve a prediction record by DB id
+GET /predictions/{id}/explain   # compute SHAP values for a logged prediction
+Authorization: Bearer <token>
+```
+
+`/explain` uses the stored `input_features` — no need to re-submit the data.
+
+---
+
+## Per-model alert thresholds
+
+Override global thresholds for a specific model via `PATCH /models/{name}/{version}`:
+
+```json
+{
+  "alert_thresholds": {
+    "drift_warning": 2.0,
+    "drift_critical": 3.5,
+    "error_rate_warning": 0.05,
+    "null_rate_warning": 0.10
+  }
+}
+```
+
+Used by the supervision service to trigger targeted alerts per model.
+
+---
+
+## Deprecation, readiness & retrain history
+
+```bash
+PATCH /models/{name}/{version}/deprecate          # mark deprecated → 410 on predictions (admin)
+GET   /models/{name}/readiness                    # verify prerequisites before production
+GET   /models/{name}/retrain-history              # structured log of all retrains
+GET   /models/{name}/performance-timeline         # performance by deployed version over time
+```
+
+`readiness` checks: MinIO file accessible, baseline computed, no critical drift.
+`retrain-history` returns: source version → new version, accuracy delta, `auto_promoted`, `trained_by`, training window.
 
 ---
 
