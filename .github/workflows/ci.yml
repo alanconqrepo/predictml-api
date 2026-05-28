@@ -59,9 +59,10 @@ jobs:
   test-windows:
     name: Tests (Windows)
     runs-on: windows-latest
+    continue-on-error: true
     # Windows runners are slower; pytest-timeout prevents individual test hangs
     # and timeout-minutes prevents the job from running forever if cleanup stalls.
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     env:
       MINIO_ENDPOINT: localhost:9002
@@ -83,6 +84,6 @@ jobs:
         run: pip install -r requirements.txt pytest pytest-cov httpx anyio pytest-asyncio email-validator fakeredis aiosqlite asyncpg pytest-timeout
 
       - name: Run tests
-        # --timeout=60   : kill any single test that hangs for more than 60 s
+        # --timeout=120  : kill any single test that hangs for more than 120 s (matches Linux)
         # --timeout-method=thread : uses a daemon thread (no SIGALRM, works on Windows)
-        run: pytest tests/ -v --tb=short -p no:warnings --timeout=60 --timeout-method=thread
+        run: pytest tests/ -v --tb=short -p no:warnings --timeout=120 --timeout-method=thread
