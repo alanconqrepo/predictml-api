@@ -42,6 +42,8 @@ from src.schemas.prediction import (
     PredictionStatsItem,
     PredictionStatsResponse,
     PurgeResponse,
+    UnlabeledPredictionItem,
+    UnlabeledPredictionsResponse,
 )
 from src.services.db_service import DBService
 from src.services.input_validation_service import resolve_expected_features, validate_input_features
@@ -608,6 +610,73 @@ async def get_anomalous_predictions(
         anomalous_count=anomalous_count,
         anomaly_rate=anomaly_rate,
         predictions=anomalous,
+    )
+
+
+@router.get("/predictions/unlabeled", response_model=UnlabeledPredictionsResponse)
+async def get_unlabeled_predictions(
+    model_name: Optional[str] = Query(None, description="Filter by model name (optional)"),
+    model_version: Optional[str] = Query(None, description="Filter by model version (optional)"),
+    strategy: str = Query(
+        "uncertainty",
+        description=(
+            "Sampling strategy: "
+            "'uncertainty' (lowest confidence first — most informative for active learning), "
+            "'recent' (newest predictions first), "
+            "'random' (unbiased random sample)"
+        ),
+    ),
+    limit: int = Query(
+        50, ge=1, le=200, description="Max results to return (default: 50, max: 200)"
+    ),
+    _auth: User = Depends(verify_token),
+    db: AsyncSession = Depends(get_read_db),
+):
+    """
+    Returns predictions without an associated observed result, ordered by labeling value.
+
+    Helps data teams prioritize annotation effort:
+    - **uncertainty**: lowest max_confidence first — highest value for active learning
+    - **recent**: newest predictions first — useful for production monitoring
+    - **random**: unbiased sample — useful for performance estimation
+
+    Only non-shadow, successful predictions with an id_obs are returned.
+    The CSV export can be re-imported via POST /observed-results/upload-csv after annotation.
+
+    Requires a valid Bearer token.
+    """
+    if strategy not in ("uncertainty", "recent", "random"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="'strategy' must be one of: uncertainty, recent, random",
+        )
+
+    predictions, total = await DBService.get_unlabeled_predictions(
+        db=db,
+        model_name=model_name,
+        model_version=model_version,
+        strategy=strategy,
+        limit=limit,
+    )
+
+    return UnlabeledPredictionsResponse(
+        total_unlabeled=total,
+        returned=len(predictions),
+        strategy=strategy,
+        model_name=model_name,
+        model_version=model_version,
+        predictions=[
+            UnlabeledPredictionItem(
+                id=p.id,
+                id_obs=p.id_obs,
+                model_name=p.model_name,
+                model_version=p.model_version,
+                prediction_result=p.prediction_result,
+                max_confidence=p.max_confidence,
+                timestamp=p.timestamp,
+            )
+            for p in predictions
+        ],
     )
 
 

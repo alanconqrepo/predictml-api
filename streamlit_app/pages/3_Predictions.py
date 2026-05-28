@@ -782,6 +782,82 @@ with tab_history:
                             )
                             _col_chart.plotly_chart(_fig_stack, use_container_width=True)
 
+        # --- Labeling queue ---
+        with st.expander(t("predictions.labeling_queue.expander_title"), expanded=False):
+            st.caption(t("predictions.labeling_queue.caption"))
+            lq_col1, lq_col2, lq_col3 = st.columns(3)
+            lq_strategy = lq_col1.selectbox(
+                t("predictions.labeling_queue.strategy_label"),
+                ["uncertainty", "recent", "random"],
+                format_func=lambda s: t(f"predictions.labeling_queue.strategy_{s}"),
+                key="lq_strategy",
+            )
+            lq_model_sel = lq_col2.selectbox(
+                t("predictions.labeling_queue.model_label"),
+                [None] + model_names,
+                format_func=lambda v: t("predictions.labeling_queue.all_models") if v is None else v,
+                key="lq_model",
+            )
+            lq_limit = int(lq_col3.selectbox(
+                t("predictions.labeling_queue.limit_label"),
+                [25, 50, 100, 200],
+                index=1,
+                key="lq_limit",
+            ))
+            try:
+                lq_data = client.get_unlabeled_predictions(
+                    model_name=lq_model_sel,
+                    strategy=lq_strategy,
+                    limit=lq_limit,
+                )
+                total_unlabeled = lq_data.get("total_unlabeled", 0)
+                lq_preds = lq_data.get("predictions", [])
+                st.metric(
+                    t("predictions.labeling_queue.total_metric"),
+                    f"{total_unlabeled:,}",
+                    help=t("predictions.labeling_queue.total_metric_help"),
+                )
+                if not lq_preds:
+                    st.success(t("predictions.labeling_queue.all_labeled"))
+                else:
+                    lq_rows = [
+                        {
+                            "id_obs": p.get("id_obs") or "—",
+                            t("predictions.labeling_queue.col_model"): p.get("model_name", ""),
+                            t("predictions.labeling_queue.col_version"): p.get("model_version") or "—",
+                            t("predictions.labeling_queue.col_prediction"): str(p.get("prediction_result", "")),
+                            t("predictions.labeling_queue.col_confidence"): (
+                                f"{p['max_confidence']:.2%}"
+                                if p.get("max_confidence") is not None else "—"
+                            ),
+                            t("predictions.labeling_queue.col_timestamp"): (
+                                pd.to_datetime(p["timestamp"]).strftime("%Y-%m-%d %H:%M")
+                                if p.get("timestamp") else "—"
+                            ),
+                        }
+                        for p in lq_preds
+                    ]
+                    st.dataframe(pd.DataFrame(lq_rows), width='stretch', hide_index=True)
+                    lq_export_df = pd.DataFrame([
+                        {
+                            "id_obs": p.get("id_obs") or "",
+                            "model_name": p.get("model_name", ""),
+                            "observed_result": "",
+                            "date_time": p.get("timestamp", ""),
+                        }
+                        for p in lq_preds
+                    ])
+                    st.download_button(
+                        label=t("predictions.labeling_queue.export_btn", count=len(lq_preds)),
+                        data=lq_export_df.to_csv(index=False),
+                        file_name=f"to_label_{lq_model_sel or 'all'}.csv",
+                        mime="text/csv",
+                        key="lq_export_btn",
+                    )
+                    st.caption(t("predictions.labeling_queue.import_hint"))
+            except Exception as _lq_exc:
+                st.error(t("predictions.labeling_queue.error", error=_lq_exc))
+
         # --- Import / Export observed results ---
         CSV_TEMPLATE = (
             "id_obs,model_name,observed_result,date_time\n"

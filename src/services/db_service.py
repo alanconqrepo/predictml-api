@@ -9,7 +9,7 @@ from typing import Any, List, Optional
 
 from sklearn.metrics import accuracy_score, mean_absolute_error
 from sklearn.metrics import f1_score as sklearn_f1_score
-from sqlalchemy import and_, delete, func, or_, select, text
+from sqlalchemy import and_, case, delete, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -1917,6 +1917,67 @@ class DBService:
                 "by_version": None,
                 "by_model": by_model,
             }
+
+    @staticmethod
+    async def get_unlabeled_predictions(
+        db: AsyncSession,
+        model_name: Optional[str] = None,
+        model_version: Optional[str] = None,
+        strategy: str = "uncertainty",
+        limit: int = 50,
+    ) -> tuple[list, int]:
+        """
+        Returns successful, non-shadow predictions with an id_obs that have no observed result.
+
+        Args:
+            strategy: 'uncertainty' (sort by max_confidence ASC, NULLs last),
+                      'recent' (sort by timestamp DESC),
+                      'random' (SQL random)
+            limit: maximum number of results to return
+
+        Returns:
+            Tuple (list of Prediction, total_unlabeled count)
+        """
+        filters = [
+            Prediction.id_obs.is_not(None),
+            Prediction.status == "success",
+            Prediction.is_shadow.is_(False),
+        ]
+        if model_name:
+            filters.append(Prediction.model_name == model_name)
+        if model_version:
+            filters.append(Prediction.model_version == model_version)
+
+        unlabeled_query = (
+            select(Prediction)
+            .outerjoin(
+                ObservedResult,
+                and_(
+                    Prediction.id_obs == ObservedResult.id_obs,
+                    Prediction.model_name == ObservedResult.model_name,
+                ),
+            )
+            .where(and_(*filters, ObservedResult.id.is_(None)))
+        )
+
+        count_result = await db.execute(
+            select(func.count()).select_from(unlabeled_query.subquery())
+        )
+        total = count_result.scalar() or 0
+
+        if strategy == "uncertainty":
+            # NULLs last: regression models (no confidence) go after classifiers
+            ordered = unlabeled_query.order_by(
+                case((Prediction.max_confidence.is_(None), 1), else_=0).asc(),
+                Prediction.max_confidence.asc(),
+            )
+        elif strategy == "recent":
+            ordered = unlabeled_query.order_by(Prediction.timestamp.desc())
+        else:  # random
+            ordered = unlabeled_query.order_by(func.random())
+
+        result = await db.execute(ordered.limit(limit))
+        return list(result.scalars().all()), total
 
     # === Model History ===
 
