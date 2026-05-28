@@ -579,6 +579,26 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def get_unlabeled_predictions(
+        self,
+        model_name: Optional[str] = None,
+        model_version: Optional[str] = None,
+        strategy: str = "uncertainty",
+        limit: int = 50,
+    ) -> dict:
+        """Predictions without an observed result, ordered by labeling value."""
+        r = self._get(
+            "/predictions/unlabeled",
+            params={
+                "model_name": model_name,
+                "model_version": model_version,
+                "strategy": strategy,
+                "limit": limit,
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
     # --- Monitoring / Supervision Dashboard ---
 
     def get_monitoring_overview(self, start: str, end: str) -> dict:

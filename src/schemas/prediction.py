@@ -361,6 +361,35 @@ class PurgeResponse(BaseModel):
     )
 
 
+class UnlabeledPredictionItem(BaseModel):
+    """A successfully scored prediction that has no associated observed result."""
+
+    id: int = Field(..., description="Prediction database ID")
+    id_obs: Optional[str] = Field(None, description="Business observation identifier")
+    model_name: str = Field(..., description="Model name")
+    model_version: Optional[str] = Field(None, description="Model version")
+    prediction_result: Any = Field(..., description="Model prediction")
+    max_confidence: Optional[float] = Field(
+        None, description="Max probability (None for regression models)"
+    )
+    timestamp: datetime = Field(..., description="Prediction timestamp (UTC)")
+
+
+class UnlabeledPredictionsResponse(BaseModel):
+    """Response for GET /predictions/unlabeled"""
+
+    total_unlabeled: int = Field(
+        ..., description="Total number of predictions without an observed result"
+    )
+    returned: int = Field(..., description="Number of predictions returned in this response")
+    strategy: str = Field(..., description="Sampling strategy: uncertainty, recent, random")
+    model_name: Optional[str] = Field(None, description="Model name filter applied (None = all)")
+    model_version: Optional[str] = Field(None, description="Version filter applied")
+    predictions: List[UnlabeledPredictionItem] = Field(
+        ..., description="Predictions to annotate, ordered by the selected strategy"
+    )
+
+
 class AnomalyFeatureDetail(BaseModel):
     """Detail of an anomalous feature in a prediction"""
 

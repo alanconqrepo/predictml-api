@@ -848,6 +848,31 @@ predictions:
 
       | `date_time` | Non | Date/heure de l''observation (ISO 8601 ou YYYY-MM-DD)
       |'
+  labeling_queue:
+    expander_title: 🏷️ File d'attente de labellisation
+    caption: Identifiez les prédictions à annoter en priorité pour améliorer la performance
+      du modèle. Exportez-les en CSV, renseignez la colonne `observed_result`, puis
+      importez via le CSV Import ci-dessous.
+    strategy_label: Stratégie
+    strategy_uncertainty: Incertitude (recommandé)
+    strategy_recent: Les plus récentes
+    strategy_random: Aléatoire
+    model_label: Modèle
+    all_models: (tous)
+    limit_label: Nombre à afficher
+    total_metric: Sans label
+    total_metric_help: Prédictions sans résultat observé correspondant (id_obs non
+      encore labellisé).
+    all_labeled: ✅ Toutes les prédictions ont un résultat observé.
+    col_model: Modèle
+    col_version: Version
+    col_prediction: Prédiction
+    col_confidence: Confiance
+    col_timestamp: Timestamp
+    export_btn: ⬇️ Exporter {count} prédiction(s) à labelliser (CSV)
+    import_hint: Remplissez la colonne `observed_result` du CSV exporté, puis importez-le
+      via le formulaire ci-dessous.
+    error: 'Erreur lors du chargement de la file : {error}'
   purge:
     expander_title: 🗑️ Maintenance RGPD — Purge des prédictions
     caption: Supprime définitivement les prédictions anciennes. Utilisez **Simuler**

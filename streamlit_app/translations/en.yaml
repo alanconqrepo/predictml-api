@@ -831,6 +831,31 @@ predictions:
       | `observed_result` | Yes | Observed value / actual class |
 
       | `date_time` | No | Observation date/time (ISO 8601 or YYYY-MM-DD) |'
+  labeling_queue:
+    expander_title: 🏷️ Labeling queue
+    caption: Identify which predictions to annotate first to improve model performance.
+      Export them as CSV, fill in the `observed_result` column, then import via the
+      CSV Import form below.
+    strategy_label: Strategy
+    strategy_uncertainty: Uncertainty (recommended)
+    strategy_recent: Most recent
+    strategy_random: Random
+    model_label: Model
+    all_models: (all)
+    limit_label: Number to display
+    total_metric: Unlabeled
+    total_metric_help: Predictions with no matching observed result (id_obs not yet
+      annotated).
+    all_labeled: ✅ All predictions have an observed result.
+    col_model: Model
+    col_version: Version
+    col_prediction: Prediction
+    col_confidence: Confidence
+    col_timestamp: Timestamp
+    export_btn: ⬇️ Export {count} prediction(s) to label (CSV)
+    import_hint: Fill in the `observed_result` column of the exported CSV, then import
+      it via the form below.
+    error: 'Error loading the labeling queue: {error}'
   purge:
     expander_title: 🗑️ GDPR Maintenance — Prediction purge
     caption: Permanently deletes old predictions. Use **Simulate** before confirming.
