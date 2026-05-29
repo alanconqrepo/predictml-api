@@ -432,6 +432,7 @@ services:
       - .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:${PGBOUNCER_PORT:-6432}/${POSTGRES_DB:-sklearn_api}
+      - DATABASE_READ_REPLICA_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer-read:${PGBOUNCER_PORT:-6432}/${POSTGRES_DB:-sklearn_api}
       - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis-master:${REDIS_PORT:-6379}/0
       - REDIS_SENTINEL_HOSTS=redis-sentinel-1:${REDIS_SENTINEL_PORT:-26379},redis-sentinel-2:${REDIS_SENTINEL_PORT:-26379},redis-sentinel-3:${REDIS_SENTINEL_PORT:-26379}
       - SECRET_KEY=${SECRET_KEY:?Définissez SECRET_KEY dans .env}
@@ -490,6 +491,7 @@ services:
       - .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:${PGBOUNCER_PORT:-6432}/${POSTGRES_DB:-sklearn_api}
+      - DATABASE_READ_REPLICA_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer-read:${PGBOUNCER_PORT:-6432}/${POSTGRES_DB:-sklearn_api}
       - REDIS_URL=redis://:${REDIS_PASSWORD:?Définissez REDIS_PASSWORD dans .env}@redis-master:${REDIS_PORT:-6379}/0
       - REDIS_SENTINEL_HOSTS=redis-sentinel-1:${REDIS_SENTINEL_PORT:-26379},redis-sentinel-2:${REDIS_SENTINEL_PORT:-26379},redis-sentinel-3:${REDIS_SENTINEL_PORT:-26379}
       - SECRET_KEY=${SECRET_KEY:?Définissez SECRET_KEY dans .env}
