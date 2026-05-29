@@ -164,6 +164,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Database warning", error=str(e))
 
+    try:
+        await minio_service.ensure_bucket_ready()
+    except Exception as e:
+        logger.warning("MinIO bucket init warning", error=str(e))
+
     await _bootstrap_admin_user()
 
     await _warmup_production_models()

@@ -43,6 +43,10 @@ class MinIOService:
         except S3Error as e:
             logger.error("MinIO error while creating bucket", error=str(e))
 
+    async def ensure_bucket_ready(self) -> None:
+        """Eagerly create the bucket at startup (called from lifespan)."""
+        await asyncio.to_thread(self._ensure_bucket_exists)
+
     def upload_model(self, model: Any, object_name: str, metadata: Optional[dict] = None) -> dict:
         """
         Upload a model to MinIO

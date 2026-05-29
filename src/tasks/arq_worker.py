@@ -26,6 +26,12 @@ from arq.connections import RedisSettings
 logger = structlog.get_logger(__name__)
 
 
+def _redis_settings() -> RedisSettings:
+    from src.core.config import settings
+
+    return RedisSettings.from_dsn(settings.REDIS_URL)
+
+
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
@@ -423,8 +429,5 @@ class WorkerSettings:
     # Grace time for missed jobs (e.g. worker restarted)
     keep_result = 3600  # keep result 1 h in Redis
 
-    @classmethod
-    def redis_settings(cls) -> RedisSettings:
-        from src.core.config import settings
+    redis_settings = _redis_settings()
 
-        return RedisSettings.from_dsn(settings.REDIS_URL)
