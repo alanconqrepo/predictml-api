@@ -11,6 +11,7 @@ import io
 from typing import List, Optional
 
 import numpy as np
+import pandas as pd
 import structlog
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -116,10 +117,7 @@ class GoldenTestService:
 
             try:
                 if hasattr(model, "feature_names_in_"):
-                    x = np.array(
-                        [[features[name] for name in model.feature_names_in_]],
-                        dtype=object,
-                    )
+                    x = pd.DataFrame([{name: features[name] for name in model.feature_names_in_}])
                 else:
                     x = np.array([list(features.values())], dtype=object)
 

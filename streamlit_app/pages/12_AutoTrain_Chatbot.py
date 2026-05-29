@@ -551,7 +551,7 @@ with tab_data:
                     ]:
                         if col in df_preview.columns:
                             df_preview[col] = df_preview[col].astype(str).str[:60]
-                    st.dataframe(df_preview, use_container_width=True, hide_index=True)
+                    st.dataframe(df_preview, width="stretch", hide_index=True)
                 except Exception:
                     st.json(preview[:3])
 
@@ -601,7 +601,7 @@ with tab_scripts:
             )
         st.dataframe(
             pd.DataFrame(summary_rows),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
