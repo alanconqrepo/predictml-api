@@ -110,7 +110,7 @@ for col, svc in zip(cols, _SERVICES):
             t("services.open_btn", name=svc['name']),
             _full_url,
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
 
         st.markdown("---")

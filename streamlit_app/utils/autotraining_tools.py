@@ -664,7 +664,7 @@ def render_autotraining_tool_result(tool_name: str, result: dict) -> None:
                     for col in ["input_features", "prediction_result", "observed_result"]:
                         if col in df_preview.columns:
                             df_preview[col] = df_preview[col].astype(str).str[:50]
-                    st.dataframe(df_preview, use_container_width=True, hide_index=True)
+                    st.dataframe(df_preview, width="stretch", hide_index=True)
                 except Exception:
                     st.json(preview)
 

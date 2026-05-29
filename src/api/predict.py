@@ -90,7 +90,7 @@ async def _run_shadow_prediction(
                         f"Shadow model '{model_name}:{shadow_version}' does not have feature_names_in_"
                     )
 
-                x = np.array([[features[n] for n in shadow_model.feature_names_in_]], dtype=object)
+                x = pd.DataFrame([{n: features[n] for n in shadow_model.feature_names_in_}])
                 raw = shadow_model.predict(x)[0]
                 result = raw.item() if hasattr(raw, "item") else raw
                 proba = (
@@ -100,23 +100,28 @@ async def _run_shadow_prediction(
                 )
                 rt_ms = (_time.time() - start) * 1000
 
-                await DBService.create_prediction(
-                    db=db,
-                    user_id=user_id,
-                    model_name=shadow_meta.name,
-                    model_version=shadow_meta.version,
-                    input_features=features,
-                    prediction_result=result,
-                    probabilities=proba,
-                    response_time_ms=rt_ms,
-                    client_ip=client_ip,
-                    user_agent=user_agent,
-                    status="success",
-                    id_obs=id_obs,
-                    is_shadow=True,
-                    max_confidence=max(proba) if proba else None,
-                    timestamp=timestamp,
-                )
+                _payload = {
+                    "user_id": user_id,
+                    "model_name": shadow_meta.name,
+                    "model_version": shadow_meta.version,
+                    "input_features": features,
+                    "prediction_result": result,
+                    "probabilities": proba,
+                    "response_time_ms": rt_ms,
+                    "client_ip": client_ip,
+                    "user_agent": user_agent,
+                    "status": "success",
+                    "id_obs": id_obs,
+                    "is_shadow": True,
+                    "max_confidence": max(proba) if proba else None,
+                    "timestamp": timestamp,
+                }
+                if settings.PREDICTION_STREAM_ENABLED:
+                    _published = await _publish_prediction_to_stream(_payload)
+                    if not _published:
+                        await DBService.create_prediction(db=db, **_payload)
+                else:
+                    await DBService.create_prediction(db=db, **_payload)
 
                 logger.info(
                     "Shadow prediction recorded",
@@ -822,7 +827,7 @@ async def explain_prediction_by_id(
         )
 
     feature_names = list(model.feature_names_in_)
-    x = np.array([[prediction.input_features[f] for f in feature_names]], dtype=float)
+    x = pd.DataFrame([{f: prediction.input_features[f] for f in feature_names}])
 
     explanation = compute_shap_explanation(
         model=model,
@@ -971,9 +976,7 @@ async def predict(
                             "expected_features": sorted(expected),
                         },
                     )
-        x = np.array(
-            [[input_data.features[name] for name in model.feature_names_in_]], dtype=object
-        )
+        x = pd.DataFrame([{name: input_data.features[name] for name in model.feature_names_in_}])
 
         # Run prediction
         prediction = model.predict(x)[0]
@@ -1269,7 +1272,7 @@ async def predict_batch(
                             },
                         )
 
-            x = np.array([[item.features[name] for name in model.feature_names_in_]], dtype=object)
+            x = pd.DataFrame([{name: item.features[name] for name in model.feature_names_in_}])
 
             raw = model.predict(x)[0]
             prediction_result = raw.item() if hasattr(raw, "item") else raw
@@ -1425,7 +1428,7 @@ async def explain(
             ),
         )
 
-    x = np.array([[input_data.features[f] for f in feature_names]], dtype=float)
+    x = pd.DataFrame([{f: input_data.features[f] for f in feature_names}])
 
     raw = model.predict(x)[0]
     prediction_result = raw.item() if hasattr(raw, "item") else raw
