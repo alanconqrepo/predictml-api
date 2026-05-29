@@ -716,7 +716,7 @@ with tab_history:
                             coloraxis_showscale=False,
                             margin=dict(l=10, r=30, t=50, b=10),
                         )
-                        _gc1.plotly_chart(_fig_top, use_container_width=True)
+                        _gc1.plotly_chart(_fig_top, width="stretch")
 
                         if _by_day_rows:
                             _df_day = pd.DataFrame(_by_day_rows)
@@ -730,7 +730,7 @@ with tab_history:
                                 markers=True,
                             )
                             _fig_day.update_layout(legend_title_text=t("predictions.activity.col_user"))
-                            _gc2.plotly_chart(_fig_day, use_container_width=True)
+                            _gc2.plotly_chart(_fig_day, width="stretch")
 
                         if _by_model_rows:
                             st.markdown(t("predictions.activity.detail_by_user_model_header"))
@@ -762,7 +762,7 @@ with tab_history:
                                     t("predictions.activity.col_error_rate"),
                                     t("predictions.activity.col_avg_latency")]],
                                 hide_index=True,
-                                use_container_width=True,
+                                width="stretch",
                             )
 
                             _fig_stack = px.bar(
@@ -780,7 +780,7 @@ with tab_history:
                                 legend_title_text=t("predictions.activity.col_model"),
                                 xaxis_title=t("predictions.activity.col_user"),
                             )
-                            _col_chart.plotly_chart(_fig_stack, use_container_width=True)
+                            _col_chart.plotly_chart(_fig_stack, width="stretch")
 
         # --- Labeling queue ---
         with st.expander(t("predictions.labeling_queue.expander_title"), expanded=False):

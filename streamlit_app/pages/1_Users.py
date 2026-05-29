@@ -465,7 +465,7 @@ with tab_requests:
         })
         st.dataframe(
             df_req,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 _req_col_id: st.column_config.NumberColumn(
@@ -511,7 +511,7 @@ with tab_requests:
         col_approve, col_reject = st.columns(2)
 
         with col_approve:
-            if st.button(t("users.requests.btn_approve"), use_container_width=True, type="primary"):
+            if st.button(t("users.requests.btn_approve"), width="stretch", type="primary"):
                 try:
                     result = client.approve_account_request(selected_req["id"])
                     created_user = result["created_user"]
@@ -529,7 +529,7 @@ with tab_requests:
             reject_reason = st.text_input(
                 t("users.requests.reject_reason_label"), key="reject_reason_input"
             )
-            if st.button(t("users.requests.btn_reject"), use_container_width=True, type="secondary"):
+            if st.button(t("users.requests.btn_reject"), width="stretch", type="secondary"):
                 try:
                     client.reject_account_request(
                         selected_req["id"], reason=reject_reason or None
@@ -577,7 +577,7 @@ with tab_requests:
                 })
                 st.dataframe(
                     df_past,
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                     column_config={
                         _hist_col_id: st.column_config.NumberColumn(

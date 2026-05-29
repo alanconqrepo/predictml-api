@@ -288,7 +288,7 @@ def show_home():  # noqa: C901
                         t("home.leaderboard.col_drift"): drift,
                     }
                 )
-            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
             st.page_link("pages/4_Stats.py", label=t("home.leaderboard.full_link"))
         else:
             n_prod = sum(1 for m in all_models if m.get("is_production"))
