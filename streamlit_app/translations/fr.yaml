@@ -2203,7 +2203,7 @@ models:
   detail_webhook_empty: '**Webhook URL :** —'
   detail_mlflow: '**MLflow run :** [{run_id}]({link})'
   detail_mlflow_empty: '**MLflow run :** —'
-  detail_minio: '**MinIO object :** `{bucket}/{key}`'
+  detail_minio: '**MinIO object :** `{bucket}/{minio_key}`'
   detail_file_size: '**Taille fichier :** {size} KB'
   detail_nb_features: '**Nb features :** {value}'
   detail_last_pred: '**Dernière prédiction :** {value}'

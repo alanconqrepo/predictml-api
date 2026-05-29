@@ -231,6 +231,7 @@ services:
       # Recycle les connexions serveur inactives après 10 min
       PGBOUNCER_SERVER_IDLE_TIMEOUT: "600"
       PGBOUNCER_SERVER_RESET_QUERY: DISCARD ALL
+      PGBOUNCER_IGNORE_STARTUP_PARAMETERS: jit
     depends_on:
       postgres:
         condition: service_healthy
@@ -261,6 +262,7 @@ services:
       PGBOUNCER_QUERY_WAIT_TIMEOUT: "10"
       PGBOUNCER_SERVER_IDLE_TIMEOUT: "600"
       PGBOUNCER_SERVER_RESET_QUERY: DISCARD ALL
+      PGBOUNCER_IGNORE_STARTUP_PARAMETERS: jit
     depends_on:
       postgres-replica:
         condition: service_healthy

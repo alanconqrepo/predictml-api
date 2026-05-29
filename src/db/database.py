@@ -2,8 +2,6 @@
 Database configuration
 """
 
-import uuid
-
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
@@ -26,15 +24,11 @@ _ENGINE_KWARGS = dict(
     # LIFO: prefer reusing recent connections → better cache on Postgres side
     pool_use_lifo=True,
     # PgBouncer transaction mode does not support server-side prepared statements.
-    # prepared_statement_cache_size=0 disables the LRU cache but asyncpg 0.30+ still
-    # creates *named* prepared statements (e.g. __asyncpg_stmt_39__).  When PgBouncer
-    # reassigns a backend connection to a different asyncpg connection, both may try to
-    # create the same name → "prepared statement already exists".
-    # prepared_statement_name_func forces a globally-unique name per statement so
-    # collisions are impossible regardless of connection reuse.
+    # prepared_statement_cache_size=0 tells asyncpg to use unnamed (one-shot) prepared
+    # statements, which are deallocated immediately after execution and never collide
+    # across PgBouncer-recycled backends.
     connect_args={
-        "prepared_statement_cache_size": 0,
-        "prepared_statement_name_func": lambda: f"__asyncpg_{uuid.uuid4().hex}__",
+        "statement_cache_size": 0,
     },
 )
 

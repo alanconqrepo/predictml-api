@@ -976,7 +976,7 @@ with st.expander(t("models.details_expander"), expanded=True):
             st.markdown(t("models.detail_mlflow_empty"))
 
         if minio_key:
-            st.markdown(t("models.detail_minio", bucket=selected.get('minio_bucket'), key=minio_key))
+            st.markdown(t("models.detail_minio", bucket=selected.get('minio_bucket'), minio_key=minio_key))
             if size:
                 st.markdown(t("models.detail_file_size", size=f"{size / 1024:.1f}"))
 
