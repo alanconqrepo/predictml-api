@@ -265,6 +265,8 @@ def show_home():  # noqa: C901
 
     if critical or warning:
         st.divider()
+        st.subheader(t("home.alerts.subheader"))
+        st.caption(t("home.alerts.subheader_caption"))
         if critical:
             names_c = ", ".join(f"**{m.get('model_name', '?')}**" for m in critical)
             st.error(t("home.alerts.critical", count=len(critical), names=names_c))

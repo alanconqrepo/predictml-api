@@ -579,6 +579,8 @@ home:
     coverage: 🔖 Ground truth coverage
     coverage_help: Percentage of predictions with an observed result (ground truth)
   alerts:
+    subheader: 🚨 Active alerts
+    subheader_caption: Models whose error rate, latency, or drift exceeds configured thresholds. Act quickly to avoid production impact.
     critical: '🔴 {count} model(s) in critical state: {names}'
     warning: '⚠️ {count} model(s) in alert: {names}'
     supervision_link: → View full supervision

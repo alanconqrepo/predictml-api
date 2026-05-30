@@ -590,6 +590,8 @@ home:
     coverage: 🔖 Couverture terrain
     coverage_help: Pourcentage de prédictions avec un résultat observé (ground truth)
   alerts:
+    subheader: 🚨 Alertes actives
+    subheader_caption: Modèles dont le taux d'erreur, la latence ou le drift dépasse les seuils configurés. Agissez rapidement pour éviter un impact en production.
     critical: '🔴 {count} modèle(s) en état critique : {names}'
     warning: '⚠️ {count} modèle(s) en alerte : {names}'
     supervision_link: → Voir la supervision complète
