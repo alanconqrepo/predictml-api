@@ -132,6 +132,7 @@ for col, svc in zip(cols, _SERVICES):
             label_visibility="collapsed",
             placeholder=t("services.login_label"),
         )
+        st.caption(t("services.env_var_caption", env_url=svc["env_user"]))
 
         # Password — hidden by default, st.code when visible (built-in copy button)
         if svc["password"]:
@@ -146,6 +147,7 @@ for col, svc in zip(cols, _SERVICES):
                     key=f"pass_{svc['name']}",
                     label_visibility="collapsed",
                 )
+            st.caption(t("services.env_var_caption", env_url=svc["env_pass"]))
         else:
             st.error(t("services.password_missing", env_var=svc['env_pass']))
 
@@ -182,6 +184,7 @@ with cols[3]:
                 label_visibility="collapsed",
             )
         st.caption(t("services.swagger_token_caption"))
+        st.caption(t("services.env_var_caption", env_url="API_TOKEN"))
     else:
         st.warning(t("services.swagger_token_missing"))
 
