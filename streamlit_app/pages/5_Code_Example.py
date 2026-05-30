@@ -29,10 +29,9 @@ tab_python, tab_curl, tab_js = st.tabs([
 # ============================================================
 with tab_python:
     # SECTION 1 — Train and track with MLflow
-    st.subheader(t("code_example.python.section1_title"))
-    st.markdown(t("code_example.python.section1_install"))
-
-    code_mlflow = f"""\
+    with st.expander(t("code_example.python.section1_title"), expanded=False):
+        st.markdown(t("code_example.python.section1_install"))
+        code_mlflow = f"""\
 import joblib
 import mlflow
 import mlflow.sklearn
@@ -82,12 +81,11 @@ joblib.dump(model, f"{{MODEL_NAME}}_v{{MODEL_VERSION}}.joblib")
 
 print("Model saved.")
 """
-    st.code(code_mlflow, language="python")
+        st.code(code_mlflow, language="python")
 
     # SECTION 2 — Upload via the API
-    st.subheader(t("code_example.python.section2_title"))
-
-    code_upload = f"""\
+    with st.expander(t("code_example.python.section2_title"), expanded=False):
+        code_upload = f"""\
 import requests
 
 # ── Configuration ──────────────────────────────────────────────
@@ -123,12 +121,11 @@ response.raise_for_status()
 model_data = response.json()
 print(f"Model uploaded: {{model_data['name']}} v{{model_data['version']}}")
 """
-    st.code(code_upload, language="python")
+        st.code(code_upload, language="python")
 
     # SECTION 3 — Make a prediction
-    st.subheader(t("code_example.python.section3_title"))
-
-    code_predict = f"""\
+    with st.expander(t("code_example.python.section3_title"), expanded=False):
+        code_predict = f"""\
 import requests
 
 API_URL = "{API_URL}"
@@ -162,13 +159,12 @@ requests.patch(
 ).raise_for_status()
 print("Version 1.0.0 promoted to production.")
 """
-    st.code(code_predict, language="python")
+        st.code(code_predict, language="python")
 
     # SECTION 4 — Record observed results
-    st.subheader(t("code_example.python.section4_title"))
-    st.markdown(t("code_example.python.section4_caption"))
-
-    code_observed = f"""\
+    with st.expander(t("code_example.python.section4_title"), expanded=False):
+        st.markdown(t("code_example.python.section4_caption"))
+        code_observed = f"""\
 import requests
 from datetime import datetime
 
@@ -191,15 +187,14 @@ response = requests.post(f"{{API_URL}}/observed-results", headers=headers, json=
 response.raise_for_status()
 print(f"{{response.json()[\'upserted\']}} result(s) recorded.")
 """
-    st.code(code_observed, language="python")
+        st.code(code_observed, language="python")
 
 # ============================================================
 # TAB CURL / BASH
 # ============================================================
 with tab_curl:
-    st.subheader(t("code_example.curl.section1_title"))
-
-    code_curl_upload = f"""\
+    with st.expander(t("code_example.curl.section1_title"), expanded=False):
+        code_curl_upload = f"""\
 #!/usr/bin/env bash
 API_URL="{API_URL}"
 TOKEN="{TOKEN}"
@@ -216,11 +211,10 @@ curl -X POST "$API_URL/models" \\
   -F "features_count=4" \\
   -F "classes=[0, 1, 2]"
 """
-    st.code(code_curl_upload, language="bash")
+        st.code(code_curl_upload, language="bash")
 
-    st.subheader(t("code_example.curl.section2_title"))
-
-    code_curl_predict = f"""\
+    with st.expander(t("code_example.curl.section2_title"), expanded=False):
+        code_curl_predict = f"""\
 API_URL="{API_URL}"
 TOKEN="{TOKEN}"
 
@@ -238,11 +232,10 @@ curl -X POST "$API_URL/predict" \\
     "id_obs": "obs_001"
   }}'
 """
-    st.code(code_curl_predict, language="bash")
+        st.code(code_curl_predict, language="bash")
 
-    st.subheader(t("code_example.curl.section3_title"))
-
-    code_curl_history = f"""\
+    with st.expander(t("code_example.curl.section3_title"), expanded=False):
+        code_curl_history = f"""\
 API_URL="{API_URL}"
 TOKEN="{TOKEN}"
 
@@ -251,11 +244,10 @@ curl -G "$API_URL/predictions" \\
   --data-urlencode "model_name=iris_model" \\
   --data-urlencode "limit=10"
 """
-    st.code(code_curl_history, language="bash")
+        st.code(code_curl_history, language="bash")
 
-    st.subheader(t("code_example.curl.section4_title"))
-
-    code_curl_observed = f"""\
+    with st.expander(t("code_example.curl.section4_title"), expanded=False):
+        code_curl_observed = f"""\
 API_URL="{API_URL}"
 TOKEN="{TOKEN}"
 
@@ -273,16 +265,15 @@ curl -X POST "$API_URL/observed-results" \\
     ]
   }}'
 """
-    st.code(code_curl_observed, language="bash")
+        st.code(code_curl_observed, language="bash")
 
 # ============================================================
 # TAB JAVASCRIPT
 # ============================================================
 with tab_js:
-    st.subheader(t("code_example.js.section1_title"))
-    st.markdown(t("code_example.js.section1_caption"))
-
-    code_js_upload = f"""\
+    with st.expander(t("code_example.js.section1_title"), expanded=False):
+        st.markdown(t("code_example.js.section1_caption"))
+        code_js_upload = f"""\
 const API_URL = "{API_URL}";
 const TOKEN = "{TOKEN}";
 
@@ -308,11 +299,10 @@ const response = await fetch(`${{API_URL}}/models`, {{
 const model = await response.json();
 console.log(`Model uploaded: ${{model.name}} v${{model.version}}`);
 """
-    st.code(code_js_upload, language="javascript")
+        st.code(code_js_upload, language="javascript")
 
-    st.subheader(t("code_example.js.section2_title"))
-
-    code_js_predict = f"""\
+    with st.expander(t("code_example.js.section2_title"), expanded=False):
+        code_js_predict = f"""\
 const API_URL = "{API_URL}";
 const TOKEN = "{TOKEN}";
 
@@ -337,11 +327,10 @@ const result = await response.json();
 console.log(`Prediction: ${{result.prediction}}`);
 console.log(`Probabilités :`, result.probability);
 """
-    st.code(code_js_predict, language="javascript")
+        st.code(code_js_predict, language="javascript")
 
-    st.subheader(t("code_example.js.section3_title"))
-
-    code_js_history = f"""\
+    with st.expander(t("code_example.js.section3_title"), expanded=False):
+        code_js_history = f"""\
 const API_URL = "{API_URL}";
 const TOKEN = "{TOKEN}";
 
@@ -352,11 +341,10 @@ const response = await fetch(`${{API_URL}}/predictions?${{params}}`, {{
 const history = await response.json();
 console.log(`${{history.length}} prediction(s) found.`);
 """
-    st.code(code_js_history, language="javascript")
+        st.code(code_js_history, language="javascript")
 
-    st.subheader(t("code_example.js.section4_title"))
-
-    code_js_observed = f"""\
+    with st.expander(t("code_example.js.section4_title"), expanded=False):
+        code_js_observed = f"""\
 const API_URL = "{API_URL}";
 const TOKEN = "{TOKEN}";
 
@@ -380,7 +368,7 @@ const response = await fetch(`${{API_URL}}/observed-results`, {{
 const result = await response.json();
 console.log(`${{result.upserted}} result(s) recorded.`);
 """
-    st.code(code_js_observed, language="javascript")
+        st.code(code_js_observed, language="javascript")
 
 st.divider()
 st.caption(t("code_example.footer_caption", api_url=API_URL, mlflow_url=MLFLOW_URL))

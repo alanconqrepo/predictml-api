@@ -201,6 +201,8 @@ def show_home():  # noqa: C901
         1 for m in mon_models if m.get("health_status") in ("warning", "critical")
     )
 
+    st.subheader(t("home.status.subheader"))
+    st.caption(t("home.status.subheader_caption"))
     col_s, col_db, col_cache, col_alerts = st.columns(4)
     col_s.metric(
         t("home.status.api_label"),
@@ -209,43 +211,50 @@ def show_home():  # noqa: C901
             if api_status == "healthy"
             else (t("home.status.api_degraded") if api_status == "degraded" else t("home.status.api_unknown"))
         ),
+        help=t("home.status.api_label_help"),
     )
     col_db.metric(
         t("home.status.db_label"),
         t("home.status.db_connected") if db_status == "connected" else f"⚠️ {db_status}",
+        help=t("home.status.db_label_help"),
     )
     col_cache.metric(
         t("home.status.cache_label"),
         t("home.status.cache_value", count=cached) if cached else "—",
+        help=t("home.status.cache_label_help"),
     )
     col_alerts.metric(
         t("home.status.alerts_label"),
         t("home.status.alerts_count", count=models_alert_count) if models_alert_count > 0 else t("home.status.alerts_none"),
+        help=t("home.status.alerts_label_help"),
     )
 
     # ── 2. Global KPIs — last 30 days ─────────────────────────────────
     st.divider()
     st.subheader(t("home.kpis.subheader"))
+    st.caption(t("home.kpis.subheader_caption"))
 
     total_preds = sum(s.get("total_predictions", 0) for s in pred_stats)
     total_err = sum(s.get("error_count", 0) for s in pred_stats)
     success_rate = round((1 - total_err / total_preds) * 100, 1) if total_preds > 0 else None
     p95_vals = [
-        s["response_time_p95_ms"] for s in pred_stats if s.get("response_time_p95_ms") is not None
+        s["p95_response_time_ms"] for s in pred_stats if s.get("p95_response_time_ms") is not None
     ]
     latency_p95 = round(sum(p95_vals) / len(p95_vals), 0) if p95_vals else None
     cov_rate = coverage.get("coverage_rate")
     coverage_pct = f"{cov_rate * 100:.1f}%" if cov_rate is not None else "—"
 
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric(t("home.kpis.predictions"), f"{total_preds:,}" if total_preds else "—")
+    k1.metric(t("home.kpis.predictions"), f"{total_preds:,}" if total_preds else "—", help=t("home.kpis.predictions_help"))
     k2.metric(
         t("home.kpis.success_rate"),
         f"{success_rate}%" if success_rate is not None else "—",
+        help=t("home.kpis.success_rate_help"),
     )
     k3.metric(
         t("home.kpis.latency_p95"),
         f"{int(latency_p95)} ms" if latency_p95 is not None else "—",
+        help=t("home.kpis.latency_p95_help"),
     )
     k4.metric(
         t("home.kpis.coverage"),
@@ -259,6 +268,8 @@ def show_home():  # noqa: C901
 
     if critical or warning:
         st.divider()
+        st.subheader(t("home.alerts.subheader"))
+        st.caption(t("home.alerts.subheader_caption"))
         if critical:
             names_c = ", ".join(f"**{m.get('model_name', '?')}**" for m in critical)
             st.error(t("home.alerts.critical", count=len(critical), names=names_c))
@@ -267,85 +278,100 @@ def show_home():  # noqa: C901
             st.warning(t("home.alerts.warning", count=len(warning), names=names_w))
         st.page_link("pages/7_Supervision.py", label=t("home.alerts.supervision_link"))
 
-    # ── 4. Leaderboard + Health grid side by side ────────────────────────────
+    # ── 4. Leaderboard ────────────────────────────────────────────────────
     st.divider()
-    col_lb, col_health = st.columns([3, 2])
-
-    with col_lb:
-        st.subheader(t("home.leaderboard.subheader"))
-        if leaderboard:
-            rows = []
-            for item in leaderboard[:5]:
-                acc = item.get("accuracy")
-                drift = item.get("drift_status") or "—"
-                rows.append(
-                    {
-                        "#": item.get("rank", "—"),
-                        t("home.leaderboard.col_model"): item.get("model_name", "—"),
-                        t("home.leaderboard.col_version"): item.get("version", "—"),
-                        t("home.leaderboard.col_accuracy"): f"{acc:.1%}" if acc is not None else "—",
-                        t("home.leaderboard.col_predictions"): f"{item.get('predictions_count', 0):,}",
-                        t("home.leaderboard.col_drift"): drift,
-                    }
-                )
-            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-            st.page_link("pages/4_Stats.py", label=t("home.leaderboard.full_link"))
-        else:
-            n_prod = sum(1 for m in all_models if m.get("is_production"))
-            if all_models:
-                st.metric(t("home.leaderboard.active_models"), len(all_models))
-                st.metric(t("home.leaderboard.prod_versions"), n_prod)
+    st.subheader(t("home.leaderboard.subheader"))
+    st.caption(t("home.leaderboard.subheader_caption"))
+    if leaderboard:
+        _mode_badge = {
+            "ab":      "🟠 A/B",
+            "ab_test": "🟠 A/B",
+            "shadow":  "🟣 Shadow",
+        }
+        rows = []
+        for item in leaderboard[:5]:
+            acc = item.get("accuracy")
+            drift = item.get("drift_status") or "—"
+            mode = item.get("deployment_mode")
+            if mode in _mode_badge:
+                mode_label = _mode_badge[mode]
+            elif item.get("is_production"):
+                mode_label = "🟢 Production"
             else:
-                st.info(t("home.leaderboard.no_models"))
-                st.page_link("pages/2_Models.py", label=t("home.leaderboard.upload_link"))
-
-    with col_health:
-        st.subheader(t("home.health.subheader"))
-        if mon_models:
-            for m in mon_models:
-                status = m.get("health_status", "unknown")
-                badge = {"ok": "✅", "warning": "⚠️", "critical": "🔴"}.get(status, "❓")
-                name = m.get("model_name", "?")
-                err = m.get("error_rate")
-                p95 = m.get("latency_p95_ms") or m.get("response_time_p95_ms")
-                preds = m.get("predictions_count") or m.get("total_predictions", 0)
-                details = []
-                if err is not None:
-                    details.append(t("home.health.detail_error", rate=f"{err:.1%}"))
-                if p95 is not None:
-                    details.append(t("home.health.detail_p95", ms=int(p95)))
-                if preds:
-                    details.append(t("home.health.detail_preds", count=f"{preds:,}"))
-                detail_str = f" — {' · '.join(details)}" if details else ""
-                st.markdown(f"{badge} **{name}**{detail_str}")
-            st.page_link("pages/7_Supervision.py", label=t("home.health.supervision_link"))
-        elif all_models:
-            for m in all_models[:8]:
-                badge = "🟢" if m.get("is_production") else "⚪"
-                st.markdown(f"{badge} **{m.get('name')}** v{m.get('version')}")
-            if len(all_models) > 8:
-                st.caption(t("home.health.more_versions", count=len(all_models) - 8))
+                mode_label = "✅ Actif"
+            rows.append(
+                {
+                    "#": item.get("rank", "—"),
+                    t("home.leaderboard.col_model"): item.get("name") or item.get("model_name", "—"),
+                    t("home.leaderboard.col_version"): item.get("version", "—"),
+                    t("home.leaderboard.col_mode"): mode_label,
+                    t("home.leaderboard.col_accuracy"): f"{acc:.1%}" if acc is not None else "—",
+                    t("home.leaderboard.col_predictions"): f"{item.get('predictions_count', 0):,}",
+                    t("home.leaderboard.col_drift"): drift,
+                }
+            )
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        st.page_link("pages/4_Stats.py", label=t("home.leaderboard.full_link"))
+    else:
+        n_prod = sum(1 for m in all_models if m.get("is_production"))
+        if all_models:
+            st.metric(t("home.leaderboard.active_models"), len(all_models))
+            st.metric(t("home.leaderboard.prod_versions"), n_prod)
         else:
-            st.info(t("home.health.no_models"))
+            st.info(t("home.leaderboard.no_models"))
+            st.page_link("pages/2_Models.py", label=t("home.leaderboard.upload_link"))
+
+    # ── 5a. Health grid ───────────────────────────────────────────────────
+    st.divider()
+    st.subheader(t("home.health.subheader"))
+    period_label = f"{(now - timedelta(days=30)).strftime('%d/%m/%Y')} → {now.strftime('%d/%m/%Y')}"
+    st.caption(f"{t('home.health.subheader_caption')} · {period_label}")
+    if mon_models:
+        for m in mon_models:
+            status = m.get("health_status", "unknown")
+            badge = {"ok": "✅", "warning": "⚠️", "critical": "🔴"}.get(status, "❓")
+            name = m.get("model_name", "?")
+            err = m.get("error_rate")
+            p95 = m.get("p95_latency_ms") or m.get("latency_p95_ms") or m.get("response_time_p95_ms")
+            preds = m.get("predictions_count") or m.get("total_predictions", 0)
+            details = []
+            if err is not None:
+                details.append(t("home.health.detail_error", rate=f"{err:.1%}"))
+            if p95 is not None:
+                details.append(t("home.health.detail_p95", ms=int(p95)))
+            if preds:
+                details.append(t("home.health.detail_preds", count=f"{preds:,}"))
+            detail_str = f" — {' · '.join(details)}" if details else ""
+            st.markdown(f"{badge} **{name}**{detail_str}")
+        st.page_link("pages/7_Supervision.py", label=t("home.health.supervision_link"))
+    elif all_models:
+        for m in all_models[:8]:
+            badge = "🟢" if m.get("is_production") else "⚪"
+            st.markdown(f"{badge} **{m.get('name')}** v{m.get('version')}")
+        if len(all_models) > 8:
+            st.caption(t("home.health.more_versions", count=len(all_models) - 8))
+    else:
+        st.info(t("home.health.no_models"))
 
     # ── 5. Active A/B tests and Shadow deployments (conditional) ──────────────────────────
-    ab_versions = [m for m in all_models if m.get("deployment_mode") == "ab"]
+    ab_versions = [m for m in all_models if m.get("deployment_mode") in ("ab", "ab_test")]
     shadow_versions = [m for m in all_models if m.get("deployment_mode") == "shadow"]
 
     if ab_versions or shadow_versions:
         st.divider()
+        st.subheader(t("home.ab_shadow.subheader"))
+        st.caption(t("home.ab_shadow.subheader_caption"))
         c1, c2 = st.columns(2)
-        if ab_versions:
-            ab_names = ", ".join({m.get("name", "?") for m in ab_versions})
-            c1.info(t("home.ab_shadow.ab_info", count=len(ab_versions), names=ab_names))
-        if shadow_versions:
-            sh_names = ", ".join({m.get("name", "?") for m in shadow_versions})
-            c2.info(t("home.ab_shadow.shadow_info", count=len(shadow_versions), names=sh_names))
+        ab_names = ", ".join({m.get("name", "?") for m in ab_versions}) if ab_versions else "—"
+        sh_names = ", ".join({m.get("name", "?") for m in shadow_versions}) if shadow_versions else "—"
+        c1.info(t("home.ab_shadow.ab_info", count=len(ab_versions), names=ab_names))
+        c2.info(t("home.ab_shadow.shadow_info", count=len(shadow_versions), names=sh_names))
         st.page_link("pages/6_AB_Testing.py", label=t("home.ab_shadow.manage_link"))
 
     # ── 6. Navigation cards ───────────────────────────────────────────────
     st.divider()
     st.subheader(t("home.nav.subheader"))
+    st.caption(t("home.nav.subheader_caption"))
 
     nav_items = [
         (

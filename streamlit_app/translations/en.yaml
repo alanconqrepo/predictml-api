@@ -553,32 +553,46 @@ home:
   role_user: 👤 User
   caption: 'Logged in — {role}  |  API: `{api_url}`'
   status:
+    subheader: 🖥️ System status
+    subheader_caption: Real-time state of the API, database, and models loaded in memory.
     api_label: API Status
+    api_label_help: Health state of the FastAPI service. ✅ Online = all routes respond normally. ⚠️ Degraded = API responds but some internal components have errors.
     api_online: ✅ Online
     api_degraded: ⚠️ Degraded
     api_unknown: ❓ Unknown
     db_label: Database
+    db_label_help: PostgreSQL connection status. ✅ Connected = database responds and queries work. ⚠️ = database is unreachable or in error.
     db_connected: ✅ Connected
     cache_label: Cached
-    cache_value: '{count} model(s)'
+    cache_label_help: Number of models currently loaded in memory (RAM). A cached model responds without cold-start latency — it does not need to be reloaded from MinIO on each request.
+    cache_value: '{count} version(s)'
     alerts_label: Models in alert
+    alerts_label_help: Number of models whose health status is "warning" or "critical" over the last 30 days. Check the Supervision page for details.
     alerts_count: 🔴 {count}
     alerts_none: ✅ None
   kpis:
     subheader: 📊 Activity — last 30 days
+    subheader_caption: Aggregated metrics across all prediction requests over the last 30 days.
     predictions: 📈 Predictions
+    predictions_help: Total number of /predict requests received over the last 30 days, across all models and users.
     success_rate: ✅ Success rate
+    success_rate_help: "Proportion of requests processed without a technical error: (total − errors) / total. An error = exception raised by the API (model not loaded, missing feature, timeout…). ⚠️ This does not measure prediction quality (accuracy vs ground truth) — see Supervision or Observed Results for that."
     latency_p95: ⚡ P95 Latency
+    latency_p95_help: 95th percentile of API response time in milliseconds. 95% of requests responded in less than this duration. Average computed across all active models.
     coverage: 🔖 Ground truth coverage
     coverage_help: Percentage of predictions with an observed result (ground truth)
   alerts:
+    subheader: 🚨 Active alerts
+    subheader_caption: Models whose error rate, latency, or drift exceeds configured thresholds. Act quickly to avoid production impact.
     critical: '🔴 {count} model(s) in critical state: {names}'
     warning: '⚠️ {count} model(s) in alert: {names}'
     supervision_link: → View full supervision
   leaderboard:
     subheader: 🏆 Model leaderboard
+    subheader_caption: Top 5 production versions ranked by accuracy over the last 30 days.
     col_model: Model
     col_version: Version
+    col_mode: Mode
     col_accuracy: Accuracy
     col_predictions: Predictions
     col_drift: Drift
@@ -589,6 +603,7 @@ home:
     upload_link: 🤖 Upload a model →
   health:
     subheader: 🛡️ Model health
+    subheader_caption: Health of each active model — error rate, P95 latency, and prediction volume.
     detail_error: 'error: {rate}'
     detail_p95: 'P95: {ms} ms'
     detail_preds: '{count} pred.'
@@ -596,11 +611,14 @@ home:
     more_versions: … and {count} more version(s)
     no_models: No models available.
   ab_shadow:
+    subheader: 🧪 Active experiments
+    subheader_caption: Versions running in A/B mode (split traffic) or shadow mode (silent predictions with no user impact).
     ab_info: 🧪 **{count} version(s) in A/B test** — {names}
     shadow_info: 👻 **{count} version(s) in shadow** — {names}
     manage_link: → Manage A/B tests and shadow deployments
   nav:
     subheader: 🗺️ Navigate the dashboard
+    subheader_caption: Quick access to all platform features.
     open_btn: Open →
     users_title: Users
     users_desc: Manage accounts, quotas and access requests
@@ -1388,6 +1406,12 @@ services:
   mlflow_desc: Experiment tracking — runs, metrics, artifacts, comparisons and model
     registry
   open_btn: Open {name} →
+  swagger_name: 📄 API Swagger
+  swagger_desc: Interactive FastAPI documentation — test endpoints directly from the browser using your token.
+  swagger_token_header: "**Bearer Token**"
+  swagger_token_caption: Paste this token into the Swagger `Authorize` field to test authenticated endpoints.
+  swagger_token_missing: Token not available — please log in to the dashboard again.
+  swagger_env_caption: 'Env var: `API_PUBLIC_URL`'
   credentials_header: '**Credentials**'
   login_label: Login
   password_label: Password

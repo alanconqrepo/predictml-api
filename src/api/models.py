@@ -519,6 +519,8 @@ async def get_models_leaderboard(
                 latency_p95_ms=ps.get("p95_response_time_ms"),
                 drift_status=drift_status,
                 predictions_count=ps.get("total_predictions", 0),
+                deployment_mode=m.deployment_mode,
+                is_production=bool(m.is_production),
             )
         )
 
