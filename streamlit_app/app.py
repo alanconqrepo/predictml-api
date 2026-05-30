@@ -290,7 +290,7 @@ def show_home():  # noqa: C901
             rows.append(
                 {
                     "#": item.get("rank", "—"),
-                    t("home.leaderboard.col_model"): item.get("model_name", "—"),
+                    t("home.leaderboard.col_model"): item.get("name") or item.get("model_name", "—"),
                     t("home.leaderboard.col_version"): item.get("version", "—"),
                     t("home.leaderboard.col_accuracy"): f"{acc:.1%}" if acc is not None else "—",
                     t("home.leaderboard.col_predictions"): f"{item.get('predictions_count', 0):,}",
