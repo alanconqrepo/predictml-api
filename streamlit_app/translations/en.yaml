@@ -592,6 +592,7 @@ home:
     subheader_caption: Top 5 production versions ranked by accuracy over the last 30 days.
     col_model: Model
     col_version: Version
+    col_mode: Mode
     col_accuracy: Accuracy
     col_predictions: Predictions
     col_drift: Drift

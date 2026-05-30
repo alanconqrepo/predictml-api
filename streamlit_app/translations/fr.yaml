@@ -603,6 +603,7 @@ home:
     subheader_caption: Top 5 des versions en production, classées par accuracy sur 30 jours.
     col_model: Modèle
     col_version: Version
+    col_mode: Mode
     col_accuracy: Accuracy
     col_predictions: Prédictions
     col_drift: Drift

@@ -895,3 +895,5 @@ class LeaderboardEntry(BaseModel):
     latency_p95_ms: Optional[float] = None
     drift_status: str = "unknown"
     predictions_count: int = 0
+    deployment_mode: Optional[str] = None
+    is_production: bool = False

@@ -283,15 +283,27 @@ def show_home():  # noqa: C901
     st.subheader(t("home.leaderboard.subheader"))
     st.caption(t("home.leaderboard.subheader_caption"))
     if leaderboard:
+        _mode_badge = {
+            "ab":     "🟠 A/B",
+            "shadow": "🟣 Shadow",
+        }
         rows = []
         for item in leaderboard[:5]:
             acc = item.get("accuracy")
             drift = item.get("drift_status") or "—"
+            mode = item.get("deployment_mode")
+            if mode in _mode_badge:
+                mode_label = _mode_badge[mode]
+            elif item.get("is_production"):
+                mode_label = "🟢 Production"
+            else:
+                mode_label = "✅ Actif"
             rows.append(
                 {
                     "#": item.get("rank", "—"),
                     t("home.leaderboard.col_model"): item.get("name") or item.get("model_name", "—"),
                     t("home.leaderboard.col_version"): item.get("version", "—"),
+                    t("home.leaderboard.col_mode"): mode_label,
                     t("home.leaderboard.col_accuracy"): f"{acc:.1%}" if acc is not None else "—",
                     t("home.leaderboard.col_predictions"): f"{item.get('predictions_count', 0):,}",
                     t("home.leaderboard.col_drift"): drift,
