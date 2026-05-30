@@ -209,18 +209,22 @@ def show_home():  # noqa: C901
             if api_status == "healthy"
             else (t("home.status.api_degraded") if api_status == "degraded" else t("home.status.api_unknown"))
         ),
+        help=t("home.status.api_label_help"),
     )
     col_db.metric(
         t("home.status.db_label"),
         t("home.status.db_connected") if db_status == "connected" else f"⚠️ {db_status}",
+        help=t("home.status.db_label_help"),
     )
     col_cache.metric(
         t("home.status.cache_label"),
         t("home.status.cache_value", count=cached) if cached else "—",
+        help=t("home.status.cache_label_help"),
     )
     col_alerts.metric(
         t("home.status.alerts_label"),
         t("home.status.alerts_count", count=models_alert_count) if models_alert_count > 0 else t("home.status.alerts_none"),
+        help=t("home.status.alerts_label_help"),
     )
 
     # ── 2. Global KPIs — last 30 days ─────────────────────────────────
@@ -238,14 +242,16 @@ def show_home():  # noqa: C901
     coverage_pct = f"{cov_rate * 100:.1f}%" if cov_rate is not None else "—"
 
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric(t("home.kpis.predictions"), f"{total_preds:,}" if total_preds else "—")
+    k1.metric(t("home.kpis.predictions"), f"{total_preds:,}" if total_preds else "—", help=t("home.kpis.predictions_help"))
     k2.metric(
         t("home.kpis.success_rate"),
         f"{success_rate}%" if success_rate is not None else "—",
+        help=t("home.kpis.success_rate_help"),
     )
     k3.metric(
         t("home.kpis.latency_p95"),
         f"{int(latency_p95)} ms" if latency_p95 is not None else "—",
+        help=t("home.kpis.latency_p95_help"),
     )
     k4.metric(
         t("home.kpis.coverage"),

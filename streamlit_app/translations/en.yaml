@@ -554,21 +554,28 @@ home:
   caption: 'Logged in — {role}  |  API: `{api_url}`'
   status:
     api_label: API Status
+    api_label_help: Health state of the FastAPI service. ✅ Online = all routes respond normally. ⚠️ Degraded = API responds but some internal components have errors.
     api_online: ✅ Online
     api_degraded: ⚠️ Degraded
     api_unknown: ❓ Unknown
     db_label: Database
+    db_label_help: PostgreSQL connection status. ✅ Connected = database responds and queries work. ⚠️ = database is unreachable or in error.
     db_connected: ✅ Connected
     cache_label: Cached
+    cache_label_help: Number of models currently loaded in memory (RAM). A cached model responds without cold-start latency — it does not need to be reloaded from MinIO on each request.
     cache_value: '{count} model(s)'
     alerts_label: Models in alert
+    alerts_label_help: Number of models whose health status is "warning" or "critical" over the last 30 days. Check the Supervision page for details.
     alerts_count: 🔴 {count}
     alerts_none: ✅ None
   kpis:
     subheader: 📊 Activity — last 30 days
     predictions: 📈 Predictions
+    predictions_help: Total number of /predict requests received over the last 30 days, across all models and users.
     success_rate: ✅ Success rate
+    success_rate_help: "Proportion of successful predictions: (total − errors) / total. An error is an exception raised by the API (e.g. model not loaded, missing feature)."
     latency_p95: ⚡ P95 Latency
+    latency_p95_help: 95th percentile of API response time in milliseconds. 95% of requests responded in less than this duration. Average computed across all active models.
     coverage: 🔖 Ground truth coverage
     coverage_help: Percentage of predictions with an observed result (ground truth)
   alerts:
