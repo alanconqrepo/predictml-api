@@ -106,7 +106,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "100 * sum(rate(http_requests_total{status=~\"5..\"}[$interval])) / sum(rate(http_requests_total[$interval]))",
+          "expr": "100 * (sum(rate(http_requests_total{status=~\"5..\"}[$interval])) or vector(0)) / sum(rate(http_requests_total[$interval]))",
           "legendFormat": "error %",
           "refId": "A"
         }
@@ -146,7 +146,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_highr_seconds_bucket[$interval])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_highr_seconds_bucket{job=\"predictml-api\"}[$interval])) by (le))",
           "legendFormat": "p95",
           "refId": "A"
         }
@@ -190,8 +190,8 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "rate(process_cpu_seconds_total[$interval]) * 100",
-          "legendFormat": "CPU %",
+          "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_service=~\"api|prediction-writer|retrain-worker\"}[$interval])) * 100",
+          "legendFormat": "{{name}}",
           "refId": "A"
         }
       ]
@@ -226,14 +226,14 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "process_resident_memory_bytes",
-          "legendFormat": "RSS (résidente)",
+          "expr": "container_memory_rss{container_label_com_docker_compose_service=~\"api|prediction-writer|retrain-worker\"}",
+          "legendFormat": "RSS — {{name}}",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "process_virtual_memory_bytes",
-          "legendFormat": "Virtuelle",
+          "expr": "container_memory_working_set_bytes{container_label_com_docker_compose_service=~\"api|prediction-writer|retrain-worker\"}",
+          "legendFormat": "WS — {{name}}",
           "refId": "B"
         }
       ]
@@ -242,7 +242,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "File descriptors",
-      "description": "Descripteurs de fichiers ouverts vs maximum autorisé",
+      "description": "Descripteurs de fichiers ouverts par les 3 process Python",
       "gridPos": { "x": 0, "y": 15, "w": 8, "h": 9 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "options": {
@@ -268,15 +268,9 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "process_open_fds",
-          "legendFormat": "Ouverts",
+          "expr": "process_open_fds{job=~\"predictml-api|prediction-writer|retrain-worker\"}",
+          "legendFormat": "{{job}}",
           "refId": "A"
-        },
-        {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "process_max_fds",
-          "legendFormat": "Maximum",
-          "refId": "B"
         }
       ]
     },
@@ -349,8 +343,8 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "time() - process_start_time_seconds",
-          "legendFormat": "uptime",
+          "expr": "time() - process_start_time_seconds{job=~\"predictml-api|prediction-writer|retrain-worker\"}",
+          "legendFormat": "{{job}}",
           "refId": "A"
         }
       ]

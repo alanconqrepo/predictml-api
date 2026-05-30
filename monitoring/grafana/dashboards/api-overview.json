@@ -136,7 +136,7 @@
       },
       "targets": [
         {
-          "expr": "100 * sum(rate(http_requests_total{status=\"5xx\"}[$interval])) / sum(rate(http_requests_total[$interval]))",
+          "expr": "100 * (sum(rate(http_requests_total{status=\"5xx\"}[$interval])) or vector(0)) / sum(rate(http_requests_total[$interval]))",
           "legendFormat": "% erreurs",
           "refId": "A"
         }
@@ -200,7 +200,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[$interval])) by (le)) * 1000",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"predictml-api\"}[$interval])) by (le)) * 1000",
           "legendFormat": "P95 ms",
           "refId": "A"
         }
@@ -364,17 +364,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[$interval])) by (le)) * 1000",
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"predictml-api\"}[$interval])) by (le)) * 1000",
           "legendFormat": "P50",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[$interval])) by (le)) * 1000",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"predictml-api\"}[$interval])) by (le)) * 1000",
           "legendFormat": "P95",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[$interval])) by (le)) * 1000",
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"predictml-api\"}[$interval])) by (le)) * 1000",
           "legendFormat": "P99",
           "refId": "C"
         }
@@ -640,14 +640,14 @@
           "format": "table"
         },
         {
-          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[$interval])) by (le, handler)) * 1000",
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"predictml-api\"}[$interval])) by (le, handler)) * 1000",
           "legendFormat": "",
           "refId": "B",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[$interval])) by (le, handler)) * 1000",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"predictml-api\"}[$interval])) by (le, handler)) * 1000",
           "legendFormat": "",
           "refId": "C",
           "instant": true,
@@ -762,8 +762,8 @@
     {
       "id": 10,
       "type": "timeseries",
-      "title": "Mémoire RSS du process Python",
-      "description": "Mémoire résidente du worker API (bytes)",
+      "title": "Mémoire RSS — replicas API",
+      "description": "Mémoire résidente par container API (source cAdvisor)",
       "gridPos": {
         "h": 6,
         "w": 12,
@@ -776,14 +776,15 @@
       },
       "targets": [
         {
-          "expr": "process_resident_memory_bytes{job=\"predictml-api\"}",
-          "legendFormat": "RSS",
+          "expr": "container_memory_rss{container_label_com_docker_compose_service=\"api\"}",
+          "legendFormat": "{{name}}",
           "refId": "A"
         }
       ],
       "options": {
         "tooltip": {
-          "mode": "single"
+          "mode": "multi",
+          "sort": "none"
         },
         "legend": {
           "showLegend": true,
@@ -805,8 +806,8 @@
     {
       "id": 11,
       "type": "timeseries",
-      "title": "CPU process Python (s/s)",
-      "description": "Consommation CPU du worker API en secondes CPU par seconde",
+      "title": "CPU utilisation (%) — replicas API",
+      "description": "% CPU par container API (source cAdvisor, 100% = 1 cœur)",
       "gridPos": {
         "h": 6,
         "w": 12,
@@ -819,14 +820,15 @@
       },
       "targets": [
         {
-          "expr": "rate(process_cpu_seconds_total{job=\"predictml-api\"}[$interval])",
-          "legendFormat": "CPU",
+          "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{container_label_com_docker_compose_service=\"api\"}[$interval])) * 100",
+          "legendFormat": "{{name}}",
           "refId": "A"
         }
       ],
       "options": {
         "tooltip": {
-          "mode": "single"
+          "mode": "multi",
+          "sort": "none"
         },
         "legend": {
           "showLegend": true,
@@ -836,7 +838,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit",
+          "unit": "percent",
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10

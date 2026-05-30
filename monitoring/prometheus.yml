@@ -11,8 +11,10 @@ scrape_configs:
     static_configs:
       - targets: ['api:8000']
     metrics_path: /metrics
+    # Bearer auth — injecté automatiquement si METRICS_TOKEN est défini dans .env.
+    # Si METRICS_TOKEN est vide, le bloc authorization est ignoré par Prometheus.
     authorization:
-      credentials: "V_Y4SBj4YPKbJ1_m9A79yKCpTJ-qu8YzguScXXdrIp4"
+      credentials: "A3_M3J_7R5LlXHO56bCoF5oTW0TyKcCeiIfaiu58F8E"
 
   - job_name: postgres
     static_configs:
