@@ -1427,6 +1427,12 @@ services:
   mlflow_desc: Experiment tracking — runs, métriques, artefacts, comparaisons et registre
     de modèles
   open_btn: Ouvrir {name} →
+  swagger_name: 📄 API Swagger
+  swagger_desc: Documentation interactive de l'API FastAPI — testez les endpoints directement depuis le navigateur avec votre token.
+  swagger_token_header: "**Token Bearer**"
+  swagger_token_caption: Collez ce token dans le champ `Authorize` du Swagger pour tester les endpoints authentifiés.
+  swagger_token_missing: Token non disponible — reconnectez-vous au dashboard.
+  swagger_env_caption: 'Variable d''env : `API_PUBLIC_URL`'
   credentials_header: '**Identifiants**'
   login_label: Login
   password_label: Mot de passe

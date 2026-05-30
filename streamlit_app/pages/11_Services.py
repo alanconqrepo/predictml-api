@@ -31,6 +31,9 @@ MLFLOW_URL = os.environ.get("MLFLOW_PUBLIC_URL", "http://localhost:5000")
 MLFLOW_USER = os.environ.get("MLFLOW_ADMIN_USER", "admin")
 MLFLOW_PASS = os.environ.get("MLFLOW_ADMIN_PASSWORD", "")
 
+API_PUBLIC_URL = os.environ.get("API_PUBLIC_URL", st.session_state.get("api_url", "http://localhost:8000"))
+API_TOKEN = st.session_state.get("api_token", "")
+
 # ── Header ─────────────────────────────────────────────────────────────────────
 st.title(t("services.title"))
 st.caption(t("services.caption"))
@@ -97,7 +100,7 @@ _SERVICES = [
 ]
 
 # ── Render service cards ────────────────────────────────────────────────────
-cols = st.columns(3, gap="large")
+cols = st.columns(4, gap="large")
 
 for col, svc in zip(cols, _SERVICES):
     with col:
@@ -146,6 +149,42 @@ for col, svc in zip(cols, _SERVICES):
         st.markdown(t("services.url_header"))
         st.code(svc["url"], language=None)
         st.caption(t("services.env_var_caption", env_url=svc['env_url']))
+
+# ── 4th column — Swagger / API ──────────────────────────────────────────────
+with cols[3]:
+    st.subheader(t("services.swagger_name"))
+    st.caption(t("services.swagger_desc"))
+
+    st.link_button(
+        t("services.open_btn", name="Swagger"),
+        API_PUBLIC_URL.rstrip("/") + "/docs",
+        type="primary",
+        width="stretch",
+    )
+
+    st.markdown("---")
+    st.markdown(t("services.swagger_token_header"))
+
+    if API_TOKEN:
+        if show_secrets:
+            st.code(API_TOKEN, language=None)
+        else:
+            st.text_input(
+                "token",
+                value=API_TOKEN,
+                type="password",
+                disabled=True,
+                key="swagger_token",
+                label_visibility="collapsed",
+            )
+        st.caption(t("services.swagger_token_caption"))
+    else:
+        st.warning(t("services.swagger_token_missing"))
+
+    st.markdown("---")
+    st.markdown(t("services.url_header"))
+    st.code(API_PUBLIC_URL.rstrip("/") + "/docs", language=None)
+    st.caption(t("services.swagger_env_caption"))
 
 # ── Security note ───────────────────────────────────────────────────────────
 st.divider()
