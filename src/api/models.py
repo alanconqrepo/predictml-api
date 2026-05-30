@@ -3284,6 +3284,8 @@ async def get_model(
         recall=model_meta.recall,
         confidence_threshold=model_meta.confidence_threshold,
         feature_baseline=model_meta.feature_baseline,
+        categorical_baseline=model_meta.categorical_baseline,
+        feature_importances=model_meta.feature_importances,
         tags=model_meta.tags,
         webhook_url=model_meta.webhook_url,
         mlflow_run_id=model_meta.mlflow_run_id,
@@ -3621,7 +3623,9 @@ async def create_model(
         algorithm=algorithm,
         mlflow_run_id=mlflow_run_id,
         accuracy=accuracy,
-        auc=auc,
+        auc=auc if auc is not None else (
+            training_metrics_parsed.get("roc_auc") if training_metrics_parsed else None
+        ),
         f1_score=f1_score,
         features_count=features_count,
         classes=classes_parsed,

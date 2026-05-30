@@ -45,7 +45,7 @@ _LINEAR_TYPES = frozenset(
 def compute_shap_explanation(
     model,
     feature_names: list,
-    x: np.ndarray,
+    x,
     prediction_result,
     feature_baseline: dict | None,
 ) -> dict:
@@ -54,9 +54,9 @@ def compute_shap_explanation(
 
     Parameters
     ----------
-    model : sklearn object
-    feature_names : ordered list of feature names
-    x : numpy array of shape (1, n_features)
+    model : sklearn object or Pipeline
+    feature_names : ordered list of input feature names
+    x : numpy array of shape (1, n_features) or pandas DataFrame
     prediction_result : result of model.predict(x)[0] (to resolve class index)
     feature_baseline : dict {feature: {mean, std, min, max}} from model_metadata.feature_baseline
 
@@ -65,8 +65,13 @@ def compute_shap_explanation(
     dict with keys:
       - shap_values : dict {feature_name: float}
       - base_value  : float
-      - model_type  : "tree" | "linear"
+      - model_type  : "tree" | "linear" | "pipeline"
     """
+    from sklearn.pipeline import Pipeline as _Pipeline
+
+    if isinstance(model, _Pipeline):
+        return _explain_pipeline(model, feature_names, x, prediction_result, feature_baseline)
+
     model_class = type(model).__name__
 
     if model_class in _TREE_TYPES:
@@ -81,7 +86,7 @@ def compute_shap_explanation(
             f"Model type '{model_class}' not supported for SHAP explanation. "
             "Supported types — trees: RandomForest, GradientBoosting, DecisionTree, ExtraTrees,"
             " HistGradientBoosting. Linear: LogisticRegression, LinearRegression, Ridge,"
-            " Lasso, ElasticNet, SGD."
+            " Lasso, ElasticNet, SGD. Pipelines wrapping any of these are also supported."
         ),
     )
 
@@ -166,3 +171,85 @@ def _explain_linear(
         "base_value": base,
         "model_type": "linear",
     }
+
+
+def _explain_pipeline(
+    model, feature_names: list, x, prediction_result, feature_baseline: dict | None
+) -> dict:
+    """Handle sklearn Pipeline: transform X through preprocessing steps then compute SHAP
+    on the final estimator. OHE-expanded contributions are summed back to original features."""
+    import pandas as pd
+
+    final_estimator = model.steps[-1][1]
+    final_name = type(final_estimator).__name__
+
+    if final_name not in _TREE_TYPES and final_name not in _LINEAR_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"Pipeline's final estimator '{final_name}' is not supported for SHAP. "
+                "Supported estimators: trees (RandomForest, GradientBoosting…) and linear models."
+            ),
+        )
+
+    # Ensure x is a DataFrame so the preprocessor handles mixed types correctly
+    if not isinstance(x, pd.DataFrame):
+        x_df = pd.DataFrame(
+            x if hasattr(x, "__len__") and len(np.array(x).shape) == 2 else np.array(x).reshape(1, -1),
+            columns=feature_names,
+        )
+    else:
+        x_df = x
+
+    # Transform through all steps except the last (the estimator)
+    preprocessor = model[:-1]
+    x_transformed = preprocessor.transform(x_df)
+
+    # Recover the expanded feature names after transformation
+    try:
+        transformed_names = list(preprocessor.get_feature_names_out())
+    except Exception:
+        transformed_names = [f"f{i}" for i in range(x_transformed.shape[1])]
+
+    # Compute SHAP on the final estimator with transformed features
+    if final_name in _TREE_TYPES:
+        result = _explain_tree(final_estimator, transformed_names, x_transformed, prediction_result)
+    else:
+        result = _explain_linear(
+            final_estimator, transformed_names, x_transformed, prediction_result, feature_baseline=None
+        )
+
+    # Aggregate OHE-expanded SHAP values back to the original input feature names
+    result["shap_values"] = _aggregate_pipeline_shap(result["shap_values"], feature_names)
+    result["model_type"] = "pipeline"
+    return result
+
+
+def _aggregate_pipeline_shap(shap_dict: dict, original_names: list) -> dict:
+    """Sum SHAP contributions for one-hot encoded features back to their source feature.
+
+    sklearn ColumnTransformer produces names like ``num__age`` or ``cat__pclass_1st``.
+    The part after ``__`` is matched against original feature names:
+    exact match for numericals, prefix match for OHE categoricals.
+    """
+    # Sort originals longest-first to avoid partial collisions (e.g. "class" vs "pclass")
+    sorted_orig = sorted(original_names, key=len, reverse=True)
+    aggregated: dict = {}
+
+    for trans_feat, shap_val in shap_dict.items():
+        # Strip transformer prefix: "num__age" → "age", "cat__pclass_1st" → "pclass_1st"
+        core = trans_feat.split("__", 1)[-1] if "__" in trans_feat else trans_feat
+
+        matched = None
+        if core in original_names:
+            matched = core
+        else:
+            for orig in sorted_orig:
+                if core.startswith(orig + "_") or core == orig:
+                    matched = orig
+                    break
+
+        key = matched if matched else trans_feat
+        aggregated[key] = aggregated.get(key, 0.0) + shap_val
+
+    return aggregated
