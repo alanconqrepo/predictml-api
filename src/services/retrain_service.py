@@ -394,7 +394,11 @@ async def do_retrain(  # noqa: C901 — complexity inherent to the pipeline
             try:
                 parsed_metrics = json.loads(stripped)
                 new_accuracy = parsed_metrics.get("accuracy", new_accuracy)
-                new_auc = parsed_metrics.get("auc", new_auc)
+                _parsed_auc = parsed_metrics.get("auc")
+                if _parsed_auc is None:
+                    _parsed_auc = parsed_metrics.get("roc_auc")
+                if _parsed_auc is not None:
+                    new_auc = _parsed_auc
                 new_f1 = parsed_metrics.get("f1_score", new_f1)
             except json.JSONDecodeError:
                 pass

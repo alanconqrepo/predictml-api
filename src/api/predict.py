@@ -1069,13 +1069,18 @@ async def predict(
         shap_base_value_inline = None
         if explain:
             try:
-                x_float = np.array(
-                    [[input_data.features[name] for name in model.feature_names_in_]], dtype=float
-                )
+                from sklearn.pipeline import Pipeline as _Pipeline
+                _feat_names = list(model.feature_names_in_)
+                if isinstance(model, _Pipeline):
+                    x_shap = pd.DataFrame([{n: input_data.features[n] for n in _feat_names}])
+                else:
+                    x_shap = np.array(
+                        [[input_data.features[name] for name in _feat_names]], dtype=float
+                    )
                 explanation = compute_shap_explanation(
                     model=model,
-                    feature_names=list(model.feature_names_in_),
-                    x=x_float,
+                    feature_names=_feat_names,
+                    x=x_shap,
                     prediction_result=prediction_result,
                     feature_baseline=metadata.feature_baseline,
                 )

@@ -540,7 +540,12 @@ for m in models:
                 else "—"
             ),
             _col_accuracy_eval: f"{m['accuracy']:.3f}" if m.get("accuracy") is not None else "—",
-            _col_auc_eval: f"{m['auc']:.3f}" if m.get("auc") is not None else "—",
+            _col_auc_eval: (
+                f"{m['auc']:.3f}" if m.get("auc") is not None
+                else f"{(m.get('training_metrics') or {}).get('roc_auc'):.3f}"
+                if (m.get("training_metrics") or {}).get("roc_auc") is not None
+                else "—"
+            ),
             _col_f1_eval: f"{m['f1_score']:.3f}" if m.get("f1_score") is not None else "—",
             _col_r2_eval: (
                 f"{(m.get('training_metrics') or {}).get('r2'):.3f}"
@@ -2293,35 +2298,50 @@ with st.expander(t("models.whatif.expander"), expanded=False):
         if st.session_state[_wif_key]:
             st.divider()
             st.markdown(t("models.whatif.history_header"))
-            _wif_feat_options = list(wif_baseline.keys())
+            _wif_feat_options = list(wif_baseline.keys()) + [
+                k for k in wif_cat_baseline if k not in wif_baseline
+            ]
             _wif_sel_feat = st.selectbox(
                 t("models.whatif.feature_select_label"),
                 _wif_feat_options,
                 key=f"whatif_feat_sel_{selected['name']}_{selected['version']}",
             )
+            _wif_is_cat = _wif_sel_feat in wif_cat_baseline and _wif_sel_feat not in wif_baseline
             _wif_chart_rows = []
             for _wif_entry in st.session_state[_wif_key]:
                 _wif_x = _wif_entry["features"].get(_wif_sel_feat)
                 _wif_entry_probs = _wif_entry.get("probability")
                 _wif_y = max(_wif_entry_probs) if _wif_entry_probs else _wif_entry.get("prediction")
                 if _wif_x is not None and _wif_y is not None:
-                    _wif_chart_rows.append({"x": _wif_x, "y": _wif_y})
+                    _wif_chart_rows.append({"x": str(_wif_x) if _wif_is_cat else _wif_x, "y": _wif_y})
 
             if _wif_chart_rows:
-                _wif_chart_df = pd.DataFrame(_wif_chart_rows).sort_values("x")
+                _wif_chart_df = pd.DataFrame(_wif_chart_rows)
                 _wif_has_probs = st.session_state[_wif_key][-1].get("probability")
                 _wif_y_label = t("models.whatif.y_label_prob") if _wif_has_probs else t("models.whatif.y_label_pred")
                 try:
                     import plotly.express as px
 
-                    _wif_evo_fig = px.line(
-                        _wif_chart_df,
-                        x="x",
-                        y="y",
-                        markers=True,
-                        labels={"x": _wif_sel_feat, "y": _wif_y_label},
-                        title=t("models.whatif.evolution_title", feature=_wif_sel_feat),
-                    )
+                    if _wif_is_cat:
+                        # Categorical: bar chart — average y per category value
+                        _wif_agg = _wif_chart_df.groupby("x", as_index=False)["y"].mean()
+                        _wif_evo_fig = px.bar(
+                            _wif_agg,
+                            x="x",
+                            y="y",
+                            labels={"x": _wif_sel_feat, "y": _wif_y_label},
+                            title=t("models.whatif.evolution_title", feature=_wif_sel_feat),
+                        )
+                    else:
+                        _wif_chart_df = _wif_chart_df.sort_values("x")
+                        _wif_evo_fig = px.line(
+                            _wif_chart_df,
+                            x="x",
+                            y="y",
+                            markers=True,
+                            labels={"x": _wif_sel_feat, "y": _wif_y_label},
+                            title=t("models.whatif.evolution_title", feature=_wif_sel_feat),
+                        )
                     st.plotly_chart(_wif_evo_fig, width='stretch')
                 except ImportError:
                     st.line_chart(_wif_chart_df.set_index("x")["y"])
