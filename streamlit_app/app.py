@@ -324,14 +324,15 @@ def show_home():  # noqa: C901
     # ── 5a. Health grid ───────────────────────────────────────────────────
     st.divider()
     st.subheader(t("home.health.subheader"))
-    st.caption(t("home.health.subheader_caption"))
+    period_label = f"{(now - timedelta(days=30)).strftime('%d/%m/%Y')} → {now.strftime('%d/%m/%Y')}"
+    st.caption(f"{t('home.health.subheader_caption')} · {period_label}")
     if mon_models:
         for m in mon_models:
             status = m.get("health_status", "unknown")
             badge = {"ok": "✅", "warning": "⚠️", "critical": "🔴"}.get(status, "❓")
             name = m.get("model_name", "?")
             err = m.get("error_rate")
-            p95 = m.get("latency_p95_ms") or m.get("response_time_p95_ms")
+            p95 = m.get("p95_latency_ms") or m.get("latency_p95_ms") or m.get("response_time_p95_ms")
             preds = m.get("predictions_count") or m.get("total_predictions", 0)
             details = []
             if err is not None:
