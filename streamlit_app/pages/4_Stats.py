@@ -599,7 +599,7 @@ with st.expander(t("stats.aggregated.expander"), expanded=False):
         st.stop()
 
     df = pd.DataFrame(all_preds)
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], format="ISO8601")
     df["date"] = df["timestamp"].dt.date
     df["hour"] = df["timestamp"].dt.floor("h")
     df["is_error"] = df["status"] == "error"
