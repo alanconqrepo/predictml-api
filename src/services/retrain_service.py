@@ -454,6 +454,7 @@ async def do_retrain(  # noqa: C901 — complexity inherent to the pipeline
             hyperparameters=(
                 parsed_metrics.get("hyperparameters") or source_fields.get("hyperparameters")
             ),
+            feature_importances=new_feature_importances,
             auto_promoted=False,
             auto_promote_reason=None,
             minio_object_key=new_object_key,
@@ -504,6 +505,24 @@ async def do_retrain(  # noqa: C901 — complexity inherent to the pipeline
         _req_object_key = None
 
     # ------------------------------------------------------------------ #
+    # 6b. Extract feature importances from the newly produced model
+    # ------------------------------------------------------------------ #
+    from src.api.models import _extract_feature_importances
+
+    new_feature_importances: Optional[dict] = None
+    try:
+        new_feature_importances = _extract_feature_importances(new_model_bytes)
+        if new_feature_importances:
+            logger.info(
+                "Feature importances extracted after retrain",
+                model=model_name,
+                version=new_version,
+                n_features=len(new_feature_importances),
+            )
+    except Exception as _exc:
+        logger.warning("Feature importances extraction failed (non-blocking)", error=str(_exc))
+
+    # ------------------------------------------------------------------ #
     # 7. DB write: new version + history + auto-promotion
     # ------------------------------------------------------------------ #
     now_naive = now_utc.replace(tzinfo=None)
@@ -539,6 +558,7 @@ async def do_retrain(  # noqa: C901 — complexity inherent to the pipeline
                 f" [{start_date} → {end_date}]"
             ),
             feature_baseline=source_fields.get("feature_baseline"),
+            feature_importances=new_feature_importances,
             confidence_threshold=source_fields.get("confidence_threshold"),
             tags=source_fields.get("tags"),
             webhook_url=source_fields.get("webhook_url"),

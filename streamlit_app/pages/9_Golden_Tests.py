@@ -202,21 +202,39 @@ if not is_admin:
 else:
     with st.expander(t("golden_tests.add_expander"), expanded=False):
         with st.form("add_golden_test_form"):
+            selected_model_meta = next(
+                (m for m in models if m["name"] == selected_name and m["version"] == selected_version),
+                None,
+            )
+            _meta = selected_model_meta or {}
+            feature_baseline = _meta.get("feature_baseline") or {}
+            _classes = _meta.get("classes") or []
+
             description = st.text_input(
                 t("golden_tests.form_description_label"),
-                placeholder=t("golden_tests.form_description_placeholder"),
+                placeholder=t("golden_tests.form_description_placeholder", name=selected_name),
                 key="gt_description",
             )
+            if feature_baseline:
+                default_features = json.dumps(
+                    {k: 0.0 for k in feature_baseline.keys()}, indent=2
+                )
+            else:
+                default_features = '{\n  "feature1": 1.0,\n  "feature2": 2.0\n}'
             features_json = st.text_area(
                 t("golden_tests.form_features_label"),
-                value='{\n  "feature1": 1.0,\n  "feature2": 2.0\n}',
+                value=default_features,
                 height=130,
                 key="gt_features",
                 help=t("golden_tests.form_features_help"),
             )
+            if _classes:
+                _expected_placeholder = " | ".join(str(c) for c in _classes[:3])
+            else:
+                _expected_placeholder = t("golden_tests.form_expected_placeholder")
             expected_output = st.text_input(
                 t("golden_tests.form_expected_label"),
-                placeholder=t("golden_tests.form_expected_placeholder"),
+                placeholder=_expected_placeholder,
                 key="gt_expected",
                 help=t("golden_tests.form_expected_help"),
             )
@@ -246,7 +264,24 @@ else:
                         st.toast(t("golden_tests.save_error", error=e), icon="❌")
 
     with st.expander(t("golden_tests.csv_expander"), expanded=False):
-        st.markdown(t("golden_tests.csv_format_desc"))
+        # Build a dynamic example using the selected model's actual feature names
+        _selected_model_meta = next(
+            (m for m in models if m["name"] == selected_name and m["version"] == selected_version),
+            None,
+        )
+        _feature_baseline = (_selected_model_meta or {}).get("feature_baseline") or {}
+        if _feature_baseline:
+            _feat_cols = list(_feature_baseline.keys())
+            _feat_vals = ["0.0"] * len(_feat_cols)
+        else:
+            _feat_cols = ["feature1", "feature2"]
+            _feat_vals = ["1.0", "2.0"]
+        _header = ",".join(_feat_cols + ["expected_output", "description"])
+        _row = ",".join(_feat_vals + ["label", "example description"])
+        _csv_example = f"{_header}\n{_row}"
+        st.markdown(t("golden_tests.csv_format_intro"))
+        st.code(_csv_example, language="text")
+        st.markdown(t("golden_tests.csv_format_columns", cols=",".join(f"`{c}`" for c in _feat_cols)))
         uploaded_csv = st.file_uploader(
             t("golden_tests.csv_uploader_label"), type=["csv"], key="gt_csv_upload"
         )

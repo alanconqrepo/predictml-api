@@ -47,6 +47,7 @@ class ModelUpdateInput(BaseModel):
     confidence_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
     feature_baseline: Optional[Dict[str, FeatureStats]] = None
     categorical_baseline: Optional[Dict[str, Dict[str, float]]] = None
+    feature_importances: Optional[Dict[str, float]] = None
     training_dataset: Optional[str] = None
 
     hyperparameters: Optional[Dict[str, Any]] = None
@@ -86,6 +87,7 @@ class ModelCreateResponse(BaseModel):
     confidence_threshold: Optional[float] = None
     feature_baseline: Optional[Dict[str, Any]] = None
     categorical_baseline: Optional[Dict[str, Dict[str, float]]] = None
+    feature_importances: Optional[Dict[str, float]] = None
     tags: Optional[List[str]] = None
     webhook_url: Optional[str] = None
     is_active: bool
@@ -138,6 +140,7 @@ class ModelGetResponse(BaseModel):
     # Feature baseline
     feature_baseline: Optional[Dict[str, Any]] = None
     categorical_baseline: Optional[Dict[str, Dict[str, float]]] = None
+    feature_importances: Optional[Dict[str, float]] = None
 
     # Tags and webhook
     tags: Optional[List[str]] = None

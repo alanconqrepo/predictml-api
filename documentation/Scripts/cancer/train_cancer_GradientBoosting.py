@@ -173,6 +173,38 @@ label_distribution = {
     for cls in np.unique(y_train)
 }
 
+
+# -- Feature importances ------------------------------------------------------
+
+feature_importances: dict = {}
+try:
+    import numpy as _np
+    _est = model
+    if hasattr(_est, "steps"):
+        _est = _est.steps[-1][1]
+    _raw_imp = None
+    if hasattr(_est, "feature_importances_"):
+        _raw_imp = _np.array(_est.feature_importances_)
+    elif hasattr(_est, "coef_"):
+        _c = _np.array(_est.coef_)
+        _raw_imp = _np.mean(_np.abs(_c), axis=0) if _c.ndim > 1 else _np.abs(_c)
+    if _raw_imp is not None:
+        _total = _raw_imp.sum()
+        if _total > 0:
+            _raw_imp = _raw_imp / _total
+        _feat_names = (
+            list(model.feature_names_in_) if hasattr(model, "feature_names_in_")
+            else list(X_train.columns) if hasattr(X_train, "columns")
+            else [f"feature_{i}" for i in range(len(_raw_imp))]
+        )
+        feature_importances = dict(sorted(
+            {n: round(float(v), 6) for n, v in zip(_feat_names, _raw_imp)}.items(),
+            key=lambda kv: kv[1], reverse=True
+        ))
+        print(f"[{MODEL_NAME}] Feature importances extracted ({len(feature_importances)} features).", file=sys.stderr)
+except Exception as _fi_exc:
+    print(f"[{MODEL_NAME}] Feature importances skipped: {_fi_exc}", file=sys.stderr)
+
 # ── 7. MLflow ─────────────────────────────────────────────────────────────────
 
 mlflow_run_id = None
@@ -183,6 +215,11 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
         with mlflow.start_run(run_name=f"{MODEL_NAME}_gb_{TRAIN_START_DATE}_{TRAIN_END_DATE}") as run:
             mlflow.log_params({"algorithm": "GradientBoosting", **HYPERPARAMS})
             mlflow.log_metrics({"accuracy": acc, "f1_score": f1, "roc_auc": roc_auc})
+            for _fi_name, _fi_val in feature_importances.items():
+                try:
+                    mlflow.log_metric(f"fi_{_fi_name.replace(' ','_')[:50]}", float(_fi_val))
+                except Exception:
+                    pass
             mlflow.set_tags({"model_name": MODEL_NAME, "algorithm": "GradientBoosting", "task_type": "binary_classification"})
             try:
                 _sig = mlflow.models.infer_signature(X_test.astype("float64"), model.predict_proba(X_test.astype("float64")))
@@ -208,6 +245,7 @@ output = {
     "hyperparameters":      HYPERPARAMS,
     "training_dataset":     _dataset_minio_path or "scikit-learn Breast Cancer Wisconsin dataset — 569 observations, 2 classes",
     "confidence_threshold": 0.70,
+    "feature_importances": feature_importances,
     "feature_stats":        feature_stats,
     "label_distribution":   label_distribution,
 }

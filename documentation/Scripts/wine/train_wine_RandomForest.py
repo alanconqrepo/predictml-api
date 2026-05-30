@@ -205,6 +205,38 @@ for _v in y_train:
     _qcounts[_idx] += 1
 label_distribution = {_qlabels[i]: round(_qcounts[i] / len(y_train), 4) for i in range(4)}
 
+
+# -- Feature importances ------------------------------------------------------
+
+feature_importances: dict = {}
+try:
+    import numpy as _np
+    _est = model
+    if hasattr(_est, "steps"):
+        _est = _est.steps[-1][1]
+    _raw_imp = None
+    if hasattr(_est, "feature_importances_"):
+        _raw_imp = _np.array(_est.feature_importances_)
+    elif hasattr(_est, "coef_"):
+        _c = _np.array(_est.coef_)
+        _raw_imp = _np.mean(_np.abs(_c), axis=0) if _c.ndim > 1 else _np.abs(_c)
+    if _raw_imp is not None:
+        _total = _raw_imp.sum()
+        if _total > 0:
+            _raw_imp = _raw_imp / _total
+        _feat_names = (
+            list(model.feature_names_in_) if hasattr(model, "feature_names_in_")
+            else list(X_train.columns) if hasattr(X_train, "columns")
+            else [f"feature_{i}" for i in range(len(_raw_imp))]
+        )
+        feature_importances = dict(sorted(
+            {n: round(float(v), 6) for n, v in zip(_feat_names, _raw_imp)}.items(),
+            key=lambda kv: kv[1], reverse=True
+        ))
+        print(f"[{MODEL_NAME}] Feature importances extracted ({len(feature_importances)} features).", file=sys.stderr)
+except Exception as _fi_exc:
+    print(f"[{MODEL_NAME}] Feature importances skipped: {_fi_exc}", file=sys.stderr)
+
 # ── 7. MLflow (graceful degradation) ─────────────────────────────────────────
 
 mlflow_run_id = None
@@ -218,6 +250,11 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
                                "train_start_date": TRAIN_START_DATE, "train_end_date": TRAIN_END_DATE})
             mlflow.log_metrics({"mae": mae, "rmse": rmse, "r2": r2,
                                 "n_rows_train": float(len(X_train)), "n_rows_test": float(len(X_test))})
+            for _fi_name, _fi_val in feature_importances.items():
+                try:
+                    mlflow.log_metric(f"fi_{_fi_name.replace(' ','_')[:50]}", float(_fi_val))
+                except Exception:
+                    pass
             mlflow.set_tags({"model_name": MODEL_NAME, "algorithm": "RandomForestRegressor",
                              "task": "regression", "target": TARGET_FEATURE})
             try:
@@ -240,6 +277,7 @@ output = {
     "n_rows":           len(X_train),
     "features_count":   len(FEATURE_NAMES),
     "training_dataset": _dataset_minio_path or "scikit-learn Wine dataset — RandomForest v1.1.0",
+    "feature_importances": feature_importances,
     "feature_stats":      feature_stats,
     "target_stats":       target_stats,
     "label_distribution": label_distribution,

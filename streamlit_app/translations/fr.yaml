@@ -1532,7 +1532,7 @@ golden_tests:
   admin_only: Section réservée aux administrateurs.
   add_expander: ➕ Nouveau cas de test
   form_description_label: Description
-  form_description_placeholder: 'ex: iris setosa typique — toutes features nominales'
+  form_description_placeholder: 'ex: typical {name} — nominal feature values'
   form_features_label: Features d'entrée (JSON)
   form_features_help: Objet JSON clé/valeur des features du modèle
   form_expected_label: Sortie attendue
@@ -1563,6 +1563,8 @@ golden_tests:
     Colonnes : `description` (optionnel), `input_features` (JSON stringifié), `expected_output`.
 
     '
+  csv_format_intro: "Importez plusieurs cas de test à la fois depuis un fichier CSV.\n\n**Format attendu :**"
+  csv_format_columns: "Colonnes features : {cols} + `expected_output` (requis) + `description` (optionnel)."
   csv_uploader_label: Fichier CSV
   csv_import_btn: 📤 Importer
   csv_import_success: '{count} cas de test importé(s).'
@@ -2258,6 +2260,15 @@ models:
   btn_hide_script: 🙈 Masquer le script
   btn_view_script: 👁 Visualiser le script
   btn_download_model: ⬇️ Télécharger le modèle{size}
+  feature_importances:
+    expander: 📊 Feature Importances
+    chart_header: "**Importance relative des features**"
+    table_header: "**Classement**"
+    axis_importance: "Importance (%)"
+    axis_feature: Feature
+    col_feature: Feature
+    col_importance: "Importance (%)"
+    caption: "{n} features — scores normalisés (somme = 100 %)"
   analysis:
     expander: 📊 Analyse & Monitoring
     date_start: Date début
