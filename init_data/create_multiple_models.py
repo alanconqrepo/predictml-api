@@ -21,7 +21,7 @@ import requests
 from sklearn.datasets import load_iris, load_wine, load_breast_cancer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
 
@@ -63,34 +63,45 @@ def train_and_register(name, model, X_train, X_test, y_train, y_test, params, de
         acc = float(accuracy_score(y_test, y_pred))
         f1 = float(f1_score(y_test, y_pred, average="weighted"))
 
+        auc = None
+        if classes and len(classes) == 2 and hasattr(model, "predict_proba"):
+            y_prob = model.predict_proba(X_test)[:, 1]
+            auc = float(roc_auc_score(y_test, y_prob))
+
         mlflow.log_params(params)
         mlflow.log_metric("accuracy", acc)
         mlflow.log_metric("f1_weighted", f1)
+        if auc is not None:
+            mlflow.log_metric("auc", auc)
         mlflow.set_tag("description", description)
         mlflow.sklearn.log_model(model, artifact_path="model", registered_model_name=name)
 
         run_id = mlflow.active_run().info.run_id
-        print(f"   Accuracy : {acc:.4f}  |  F1 : {f1:.4f}")
+        auc_str = f"  |  AUC : {auc:.4f}" if auc is not None else ""
+        print(f"   Accuracy : {acc:.4f}  |  F1 : {f1:.4f}{auc_str}")
         print(f"   MLflow run ID : {run_id}")
 
     # Register via POST /models (mlflow_run_id only, no separate MinIO upload)
     import json
+    data = {
+        "name": name,
+        "version": MODEL_VERSION,
+        "description": description,
+        "algorithm": params.get("algorithm", ""),
+        "mlflow_run_id": run_id,
+        "accuracy": acc,
+        "f1_score": f1,
+        "features_count": params.get("features_count"),
+        "classes": json.dumps(classes) if classes else None,
+        "training_params": json.dumps(params),
+        "training_dataset": params.get("dataset", ""),
+    }
+    if auc is not None:
+        data["auc"] = auc
     response = requests.post(
         f"{API_URL}/models",
         headers={"Authorization": f"Bearer {API_TOKEN}"},
-        data={
-            "name": name,
-            "version": MODEL_VERSION,
-            "description": description,
-            "algorithm": params.get("algorithm", ""),
-            "mlflow_run_id": run_id,
-            "accuracy": acc,
-            "f1_score": f1,
-            "features_count": params.get("features_count"),
-            "classes": json.dumps(classes) if classes else None,
-            "training_params": json.dumps(params),
-            "training_dataset": params.get("dataset", ""),
-        },
+        data=data,
     )
 
     if response.status_code == 201:
