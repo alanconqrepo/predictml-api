@@ -1193,6 +1193,97 @@ class DBService:
         return stats
 
     @staticmethod
+    async def get_categorical_production_stats(
+        db: AsyncSession,
+        model_name: str,
+        model_version: Optional[str],
+        days: int = 7,
+    ) -> dict:
+        """
+        Compute production frequency distributions for categorical input features.
+
+        Returns {feature: {category: frequency, ..., "_count": int}} where frequency
+        is the proportion of rows containing that category value.
+        Only includes features whose values are NOT parseable as numbers.
+
+        PostgreSQL: jsonb_each_text() + WHERE NOT numeric regex, server-side GROUP BY.
+        SQLite (tests): Python-side aggregation.
+        """
+        days = min(days, settings.ANALYTICS_MAX_DAYS)
+        cutoff = _utcnow() - timedelta(days=days)
+
+        if _pg(db):
+            version_clause = "AND p.model_version = :version" if model_version else ""
+            pg_params: dict = {"name": model_name, "cutoff": cutoff}
+            if model_version:
+                pg_params["version"] = model_version
+
+            sql = text(f"""
+                SELECT
+                    kv.key                   AS feature,
+                    kv.value                 AS category,
+                    COUNT(*)                 AS cnt,
+                    SUM(COUNT(*)) OVER (PARTITION BY kv.key) AS total_for_feature
+                FROM predictions p,
+                     LATERAL jsonb_each_text(p.input_features::jsonb) AS kv(key, value)
+                WHERE p.model_name = :name
+                  AND p.status     = 'success'
+                  AND p.timestamp  >= :cutoff
+                  {version_clause}
+                  AND kv.value     !~ '^-?[0-9]+\\.?[0-9]*$'
+                GROUP BY kv.key, kv.value
+                ORDER BY kv.key, cnt DESC
+            """)
+            result = await db.execute(sql, pg_params)
+            rows = result.all()
+
+            stats: dict = {}
+            for row in rows:
+                feat = row.feature
+                if feat not in stats:
+                    stats[feat] = {"_count": int(row.total_for_feature)}
+                total = int(row.total_for_feature)
+                stats[feat][row.category] = round(int(row.cnt) / total, 6) if total > 0 else 0.0
+            return stats
+
+        # --- SQLite fallback (tests) ---
+        version_filter = []
+        if model_version:
+            version_filter.append(Prediction.model_version == model_version)
+
+        stmt = (
+            select(Prediction.input_features)
+            .where(
+                and_(
+                    Prediction.model_name == model_name,
+                    Prediction.status == "success",
+                    Prediction.timestamp >= cutoff,
+                    *version_filter,
+                )
+            )
+            .limit(settings.MAX_ROWS_ANALYTICS)
+        )
+        result = await db.execute(stmt)
+        rows_data = result.scalars().all()
+
+        feature_counts: dict[str, dict[str, int]] = {}
+        for input_features in rows_data:
+            if not isinstance(input_features, dict):
+                continue
+            for feature, value in input_features.items():
+                if isinstance(value, str):
+                    feature_counts.setdefault(feature, {})
+                    feature_counts[feature][value] = feature_counts[feature].get(value, 0) + 1
+
+        stats = {}
+        for feature, counts in feature_counts.items():
+            total = sum(counts.values())
+            stats[feature] = {"_count": total}
+            for cat, cnt in counts.items():
+                stats[feature][cat] = round(cnt / total, 6) if total > 0 else 0.0
+        return stats
+
+    @staticmethod
     async def get_prediction_label_distribution(
         db: AsyncSession,
         model_name: str,

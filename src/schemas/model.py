@@ -46,6 +46,7 @@ class ModelUpdateInput(BaseModel):
     classes: Optional[List[Any]] = None
     confidence_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
     feature_baseline: Optional[Dict[str, FeatureStats]] = None
+    categorical_baseline: Optional[Dict[str, Dict[str, float]]] = None
     training_dataset: Optional[str] = None
 
     hyperparameters: Optional[Dict[str, Any]] = None
@@ -84,6 +85,7 @@ class ModelCreateResponse(BaseModel):
     hyperparameters: Optional[Dict[str, Any]] = None
     confidence_threshold: Optional[float] = None
     feature_baseline: Optional[Dict[str, Any]] = None
+    categorical_baseline: Optional[Dict[str, Dict[str, float]]] = None
     tags: Optional[List[str]] = None
     webhook_url: Optional[str] = None
     is_active: bool
@@ -135,6 +137,7 @@ class ModelGetResponse(BaseModel):
 
     # Feature baseline
     feature_baseline: Optional[Dict[str, Any]] = None
+    categorical_baseline: Optional[Dict[str, Dict[str, float]]] = None
 
     # Tags and webhook
     tags: Optional[List[str]] = None
@@ -248,7 +251,7 @@ class ModelPerformanceResponse(BaseModel):
 
 
 class FeatureDriftResult(BaseModel):
-    """Drift result for an individual feature"""
+    """Drift result for an individual numeric feature"""
 
     baseline_mean: Optional[float] = None
     baseline_std: Optional[float] = None
@@ -265,6 +268,16 @@ class FeatureDriftResult(BaseModel):
     drift_status: str  # "ok" | "warning" | "critical" | "insufficient_data" | "no_baseline"
 
 
+class CategoricalDriftResult(BaseModel):
+    """Drift result for an individual categorical feature (PSI on frequencies)"""
+
+    baseline_distribution: Dict[str, float]  # {category: frequency at training}
+    production_distribution: Dict[str, float]  # {category: frequency in production}
+    production_count: int = 0
+    psi: Optional[float] = None
+    drift_status: str  # "ok" | "warning" | "critical" | "insufficient_data" | "no_baseline"
+
+
 class DriftReportResponse(BaseModel):
     """Complete drift report for a model"""
 
@@ -275,6 +288,7 @@ class DriftReportResponse(BaseModel):
     baseline_available: bool
     drift_summary: str  # "ok" | "warning" | "critical" | "no_baseline" | "insufficient_data"
     features: Dict[str, FeatureDriftResult]
+    categorical_features: Dict[str, CategoricalDriftResult] = {}
 
 
 # ---------------------------------------------------------------------------
