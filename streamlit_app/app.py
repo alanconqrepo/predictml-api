@@ -235,7 +235,7 @@ def show_home():  # noqa: C901
     total_err = sum(s.get("error_count", 0) for s in pred_stats)
     success_rate = round((1 - total_err / total_preds) * 100, 1) if total_preds > 0 else None
     p95_vals = [
-        s["response_time_p95_ms"] for s in pred_stats if s.get("response_time_p95_ms") is not None
+        s["p95_response_time_ms"] for s in pred_stats if s.get("p95_response_time_ms") is not None
     ]
     latency_p95 = round(sum(p95_vals) / len(p95_vals), 0) if p95_vals else None
     cov_rate = coverage.get("coverage_rate")
