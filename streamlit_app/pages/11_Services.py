@@ -34,7 +34,7 @@ MLFLOW_PASS = os.environ.get("MLFLOW_ADMIN_PASSWORD", "")
 _api_internal = os.environ.get("API_URL", "http://localhost:8000")
 API_PUBLIC_URL = os.environ.get(
     "API_PUBLIC_URL",
-    "http://localhost:8000" if "api:" in _api_internal else _api_internal,
+    "http://localhost:80" if "api:" in _api_internal else _api_internal,
 )
 API_TOKEN = st.session_state.get("api_token", "")
 
