@@ -312,6 +312,75 @@ def _detect_task_type(model_bytes: bytes) -> Optional[str]:
     return None
 
 
+def _extract_feature_importances(
+    model_bytes: bytes,
+    feature_names: Optional[list] = None,
+) -> Optional[dict]:
+    """
+    Extract feature importances from a sklearn model (.joblib bytes).
+
+    Supports:
+    - tree-based models: feature_importances_ (RandomForest, GBT, XGBoost, etc.)
+    - linear models: coef_ (LogisticRegression, LinearSVC, Ridge, etc.)
+    - Pipelines: unwraps to the last estimator, uses feature names from the
+      last transformer if available (ColumnTransformer, etc.)
+
+    Returns {feature_name: score} sorted descending, or None if not supported.
+    """
+    try:
+        import io as _io
+
+        import joblib
+        import numpy as np
+
+        obj = joblib.load(_io.BytesIO(model_bytes))
+
+        # Resolve feature names from Pipeline transformers if available
+        pipeline_feature_names: Optional[list] = None
+        if hasattr(obj, "steps"):
+            # Try to get feature names from the last transformer before the estimator
+            try:
+                if hasattr(obj[:-1], "get_feature_names_out"):
+                    pipeline_feature_names = list(obj[:-1].get_feature_names_out())
+            except Exception:
+                pass
+            obj = obj.steps[-1][1]
+
+        names = feature_names or pipeline_feature_names
+
+        importances: Optional[np.ndarray] = None
+        if hasattr(obj, "feature_importances_"):
+            importances = np.array(obj.feature_importances_)
+        elif hasattr(obj, "coef_"):
+            coef = np.array(obj.coef_)
+            # Multi-class: average abs coef across classes
+            if coef.ndim > 1:
+                importances = np.mean(np.abs(coef), axis=0)
+            else:
+                importances = np.abs(coef)
+        else:
+            return None
+
+        # Build feature name list
+        if not names and hasattr(obj, "feature_names_in_"):
+            names = list(obj.feature_names_in_)
+        if not names:
+            names = [f"feature_{i}" for i in range(len(importances))]
+
+        if len(names) != len(importances):
+            names = [f"feature_{i}" for i in range(len(importances))]
+
+        total = importances.sum()
+        if total > 0:
+            importances = importances / total
+
+        result = {name: round(float(score), 6) for name, score in zip(names, importances)}
+        return dict(sorted(result.items(), key=lambda kv: kv[1], reverse=True))
+
+    except Exception:
+        return None
+
+
 _SAFE_UPLOAD_ENV_KEYS = {
     "PATH",
     "HOME",
@@ -3518,10 +3587,19 @@ async def create_model(
         minio_object_key = object_name
         file_size_bytes = upload_info["size"]
 
-    # Detect task type from model bytes
+    # Detect task type and extract feature importances from model bytes
     detected_task: Optional[str] = None
+    extracted_importances: Optional[dict] = None
     if model_bytes_to_store is not None:
         detected_task = _detect_task_type(model_bytes_to_store)
+        extracted_importances = _extract_feature_importances(model_bytes_to_store)
+        if extracted_importances:
+            logger.info(
+                "Feature importances extracted",
+                model=name,
+                version=version,
+                n_features=len(extracted_importances),
+            )
 
     # Deserialize optional JSON fields
     classes_parsed = _parse_json_field(classes, "classes")
@@ -3552,6 +3630,7 @@ async def create_model(
         hyperparameters=hyperparameters_parsed,
         training_dataset=training_dataset,
         feature_baseline=feature_baseline_parsed,
+        feature_importances=extracted_importances,
         tags=tags_parsed,
         webhook_url=webhook_url,
         train_script_object_key=train_script_object_key,

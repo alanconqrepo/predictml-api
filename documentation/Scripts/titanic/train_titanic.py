@@ -424,6 +424,38 @@ except Exception as _ds_exc:
 
 _ts("after dataset save")
 
+
+# -- Feature importances ------------------------------------------------------
+
+feature_importances: dict = {}
+try:
+    import numpy as _np
+    _est = model
+    if hasattr(_est, "steps"):
+        _est = _est.steps[-1][1]
+    _raw_imp = None
+    if hasattr(_est, "feature_importances_"):
+        _raw_imp = _np.array(_est.feature_importances_)
+    elif hasattr(_est, "coef_"):
+        _c = _np.array(_est.coef_)
+        _raw_imp = _np.mean(_np.abs(_c), axis=0) if _c.ndim > 1 else _np.abs(_c)
+    if _raw_imp is not None:
+        _total = _raw_imp.sum()
+        if _total > 0:
+            _raw_imp = _raw_imp / _total
+        _feat_names = (
+            list(model.feature_names_in_) if hasattr(model, "feature_names_in_")
+            else list(X_train.columns) if hasattr(X_train, "columns")
+            else [f"feature_{i}" for i in range(len(_raw_imp))]
+        )
+        feature_importances = dict(sorted(
+            {n: round(float(v), 6) for n, v in zip(_feat_names, _raw_imp)}.items(),
+            key=lambda kv: kv[1], reverse=True
+        ))
+        print(f"[{MODEL_NAME}] Feature importances extracted ({len(feature_importances)} features).", file=sys.stderr)
+except Exception as _fi_exc:
+    print(f"[{MODEL_NAME}] Feature importances skipped: {_fi_exc}", file=sys.stderr)
+
 # ── 7. Statistics for MLflow and drift detection ───────────────────────────────
 #
 # feature_stats contains ONLY numerical features (FeatureStats expects
@@ -506,6 +538,9 @@ if _MLFLOW_AVAILABLE and MLFLOW_TRACKING_URI:
                     all_metrics[f"feat_{safe}_{stat_key}"] = float(val)
             for label, ratio in label_distribution.items():
                 all_metrics[f"label_{label}_ratio"] = float(ratio)
+            for feat_name, importance in feature_importances.items():
+                safe = feat_name.replace(" ", "_")[:50]
+                all_metrics[f"fi_{safe}"] = float(importance)
 
             _ts(f"MLflow — log_metrics x{len(all_metrics)} (network call #4)")
             mlflow.log_metrics(all_metrics)
@@ -622,6 +657,7 @@ output = {
     # is marked low_confidence=True in the API. 0.65 is appropriate for this
     # binary model: cases between 0.35 and 0.65 survival probability are ambiguous.
     "confidence_threshold": 0.65,
+    "feature_importances": feature_importances,
     "feature_stats": feature_stats,  # numerical features only
     "cat_distributions": cat_distributions,  # informational (non-standard API)
     "label_distribution": label_distribution,

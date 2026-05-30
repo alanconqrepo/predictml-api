@@ -105,6 +105,7 @@ class ModelMetadata(Base):
     training_params = Column(JSON, nullable=True)
     feature_baseline = Column(JSON, nullable=True)  # {feature: {mean, std, min, max}}
     categorical_baseline = Column(JSON, nullable=True)  # {feature: {category: frequency}}
+    feature_importances = Column(JSON, nullable=True)  # {feature: importance_score} sorted desc
 
     # Tags et webhook
     tags = Column(JSON, nullable=True)  # Liste de tags ex: ["production", "finance"]

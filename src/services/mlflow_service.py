@@ -62,6 +62,7 @@ class MLflowService:
         algorithm: Optional[str],
         training_params: Optional[dict],
         hyperparameters: Optional[dict] = None,
+        feature_importances: Optional[dict] = None,
         auto_promoted: bool = False,
         auto_promote_reason: Optional[str] = None,
         minio_object_key: Optional[str] = None,
@@ -146,6 +147,15 @@ class MLflowService:
                         safe_label = str(label).replace(" ", "_")[:30]
                         try:
                             mlflow.log_metric(f"label_{safe_label}_ratio", ratio)
+                        except Exception:
+                            pass
+
+                # Feature importances — one metric per feature
+                if feature_importances:
+                    for feat_name, importance in feature_importances.items():
+                        safe = feat_name.replace(" ", "_")[:50]
+                        try:
+                            mlflow.log_metric(f"fi_{safe}", float(importance))
                         except Exception:
                             pass
 

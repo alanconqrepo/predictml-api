@@ -1106,6 +1106,54 @@ with st.expander(t("models.details_expander"), expanded=True):
 _tm = selected.get("training_metrics") or {}
 _is_regression = any(k in _tm for k in ("mae", "rmse", "r2"))
 
+# ── Feature Importances ───────────────────────────────────────────────────────
+_fi = selected.get("feature_importances") or {}
+if _fi:
+    with st.expander(t("models.feature_importances.expander"), expanded=False):
+        import pandas as pd
+
+        _fi_df = (
+            pd.DataFrame(list(_fi.items()), columns=["feature", "importance"])
+            .sort_values("importance", ascending=False)
+            .reset_index(drop=True)
+        )
+        _fi_df["importance_%"] = (_fi_df["importance"] * 100).round(2)
+
+        _col_fi_chart, _col_fi_table = st.columns([3, 2])
+        with _col_fi_chart:
+            st.markdown(t("models.feature_importances.chart_header"))
+            import plotly.express as px
+
+            _fig = px.bar(
+                _fi_df,
+                x="importance_%",
+                y="feature",
+                orientation="h",
+                labels={"importance_%": t("models.feature_importances.axis_importance"), "feature": t("models.feature_importances.axis_feature")},
+                color="importance_%",
+                color_continuous_scale="Blues",
+            )
+            _fig.update_layout(
+                yaxis={"categoryorder": "total ascending"},
+                coloraxis_showscale=False,
+                margin={"l": 0, "r": 0, "t": 10, "b": 0},
+                height=max(300, len(_fi_df) * 28),
+            )
+            st.plotly_chart(_fig, use_container_width=True)
+        with _col_fi_table:
+            st.markdown(t("models.feature_importances.table_header"))
+            st.dataframe(
+                _fi_df[["feature", "importance_%"]].rename(
+                    columns={
+                        "feature": t("models.feature_importances.col_feature"),
+                        "importance_%": t("models.feature_importances.col_importance"),
+                    }
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+        st.caption(t("models.feature_importances.caption", n=len(_fi_df)))
+
 # ── Analysis & Monitoring (metrics, SHAP, performance, drift) ────────────────
 with st.expander(t("models.analysis.expander"), expanded=False):
     from datetime import date as _date, timedelta as _td
