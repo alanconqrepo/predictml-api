@@ -1,16 +1,15 @@
 apiVersion: 1
 
 # Override du fichier de provisioning built-in de grafana/otel-lgtm.
-# Supprime le dashboard JVM (non pertinent pour une API Python).
-# Les dashboards RED Metrics sont conservés (utiles pour HTTP rate/error/duration).
+# Supprime les dashboards JVM et RED Metrics (non pertinents pour une API Python).
+# Seuls les dashboards custom predictml sont chargés.
 providers:
-  - name: "RED Metrics (classic histogram)"
+  - name: predictml-api
+    orgId: 1
     type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
     options:
-      path: /otel-lgtm/grafana-dashboard-red-metrics-classic.json
-      foldersFromFilesStructure: false
-  - name: "RED Metrics (exponential/native histogram)"
-    type: file
-    options:
-      path: /otel-lgtm/grafana-dashboard-red-metrics-native.json
+      path: /etc/grafana/provisioning/dashboards
       foldersFromFilesStructure: false
