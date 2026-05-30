@@ -587,7 +587,7 @@ home:
     predictions: 📈 Prédictions
     predictions_help: Nombre total de requêtes /predict reçues sur les 30 derniers jours, tous modèles et utilisateurs confondus.
     success_rate: ✅ Taux de succès
-    success_rate_help: "Proportion de prédictions réussies : (total − erreurs) / total. Une erreur correspond à une exception levée par l'API (ex. modèle non chargé, feature manquante)."
+    success_rate_help: "Proportion de requêtes traitées sans erreur technique : (total − erreurs) / total. Une erreur = exception levée par l'API (modèle non chargé, feature manquante, timeout…). ⚠️ Ceci ne mesure pas la qualité des prédictions (précision vs ground truth) — pour ça, consultez la Supervision ou les Observed Results."
     latency_p95: ⚡ Latence P95
     latency_p95_help: 95e percentile du temps de réponse API en millisecondes. 95 % des requêtes ont répondu en moins de cette durée. Moyenne calculée sur tous les modèles actifs.
     coverage: 🔖 Couverture terrain
