@@ -15,6 +15,7 @@ A single worker replica is deployed (no Redis lock needed for
 scheduling, unlike the old APScheduler × 3 replicas architecture).
 """
 
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import uuid4
@@ -22,6 +23,19 @@ from uuid import uuid4
 import structlog
 from arq import cron
 from arq.connections import RedisSettings
+from prometheus_client import Counter, Histogram, start_http_server
+
+TASK_TOTAL = Counter(
+    "arq_task_total",
+    "Total ARQ task executions",
+    ["task", "status"],
+)
+TASK_DURATION = Histogram(
+    "arq_task_duration_seconds",
+    "ARQ task execution duration in seconds",
+    ["task"],
+    buckets=[1, 5, 30, 60, 120, 300, 600, 720],
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -96,6 +110,7 @@ async def retrain_task(
         new_version=new_version,
     )
 
+    t0 = time.monotonic()
     try:
         result = await do_retrain(
             model_name=model_name,
@@ -116,6 +131,8 @@ async def retrain_task(
 
     completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     status = "success" if result.get("success") else "failed"
+    TASK_DURATION.labels(task="retrain_task").observe(time.monotonic() - t0)
+    TASK_TOTAL.labels(task="retrain_task", status=status).inc()
     final_logs = await _get_redis_logs(redis, job_id) if redis else ""
 
     await _update_task_run(
@@ -233,6 +250,7 @@ async def scheduled_retrain_task(
     except Exception as exc:
         logger.warning("TaskRun creation failed (non-blocking)", error=str(exc))
 
+    t0 = time.monotonic()
     try:
         result = await do_retrain(
             model_name=model_name,
@@ -255,6 +273,9 @@ async def scheduled_retrain_task(
         result = {"success": False, "error": str(exc)}
     finally:
         await redis.delete(lock_key)
+        status = "success" if result.get("success") else "failed"
+        TASK_DURATION.labels(task="scheduled_retrain_task").observe(time.monotonic() - t0)
+        TASK_TOTAL.labels(task="scheduled_retrain_task", status=status).inc()
 
     # Final TaskRun update
     completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -282,7 +303,15 @@ async def alert_check_task(ctx: Dict[str, Any]) -> None:
     from src.tasks.supervision_reporter import run_alert_check
 
     logger.info("alert_check_task started")
-    await run_alert_check()
+    t0 = time.monotonic()
+    try:
+        await run_alert_check()
+        TASK_TOTAL.labels(task="alert_check_task", status="success").inc()
+    except Exception:
+        TASK_TOTAL.labels(task="alert_check_task", status="failed").inc()
+        raise
+    finally:
+        TASK_DURATION.labels(task="alert_check_task").observe(time.monotonic() - t0)
     logger.info("alert_check_task completed")
 
 
@@ -313,6 +342,9 @@ async def startup(ctx: Dict[str, Any]) -> None:
 
     setup_logging(debug=settings.DEBUG)
     logger.info("ARQ worker started")
+
+    start_http_server(9092)
+    logger.info("Prometheus metrics server started", port=9092)
 
     try:
         await init_db()

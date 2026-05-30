@@ -94,7 +94,8 @@ if [ -f "$PROMETHEUS_TEMPLATE" ]; then
   _api_port=$(grep -E '^API_PORT=' "$ENV_FILE" | cut -d= -f2 | sed 's/#.*//' | tr -d '[:space:]')
   _api_port="${_api_port:-8000}"
   export API_PORT="$_api_port"
-  envsubst '${API_PORT}' < "$PROMETHEUS_TEMPLATE" > "$PROMETHEUS_OUT"
+  export METRICS_TOKEN
+  envsubst '${API_PORT} ${METRICS_TOKEN}' < "$PROMETHEUS_TEMPLATE" > "$PROMETHEUS_OUT"
   echo "✅  monitoring/prometheus.yml généré (API_PORT=${_api_port})"
 fi
 

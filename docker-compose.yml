@@ -63,6 +63,7 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Définissez MINIO_ROOT_PASSWORD dans .env}
       MINIO_INTERNAL_PORT: ${MINIO_INTERNAL_PORT:-9000}
       MINIO_CONSOLE_INTERNAL_PORT: ${MINIO_CONSOLE_INTERNAL_PORT:-9001}
+      MINIO_PROMETHEUS_AUTH_TYPE: public
     volumes:
       - minio_data:/data
     ports:
@@ -73,6 +74,63 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # Promtail — collecte les logs Docker de tous les containers et les envoie à Loki
+  promtail:
+    image: grafana/promtail:latest
+    container_name: predictml-promtail
+    command: -config.file=/etc/promtail/config.yaml
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./monitoring/promtail-config.yaml:/etc/promtail/config.yaml:ro
+    depends_on:
+      - grafana
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # PostgreSQL exporter — métriques DB pour Prometheus
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:latest
+    container_name: predictml-postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:${POSTGRES_INTERNAL_PORT:-5432}/${POSTGRES_DB:-sklearn_api}?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # Redis exporter — métriques Redis pour Prometheus
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: predictml-redis-exporter
+    environment:
+      REDIS_ADDR: "redis://redis-master:${REDIS_PORT:-6379}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # cAdvisor — métriques CPU/RAM/réseau de tous les containers Docker
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: predictml-cadvisor
+    command: --docker_only=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    privileged: true
     restart: unless-stopped
     networks:
       - internal
@@ -94,6 +152,7 @@ services:
       - ./monitoring/prometheus.yml:/otel-lgtm/prometheus.yaml:ro
       - ./monitoring/grafana/provisioning.yaml:/etc/grafana/provisioning/datasources/predictml.yaml:ro
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/grafana-dashboards-override.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/grafana-dashboards.yaml:ro
     restart: unless-stopped
     networks:
       - internal
