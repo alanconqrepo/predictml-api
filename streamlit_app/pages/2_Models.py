@@ -510,8 +510,8 @@ _col_last_pred = t("models.table.col_last_pred")
 _col_accuracy_eval = t("models.table.col_accuracy_eval")
 _col_auc_eval = t("models.table.col_auc_eval")
 _col_f1_eval = t("models.table.col_f1_eval")
-_col_r2_train = t("models.table.col_r2_train")
-_col_rmse_train = t("models.table.col_rmse_train")
+_col_r2_eval = t("models.table.col_r2_eval")
+_col_rmse_eval = t("models.table.col_rmse_eval")
 
 rows = []
 for m in models:
@@ -542,12 +542,12 @@ for m in models:
             _col_accuracy_eval: f"{m['accuracy']:.3f}" if m.get("accuracy") is not None else "—",
             _col_auc_eval: f"{m['auc']:.3f}" if m.get("auc") is not None else "—",
             _col_f1_eval: f"{m['f1_score']:.3f}" if m.get("f1_score") is not None else "—",
-            _col_r2_train: (
+            _col_r2_eval: (
                 f"{(m.get('training_metrics') or {}).get('r2'):.3f}"
                 if (m.get("training_metrics") or {}).get("r2") is not None
                 else "—"
             ),
-            _col_rmse_train: (
+            _col_rmse_eval: (
                 f"{(m.get('training_metrics') or {}).get('rmse'):.4f}"
                 if (m.get("training_metrics") or {}).get("rmse") is not None
                 else "—"
@@ -612,13 +612,13 @@ st.dataframe(
             _col_f1_eval,
             help=t("models.table.col_f1_eval_help"),
         ),
-        _col_r2_train: st.column_config.TextColumn(
-            _col_r2_train,
-            help=t("models.table.col_r2_train_help"),
+        _col_r2_eval: st.column_config.TextColumn(
+            _col_r2_eval,
+            help=t("models.table.col_r2_eval_help"),
         ),
-        _col_rmse_train: st.column_config.TextColumn(
-            _col_rmse_train,
-            help=t("models.table.col_rmse_train_help"),
+        _col_rmse_eval: st.column_config.TextColumn(
+            _col_rmse_eval,
+            help=t("models.table.col_rmse_eval_help"),
         ),
     },
 )
@@ -894,9 +894,11 @@ st.divider()
 st.subheader(t("models.detail.subheader"))
 
 model_options = {f"{m['name']} v{m['version']}": m for m in models}
-detail_search = st.text_input(
-    t("models.detail.filter_label"), key="detail_search", placeholder=t("models.detail.filter_placeholder")
-)
+_detail_col_search, _detail_col_select = st.columns([1, 2])
+with _detail_col_search:
+    detail_search = st.text_input(
+        t("models.detail.filter_label"), key="detail_search", placeholder=t("models.detail.filter_placeholder")
+    )
 filtered_keys = (
     [k for k in model_options if detail_search.lower() in k.lower()]
     if detail_search
@@ -910,7 +912,8 @@ if _preselect:
     _hits = [i for i, k in enumerate(_detail_keys) if k.split(" v")[0] == _preselect]
     if _hits:
         _detail_idx = _hits[0]
-selected_label = st.selectbox(t("models.detail.select_label"), _detail_keys, index=_detail_idx)
+with _detail_col_select:
+    selected_label = st.selectbox(t("models.detail.select_label"), _detail_keys, index=_detail_idx)
 selected = model_options[selected_label]
 
 # Details
@@ -1730,33 +1733,59 @@ with st.expander(t("models.analysis.expander"), expanded=False):
             st.warning(t("models.analysis.feature_drift_error", error=e))
 
 # Feature resolution for the Validate / Golden Tests blocks
+# Always fetch model detail to get the full feature_names_in_ list (includes
+# categorical features that are absent from feature_baseline, which only stores
+# numerical stats — mean/std/min/max cannot be computed for categoricals).
 feature_baseline = selected.get("feature_baseline") or {}
+categorical_baseline = selected.get("categorical_baseline") or {}
 feature_names_list: list = []
-if feature_baseline:
-    feature_names_list = list(feature_baseline.keys())
-else:
-    try:
-        _feat_detail = fetch_model_detail(
-            st.session_state.get("api_url"),
-            st.session_state.get("api_token"),
-            selected["name"],
-            selected["version"],
-        )
-        feature_names_list = _feat_detail.get("feature_names") or []
+try:
+    _feat_detail = fetch_model_detail(
+        st.session_state.get("api_url"),
+        st.session_state.get("api_token"),
+        selected["name"],
+        selected["version"],
+    )
+    feature_names_list = _feat_detail.get("feature_names") or []
+    if not feature_baseline:
         feature_baseline = _feat_detail.get("feature_baseline") or {}
-    except Exception:
-        pass
+    if not categorical_baseline:
+        categorical_baseline = _feat_detail.get("categorical_baseline") or {}
+except Exception:
+    pass
+
+if not feature_names_list:
+    feature_names_list = list(feature_baseline.keys()) + [
+        k for k in categorical_baseline if k not in feature_baseline
+    ]
+
+
+def _cat_default(feat: str) -> str:
+    """Return the most frequent category for a categorical feature, or '' if unknown."""
+    dist = categorical_baseline.get(feat, {})
+    if not dist:
+        return ""
+    return max(dist, key=lambda k: dist[k])
+
 
 with st.expander(t("models.validate.expander"), expanded=False):
     st.markdown(t("models.validate.intro"))
 
-    # Build example JSON from feature_baseline or feature_names_list
-    if feature_baseline:
+    # Build example JSON: use all feature_names from the model (feature_names_in_).
+    # - Numerical features (in feature_baseline): use their stored mean value.
+    # - Categorical features (in categorical_baseline): use the most frequent category.
+    # - Unknown features: fall back to 0.0.
+    if feature_names_list:
+        example_payload = {
+            feat: float(feature_baseline[feat].get("mean") or 0.0)
+            if feat in feature_baseline
+            else _cat_default(feat)
+            for feat in feature_names_list
+        }
+    elif feature_baseline:
         example_payload = {
             feat: float(info.get("mean") or 0.0) for feat, info in feature_baseline.items()
         }
-    elif feature_names_list:
-        example_payload = {feat: 0.0 for feat in feature_names_list}
     else:
         example_payload = {}
 
@@ -1918,13 +1947,21 @@ with st.expander(t("models.golden_tests.expander"), expanded=False):
 
         # --- Add a case ---
         with st.expander(t("models.golden_tests.add_expander"), expanded=False):
-            if feature_baseline:
+            if feature_names_list:
+                _gt_default = _json.dumps(
+                    {
+                        feat: float(feature_baseline[feat].get("mean") or 0.0)
+                        if feat in feature_baseline
+                        else _cat_default(feat)
+                        for feat in feature_names_list
+                    },
+                    indent=2,
+                )
+            elif feature_baseline:
                 _gt_default = _json.dumps(
                     {feat: float(info.get("mean") or 0.0) for feat, info in feature_baseline.items()},
                     indent=2,
                 )
-            elif feature_names_list:
-                _gt_default = _json.dumps({feat: 0.0 for feat in feature_names_list}, indent=2)
             else:
                 _gt_default = '{}\n  "feature1": 0.0\n}'
 
@@ -2018,54 +2055,80 @@ with st.expander(t("models.whatif.expander"), expanded=False):
     _wif_api_token = st.session_state.get("api_token")
 
     wif_baseline = selected.get("feature_baseline") or {}
+    wif_cat_baseline = selected.get("categorical_baseline") or {}
     wif_classes = selected.get("classes") or []
-    if not wif_baseline:
+    wif_feature_names: list = []
+    if not wif_baseline and not wif_cat_baseline:
         try:
             _wif_detail = fetch_model_detail(
                 _wif_api_url, _wif_api_token, selected["name"], selected["version"]
             )
             wif_baseline = _wif_detail.get("feature_baseline") or {}
+            wif_cat_baseline = _wif_detail.get("categorical_baseline") or {}
+            wif_feature_names = _wif_detail.get("feature_names") or []
         except Exception:
             pass
 
-    if not wif_baseline:
+    # Determine ordered feature list: model order from feature_names_in_, else baseline keys
+    if not wif_feature_names:
+        wif_feature_names = list(wif_baseline.keys()) + [
+            k for k in wif_cat_baseline if k not in wif_baseline
+        ]
+
+    if not wif_baseline and not wif_cat_baseline:
         st.info(t("models.whatif.no_baseline"))
     else:
         _wif_key = f"whatif_history_{selected['name']}_{selected['version']}"
         if _wif_key not in st.session_state:
             st.session_state[_wif_key] = []
 
-        st.caption(t("models.whatif.caption", n=len(wif_baseline)))
+        _wif_n_total = len(wif_feature_names) or len(wif_baseline) + len(wif_cat_baseline)
+        st.caption(t("models.whatif.caption", n=_wif_n_total))
 
         _wif_cols = st.columns(2)
         wif_feature_values: dict = {}
-        for _wif_i, (_wif_feat, _wif_stats) in enumerate(wif_baseline.items()):
+        _wif_i = 0
+        for _wif_feat in wif_feature_names:
             with _wif_cols[_wif_i % 2]:
-                _wif_min = float(_wif_stats.get("min") or 0.0)
-                _wif_max = float(_wif_stats.get("max") or 1.0)
-                _wif_mean = float(_wif_stats.get("mean") or (_wif_min + _wif_max) / 2)
-                if _wif_min == _wif_max:
-                    st.metric(_wif_feat, _wif_mean)
-                    wif_feature_values[_wif_feat] = _wif_mean
-                else:
-                    _wif_range = _wif_max - _wif_min
-                    _wif_is_int = (
-                        _wif_min == int(_wif_min) and _wif_max == int(_wif_max) and _wif_range <= 50
-                    )
-                    if _wif_is_int:
-                        _wif_step = 1.0
-                        _wif_default = float(round(_wif_mean))
+                if _wif_feat in wif_baseline:
+                    # Numerical feature — slider
+                    _wif_stats = wif_baseline[_wif_feat]
+                    _wif_min = float(_wif_stats.get("min") or 0.0)
+                    _wif_max = float(_wif_stats.get("max") or 1.0)
+                    _wif_mean = float(_wif_stats.get("mean") or (_wif_min + _wif_max) / 2)
+                    if _wif_min == _wif_max:
+                        st.metric(_wif_feat, _wif_mean)
+                        wif_feature_values[_wif_feat] = _wif_mean
                     else:
-                        _wif_step = max(0.001, round(_wif_range / 100, 4))
-                        _wif_default = _wif_mean
-                    wif_feature_values[_wif_feat] = st.slider(
+                        _wif_range = _wif_max - _wif_min
+                        _wif_is_int = (
+                            _wif_min == int(_wif_min) and _wif_max == int(_wif_max) and _wif_range <= 50
+                        )
+                        if _wif_is_int:
+                            _wif_step = 1.0
+                            _wif_default = float(round(_wif_mean))
+                        else:
+                            _wif_step = max(0.001, round(_wif_range / 100, 4))
+                            _wif_default = _wif_mean
+                        wif_feature_values[_wif_feat] = st.slider(
+                            _wif_feat,
+                            min_value=_wif_min,
+                            max_value=_wif_max,
+                            value=_wif_default,
+                            step=_wif_step,
+                            key=f"whatif_slider_{selected['name']}_{selected['version']}_{_wif_feat}",
+                        )
+                elif _wif_feat in wif_cat_baseline:
+                    # Categorical feature — selectbox sorted by frequency (most common first)
+                    _wif_dist = wif_cat_baseline[_wif_feat]
+                    _wif_options = sorted(_wif_dist.keys(), key=lambda c: -_wif_dist[c])
+                    wif_feature_values[_wif_feat] = st.selectbox(
                         _wif_feat,
-                        min_value=_wif_min,
-                        max_value=_wif_max,
-                        value=_wif_default,
-                        step=_wif_step,
-                        key=f"whatif_slider_{selected['name']}_{selected['version']}_{_wif_feat}",
+                        options=_wif_options,
+                        index=0,
+                        key=f"whatif_select_{selected['name']}_{selected['version']}_{_wif_feat}",
                     )
+            _wif_i += 1
 
         wif_use_shap = st.checkbox(
             t("models.whatif.shap_checkbox"),

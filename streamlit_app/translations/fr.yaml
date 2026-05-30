@@ -1127,6 +1127,16 @@ supervision:
     predictions_analyzed: '{count} prédictions analysées'
     no_baseline: Pas de baseline de features enregistrée pour ce modèle.
     no_drift_data: Aucune donnée de drift disponible.
+    insufficient_data: Données insuffisantes ({count} observations — seuil 30).
+    cat_drift_header: '**📊 Drift des features catégorielles**'
+  drift_cat:
+    col_category: Catégorie
+    col_baseline: Baseline (%)
+    col_production: Production (%)
+    col_delta: Δ (pts)
+    y_axis: Fréquence (%)
+    legend_baseline: Baseline
+    legend_production: Production
   drift_table:
     col_feature: Feature
     col_status: Statut
@@ -2065,12 +2075,12 @@ models:
       Recommandé quand les classes sont déséquilibrées ou quand les faux négatifs
       et faux positifs ont un coût différent (ex : détection de fraude, diagnostic
       médical). Métrique classification uniquement.'
-    col_r2_train: R² (train)
-    col_r2_train_help: 'R² = 1 − (Σ(y − ŷ)²) / (Σ(y − ȳ)²)
+    col_r2_eval: R² (eval)
+    col_r2_eval_help: 'R² = 1 − (Σ(y − ŷ)²) / (Σ(y − ȳ)²)
 
 
       Mesure la part de variance de la variable cible expliquée par le modèle, calculée
-      sur le jeu d''entraînement.
+      sur le jeu de test (eval).
 
 
       • 1.0 → le modèle prédit parfaitement toutes les valeurs
@@ -2081,14 +2091,14 @@ models:
       (sur-régularisation, mauvais features, bug)
 
 
-      ⚠️ Un R² élevé sur le train peut masquer du surapprentissage. Comparer avec
-      les métriques live en production. Métrique régression uniquement.'
-    col_rmse_train: RMSE (train)
-    col_rmse_train_help: 'RMSE = √( Σ(y − ŷ)² / n )
+      ⚠️ Comparer avec les métriques live en production pour détecter le surapprentissage.
+      Métrique régression uniquement.'
+    col_rmse_eval: RMSE (eval)
+    col_rmse_eval_help: 'RMSE = √( Σ(y − ŷ)² / n )
 
 
       Erreur quadratique moyenne, exprimée dans la même unité que la variable cible.
-      Calculée sur le jeu d''entraînement.
+      Calculée sur le jeu de test (eval).
 
 
       • Un RMSE de 2.5 sur un prix en € signifie que le modèle se trompe en moyenne

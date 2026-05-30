@@ -715,6 +715,67 @@ with _tab_detail:
             else:
                 st.info(t("supervision.drift.no_drift_data"))
 
+            # ── Categorical feature drift ──────────────────────────────────────
+            cat_features_dict = feature_drift.get("categorical_features", {})
+            if cat_features_dict:
+                st.markdown(t("supervision.drift.cat_drift_header"))
+                _STATUS_ORDER = {"critical": 0, "warning": 1, "ok": 2, "insufficient_data": 3, "no_baseline": 4}
+                _CAT_PSI_COLORS = {"ok": "#27ae60", "warning": "#f39c12", "critical": "#e74c3c"}
+
+                for feat_name, feat_data in sorted(
+                    cat_features_dict.items(),
+                    key=lambda x: _STATUS_ORDER.get(x[1].get("drift_status", "no_baseline"), 99),
+                ):
+                    drift_st = feat_data.get("drift_status", "no_data")
+                    psi_val  = feat_data.get("psi")
+                    prod_cnt = feat_data.get("production_count", 0)
+                    bl_dist  = feat_data.get("baseline_distribution", {})
+                    pr_dist  = feat_data.get("production_distribution", {})
+
+                    icon = _icon(drift_st)
+                    psi_str = f"PSI={psi_val:.4f}" if psi_val is not None else "PSI=—"
+                    with st.expander(f"{icon} **{feat_name}** — {drift_st.upper()}  ·  {psi_str}  ·  n={prod_cnt}", expanded=(drift_st in ("warning", "critical"))):
+                        if bl_dist and pr_dist:
+                            all_cats = sorted(set(bl_dist.keys()) | set(pr_dist.keys()))
+                            df_cat = pd.DataFrame({
+                                t("supervision.drift_cat.col_category"): all_cats,
+                                t("supervision.drift_cat.col_baseline"): [round(bl_dist.get(c, 0.0) * 100, 1) for c in all_cats],
+                                t("supervision.drift_cat.col_production"): [round(pr_dist.get(c, 0.0) * 100, 1) for c in all_cats],
+                            })
+                            df_cat[t("supervision.drift_cat.col_delta")] = (
+                                df_cat[t("supervision.drift_cat.col_production")]
+                                - df_cat[t("supervision.drift_cat.col_baseline")]
+                            ).round(1)
+
+                            fig_cat = go.Figure()
+                            fig_cat.add_trace(go.Bar(
+                                name=t("supervision.drift_cat.legend_baseline"),
+                                x=all_cats,
+                                y=df_cat[t("supervision.drift_cat.col_baseline")],
+                                marker_color="#5dade2",
+                            ))
+                            fig_cat.add_trace(go.Bar(
+                                name=t("supervision.drift_cat.legend_production"),
+                                x=all_cats,
+                                y=df_cat[t("supervision.drift_cat.col_production")],
+                                marker_color=_CAT_PSI_COLORS.get(drift_st, "#95a5a6"),
+                            ))
+                            fig_cat.update_layout(
+                                barmode="group",
+                                xaxis_title=feat_name,
+                                yaxis_title=t("supervision.drift_cat.y_axis"),
+                                height=280,
+                                margin=dict(l=0, r=0, t=20, b=0),
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                            )
+                            st.plotly_chart(fig_cat, use_container_width=True)
+
+                            st.dataframe(df_cat, hide_index=True, use_container_width=True)
+                        elif drift_st == "insufficient_data":
+                            st.caption(t("supervision.drift.insufficient_data", count=prod_cnt))
+                        else:
+                            st.caption(t("supervision.drift.no_baseline"))
+
         st.divider()
 
         # Confidence trend

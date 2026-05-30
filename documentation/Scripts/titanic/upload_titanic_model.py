@@ -294,9 +294,13 @@ patch_body = {
     "tags": ["Example"],
 }
 
-# feature_baseline = numerical stats only
+# feature_baseline = numerical stats only (mean/std/min/max)
 if metrics.get("feature_stats"):
     patch_body["feature_baseline"] = metrics["feature_stats"]
+
+# categorical_baseline = category frequency distributions (pclass, sex, embarked)
+if metrics.get("cat_distributions"):
+    patch_body["categorical_baseline"] = metrics["cat_distributions"]
 
 if metrics.get("confidence_threshold") is not None:
     patch_body["confidence_threshold"] = metrics["confidence_threshold"]
@@ -325,9 +329,15 @@ patch = requests.patch(
 
 if patch.status_code == 200:
     baseline_ok = "feature_baseline" in patch_body
+    cat_ok = "categorical_baseline" in patch_body
+    extras = []
+    if baseline_ok:
+        extras.append("numerical baseline")
+    if cat_ok:
+        extras.append("categorical baseline")
     print(
         f"✅  Model set to production (ab_test) with the 'Example' tag"
-        f"{' and numerical feature baseline' if baseline_ok else ''}."
+        + (f" and {', '.join(extras)}" if extras else "") + "."
     )
 else:
     print(f"⚠️   PATCH failed ({patch.status_code}): {patch.text[:200]}")

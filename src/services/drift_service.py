@@ -1,17 +1,20 @@
 """
 Data drift detection service.
 
-Computes three metrics per numeric feature:
+Numeric features — three metrics per feature:
 - Z-score: normalized deviation between production mean and baseline
 - PSI (Population Stability Index): distribution divergence via normal bins
 - Null rate: rate of null/missing values in production vs baseline
+
+Categorical features — one metric per feature:
+- PSI on category frequency distributions (baseline vs production)
 
 Status thresholds:
   Z-score    : ok < 2 | warning 2–3 | critical ≥ 3
   PSI        : ok < 0.1 | warning 0.1–0.2 | critical ≥ 0.2
   Null rate  : ok if absolute deviation < 5 pts | warning 5–15 pts | critical > 15 pts or prod > 30 %
 
-Final status = worst of the three statuses.
+Final status = worst across all numeric + categorical features.
 """
 
 import math
@@ -20,7 +23,7 @@ from typing import TYPE_CHECKING, Dict, Optional
 import numpy as np
 from scipy import stats
 
-from src.schemas.model import FeatureDriftResult
+from src.schemas.model import CategoricalDriftResult, FeatureDriftResult
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -216,16 +219,75 @@ def compute_feature_drift(
     return results
 
 
-def summarize_drift(features: Dict[str, FeatureDriftResult], baseline_available: bool) -> str:
-    """Return the worst overall status among all features.
+def compute_categorical_drift(
+    categorical_baseline: Dict[str, Dict[str, float]],
+    categorical_production_stats: Dict[str, dict],
+    min_count: int = 30,
+) -> Dict[str, CategoricalDriftResult]:
+    """
+    Compute PSI-based drift for categorical features.
 
-    Takes into account drift_status (Z-score + PSI) and null_rate_status as a fourth dimension.
+    Args:
+        categorical_baseline: {feature: {category: baseline_frequency}}
+        categorical_production_stats: {feature: {category: prod_frequency, "_count": int}}
+        min_count: minimum number of production observations to compute drift
+
+    Returns:
+        Dict[feature, CategoricalDriftResult]
+    """
+    results: Dict[str, CategoricalDriftResult] = {}
+
+    for feature, baseline_dist in categorical_baseline.items():
+        prod_stats = categorical_production_stats.get(feature, {})
+        prod_count = int(prod_stats.get("_count", 0))
+        prod_dist = {k: v for k, v in prod_stats.items() if k != "_count"}
+
+        if prod_count < min_count:
+            results[feature] = CategoricalDriftResult(
+                baseline_distribution=baseline_dist,
+                production_distribution=prod_dist,
+                production_count=prod_count,
+                psi=None,
+                drift_status="insufficient_data",
+            )
+            continue
+
+        # PSI across all categories (union of baseline + production categories)
+        all_categories = set(baseline_dist.keys()) | set(prod_dist.keys())
+        psi = 0.0
+        for cat in all_categories:
+            expected = max(float(baseline_dist.get(cat, 0.0)), _EPS)
+            actual = max(float(prod_dist.get(cat, 0.0)), _EPS)
+            psi += (actual - expected) * math.log(actual / expected)
+
+        psi = round(psi, 6)
+        drift_status = _status_from_psi(psi)
+
+        results[feature] = CategoricalDriftResult(
+            baseline_distribution=baseline_dist,
+            production_distribution=prod_dist,
+            production_count=prod_count,
+            psi=psi,
+            drift_status=drift_status,
+        )
+
+    return results
+
+
+def summarize_drift(
+    features: Dict[str, FeatureDriftResult],
+    baseline_available: bool,
+    categorical_features: Optional[Dict[str, CategoricalDriftResult]] = None,
+) -> str:
+    """Return the worst overall status across numeric and categorical features.
+
+    Takes into account Z-score + PSI + null_rate for numerics, PSI for categoricals.
     """
     if not baseline_available:
         return "no_baseline"
 
     statuses = [f.drift_status for f in features.values() if f.drift_status not in ("no_baseline",)]
-    if not statuses:
+    if not statuses and not categorical_features:
         return "insufficient_data"
 
     ranked = [s for s in statuses if s in ("ok", "warning", "critical")]
@@ -235,7 +297,13 @@ def summarize_drift(features: Dict[str, FeatureDriftResult], baseline_available:
         for f in features.values()
         if f.null_rate_status in ("ok", "warning", "critical")
     ]
-    all_ranked = ranked + null_ranked
+    # Categorical PSI statuses
+    cat_ranked = [
+        c.drift_status
+        for c in (categorical_features or {}).values()
+        if c.drift_status in ("ok", "warning", "critical")
+    ]
+    all_ranked = ranked + null_ranked + cat_ranked
 
     if not all_ranked:
         return "insufficient_data"

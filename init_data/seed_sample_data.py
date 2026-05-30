@@ -24,6 +24,12 @@ Deployment schema after seeding:
     v1.2.0  ExtraTreesClassifier       → shadow
     v1.3.0  LogisticRegression         → uploaded only
 
+  titanic-survival  (binary classification: survived 0/1, mixed numerical + categorical)
+    v1.0.0  GradientBoosting Pipeline (OneHotEncoder)   → production + ab_test
+    v1.1.0  RandomForest Pipeline (OneHotEncoder)        → production + ab_test
+    v1.2.0  ExtraTrees Pipeline (OneHotEncoder)          → shadow
+    v1.3.0  LogisticRegression Pipeline (OneHotEncoder)  → uploaded only
+
 Environment variables:
   API_URL    Internal API URL  (default: http://api:8000)
   API_TOKEN  Admin token       (ADMIN_TOKEN as fallback)
@@ -112,6 +118,21 @@ SCRIPTS = [
     (
         "titanic/upload_titanic_model.py",
         {"MODEL_NAME": "titanic-survival", "MODEL_VERSION": "1.0.0"},
+    ),
+    # v1.1.0 : RandomForest Pipeline — production + ab_test
+    (
+        "titanic/upload_titanic_RandomForest_abtest.py",
+        {"MODEL_NAME": "titanic-survival", "MODEL_VERSION": "1.1.0"},
+    ),
+    # v1.2.0 : ExtraTrees Pipeline — shadow
+    (
+        "titanic/upload_titanic_ExtraTrees_shadow.py",
+        {"MODEL_NAME": "titanic-survival", "MODEL_VERSION": "1.2.0"},
+    ),
+    # v1.3.0 : LogisticRegression Pipeline — uploaded only
+    (
+        "titanic/upload_titanic_LogisticRegression_uploaded.py",
+        {"MODEL_NAME": "titanic-survival", "MODEL_VERSION": "1.3.0"},
     ),
     # ── Predictions and ground truth ─────────────────────────────────────────
     ("iris/send_predictions_iris.py", {"MODEL_NAME": "iris-classifier", "SLEEP_BETWEEN": "1"}),
@@ -220,6 +241,9 @@ def main():
     print("    cancer-classifier v1.2.0 ExtraTrees          → shadow")
     print("    cancer-classifier v1.3.0 LogisticRegression  → uploaded")
     print("    titanic-survival  v1.0.0 GradientBoosting+OneHotEncoder → production + ab_test")
+    print("    titanic-survival  v1.1.0 RandomForest+OneHotEncoder     → production + ab_test")
+    print("    titanic-survival  v1.2.0 ExtraTrees+OneHotEncoder       → shadow")
+    print("    titanic-survival  v1.3.0 LogisticRegression+OneHotEncoder → uploaded")
 
     for script_path_rel, extra_env in SCRIPTS:
         ok = run_script(script_path_rel, extra_env)

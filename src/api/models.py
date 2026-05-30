@@ -67,6 +67,7 @@ from src.schemas.model import (
     ConfidenceTrendPoint,
     ConfidenceTrendResponse,
     DeprecateModelResponse,
+    CategoricalDriftResult,
     DriftReportResponse,
     FeatureDriftResult,
     FeatureImportanceItem,
@@ -171,14 +172,23 @@ async def _get_leaderboard_drift_status(
     version: str,
     period_days: int,
     feature_baseline: Optional[dict],
+    categorical_baseline: Optional[dict] = None,
 ) -> str:
-    if not feature_baseline:
+    has_numeric = bool(feature_baseline)
+    has_categorical = bool(categorical_baseline)
+    if not has_numeric and not has_categorical:
         return "no_baseline"
-    prod_stats = await DBService.get_feature_production_stats(db, name, version, period_days)
-    if not prod_stats:
-        return "no_data"
-    features = drift_service.compute_feature_drift(feature_baseline, prod_stats, min_count=10)
-    return drift_service.summarize_drift(features, baseline_available=True)
+    prod_stats, cat_prod_stats = await asyncio.gather(
+        DBService.get_feature_production_stats(db, name, version, period_days),
+        DBService.get_categorical_production_stats(db, name, version, period_days),
+    )
+    features = drift_service.compute_feature_drift(feature_baseline or {}, prod_stats, min_count=10)
+    cat_features = drift_service.compute_categorical_drift(
+        categorical_baseline or {}, cat_prod_stats, min_count=10
+    )
+    return drift_service.summarize_drift(
+        features, baseline_available=has_numeric or has_categorical, categorical_features=cat_features
+    )
 
 
 _ALLOWED_IMPORT_MODULES = {
@@ -493,7 +503,7 @@ async def get_models_leaderboard(
     for m in models:
         ps = stats_by_name.get(m.name, {})
         drift_status = await _get_leaderboard_drift_status(
-            db, m.name, m.version, days, m.feature_baseline
+            db, m.name, m.version, days, m.feature_baseline, m.categorical_baseline
         )
         tm = m.training_metrics or {}
         entries.append(
@@ -799,14 +809,20 @@ async def get_model_drift(
             detail=f"Model '{name}' not found.",
         )
 
-    production_stats = await DBService.get_feature_production_stats(
-        db, name, metadata.version, days
+    production_stats, cat_prod_stats = await asyncio.gather(
+        DBService.get_feature_production_stats(db, name, metadata.version, days),
+        DBService.get_categorical_production_stats(db, name, metadata.version, days),
     )
 
     total_predictions = sum(v.get("count", 0) for v in production_stats.values())
+    if not total_predictions:
+        total_predictions = max(
+            (v.get("_count", 0) for v in cat_prod_stats.values()), default=0
+        )
 
-    baseline = metadata.feature_baseline
-    baseline_available = bool(baseline)
+    baseline = metadata.feature_baseline or {}
+    categorical_baseline = metadata.categorical_baseline or {}
+    baseline_available = bool(baseline) or bool(categorical_baseline)
 
     if not baseline_available:
         return DriftReportResponse(
@@ -828,10 +844,24 @@ async def get_model_drift(
                 )
                 for feat, stats in production_stats.items()
             },
+            categorical_features={
+                feat: CategoricalDriftResult(
+                    baseline_distribution={},
+                    production_distribution={k: v for k, v in stats.items() if k != "_count"},
+                    production_count=stats.get("_count", 0),
+                    drift_status="no_baseline",
+                )
+                for feat, stats in cat_prod_stats.items()
+            },
         )
 
     features = drift_service.compute_feature_drift(baseline, production_stats, min_predictions)
-    summary = drift_service.summarize_drift(features, baseline_available=True)
+    categorical_features = drift_service.compute_categorical_drift(
+        categorical_baseline, cat_prod_stats, min_predictions
+    )
+    summary = drift_service.summarize_drift(
+        features, baseline_available=True, categorical_features=categorical_features
+    )
 
     return DriftReportResponse(
         model_name=name,
@@ -841,6 +871,7 @@ async def get_model_drift(
         baseline_available=True,
         drift_summary=summary,
         features=features,
+        categorical_features=categorical_features,
     )
 
 
@@ -920,9 +951,10 @@ async def get_model_readiness(
         pass_=model_meta.is_production,
         detail=None if model_meta.is_production else "is_production=False",
     )
+    has_baseline = bool(model_meta.feature_baseline) or bool(model_meta.categorical_baseline)
     baseline_check = ReadinessCheck(
-        pass_=model_meta.feature_baseline is not None,
-        detail=None if model_meta.feature_baseline is not None else "feature_baseline is null",
+        pass_=has_baseline,
+        detail=None if has_baseline else "feature_baseline and categorical_baseline are null",
     )
 
     async def _check_file() -> ReadinessCheck:
@@ -932,13 +964,21 @@ async def get_model_readiness(
         return ReadinessCheck(pass_=False, detail="model file not found in MinIO")
 
     async def _check_drift() -> ReadinessCheck:
-        if not model_meta.feature_baseline:
+        if not model_meta.feature_baseline and not model_meta.categorical_baseline:
             return ReadinessCheck(pass_=True)
-        prod_stats = await DBService.get_feature_production_stats(db, name, version, days=1)
-        features = drift_service.compute_feature_drift(
-            model_meta.feature_baseline, prod_stats, min_count=30
+        prod_stats, cat_prod_stats = await asyncio.gather(
+            DBService.get_feature_production_stats(db, name, version, days=1),
+            DBService.get_categorical_production_stats(db, name, version, days=1),
         )
-        drift_status = drift_service.summarize_drift(features, baseline_available=True)
+        features = drift_service.compute_feature_drift(
+            model_meta.feature_baseline or {}, prod_stats, min_count=30
+        )
+        cat_features = drift_service.compute_categorical_drift(
+            model_meta.categorical_baseline or {}, cat_prod_stats, min_count=30
+        )
+        drift_status = drift_service.summarize_drift(
+            features, baseline_available=True, categorical_features=cat_features
+        )
         if drift_status == "critical":
             return ReadinessCheck(pass_=False, detail=f"drift_status={drift_status}")
         return ReadinessCheck(pass_=True)
@@ -2093,11 +2133,18 @@ def _build_drift_section(
     metadata: ModelMetadata,
     days: int,
     production_stats: dict,
+    categorical_production_stats: Optional[dict] = None,
 ) -> Optional[DriftReportResponse]:
     try:
+        cat_prod_stats = categorical_production_stats or {}
         total_predictions = sum(v.get("count", 0) for v in production_stats.values())
-        baseline = metadata.feature_baseline
-        baseline_available = bool(baseline)
+        if not total_predictions:
+            total_predictions = max(
+                (v.get("_count", 0) for v in cat_prod_stats.values()), default=0
+            )
+        baseline = metadata.feature_baseline or {}
+        categorical_baseline = metadata.categorical_baseline or {}
+        baseline_available = bool(baseline) or bool(categorical_baseline)
         if not baseline_available:
             return DriftReportResponse(
                 model_name=name,
@@ -2120,7 +2167,12 @@ def _build_drift_section(
                 },
             )
         features = drift_service.compute_feature_drift(baseline, production_stats)
-        summary = drift_service.summarize_drift(features, baseline_available=True)
+        categorical_features = drift_service.compute_categorical_drift(
+            categorical_baseline, cat_prod_stats
+        )
+        summary = drift_service.summarize_drift(
+            features, baseline_available=True, categorical_features=categorical_features
+        )
         return DriftReportResponse(
             model_name=name,
             model_version=metadata.version,
@@ -2129,6 +2181,7 @@ def _build_drift_section(
             baseline_available=True,
             drift_summary=summary,
             features=features,
+            categorical_features=categorical_features,
         )
     except Exception:
         return None
@@ -2366,6 +2419,7 @@ async def get_performance_report(
         total_count,
         pairs,
         production_stats,
+        cat_prod_stats,
         raw_ab_stats,
         agreement_by_version,
         predictions_result,
@@ -2373,6 +2427,7 @@ async def get_performance_report(
         DBService.count_predictions(db, name, start_naive, now_naive, version),
         DBService.get_performance_pairs(db, name, start_naive, now_naive, version),
         DBService.get_feature_production_stats(db, name, version, days),
+        DBService.get_categorical_production_stats(db, name, version, days),
         DBService.get_ab_comparison_stats(db, name, days=days),
         DBService.get_shadow_agreement_rate(db, name, days=days),
         DBService.get_predictions(
@@ -2394,7 +2449,7 @@ async def get_performance_report(
         generated_at=now.replace(tzinfo=None),
         period_days=days,
         performance=_build_performance_section(name, metadata, total_count, pairs),
-        drift=_build_drift_section(name, metadata, days, production_stats),
+        drift=_build_drift_section(name, metadata, days, production_stats, cat_prod_stats),
         calibration=_build_calibration_section(name, version, pairs),
         ab_comparison=_build_ab_comparison_section(
             name, days, meta_by_version, raw_ab_stats, agreement_by_version, pairs
@@ -2618,20 +2673,28 @@ async def compare_model_versions(
 
     # Per-version extras (drift + live metrics) — parallel gather
     async def _version_extras(version: str, meta: ModelMetadata):
-        prod_stats, pairs = await asyncio.gather(
+        prod_stats, cat_prod_stats_v, pairs = await asyncio.gather(
             DBService.get_feature_production_stats(
                 db, name, version, days, start=_period_start, end=_period_end
             ),
+            DBService.get_categorical_production_stats(db, name, version, days),
             DBService.get_performance_pairs(
                 db, name, model_version=version, start=_period_start, end=_period_end
             ),
         )
 
         baseline = meta.feature_baseline or {}
-        if baseline and prod_stats:
+        cat_baseline = meta.categorical_baseline or {}
+        has_any_baseline = bool(baseline) or bool(cat_baseline)
+        if has_any_baseline and (prod_stats or cat_prod_stats_v):
             feat_results = drift_service.compute_feature_drift(baseline, prod_stats, min_count=30)
-            drift_status = drift_service.summarize_drift(feat_results, baseline_available=True)
-        elif baseline:
+            cat_results = drift_service.compute_categorical_drift(
+                cat_baseline, cat_prod_stats_v, min_count=30
+            )
+            drift_status = drift_service.summarize_drift(
+                feat_results, baseline_available=True, categorical_features=cat_results
+            )
+        elif has_any_baseline:
             drift_status = "insufficient_data"
         else:
             drift_status = "no_baseline"
@@ -2880,12 +2943,14 @@ async def get_model_card(
         total_count,
         pairs,
         production_stats,
+        cat_prod_stats_card,
         coverage_stats,
         predictions_result,
     ) = await asyncio.gather(
         DBService.count_predictions(db, name, start_naive, now_naive, version),
         DBService.get_performance_pairs(db, name, start_naive, now_naive, version),
         DBService.get_feature_production_stats(db, name, version, days),
+        DBService.get_categorical_production_stats(db, name, version, days),
         DBService.get_observed_results_stats(db, model_name=name),
         DBService.get_predictions(
             db, model_name=name, start=start_naive, end=now_naive, model_version=version, limit=50
@@ -2913,17 +2978,21 @@ async def get_model_card(
     # Drift
     drift_section: Optional[ModelCardDriftSummary] = None
     try:
-        raw_drift = _build_drift_section(name, metadata, days, production_stats)
+        raw_drift = _build_drift_section(name, metadata, days, production_stats, cat_prod_stats_card)
         if raw_drift:
             top_drifting: Optional[List[str]] = None
             if raw_drift.drift_summary in ("warning", "critical"):
+                all_drifting = [
+                    (feat, info.drift_status)
+                    for feat, info in raw_drift.features.items()
+                    if info.drift_status in ("warning", "critical")
+                ] + [
+                    (feat, info.drift_status)
+                    for feat, info in raw_drift.categorical_features.items()
+                    if info.drift_status in ("warning", "critical")
+                ]
                 sorted_feats = sorted(
-                    [
-                        (feat, info.drift_status)
-                        for feat, info in raw_drift.features.items()
-                        if info.drift_status in ("warning", "critical")
-                    ],
-                    key=lambda x: (0 if x[1] == "critical" else 1),
+                    all_drifting, key=lambda x: (0 if x[1] == "critical" else 1)
                 )
                 top_drifting = [f for f, _ in sorted_feats[:3]] or None
             drift_section = ModelCardDriftSummary(

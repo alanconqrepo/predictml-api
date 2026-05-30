@@ -1105,6 +1105,16 @@ supervision:
     predictions_analyzed: '{count} predictions analyzed'
     no_baseline: No feature baseline recorded for this model.
     no_drift_data: No drift data available.
+    insufficient_data: Insufficient data ({count} observations — threshold 30).
+    cat_drift_header: '**📊 Categorical feature drift**'
+  drift_cat:
+    col_category: Category
+    col_baseline: Baseline (%)
+    col_production: Production (%)
+    col_delta: Δ (pts)
+    y_axis: Frequency (%)
+    legend_baseline: Baseline
+    legend_production: Production
   drift_table:
     col_feature: Feature
     col_status: Status
@@ -2008,10 +2018,10 @@ models:
     col_auc_eval: "AUC (eval)"
     col_f1_eval: "F1 (eval)"
     col_f1_eval_help: "F1 = 2 × (Precision × Recall) / (Precision + Recall)\n\nHarmonic mean of precision and recall. Recommended for imbalanced classes. Classification metric only."
-    col_r2_train: "R² (train)"
-    col_r2_train_help: "R² = 1 − (Σ(y − ŷ)²) / (Σ(y − ȳ)²)\n\nMeasures the proportion of variance in the target explained by the model, computed on the training set. Regression metric only."
-    col_rmse_train: "RMSE (train)"
-    col_rmse_train_help: "RMSE = √( Σ(y − ŷ)² / n )\n\nRoot mean squared error, expressed in the same unit as the target variable. Computed on the training set. Regression metric only."
+    col_r2_eval: "R² (eval)"
+    col_r2_eval_help: "R² = 1 − (Σ(y − ŷ)²) / (Σ(y − ȳ)²)\n\nMeasures the proportion of variance in the target explained by the model, computed on the held-out test set (eval). Regression metric only."
+    col_rmse_eval: "RMSE (eval)"
+    col_rmse_eval_help: "RMSE = √( Σ(y − ŷ)² / n )\n\nRoot mean squared error, expressed in the same unit as the target variable. Computed on the held-out test set (eval). Regression metric only."
     baseline_ok: "✅ Baseline"
     baseline_missing: "⚠️ No baseline"
     cache_hot: "🔥 Cached"
