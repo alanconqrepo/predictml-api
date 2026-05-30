@@ -285,75 +285,10 @@ st.divider()
 # ── Main layout — 3 full-width sections ──────────────────────────────────────
 
 # ═══════════════════════════════════════════════════════════
-# SECTION 1 — Documentation
+# SECTION 1 — Chatbot LLM
 # ═══════════════════════════════════════════════════════════
 
-with st.expander(t("aide.doc_expander"), expanded=True):
-    if not docs:
-        st.warning(t("aide.doc_not_available"))
-    else:
-        labels = {
-            "API_REFERENCE":      "📖 API Reference",
-            "ARCHITECTURE":       "🏗️ Architecture",
-            "BEGINNER_GUIDE":     "🎓 Beginner Guide",
-            "DATABASE":           "🗄️ Database",
-            "DOCKER":             "🐳 Docker",
-            "QUICKSTART":         "⚡ Quick Start",
-            "README":             "🏠 README",
-            "CODING_STANDARDS":   "✅ Coding Standards",
-            "DASHBOARD_GUIDE":    "🖥️ Dashboard Guide",
-            "TRAIN_SCRIPT_GUIDE": "🛠️ train.py Guide",
-            "KPIS_REFERENCE":     "📊 KPIs Reference",
-            "FAQ":                "❓ FAQ",
-        }
-        doc_names = [k for k in docs if k != "KPIs_Dashboard"]
-        display_names = [labels.get(n, n) for n in doc_names]
-        name_map = dict(zip(display_names, doc_names))
-
-        col_sel, col_btn, col_dl = st.columns([6, 1, 1], vertical_alignment="bottom")
-        selected_label = col_sel.selectbox(t("aide.doc_select_label"), display_names, key="help_doc_select")
-        selected_key = name_map[selected_label]
-
-        if col_btn.button(t("aide.doc_enlarge_btn"), key="open_doc_popup", width='stretch'):
-            _doc_popup(docs[selected_key], selected_label)
-
-        col_dl.download_button(
-            t("aide.doc_download_btn"),
-            data=docs[selected_key].encode("utf-8"),
-            file_name=f"{selected_key.lower()}.md",
-            mime="text/markdown",
-            width='stretch',
-            key="dl_doc",
-        )
-
-        with st.container(height=500, border=True):
-            st.markdown(docs[selected_key])
-
-# ═══════════════════════════════════════════════════════════
-# SECTION 2 — Code source
-# ═══════════════════════════════════════════════════════════
-
-if snippets:
-    with st.expander(t("aide.src_expander", count=len(snippets)), expanded=False):
-        col_src, col_src_btn, col_src_dl = st.columns([6, 1, 1], vertical_alignment="bottom")
-        selected_src = col_src.selectbox(t("aide.src_file_label"), list(snippets.keys()), key="help_src_select")
-        if col_src_btn.button(t("aide.doc_enlarge_btn"), key="open_src_popup", width='stretch'):
-            _src_popup(selected_src, snippets[selected_src])
-        col_src_dl.download_button(
-            t("aide.src_download_btn"),
-            data=snippets[selected_src].encode("utf-8"),
-            file_name=selected_src.split("/")[-1],
-            mime="text/x-python",
-            width='stretch',
-            key="dl_src",
-        )
-        st.code(snippets[selected_src], language="python")
-
-# ═══════════════════════════════════════════════════════════
-# SECTION 3 — Chatbot LLM
-# ═══════════════════════════════════════════════════════════
-
-with st.expander(t("aide.chat_expander"), expanded=True):
+with st.expander(t("aide.chat_expander"), expanded=False):
     if anthropic_client is None:
         st.warning(t("aide.no_api_key"))
 
@@ -426,3 +361,68 @@ with st.expander(t("aide.chat_expander"), expanded=True):
             }
         )
         st.rerun()
+
+# ═══════════════════════════════════════════════════════════
+# SECTION 2 — Documentation
+# ═══════════════════════════════════════════════════════════
+
+with st.expander(t("aide.doc_expander"), expanded=False):
+    if not docs:
+        st.warning(t("aide.doc_not_available"))
+    else:
+        labels = {
+            "API_REFERENCE":      "📖 API Reference",
+            "ARCHITECTURE":       "🏗️ Architecture",
+            "BEGINNER_GUIDE":     "🎓 Beginner Guide",
+            "DATABASE":           "🗄️ Database",
+            "DOCKER":             "🐳 Docker",
+            "QUICKSTART":         "⚡ Quick Start",
+            "README":             "🏠 README",
+            "CODING_STANDARDS":   "✅ Coding Standards",
+            "DASHBOARD_GUIDE":    "🖥️ Dashboard Guide",
+            "TRAIN_SCRIPT_GUIDE": "🛠️ train.py Guide",
+            "KPIS_REFERENCE":     "📊 KPIs Reference",
+            "FAQ":                "❓ FAQ",
+        }
+        doc_names = [k for k in docs if k != "KPIs_Dashboard"]
+        display_names = [labels.get(n, n) for n in doc_names]
+        name_map = dict(zip(display_names, doc_names))
+
+        col_sel, col_btn, col_dl = st.columns([6, 1, 1], vertical_alignment="bottom")
+        selected_label = col_sel.selectbox(t("aide.doc_select_label"), display_names, key="help_doc_select")
+        selected_key = name_map[selected_label]
+
+        if col_btn.button(t("aide.doc_enlarge_btn"), key="open_doc_popup", width='stretch'):
+            _doc_popup(docs[selected_key], selected_label)
+
+        col_dl.download_button(
+            t("aide.doc_download_btn"),
+            data=docs[selected_key].encode("utf-8"),
+            file_name=f"{selected_key.lower()}.md",
+            mime="text/markdown",
+            width='stretch',
+            key="dl_doc",
+        )
+
+        with st.container(height=500, border=True):
+            st.markdown(docs[selected_key])
+
+# ═══════════════════════════════════════════════════════════
+# SECTION 3 — Code source
+# ═══════════════════════════════════════════════════════════
+
+if snippets:
+    with st.expander(t("aide.src_expander", count=len(snippets)), expanded=False):
+        col_src, col_src_btn, col_src_dl = st.columns([6, 1, 1], vertical_alignment="bottom")
+        selected_src = col_src.selectbox(t("aide.src_file_label"), list(snippets.keys()), key="help_src_select")
+        if col_src_btn.button(t("aide.doc_enlarge_btn"), key="open_src_popup", width='stretch'):
+            _src_popup(selected_src, snippets[selected_src])
+        col_src_dl.download_button(
+            t("aide.src_download_btn"),
+            data=snippets[selected_src].encode("utf-8"),
+            file_name=selected_src.split("/")[-1],
+            mime="text/x-python",
+            width='stretch',
+            key="dl_src",
+        )
+        st.code(snippets[selected_src], language="python")
