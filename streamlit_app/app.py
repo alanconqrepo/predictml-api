@@ -360,12 +360,10 @@ def show_home():  # noqa: C901
         st.subheader(t("home.ab_shadow.subheader"))
         st.caption(t("home.ab_shadow.subheader_caption"))
         c1, c2 = st.columns(2)
-        if ab_versions:
-            ab_names = ", ".join({m.get("name", "?") for m in ab_versions})
-            c1.info(t("home.ab_shadow.ab_info", count=len(ab_versions), names=ab_names))
-        if shadow_versions:
-            sh_names = ", ".join({m.get("name", "?") for m in shadow_versions})
-            c2.info(t("home.ab_shadow.shadow_info", count=len(shadow_versions), names=sh_names))
+        ab_names = ", ".join({m.get("name", "?") for m in ab_versions}) if ab_versions else "—"
+        sh_names = ", ".join({m.get("name", "?") for m in shadow_versions}) if shadow_versions else "—"
+        c1.info(t("home.ab_shadow.ab_info", count=len(ab_versions), names=ab_names))
+        c2.info(t("home.ab_shadow.shadow_info", count=len(shadow_versions), names=sh_names))
         st.page_link("pages/6_AB_Testing.py", label=t("home.ab_shadow.manage_link"))
 
     # ── 6. Navigation cards ───────────────────────────────────────────────
