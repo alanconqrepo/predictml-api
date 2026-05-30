@@ -23,8 +23,28 @@ from typing import Optional
 
 import redis.asyncio as aioredis
 import structlog
+from prometheus_client import Counter, Histogram, start_http_server
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
+
+MESSAGES_PROCESSED = Counter(
+    "prediction_writer_messages_processed_total",
+    "Messages successfully inserted into PostgreSQL",
+)
+MESSAGES_FAILED = Counter(
+    "prediction_writer_messages_failed_total",
+    "Messages that failed DB insertion (left pending for retry)",
+)
+MESSAGES_DLQ = Counter(
+    "prediction_writer_dlq_messages_total",
+    "Messages moved to the dead-letter queue",
+    ["reason"],
+)
+BATCH_INSERT_DURATION = Histogram(
+    "prediction_writer_batch_insert_seconds",
+    "Batch INSERT duration in PostgreSQL",
+    buckets=[0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5],
+)
 
 # Ensure the src/ package is importable when running the script from the project root
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -95,6 +115,7 @@ async def _move_to_dlq(redis, msg_id: str, fields: dict, reason: str) -> None:
         dlq_payload["_failed_at"] = datetime.utcnow().isoformat()
         await redis.xadd(DLQ, dlq_payload)
         await redis.xack(STREAM, GROUP, msg_id)
+        MESSAGES_DLQ.labels(reason=reason.split(":")[0]).inc()
         logger.error(
             "Message déplacé en DLQ",
             msg_id=msg_id,
@@ -131,12 +152,15 @@ async def _flush_batch(
 
     async with session_factory() as db:
         try:
-            db.add_all(orm_objects)
-            await db.commit()
+            with BATCH_INSERT_DURATION.time():
+                db.add_all(orm_objects)
+                await db.commit()
             await redis.xack(STREAM, GROUP, *valid_ids)
+            MESSAGES_PROCESSED.inc(len(orm_objects))
             logger.info("Batch inséré", count=len(orm_objects))
         except Exception as exc:
             await db.rollback()
+            MESSAGES_FAILED.inc(len(orm_objects))
             # Do not XACK: messages remain pending for retry via XAUTOCLAIM
             logger.error(
                 "DB error during batch INSERT — messages pending for retry",
@@ -283,6 +307,7 @@ async def run() -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    start_http_server(9091)
     asyncio.run(run())
 
 

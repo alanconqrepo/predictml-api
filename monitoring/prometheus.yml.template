@@ -11,15 +11,32 @@ scrape_configs:
     static_configs:
       - targets: ['api:${API_PORT}']
     metrics_path: /metrics
-    # Authentification Bearer — requise seulement si METRICS_TOKEN est défini dans .env.
-    #
-    # Contexte réseau : Prometheus s'exécute DANS le container grafana/otel-lgtm, sur le
-    # réseau Docker interne. Le port ${API_PORT} de l'API n'est pas exposé publiquement.
-    # → Laisser METRICS_TOKEN vide dans .env est sûr pour ce cas d'usage.
-    #
-    # Si vous définissez METRICS_TOKEN dans .env pour sécuriser /metrics vis-à-vis
-    # de l'extérieur, décommentez les lignes ci-dessous et remplacez <token> par la
-    # même valeur :
-    #
-    # authorization:
-    #   credentials: "<valeur de METRICS_TOKEN depuis .env>"
+    # Bearer auth — injecté automatiquement si METRICS_TOKEN est défini dans .env.
+    # Si METRICS_TOKEN est vide, le bloc authorization est ignoré par Prometheus.
+    authorization:
+      credentials: "${METRICS_TOKEN}"
+
+  - job_name: postgres
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
+  - job_name: redis
+    static_configs:
+      - targets: ['redis-exporter:9121']
+
+  - job_name: minio
+    static_configs:
+      - targets: ['minio:9000']
+    metrics_path: /minio/v2/metrics/cluster
+
+  - job_name: prediction-writer
+    static_configs:
+      - targets: ['prediction-writer:9091']
+
+  - job_name: retrain-worker
+    static_configs:
+      - targets: ['retrain-worker:9092']
+
+  - job_name: cadvisor
+    static_configs:
+      - targets: ['cadvisor:8080']
