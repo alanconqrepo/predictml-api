@@ -284,8 +284,9 @@ def show_home():  # noqa: C901
     st.caption(t("home.leaderboard.subheader_caption"))
     if leaderboard:
         _mode_badge = {
-            "ab":     "🟠 A/B",
-            "shadow": "🟣 Shadow",
+            "ab":      "🟠 A/B",
+            "ab_test": "🟠 A/B",
+            "shadow":  "🟣 Shadow",
         }
         rows = []
         for item in leaderboard[:5]:
@@ -352,7 +353,7 @@ def show_home():  # noqa: C901
         st.info(t("home.health.no_models"))
 
     # ── 5. Active A/B tests and Shadow deployments (conditional) ──────────────────────────
-    ab_versions = [m for m in all_models if m.get("deployment_mode") == "ab"]
+    ab_versions = [m for m in all_models if m.get("deployment_mode") in ("ab", "ab_test")]
     shadow_versions = [m for m in all_models if m.get("deployment_mode") == "shadow"]
 
     if ab_versions or shadow_versions:
