@@ -564,6 +564,8 @@ home:
   role_user: 👤 Utilisateur
   caption: 'Connecté — {role}  |  API: `{api_url}`'
   status:
+    subheader: 🖥️ Statut du système
+    subheader_caption: État en temps réel de l'API, de la base de données et des modèles chargés en mémoire.
     api_label: Statut API
     api_label_help: État de santé de l'API FastAPI. ✅ En ligne = toutes les routes répondent normalement. ⚠️ Dégradé = l'API répond mais certains composants internes ont des erreurs.
     api_online: ✅ En ligne
@@ -581,6 +583,7 @@ home:
     alerts_none: ✅ Aucune
   kpis:
     subheader: 📊 Activité — 30 derniers jours
+    subheader_caption: Métriques agrégées sur toutes les requêtes de prédiction des 30 derniers jours.
     predictions: 📈 Prédictions
     predictions_help: Nombre total de requêtes /predict reçues sur les 30 derniers jours, tous modèles et utilisateurs confondus.
     success_rate: ✅ Taux de succès
@@ -597,6 +600,7 @@ home:
     supervision_link: → Voir la supervision complète
   leaderboard:
     subheader: 🏆 Classement des modèles
+    subheader_caption: Top 5 des versions en production, classées par accuracy sur 30 jours.
     col_model: Modèle
     col_version: Version
     col_accuracy: Accuracy
@@ -609,6 +613,7 @@ home:
     upload_link: 🤖 Uploader un modèle →
   health:
     subheader: 🛡️ État des modèles
+    subheader_caption: Santé de chaque modèle actif — taux d'erreur, latence P95 et volume de prédictions.
     detail_error: 'erreur : {rate}'
     detail_p95: 'P95 : {ms} ms'
     detail_preds: '{count} pred.'
@@ -616,11 +621,14 @@ home:
     more_versions: … et {count} autre(s) version(s)
     no_models: Aucun modèle disponible.
   ab_shadow:
+    subheader: 🧪 Tests en cours
+    subheader_caption: Versions actives en mode A/B (trafic partagé) ou shadow (prédictions silencieuses sans impact utilisateur).
     ab_info: 🧪 **{count} version(s) en test A/B** — {names}
     shadow_info: 👻 **{count} version(s) en shadow** — {names}
     manage_link: → Gérer les tests A/B et shadow
   nav:
     subheader: 🗺️ Naviguer dans le dashboard
+    subheader_caption: Accès rapide à toutes les fonctionnalités de la plateforme.
     open_btn: Ouvrir →
     users_title: Utilisateurs
     users_desc: Gérer les comptes, quotas et demandes d'accès

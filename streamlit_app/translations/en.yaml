@@ -553,6 +553,8 @@ home:
   role_user: 👤 User
   caption: 'Logged in — {role}  |  API: `{api_url}`'
   status:
+    subheader: 🖥️ System status
+    subheader_caption: Real-time state of the API, database, and models loaded in memory.
     api_label: API Status
     api_label_help: Health state of the FastAPI service. ✅ Online = all routes respond normally. ⚠️ Degraded = API responds but some internal components have errors.
     api_online: ✅ Online
@@ -570,6 +572,7 @@ home:
     alerts_none: ✅ None
   kpis:
     subheader: 📊 Activity — last 30 days
+    subheader_caption: Aggregated metrics across all prediction requests over the last 30 days.
     predictions: 📈 Predictions
     predictions_help: Total number of /predict requests received over the last 30 days, across all models and users.
     success_rate: ✅ Success rate
@@ -586,6 +589,7 @@ home:
     supervision_link: → View full supervision
   leaderboard:
     subheader: 🏆 Model leaderboard
+    subheader_caption: Top 5 production versions ranked by accuracy over the last 30 days.
     col_model: Model
     col_version: Version
     col_accuracy: Accuracy
@@ -598,6 +602,7 @@ home:
     upload_link: 🤖 Upload a model →
   health:
     subheader: 🛡️ Model health
+    subheader_caption: Health of each active model — error rate, P95 latency, and prediction volume.
     detail_error: 'error: {rate}'
     detail_p95: 'P95: {ms} ms'
     detail_preds: '{count} pred.'
@@ -605,11 +610,14 @@ home:
     more_versions: … and {count} more version(s)
     no_models: No models available.
   ab_shadow:
+    subheader: 🧪 Active experiments
+    subheader_caption: Versions running in A/B mode (split traffic) or shadow mode (silent predictions with no user impact).
     ab_info: 🧪 **{count} version(s) in A/B test** — {names}
     shadow_info: 👻 **{count} version(s) in shadow** — {names}
     manage_link: → Manage A/B tests and shadow deployments
   nav:
     subheader: 🗺️ Navigate the dashboard
+    subheader_caption: Quick access to all platform features.
     open_btn: Open →
     users_title: Users
     users_desc: Manage accounts, quotas and access requests

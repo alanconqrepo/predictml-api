@@ -201,6 +201,8 @@ def show_home():  # noqa: C901
         1 for m in mon_models if m.get("health_status") in ("warning", "critical")
     )
 
+    st.subheader(t("home.status.subheader"))
+    st.caption(t("home.status.subheader_caption"))
     col_s, col_db, col_cache, col_alerts = st.columns(4)
     col_s.metric(
         t("home.status.api_label"),
@@ -230,6 +232,7 @@ def show_home():  # noqa: C901
     # ── 2. Global KPIs — last 30 days ─────────────────────────────────
     st.divider()
     st.subheader(t("home.kpis.subheader"))
+    st.caption(t("home.kpis.subheader_caption"))
 
     total_preds = sum(s.get("total_predictions", 0) for s in pred_stats)
     total_err = sum(s.get("error_count", 0) for s in pred_stats)
@@ -281,6 +284,7 @@ def show_home():  # noqa: C901
 
     with col_lb:
         st.subheader(t("home.leaderboard.subheader"))
+        st.caption(t("home.leaderboard.subheader_caption"))
         if leaderboard:
             rows = []
             for item in leaderboard[:5]:
@@ -309,6 +313,7 @@ def show_home():  # noqa: C901
 
     with col_health:
         st.subheader(t("home.health.subheader"))
+        st.caption(t("home.health.subheader_caption"))
         if mon_models:
             for m in mon_models:
                 status = m.get("health_status", "unknown")
@@ -342,6 +347,8 @@ def show_home():  # noqa: C901
 
     if ab_versions or shadow_versions:
         st.divider()
+        st.subheader(t("home.ab_shadow.subheader"))
+        st.caption(t("home.ab_shadow.subheader_caption"))
         c1, c2 = st.columns(2)
         if ab_versions:
             ab_names = ", ".join({m.get("name", "?") for m in ab_versions})
@@ -354,6 +361,7 @@ def show_home():  # noqa: C901
     # ── 6. Navigation cards ───────────────────────────────────────────────
     st.divider()
     st.subheader(t("home.nav.subheader"))
+    st.caption(t("home.nav.subheader_caption"))
 
     nav_items = [
         (
