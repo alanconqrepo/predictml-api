@@ -563,7 +563,7 @@ home:
     db_connected: ✅ Connected
     cache_label: Cached
     cache_label_help: Number of models currently loaded in memory (RAM). A cached model responds without cold-start latency — it does not need to be reloaded from MinIO on each request.
-    cache_value: '{count} model(s)'
+    cache_value: '{count} version(s)'
     alerts_label: Models in alert
     alerts_label_help: Number of models whose health status is "warning" or "critical" over the last 30 days. Check the Supervision page for details.
     alerts_count: 🔴 {count}
