@@ -137,8 +137,8 @@ def fetch_prediction_count(api_url, token, name, version, start: str, end: str) 
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def fetch_feature_drift(api_url, token, name, start: str, end: str) -> dict:
-    """Fetches feature drift via /monitoring/model/{name}."""
+def fetch_model_monitoring(api_url, token, name, start: str, end: str) -> dict:
+    """Fetches full model monitoring detail via /monitoring/model/{name}."""
     import requests
 
     r = requests.get(
@@ -148,7 +148,12 @@ def fetch_feature_drift(api_url, token, name, start: str, end: str) -> dict:
         timeout=15,
     )
     r.raise_for_status()
-    return r.json().get("feature_drift", {})
+    return r.json()
+
+
+def fetch_feature_drift(api_url, token, name, start: str, end: str) -> dict:
+    """Fetches feature drift — thin wrapper around fetch_model_monitoring (shared cache)."""
+    return fetch_model_monitoring(api_url, token, name, start, end).get("feature_drift", {})
 
 
 @st.cache_data(ttl=10, show_spinner=False)
@@ -954,6 +959,7 @@ with st.expander(t("models.details_expander"), expanded=True):
         st.markdown(t("models.detail_version", version=selected.get('version')))
         st.markdown(t("models.detail_description", value=selected.get('description') or '—'))
         st.markdown(t("models.detail_algorithm", value=selected.get('algorithm') or '—'))
+        st.markdown(t("models.detail_task", value=_infer_task(selected)))
         if _ds and not _csv_bytes:
             st.markdown(t("models.detail_training_dataset", value=_ds))
         st.markdown(t("models.detail_trained_by", value=selected.get('trained_by') or '—'))
@@ -1110,11 +1116,16 @@ with st.expander(t("models.details_expander"), expanded=True):
 # ── Metrics in 2 side-by-side blocks ─────────────────────────────────────────
 _tm = selected.get("training_metrics") or {}
 _is_regression = any(k in _tm for k in ("mae", "rmse", "r2"))
+_is_binary = not _is_regression and (
+    selected.get("model_task") == "classification_binary"
+    or len(selected.get("classes") or []) == 2
+)
 
 # ── Feature Importances ───────────────────────────────────────────────────────
 _fi = selected.get("feature_importances") or {}
 if _fi:
     with st.expander(t("models.feature_importances.expander"), expanded=False):
+        st.caption(t("models.feature_importances.source_note"))
         import pandas as pd
 
         _fi_df = (
@@ -1194,6 +1205,64 @@ with st.expander(t("models.analysis.expander"), expanded=False):
             st.rerun()
         _gcol2.caption(t("models.analysis.btn_load_caption"))
 
+    # ── Volume ────────────────────────────────────────────────────────────────
+    if _ana_loaded:
+        st.divider()
+        st.markdown(t("models.analysis.volume_header"))
+        _vol_start = _date_debut.strftime("%Y-%m-%d")
+        _vol_end = _date_fin.strftime("%Y-%m-%d")
+        try:
+            _monitoring = fetch_model_monitoring(
+                st.session_state.get("api_url"),
+                st.session_state.get("api_token"),
+                selected["name"],
+                _vol_start,
+                _vol_end,
+            )
+            _ver_stats = next(
+                (v for v in _monitoring.get("per_version_stats", []) if v["version"] == selected["version"]),
+                None,
+            )
+            _prod_count = _ver_stats["total_predictions"] if _ver_stats else 0
+            _shadow_count = _ver_stats["shadow_predictions"] if _ver_stats else 0
+
+            _ts_points = [
+                _pt for _pt in _monitoring.get("timeseries", [])
+                if _pt.get("total_predictions", 0) > 0
+            ]
+            _first_date = _ts_points[0]["date"] if _ts_points else "—"
+            _last_date = _ts_points[-1]["date"] if _ts_points else "—"
+
+            _vol_gt_n = 0
+            try:
+                _vol_perf = fetch_model_performance(
+                    st.session_state.get("api_url"),
+                    st.session_state.get("api_token"),
+                    selected["name"],
+                    selected["version"],
+                    period_days=_ana_days,
+                )
+                _vol_gt_n = _vol_perf.get("matched_predictions", 0) if _vol_perf else 0
+            except Exception:
+                pass
+            # matched_predictions includes shadow predictions (no is_shadow filter in the
+            # performance endpoint), so use prod+shadow as the denominator for consistency.
+            _total_vol = _prod_count + _shadow_count
+            _pct_gt = round(_vol_gt_n / _total_vol * 100, 1) if _total_vol > 0 else 0.0
+
+            _vc1, _vc2, _vc3, _vc4, _vc5 = st.columns(5)
+            _vc1.metric(t("models.analysis.volume_prod_count"), _prod_count)
+            _vc2.metric(t("models.analysis.volume_shadow_count"), _shadow_count)
+            _vc3.metric(t("models.analysis.volume_first_date"), _first_date)
+            _vc4.metric(t("models.analysis.volume_last_date"), _last_date)
+            _vc5.metric(
+                t("models.analysis.volume_gt_pct"),
+                f"{_pct_gt:.1f}%",
+                help=t("models.analysis.volume_gt_pct_help", n=_vol_gt_n, total=_prod_count),
+            )
+        except Exception as _vol_err:
+            st.warning(t("models.analysis.volume_error", error=_vol_err))
+
     # ── Metrics ───────────────────────────────────────────────────────────────
     if _ana_loaded:
         st.divider()
@@ -1228,6 +1297,8 @@ with st.expander(t("models.analysis.expander"), expanded=False):
                 ("Precision", "precision", "precision_weighted",  None),
                 ("Recall",    "recall",    "recall_weighted",     None),
             ]
+            if _is_binary:
+                _metrics_keys.insert(1, ("AUC", "roc_auc", "auc", selected.get("auc")))
 
         _col_metric = t("models.analysis.col_metric")
         _col_training = t("models.analysis.col_training")
@@ -1359,6 +1430,7 @@ with st.expander(t("models.analysis.expander"), expanded=False):
     if _ana_loaded:
         st.divider()
         st.markdown(t("models.analysis.perf_header"))
+        st.caption(t("models.analysis.perf_caption"))
         try:
             import numpy as np
             import plotly.express as px
@@ -1395,12 +1467,22 @@ with st.expander(t("models.analysis.expander"), expanded=False):
                 )
                 st.caption(t("models.analysis.perf_n_paired", n=matched))
             else:
-                col_acc, col_prec, col_rec, col_f1 = st.columns(4)
+                if _is_binary:
+                    col_acc, col_auc, col_prec, col_rec, col_f1 = st.columns(5)
+                else:
+                    col_acc, col_prec, col_rec, col_f1 = st.columns(4)
+                    col_auc = None
                 col_acc.metric(
                     "Accuracy",
                     f"{perf['accuracy']:.3f}" if perf.get("accuracy") is not None else "—",
                     help=t("metrics.accuracy"),
                 )
+                if col_auc is not None:
+                    col_auc.metric(
+                        "AUC",
+                        f"{perf['auc']:.3f}" if perf.get("auc") is not None else "—",
+                        help=t("metrics.auc"),
+                    )
                 col_prec.metric(
                     "Precision (w.)",
                     (
@@ -1749,9 +1831,17 @@ with st.expander(t("models.analysis.expander"), expanded=False):
                             "Drift": [r[_fdc_status].split(" ", 1)[-1].strip() for r in _rows_z],
                         }
                     ).sort_values("Z-score", ascending=True)
+                    import html as _html
+                    _z_help = _html.escape(t("models.analysis.feature_drift_zscore_chart_help"))
+                    st.markdown(
+                        f'<p style="font-weight:600;font-size:0.95em;margin-bottom:-4px" '
+                        f'title="{_z_help}">'
+                        f'{t("models.analysis.feature_drift_zscore_chart_title")}'
+                        f' <span style="opacity:0.45;font-size:0.8em">ℹ️</span></p>',
+                        unsafe_allow_html=True,
+                    )
                     fig_z = px.bar(
                         _df_z, x="Z-score", y="Feature", color="Drift", orientation="h",
-                        title=t("models.analysis.feature_drift_zscore_chart_title"),
                         color_discrete_map=_color_map,
                     )
                     fig_z.add_vline(x=2.0, line_dash="dash", line_color="#F39C12",
@@ -1770,9 +1860,16 @@ with st.expander(t("models.analysis.expander"), expanded=False):
                             "Drift": [r[_fdc_status].split(" ", 1)[-1].strip() for r in _rows_psi],
                         }
                     ).sort_values("PSI", ascending=True)
+                    _psi_help = _html.escape(t("models.analysis.feature_drift_psi_chart_help"))
+                    st.markdown(
+                        f'<p style="font-weight:600;font-size:0.95em;margin-bottom:-4px" '
+                        f'title="{_psi_help}">'
+                        f'{t("models.analysis.feature_drift_psi_chart_title")}'
+                        f' <span style="opacity:0.45;font-size:0.8em">ℹ️</span></p>',
+                        unsafe_allow_html=True,
+                    )
                     fig_psi = px.bar(
                         _df_psi, x="PSI", y="Feature", color="Drift", orientation="h",
-                        title=t("models.analysis.feature_drift_psi_chart_title"),
                         color_discrete_map=_color_map,
                     )
                     fig_psi.add_vline(x=0.1, line_dash="dash", line_color="#F39C12",
@@ -1941,6 +2038,7 @@ with st.expander(t("models.validate.expander"), expanded=False):
 
 # Regression tests (Golden Test Set)
 with st.expander(t("models.golden_tests.expander"), expanded=False):
+    st.info(t("models.golden_tests.intro"))
     is_admin_gt = st.session_state.get("is_admin", False)
     gt_model_name = selected["name"]
     gt_version = selected["version"]
@@ -2696,9 +2794,11 @@ if is_admin:
 
             with st.expander(_policy_exp_title, expanded=False):
                 st.caption(t("models.policy.caption", name=selected['name']))
+                st.info(t("models.policy.intro"))
 
                 # ── Auto-promotion ─────────────────────────────────────────────
                 st.markdown(t("models.policy.promote_header_active") if _pp_promote_on else t("models.policy.promote_header_inactive"))
+                st.caption(t("models.policy.promote_help"))
                 _pp_c1, _pp_c2 = st.columns(2)
                 with _pp_c1:
                     _pp_new_promote = st.checkbox(
@@ -2748,6 +2848,7 @@ if is_admin:
 
                 # ── Circuit breaker ────────────────────────────────────────────
                 st.markdown(t("models.policy.cb_header_active") if _pp_demote_on else t("models.policy.cb_header_inactive"))
+                st.caption(t("models.policy.cb_help"))
                 _pp_cb1, _pp_cb2 = st.columns(2)
                 with _pp_cb1:
                     _pp_new_demote = st.checkbox(
