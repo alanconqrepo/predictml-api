@@ -1873,6 +1873,33 @@ with _tab_detail:
 
         # ── Circuit breaker ───────────────────────────────────────────────
         with _conf_tab_cb:
+            # Panneau de statut
+            _cb_stat_col, _cb_info_col = st.columns([1, 3])
+            with _cb_stat_col:
+                st.metric(
+                    label=t("supervision.config.cb_status_label"),
+                    value=(
+                        t("supervision.config.cb_status_active_value") if _auto_demote_on
+                        else t("supervision.config.cb_status_inactive_value")
+                    ),
+                )
+            with _cb_info_col:
+                if _auto_demote_on:
+                    _drift_lvl = _policy.get("demote_on_drift", "critical")
+                    _acc_thr   = _policy.get("demote_on_accuracy_below")
+                    _cd_h      = int(_policy.get("demote_cooldown_hours", 24))
+                    _acc_line  = (
+                        t("supervision.config.cb_trigger_summary_acc", val=f"{_acc_thr:.2f}")
+                        if _acc_thr else t("supervision.config.cb_trigger_summary_acc_disabled")
+                    )
+                    st.markdown(
+                        t("supervision.config.cb_trigger_summary_drift", level=_drift_lvl) + "  \n"
+                        + _acc_line + "  \n"
+                        + t("supervision.config.cb_trigger_summary_cooldown", hours=_cd_h)
+                    )
+            st.info(t("supervision.config.cb_intro_panel"))
+            st.divider()
+
             st.caption(t("supervision.config.circuit_breaker_caption"))
             _cb1, _cb2 = st.columns(2)
             with _cb1:
@@ -1930,7 +1957,7 @@ with _tab_detail:
 
             try:
                 _history_data    = client.get_model_history(selected_model)
-                _history_entries = _history_data.get("history", [])
+                _history_entries = _history_data.get("entries", [])
                 _last_demote     = next((e for e in _history_entries if e.get("action") == "auto_demote"), None)
             except Exception:
                 _last_demote = None

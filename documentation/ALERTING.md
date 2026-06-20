@@ -157,6 +157,9 @@ Le webhook reçoit un POST JSON de la forme :
 | `drift_critical` | Drift critique sur une feature |
 | `output_drift_critical` | Drift critique sur la distribution des labels |
 | `auc_below_threshold` | AUC < `auc_min` |
+| `auto_demote` | Circuit breaker : modèle retiré automatiquement de production (drift ou chute d'accuracy) |
+
+> **Payload `auto_demote`** : le champ `details` contient `{"reason": "<texte lisible>"}` (raisons concaténées) plutôt que des métriques numériques.
 
 ---
 
@@ -203,6 +206,25 @@ Le webhook reçoit un POST JSON de la forme :
 | Status | `critical` |
 | Z-score | Valeur calculée (critique ≥ 3) |
 | PSI | Valeur calculée (critique ≥ 0.2) |
+
+### Auto-demotion (circuit breaker)
+
+**Sujet** : `[PredictML] 🔴 Auto-demotion — {modele} v{version}`
+
+| Champ | Valeur |
+|-------|--------|
+| Modèle | Nom du modèle |
+| Version | Version concernée |
+| Raison | Critères déclenchés concaténés (ex : `"Feature drift critical detected. Accuracy 0.72 < 0.80."`) |
+| Détecté le | Timestamp UTC |
+
+**Envoyé quand** : `auto_demote=true` dans la politique ET au moins un critère est déclenché ET `ENABLE_EMAIL_ALERTS=true`.
+
+**Cas particulier** : si aucune version de secours n'existe, la demotion est bloquée mais un email d'avertissement est quand même envoyé, avec la mention `"No fallback version available — the model has NOT been demoted."`.
+
+Voir [CIRCUIT_BREAKER.md](./CIRCUIT_BREAKER.md) pour la configuration complète.
+
+---
 
 ### Rapport hebdomadaire
 
@@ -251,6 +273,7 @@ Tableau récapitulatif de tous les modèles actifs : nombre de prédictions, tau
 |---------|------|
 | `src/tasks/arq_worker.py` | Définition des cron jobs ARQ (`alert_check_task`, `weekly_report_task`) |
 | `src/tasks/supervision_reporter.py` | Logique de vérification des métriques et déclenchement des alertes |
+| `src/services/auto_promotion_service.py` | Logique circuit breaker (`evaluate_auto_demotion()`) |
 | `src/services/email_service.py` | Templates HTML et envoi SMTP |
 | `src/services/webhook_service.py` | Envoi des payloads webhook |
 | `src/core/config.py` | Lecture des variables d'environnement SMTP |

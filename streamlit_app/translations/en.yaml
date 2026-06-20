@@ -1494,6 +1494,18 @@ supervision:
     circuit_breaker_saved: Circuit breaker updated.
     last_demote_error: 🔴 **Auto-demoted on {ts} UTC** — {reason}
     no_recent_demote: 🟢 No recent auto-demotion detected.
+    cb_status_label: "Circuit Breaker Status"
+    cb_status_active_value: "🔴 ACTIVE"
+    cb_status_inactive_value: "⬜ INACTIVE"
+    cb_intro_panel: "The **circuit breaker** automatically monitors this model every\
+      \ **6 hours** (via the `retrain-worker` container). If it detects critical drift\
+      \ or accuracy dropping below the threshold, it removes the model from production\
+      \ (`is_production=false`).\n\n📋 **Prerequisites**: a **fallback** version (non-production,\
+      \ active) must exist. The **cooldown** prevents rapid oscillations."
+    cb_trigger_summary_drift: "Drift trigger: **{level}**"
+    cb_trigger_summary_acc: "Min accuracy: **{val}**"
+    cb_trigger_summary_acc_disabled: "Min accuracy: ⬜ disabled"
+    cb_trigger_summary_cooldown: "Cooldown: **{hours} h**"
 access_request:
   title: 📝 PredictML Access Request
   intro: Fill in this form to request an account. An administrator will review your
@@ -2581,12 +2593,18 @@ models:
     error_toast: "Retraining error: {error}"
 
   policy:
-    expander_active: "⚙️ Promotion policy  🚀 Promo ⚡ CB"
-    expander_promote_only: "⚙️ Promotion policy  🚀 Promo"
-    expander_cb_only: "⚙️ Promotion policy  ⚡ CB"
-    expander_default: "⚙️ Promotion policy"
+    expander_active: "⚙️ Promotion policy — 🚀 Promo ACTIVE  ⚡ CB ACTIVE"
+    expander_promote_only: "⚙️ Promotion policy — 🚀 Promo ACTIVE  ⬜ CB inactive"
+    expander_cb_only: "⚙️ Promotion policy — ⬜ Promo inactive  ⚡ CB ACTIVE"
+    expander_default: "⚙️ Promotion policy — ⬜ all inactive"
     caption: "Applied to **all versions** of `{name}`. 0 = criterion disabled."
     intro: "Automates two lifecycle mechanisms for this model:\n\n🚀 **Auto-promotion** — automatically promotes a new version to production if quality criteria are met after a retrain.\n\n⚡ **Circuit breaker** — automatically demotes the production version if its performance degrades during operation."
+    status_box_both_active: "🟢 Both **Auto-promotion** and **Circuit breaker** are **active** for this model."
+    status_box_promote_only: "🚀 **Auto-promotion** is **active**. ⬜ Circuit breaker **inactive**."
+    status_box_cb_only: "⚡ **Circuit breaker** is **active**. ⬜ Auto-promotion **inactive**."
+    status_box_none: "⬜ No automation active. Promotions and demotions remain manual."
+    howto_expander: "💡 How does it work?"
+    howto_callout: "**How does it work?**\n\n🚀 **Auto-promotion**: after each retrain, if all criteria (accuracy, MAE, latency…) are met, the new version is automatically set to production.\n\n⚡ **Circuit breaker**: every **6 hours**, the `retrain-worker` container monitors the production model. If it detects critical drift or accuracy dropping below the threshold, it automatically removes the model from production (`is_production=false`)."
     promote_header_active: "**🚀 Auto-promotion after retrain** — 🟢 Enabled"
     promote_header_inactive: "**🚀 Auto-promotion after retrain** — ⬜ Inactive"
     promote_help: "After each retrain, the new version is evaluated on recent (prediction → observed result) pairs. If **all** configured criteria are met and the minimum sample count is reached, it is automatically set to production. Setting 0 on a criterion disables it."

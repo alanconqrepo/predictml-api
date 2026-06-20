@@ -2815,7 +2815,20 @@ if is_admin:
 
             with st.expander(_policy_exp_title, expanded=False):
                 st.caption(t("models.policy.caption", name=selected['name']))
-                st.info(t("models.policy.intro"))
+
+                # Statut en langage clair
+                if _pp_promote_on and _pp_demote_on:
+                    st.success(t("models.policy.status_box_both_active"))
+                elif _pp_promote_on:
+                    st.info(t("models.policy.status_box_promote_only"))
+                elif _pp_demote_on:
+                    st.info(t("models.policy.status_box_cb_only"))
+                else:
+                    st.warning(t("models.policy.status_box_none"))
+
+                # Explication pour utilisateurs novices
+                with st.expander(t("models.policy.howto_expander"), expanded=False):
+                    st.info(t("models.policy.howto_callout"))
 
                 # ── Auto-promotion ─────────────────────────────────────────────
                 st.markdown(t("models.policy.promote_header_active") if _pp_promote_on else t("models.policy.promote_header_inactive"))
