@@ -49,7 +49,7 @@ client = get_client()
 col_start, col_end, col_refresh = st.columns([2, 2, 1])
 
 default_end = date.today()
-default_start = default_end - timedelta(days=7)
+default_start = default_end - timedelta(days=30)
 
 start_date = col_start.date_input(t("supervision.filters.from_label"), value=default_start)
 end_date = col_end.date_input(t("supervision.filters.to_label"), value=default_end)
@@ -197,6 +197,9 @@ if not models_data:
     st.stop()
 
 # ---------------------------------------------------------------------------
+# Admin flag — needed in both tabs
+_is_sup_admin = st.session_state.get("is_admin", False)
+
 # Main navigation: two tabs
 # ---------------------------------------------------------------------------
 st.divider()
@@ -230,12 +233,19 @@ with _tab_global:
     st.subheader(t("supervision.global.health_subheader"))
     rows_table = []
     for m in models_data:
+        _modes = m.get("deployment_modes", {})
+        _nb_prod   = sum(1 for v in _modes.values() if v == "production")
+        _nb_shadow = sum(1 for v in _modes.values() if v == "shadow")
+        _nb_active = len(m.get("versions", []))
         rows_table.append({
             t("supervision.health_table.col_model"): m["model_name"],
             t("supervision.health_table.col_versions"): ", ".join(m.get("versions", [])),
             t("supervision.health_table.col_mode"): ", ".join(sorted(set(
-                _MODE_LABEL.get(v, "⚪ —") for v in m.get("deployment_modes", {}).values() if v
+                _MODE_LABEL.get(v, "⚪ —") for v in _modes.values() if v
             ))) or "—",
+            t("supervision.health_table.col_nb_prod"): _nb_prod,
+            t("supervision.health_table.col_nb_shadow"): _nb_shadow,
+            t("supervision.health_table.col_nb_active"): _nb_active,
             t("supervision.health_table.col_predictions"): m["total_predictions"],
             t("supervision.health_table.col_shadow"): m["shadow_predictions"],
             t("supervision.health_table.col_errors"): f"{m['error_rate'] * 100:.1f} %",
@@ -257,6 +267,18 @@ with _tab_global:
             t("supervision.health_table.col_mode"): st.column_config.TextColumn(
                 t("supervision.health_table.col_mode"),
                 help=t("supervision.health_table.help_mode"),
+            ),
+            t("supervision.health_table.col_nb_prod"): st.column_config.NumberColumn(
+                t("supervision.health_table.col_nb_prod"),
+                help=t("supervision.health_table.help_nb_prod"),
+            ),
+            t("supervision.health_table.col_nb_shadow"): st.column_config.NumberColumn(
+                t("supervision.health_table.col_nb_shadow"),
+                help=t("supervision.health_table.help_nb_shadow"),
+            ),
+            t("supervision.health_table.col_nb_active"): st.column_config.NumberColumn(
+                t("supervision.health_table.col_nb_active"),
+                help=t("supervision.health_table.help_nb_active"),
             ),
             t("supervision.health_table.col_predictions"): st.column_config.NumberColumn(
                 t("supervision.health_table.col_predictions"),
@@ -415,6 +437,227 @@ with _tab_global:
             )],
         )
     st.plotly_chart(fig_lat, width='stretch')
+
+    # ── Configured alert thresholds ───────────────────────────────────────
+    with st.expander(t("supervision.global.alerts_expander"), expanded=False):
+        st.caption(t("supervision.global.alerts_caption"))
+        st.info(t("supervision.config.thresholds_note"))
+
+        _alerts_rows: list[dict] = []
+        _meta_cache: dict[tuple, dict] = {}  # (model, version) → full model dict
+        with st.spinner(t("supervision.loading.alerts")):
+            for _m in models_data:
+                _m_modes = _m.get("deployment_modes", {})
+                # Iterate ALL active versions, not just the production one
+                _all_versions = list(_m_modes.keys()) or (_m.get("versions") or [])
+                for _ver in _all_versions:
+                    try:
+                        _mfull = client.get_model(_m["model_name"], _ver)
+                        _meta_cache[(_m["model_name"], _ver)] = _mfull
+                        _at = _mfull.get("alert_thresholds") or {}
+                        _wh = _mfull.get("webhook_url") or ""
+                        _is_bin = (
+                            _mfull.get("model_task") == "classification_binary"
+                            or len(_mfull.get("classes") or []) == 2
+                        )
+                        _alerts_rows.append({
+                            "_model": _m["model_name"],
+                            "_version": _ver,
+                            t("supervision.global.alerts_col_model"): _m["model_name"],
+                            t("supervision.global.alerts_col_version"): _ver,
+                            t("supervision.global.alerts_col_mode"): _MODE_LABEL.get(
+                                _m_modes.get(_ver, ""), "⚪ —"
+                            ),
+                            t("supervision.global.alerts_col_error_max"): (
+                                f"{_at['error_rate_max'] * 100:.1f} %"
+                                if _at.get("error_rate_max") is not None else "—"
+                            ),
+                            t("supervision.global.alerts_col_accuracy_min"): (
+                                f"{_at['accuracy_min']:.0%}"
+                                if _at.get("accuracy_min") is not None else "—"
+                            ),
+                            t("supervision.global.alerts_col_auc_min"): (
+                                f"{_at['auc_min']:.2f}"
+                                if _at.get("auc_min") is not None and _is_bin else "—"
+                            ),
+                            t("supervision.global.alerts_col_drift"): (
+                                "✅" if _at.get("drift_auto_alert") else "⬜"
+                            ),
+                            t("supervision.global.alerts_col_webhook"): "✅" if _wh else "—",
+                            "_configured": bool(_at),
+                        })
+                    except Exception:
+                        pass
+
+        # ── Table of configured alerts ────────────────────────────────────
+        _configured_rows = [r for r in _alerts_rows if r["_configured"]]
+        if not _configured_rows:
+            st.info(t("supervision.global.alerts_none"))
+        else:
+            _display_keys = [k for k in _configured_rows[0] if not k.startswith("_")]
+            st.dataframe(
+                pd.DataFrame(_configured_rows)[_display_keys],
+                hide_index=True,
+                width="stretch",
+            )
+
+        if _is_sup_admin:
+            # ── Manage existing alerts ────────────────────────────────────
+            if _configured_rows:
+                st.divider()
+                st.markdown(t("supervision.global.alerts_manage_header"))
+                _alert_labels = [
+                    f"{r['_model']} — v{r['_version']}" for r in _configured_rows
+                ]
+                _mgmt_sel_col, _mgmt_btn1_col, _mgmt_btn2_col = st.columns([5, 2, 2])
+                _sel_alert_label = _mgmt_sel_col.selectbox(
+                    t("supervision.global.alerts_select_label"),
+                    _alert_labels,
+                    key="alert_manage_select",
+                    label_visibility="collapsed",
+                )
+                if _sel_alert_label:
+                    _sel_alert_row = _configured_rows[_alert_labels.index(_sel_alert_label)]
+                    _mgmt_btn1_col.write("")  # vertical alignment nudge
+                    if _mgmt_btn1_col.button(
+                        t("supervision.global.alerts_disable_btn"),
+                        key="alert_disable",
+                        help=t("supervision.global.alerts_disable_help"),
+                        use_container_width=True,
+                    ):
+                        try:
+                            client.update_model(
+                                _sel_alert_row["_model"],
+                                _sel_alert_row["_version"],
+                                {"alert_thresholds": {"drift_auto_alert": False}},
+                            )
+                            st.success(t("supervision.global.alerts_disabled_ok",
+                                        model=_sel_alert_row["_model"],
+                                        version=_sel_alert_row["_version"]))
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as _exc:
+                            st.error(t("supervision.errors.generic", error=_exc))
+                    _mgmt_btn2_col.write("")  # vertical alignment nudge
+                    if _mgmt_btn2_col.button(
+                        t("supervision.global.alerts_delete_btn"),
+                        key="alert_delete",
+                        type="primary",
+                        help=t("supervision.global.alerts_delete_help"),
+                        use_container_width=True,
+                    ):
+                        try:
+                            client.update_model(
+                                _sel_alert_row["_model"],
+                                _sel_alert_row["_version"],
+                                {"alert_thresholds": None},
+                            )
+                            st.success(t("supervision.global.alerts_deleted_ok",
+                                        model=_sel_alert_row["_model"],
+                                        version=_sel_alert_row["_version"]))
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as _exc:
+                            st.error(t("supervision.errors.generic", error=_exc))
+
+            # ── Create / edit alert thresholds ────────────────────────────
+            st.divider()
+            st.markdown(t("supervision.global.alerts_create_header"))
+
+            # Build selector over all active versions (model × version tuples)
+            _create_opts: list[tuple[str, str, str]] = []
+            for _m in models_data:
+                _m_modes = _m.get("deployment_modes", {})
+                for _v in _m.get("versions", []):
+                    _m_lbl = _MODE_LABEL.get(_m_modes.get(_v, ""), "⚪ —")
+                    _create_opts.append((_m["model_name"], _v, _m_lbl))
+            _create_labels = [
+                f"{mn} — v{ver}  {lbl}" for mn, ver, lbl in _create_opts
+            ]
+
+            _sel_create_label = st.selectbox(
+                t("supervision.global.alerts_create_select"),
+                _create_labels,
+                key="alert_create_select",
+                label_visibility="collapsed",
+            )
+
+            if _sel_create_label and _create_opts:
+                _ci = _create_labels.index(_sel_create_label)
+                _c_model, _c_ver, _ = _create_opts[_ci]
+
+                # Use cached metadata if available, else fetch
+                _cfull = _meta_cache.get((_c_model, _c_ver))
+                if _cfull is None:
+                    try:
+                        _cfull = client.get_model(_c_model, _c_ver)
+                        _meta_cache[(_c_model, _c_ver)] = _cfull
+                    except Exception:
+                        _cfull = {}
+
+                _cat = _cfull.get("alert_thresholds") or {}
+                _c_is_bin = (
+                    _cfull.get("model_task") == "classification_binary"
+                    or len(_cfull.get("classes") or []) == 2
+                )
+
+                with st.form("global_alert_thresholds_form"):
+                    _gcols = st.columns(3 if _c_is_bin else 2)
+                    _g_err = _gcols[0].number_input(
+                        t("supervision.config.form_error_rate_max"),
+                        min_value=0.0, max_value=100.0,
+                        value=round(_cat["error_rate_max"] * 100, 2)
+                              if _cat.get("error_rate_max") is not None else 10.0,
+                        step=0.5, help=t("supervision.config.form_error_rate_help"),
+                    )
+                    _g_acc = _gcols[1].number_input(
+                        t("supervision.config.form_accuracy_min"),
+                        min_value=0.0, max_value=1.0,
+                        value=float(_cat["accuracy_min"])
+                              if _cat.get("accuracy_min") is not None else 0.80,
+                        step=0.01, format="%.2f",
+                        help=t("supervision.config.form_accuracy_help"),
+                    )
+                    if _c_is_bin:
+                        _g_auc = _gcols[2].number_input(
+                            t("supervision.config.form_auc_min"),
+                            min_value=0.0, max_value=1.0,
+                            value=float(_cat["auc_min"])
+                                  if _cat.get("auc_min") is not None else 0.70,
+                            step=0.01, format="%.2f",
+                            help=t("supervision.config.form_auc_min_help"),
+                        )
+                    else:
+                        _g_auc = None
+                    _g_drift = st.checkbox(
+                        t("supervision.config.form_drift_auto_alert"),
+                        value=bool(_cat.get("drift_auto_alert")),
+                        help=t("supervision.config.form_drift_auto_alert_help"),
+                    )
+                    _g_submitted = st.form_submit_button(
+                        t("supervision.config.form_save_btn"), type="primary"
+                    )
+                    if _g_submitted:
+                        try:
+                            _g_payload: dict = {
+                                "error_rate_max": _g_err / 100,
+                                "accuracy_min": _g_acc,
+                                "drift_auto_alert": _g_drift,
+                            }
+                            if _c_is_bin:
+                                _g_payload["auc_min"] = _g_auc
+                            client.update_model(
+                                _c_model, _c_ver, {"alert_thresholds": _g_payload}
+                            )
+                            st.success(t("supervision.config.thresholds_saved",
+                                        model=_c_model, version=_c_ver))
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as _exc:
+                            st.error(t("supervision.errors.generic", error=_exc))
+        else:
+            if not _configured_rows:
+                st.caption(t("supervision.config.admin_only"))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -578,6 +821,7 @@ with _tab_detail:
 
         with col_perf:
             st.markdown(t("supervision.drift.perf_drift_header"))
+            st.caption(t("supervision.drift.perf_drift_note"))
             if perf_by_day:
                 df_perf = pd.DataFrame(perf_by_day)
                 df_perf["date"] = pd.to_datetime(df_perf["date"])
@@ -662,6 +906,7 @@ with _tab_detail:
 
         with col_feat:
             st.markdown(t("supervision.drift.feat_drift_header"))
+            st.caption(t("supervision.drift.feat_drift_note"))
             feat_summary  = feature_drift.get("drift_summary", "no_data")
             feat_baseline = feature_drift.get("baseline_available", False)
             feat_analyzed = feature_drift.get("predictions_analyzed", 0)
@@ -678,6 +923,7 @@ with _tab_detail:
                     t("supervision.drift_table.col_psi"): round(fd["psi"], 4) if fd.get("psi") is not None else "—",
                     t("supervision.drift_table.col_n_prod"): fd.get("production_count", 0),
                 } for fn, fd in features_dict.items()]
+                st.info(t("supervision.drift_table.zscore_psi_legend"))
                 st.dataframe(
                     pd.DataFrame(rows_drift), width='stretch', hide_index=True,
                     column_config={
@@ -781,6 +1027,7 @@ with _tab_detail:
 
         # Confidence trend
         st.markdown(t("supervision.confidence.header"))
+        st.caption(t("supervision.confidence.note"))
         period_days = max(1, (end_date - start_date).days)
         try:
             conf_trend = client.get_confidence_trend(selected_model, days=period_days)
@@ -837,6 +1084,7 @@ with _tab_detail:
         # Anomalous predictions
         st.markdown(t("supervision.anomalies.header"))
         st.caption(t("supervision.anomalies.caption"))
+        st.caption(t("supervision.anomalies.note"))
         _anom_col1, _anom_col2 = st.columns([1, 2])
         _anom_days = _anom_col1.number_input(
             t("supervision.anomalies.window_label"), min_value=1, max_value=90,
@@ -1440,8 +1688,6 @@ with _tab_detail:
     # ────────────────────────────────────────────────────────────────────
     # EXPANDER 7 — Configuration (seuils + politique) — admin
     # ────────────────────────────────────────────────────────────────────
-    _is_sup_admin = st.session_state.get("is_admin", False)
-
     _prod_ver_for_policy = next(
         (v["version"] for v in per_version if v.get("deployment_mode") == "production"),
         per_version[0]["version"] if per_version else None,
@@ -1477,6 +1723,7 @@ with _tab_detail:
 
         # ── Alert thresholds ─────────────────────────────────────────────
         with _conf_tab_seuils:
+            st.info(t("supervision.config.thresholds_note"))
             if not per_version:
                 st.info(t("supervision.config.no_version"))
             else:
@@ -1493,39 +1740,62 @@ with _tab_detail:
                     _full = client.get_model(selected_model, _sel_ver)
                     _cur  = _full.get("alert_thresholds") or {}
                 except Exception:
+                    _full = {}
                     _cur = {}
 
+                _is_binary = (
+                    _full.get("model_task") == "classification_binary"
+                    or len(_full.get("classes") or []) == 2
+                )
                 _err_val   = _cur.get("error_rate_max")
                 _acc_val   = _cur.get("accuracy_min")
+                _auc_val   = _cur.get("auc_min")
                 _drift_val = _cur.get("drift_auto_alert") or False
 
                 if _cur:
-                    _ci1, _ci2, _ci3 = st.columns(3)
-                    _ci1.metric(t("supervision.config.threshold_error_rate_max"), f"{_err_val * 100:.1f} %" if _err_val is not None else "—")
-                    _ci2.metric(t("supervision.config.threshold_accuracy_min"), f"{_acc_val:.0%}" if _acc_val is not None else "—")
-                    _ci3.metric(t("supervision.config.threshold_drift_alert"), t("supervision.config.drift_alert_enabled") if _drift_val else t("supervision.config.drift_alert_disabled"))
+                    _ci_cols = st.columns(4 if _is_binary else 3)
+                    _ci_cols[0].metric(t("supervision.config.threshold_error_rate_max"), f"{_err_val * 100:.1f} %" if _err_val is not None else "—")
+                    _ci_cols[1].metric(t("supervision.config.threshold_accuracy_min"), f"{_acc_val:.0%}" if _acc_val is not None else "—")
+                    if _is_binary:
+                        _ci_cols[2].metric(t("supervision.config.threshold_auc_min"), f"{_auc_val:.2f}" if _auc_val is not None else "—")
+                    _ci_cols[-1].metric(t("supervision.config.threshold_drift_alert"), t("supervision.config.drift_alert_enabled") if _drift_val else t("supervision.config.drift_alert_disabled"))
 
                 with st.form("alert_thresholds_form"):
-                    _col1, _col2 = st.columns(2)
-                    new_error_rate_pct = _col1.number_input(
+                    _detail_cols = st.columns(3 if _is_binary else 2)
+                    new_error_rate_pct = _detail_cols[0].number_input(
                         t("supervision.config.form_error_rate_max"), min_value=0.0, max_value=100.0,
                         value=round(_err_val * 100, 2) if _err_val is not None else 10.0,
                         step=0.5, help=t("supervision.config.form_error_rate_help"),
                     )
-                    new_accuracy_min = _col2.number_input(
+                    new_accuracy_min = _detail_cols[1].number_input(
                         t("supervision.config.form_accuracy_min"), min_value=0.0, max_value=1.0,
                         value=float(_acc_val) if _acc_val is not None else 0.80,
                         step=0.01, format="%.2f", help=t("supervision.config.form_accuracy_help"),
                     )
-                    new_drift_auto = st.checkbox(t("supervision.config.form_drift_auto_alert"), value=bool(_drift_val))
+                    if _is_binary:
+                        new_auc_min = _detail_cols[2].number_input(
+                            t("supervision.config.form_auc_min"), min_value=0.0, max_value=1.0,
+                            value=float(_auc_val) if _auc_val is not None else 0.70,
+                            step=0.01, format="%.2f", help=t("supervision.config.form_auc_min_help"),
+                        )
+                    else:
+                        new_auc_min = None
+                    new_drift_auto = st.checkbox(
+                        t("supervision.config.form_drift_auto_alert"),
+                        value=bool(_drift_val),
+                        help=t("supervision.config.form_drift_auto_alert_help"),
+                    )
                     _submitted = st.form_submit_button(t("supervision.config.form_save_btn"), type="primary")
                     if _submitted:
                         try:
-                            client.update_model(selected_model, _sel_ver, {"alert_thresholds": {
+                            _thresholds_payload: dict = {
                                 "error_rate_max": new_error_rate_pct / 100,
                                 "accuracy_min": new_accuracy_min,
                                 "drift_auto_alert": new_drift_auto,
-                            }})
+                            }
+                            if _is_binary:
+                                _thresholds_payload["auc_min"] = new_auc_min
+                            client.update_model(selected_model, _sel_ver, {"alert_thresholds": _thresholds_payload})
                             st.success(t("supervision.config.thresholds_saved", model=selected_model, version=_sel_ver))
                             st.cache_data.clear()
                         except Exception as _exc:

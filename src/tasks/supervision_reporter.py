@@ -105,7 +105,7 @@ async def run_alert_check() -> None:
                         error_rate=error_rate,
                     )
                     if settings.ENABLE_EMAIL_ALERTS:
-                        email_service.send_error_spike_alert(model_name, error_rate)
+                        email_service.send_error_spike_alert(model_name, error_rate, threshold=error_threshold)
                     if prod_meta and prod_meta.webhook_url:
                         asyncio.create_task(
                             send_webhook(
@@ -120,6 +120,42 @@ async def run_alert_check() -> None:
                                     },
                                 },
                                 event_type="error_rate_threshold",
+                            )
+                        )
+
+                # AUC minimum alert (binary classifiers only — checks stored training AUC)
+                auc_min = thresholds.get("auc_min") if thresholds else None
+                if (
+                    auc_min is not None
+                    and prod_meta
+                    and prod_meta.model_task == "classification_binary"
+                    and prod_meta.auc is not None
+                    and prod_meta.auc < auc_min
+                ):
+                    logger.warning(
+                        "AUC below minimum threshold",
+                        model=model_name,
+                        auc=prod_meta.auc,
+                        auc_min=auc_min,
+                    )
+                    if settings.ENABLE_EMAIL_ALERTS:
+                        email_service.send_auc_alert(
+                            model_name, prod_meta.auc, auc_min
+                        )
+                    if prod_meta.webhook_url:
+                        asyncio.create_task(
+                            send_webhook(
+                                prod_meta.webhook_url,
+                                {
+                                    "model_name": model_name,
+                                    "version": prod_meta.version,
+                                    "timestamp": end.isoformat() + "Z",
+                                    "details": {
+                                        "auc": prod_meta.auc,
+                                        "auc_min": auc_min,
+                                    },
+                                },
+                                event_type="auc_below_threshold",
                             )
                         )
 

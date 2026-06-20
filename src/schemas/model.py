@@ -31,6 +31,7 @@ class AlertThresholds(BaseModel):
     """Per-model configurable alert thresholds (overrides global environment variables)"""
 
     accuracy_min: Optional[float] = Field(None, ge=0.0, le=1.0)
+    auc_min: Optional[float] = Field(None, ge=0.0, le=1.0)
     error_rate_max: Optional[float] = Field(None, ge=0.0, le=1.0)
     drift_auto_alert: Optional[bool] = None
 
