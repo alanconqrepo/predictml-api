@@ -2769,34 +2769,43 @@ if is_admin:
                     if start_date > end_date:
                         st.error(t("models.retrain.date_order_error"))
                     else:
-                        with st.spinner(t("models.retrain.spinner")):
-                            try:
-                                result = client.retrain_model(
-                                    name=selected["name"],
-                                    version=selected["version"],
-                                    start_date=str(start_date),
-                                    end_date=str(end_date),
-                                    new_version=new_version_input.strip() or None,
-                                    set_production=set_prod,
+                        import time as _time
+                        try:
+                            enqueued = client.retrain_model(
+                                name=selected["name"],
+                                version=selected["version"],
+                                start_date=str(start_date),
+                                end_date=str(end_date),
+                                new_version=new_version_input.strip() or None,
+                                set_production=set_prod,
+                            )
+                            job_id = enqueued.get("job_id")
+                            _TERMINAL = {"success", "failed", "cancelled"}
+                            job = enqueued
+                            with st.spinner(t("models.retrain.spinner")):
+                                while job.get("status") not in _TERMINAL:
+                                    _time.sleep(2)
+                                    job = client.get_job_status(job_id)
+                            succeeded = job.get("status") == "success"
+                            new_ver = job.get("new_version") or (job.get("result") or {}).get("new_version")
+                            err_msg = job.get("error") or t("models.retrain.unknown_error")
+                            if succeeded:
+                                st.toast(
+                                    t("models.retrain.success_toast", new_version=new_ver),
+                                    icon="✅",
                                 )
-                                if result.get("success"):
-                                    st.toast(
-                                        t("models.retrain.success_toast", new_version=result['new_version']),
-                                        icon="✅",
-                                    )
-                                else:
-                                    st.toast(
-                                        t("models.retrain.failure_toast", error=result.get('error', t("models.retrain.unknown_error"))),
-                                        icon="❌",
-                                    )
-                                with st.expander(t("models.retrain.stdout_expander"), expanded=not result.get("success")):
-                                    st.code(result.get("stdout", t("models.retrain.logs_empty")), language="text")
-                                with st.expander(t("models.retrain.stderr_expander"), expanded=not result.get("success")):
-                                    st.code(result.get("stderr", t("models.retrain.logs_empty")), language="text")
-                                if result.get("success"):
-                                    reload()
-                            except Exception as e:
-                                st.toast(t("models.retrain.error_toast", error=e), icon="❌")
+                            else:
+                                st.toast(
+                                    t("models.retrain.failure_toast", error=err_msg),
+                                    icon="❌",
+                                )
+                            logs = job.get("logs") or t("models.retrain.logs_empty")
+                            with st.expander(t("models.retrain.stdout_expander"), expanded=not succeeded):
+                                st.code(logs, language="text")
+                            if succeeded:
+                                reload()
+                        except Exception as e:
+                            st.toast(t("models.retrain.error_toast", error=e), icon="❌")
 
         # Auto-promotion policy / circuit breaker
         if is_admin:
@@ -2830,6 +2839,27 @@ if is_admin:
                 with st.expander(t("models.policy.howto_expander"), expanded=False):
                     st.info(t("models.policy.howto_callout"))
 
+                # Résumé visuel des critères actifs (aide à la compréhension)
+                if _pp_promote_on:
+                    _criteria_lines = []
+                    if _pp.get("min_accuracy"):
+                        _criteria_lines.append(t("models.policy.criteria_accuracy", val=_pp["min_accuracy"]))
+                    if _pp.get("max_mae"):
+                        _criteria_lines.append(t("models.policy.criteria_mae", val=_pp["max_mae"]))
+                    if _pp.get("max_latency_p95_ms"):
+                        _criteria_lines.append(t("models.policy.criteria_latency", val=_pp["max_latency_p95_ms"]))
+                    if _pp.get("min_sample_validation", 10):
+                        _criteria_lines.append(t("models.policy.criteria_samples", val=_pp.get("min_sample_validation", 10)))
+                    if _pp.get("min_golden_test_pass_rate"):
+                        _criteria_lines.append(t("models.policy.criteria_golden", val=_pp["min_golden_test_pass_rate"]))
+                    if _criteria_lines:
+                        st.info(
+                            t("models.policy.criteria_summary_header") + "\n"
+                            + "\n".join(f"- {c}" for c in _criteria_lines)
+                        )
+                    else:
+                        st.warning(t("models.policy.criteria_none"))
+
                 # ── Auto-promotion ─────────────────────────────────────────────
                 st.markdown(t("models.policy.promote_header_active") if _pp_promote_on else t("models.policy.promote_header_inactive"))
                 st.caption(t("models.policy.promote_help"))
@@ -2854,6 +2884,7 @@ if is_admin:
                         min_value=0.0, max_value=1.0, step=0.01,
                         value=float(_pp_min_golden) if _pp_min_golden is not None else 0.0,
                         key="pp_min_golden",
+                        help=t("models.policy.min_golden_help"),
                     )
                 with _pp_c2:
                     _pp_max_mae = _pp.get("max_mae")
@@ -2870,12 +2901,14 @@ if is_admin:
                         min_value=0.0, step=10.0,
                         value=float(_pp_max_lat) if _pp_max_lat is not None else 0.0,
                         key="pp_max_latency",
+                        help=t("models.policy.max_latency_help"),
                     )
                     _pp_new_min_samples = st.number_input(
                         t("models.policy.min_samples_label"),
                         min_value=1, step=1,
                         value=int(_pp.get("min_sample_validation", 10)),
                         key="pp_min_samples",
+                        help=t("models.policy.min_samples_help"),
                     )
 
                 st.divider()
@@ -2883,6 +2916,7 @@ if is_admin:
                 # ── Circuit breaker ────────────────────────────────────────────
                 st.markdown(t("models.policy.cb_header_active") if _pp_demote_on else t("models.policy.cb_header_inactive"))
                 st.caption(t("models.policy.cb_help"))
+                st.caption(t("models.policy.cb_frequency_note"))
                 _pp_cb1, _pp_cb2 = st.columns(2)
                 with _pp_cb1:
                     _pp_new_demote = st.checkbox(

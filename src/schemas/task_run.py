@@ -37,6 +37,7 @@ class TaskRunStatus(BaseModel):
     duration_seconds: Optional[float] = None
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    logs: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -619,6 +619,20 @@ services:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Alertes e-mail — reflétées depuis l'API pour affichage sur la page Services
+      - ENABLE_EMAIL_ALERTS=${ENABLE_EMAIL_ALERTS:-false}
+      - WEEKLY_REPORT_ENABLED=${WEEKLY_REPORT_ENABLED:-false}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - ALERT_EMAIL_TO=${ALERT_EMAIL_TO:-}
+      - WEEKLY_REPORT_DAY=${WEEKLY_REPORT_DAY:-monday}
+      - WEEKLY_REPORT_HOUR=${WEEKLY_REPORT_HOUR:-8}
+      - PERFORMANCE_DRIFT_ALERT_THRESHOLD=${PERFORMANCE_DRIFT_ALERT_THRESHOLD:-0.10}
+      - ERROR_RATE_ALERT_THRESHOLD=${ERROR_RATE_ALERT_THRESHOLD:-0.10}
       - HOME=/tmp
       # Connexion PostgreSQL pour le tool SQL du chatbot
       - POSTGRES_HOST=postgres

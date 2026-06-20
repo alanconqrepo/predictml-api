@@ -253,4 +253,5 @@ def _task_run_to_schema(row: TaskRun) -> TaskRunStatus:
         duration_seconds=duration,
         result=row.result,
         error=row.error,
+        logs=row.logs,
     )

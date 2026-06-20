@@ -627,6 +627,16 @@ async def do_retrain(  # noqa: C901 — complexity inherent to the pipeline
                 promoted=should_promote,
                 reason=reason,
             )
+            if should_promote and settings.ENABLE_EMAIL_ALERTS:
+                from src.services.email_service import email_service as _email_svc
+
+                _email_svc.send_auto_promotion_alert(
+                    model_name,
+                    new_version,
+                    reason,
+                    accuracy=new_metadata.accuracy,
+                    f1_score=new_metadata.f1_score,
+                )
 
         # Persist auto_promoted in training_stats
         if promotion_policy.get("auto_promote") and not set_production:

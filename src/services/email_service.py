@@ -270,6 +270,42 @@ class EmailService:
             html_body=self._base_html("AUC below minimum threshold", body),
         )
 
+    def send_auto_promotion_alert(
+        self,
+        model_name: str,
+        new_version: str,
+        reason: str,
+        accuracy: float | None = None,
+        f1_score: float | None = None,
+    ) -> bool:
+        """Auto-promotion success notification."""
+        metrics_rows = ""
+        if accuracy is not None:
+            metrics_rows += f"<tr><th>Accuracy</th><td><strong>{accuracy:.4f}</strong></td></tr>"
+        if f1_score is not None:
+            metrics_rows += f"<tr><th>F1 score</th><td><strong>{f1_score:.4f}</strong></td></tr>"
+        body = f"""
+        <p>The model <strong>{model_name}</strong> v<strong>{new_version}</strong>
+           has been <strong>automatically promoted to production</strong>
+           following a successful retrain — all quality criteria were satisfied.</p>
+        <table>
+          <tr><th>Model</th><td>{model_name}</td></tr>
+          <tr><th>New version</th><td>{new_version}</td></tr>
+          {metrics_rows}
+          <tr><th>Criteria result</th><td>{reason}</td></tr>
+          <tr><th>Promoted on</th>
+              <td>{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC</td></tr>
+        </table>
+        <p>The new version is now serving production traffic.
+           Open the dashboard to verify its performance metrics and configure
+           alerts if needed.</p>"""
+
+        return self._send_email(
+            to=settings.ALERT_EMAIL_TO,
+            subject=f"[PredictML] ✅ Auto-promotion — {model_name} v{new_version}",
+            html_body=self._base_html("Auto-promotion — New version in production", body),
+        )
+
     def send_auto_demotion_alert(
         self,
         model_name: str,

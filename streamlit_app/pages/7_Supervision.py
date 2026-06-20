@@ -1804,6 +1804,29 @@ with _tab_detail:
         # ── Auto-promotion ────────────────────────────────────────────────
         with _conf_tab_promo:
             st.caption(t("supervision.config.auto_promote_caption", model=selected_model))
+            st.info(t("supervision.config.auto_promote_context"))
+
+            # Résumé des critères actifs
+            if _auto_promote_on:
+                _sup_criteria = []
+                if _policy.get("min_accuracy"):
+                    _sup_criteria.append(t("supervision.config.criteria_accuracy", val=_policy["min_accuracy"]))
+                if _policy.get("max_mae"):
+                    _sup_criteria.append(t("supervision.config.criteria_mae", val=_policy["max_mae"]))
+                if _policy.get("max_latency_p95_ms"):
+                    _sup_criteria.append(t("supervision.config.criteria_latency", val=_policy["max_latency_p95_ms"]))
+                if _policy.get("min_sample_validation", 10):
+                    _sup_criteria.append(t("supervision.config.criteria_samples", val=_policy.get("min_sample_validation", 10)))
+                if _policy.get("min_golden_test_pass_rate"):
+                    _sup_criteria.append(t("supervision.config.criteria_golden", val=_policy["min_golden_test_pass_rate"]))
+                if _sup_criteria:
+                    st.success(
+                        t("supervision.config.criteria_summary_header") + "\n"
+                        + "\n".join(f"- {c}" for c in _sup_criteria)
+                    )
+                else:
+                    st.warning(t("supervision.config.criteria_none"))
+
             _ap1, _ap2 = st.columns(2)
             with _ap1:
                 new_auto_promote = st.checkbox(
@@ -1824,6 +1847,7 @@ with _tab_detail:
                     min_value=0.0, max_value=1.0, step=0.01,
                     value=float(_min_golden) if _min_golden is not None else 0.0,
                     key="sup_min_golden", disabled=not _is_sup_admin,
+                    help=t("supervision.config.min_golden_help"),
                 )
             with _ap2:
                 _max_mae = _policy.get("max_mae")
@@ -1840,12 +1864,14 @@ with _tab_detail:
                     min_value=0.0, step=10.0,
                     value=float(_max_lat) if _max_lat is not None else 0.0,
                     key="sup_max_latency", disabled=not _is_sup_admin,
+                    help=t("supervision.config.max_latency_help"),
                 )
                 new_min_samples = st.number_input(
                     t("supervision.config.min_samples_label"),
                     min_value=1, step=1,
                     value=int(_policy.get("min_sample_validation", 10)),
                     key="sup_min_samples", disabled=not _is_sup_admin,
+                    help=t("supervision.config.min_samples_help"),
                 )
 
             if _is_sup_admin and st.button(t("supervision.config.save_auto_promote_btn"), key="save_auto_promote"):

@@ -1488,17 +1488,26 @@ supervision:
       \ sans supprimer les autres seuils."
     form_save_btn: 💾 Enregistrer les seuils
     thresholds_saved: ✅ Seuils mis à jour pour {model} v{version}.
-    auto_promote_caption: Promeut automatiquement le modèle ré-entraîné si tous les
-      critères sont satisfaits. Appliquée à toutes les versions de **{model}**. 0
-      = critère désactivé.
+    auto_promote_caption: "**Auto-promotion** — promeut automatiquement le modèle ré-entraîné si tous les critères de qualité sont satisfaits. Appliquée à toutes les versions de **{model}**. 0 = critère désactivé."
+    auto_promote_context: "Ce formulaire configure la même politique que **Modèles → ⚙️ Politique de promotion**.\n\nL'évaluation se déclenche **après chaque retrain** (manuel ou planifié). Les résultats sont visibles dans la page Retrain → colonne Historique.\n\n> ℹ️ Les paramètres du Circuit breaker (auto-demotion) se configurent dans la page **Modèles**."
     auto_promote_enable: Activer l'auto-promotion
     min_accuracy_label: Accuracy minimale (0 = désactivé)
-    min_accuracy_help: Accuracy requise sur les paires de validation pour promotion.
+    min_accuracy_help: "Accuracy requise sur les paires récentes (prédiction → résultat observé) pour valider la promotion. Ex. : 0.90 → la nouvelle version doit être correcte sur au moins 90 % des cas."
     min_golden_label: Taux Golden Tests min (0 = désactivé)
+    min_golden_help: "Proportion de golden tests à réussir. Les configurer dans la page Golden Tests."
     max_mae_label: MAE maximale (0 = désactivé)
-    max_mae_help: MAE maximale autorisée (régression uniquement).
+    max_mae_help: "Erreur absolue moyenne maximale autorisée (régression uniquement). Ex. : 5.0 → l'erreur ne doit pas dépasser 5 unités."
     max_latency_label: Latence P95 max (ms, 0 = désactivé)
-    min_samples_label: Échantillons de validation min
+    max_latency_help: "Le 95e percentile du temps de réponse doit rester sous ce seuil. Ex. : 200 ms."
+    min_samples_label: Paires de validation min
+    min_samples_help: "Nombre minimum de paires (prédiction, résultat observé) pour une évaluation fiable. Si les données sont insuffisantes, l'auto-promotion est ignorée."
+    criteria_summary_header: "**✅ Critères actifs (tous doivent être satisfaits) :**"
+    criteria_accuracy: "Accuracy ≥ {val:.2f}"
+    criteria_mae: "MAE ≤ {val}"
+    criteria_latency: "Latence P95 ≤ {val:.0f} ms"
+    criteria_samples: "Au moins {val} paires de validation"
+    criteria_golden: "Taux Golden Tests ≥ {val:.2f}"
+    criteria_none: "⚠️ Auto-promotion activée mais **aucun critère de qualité configuré** — la nouvelle version sera promue sans vérification."
     save_auto_promote_btn: 💾 Sauvegarder l'auto-promotion
     auto_promote_saved: Politique d'auto-promotion mise à jour.
     admin_only: 🔒 Réservé aux administrateurs.
@@ -1619,6 +1628,34 @@ services:
 
     | `MLFLOW_ADMIN_PASSWORD` | *(généré)* | Mot de passe MLflow |
 
+    | `ANTHROPIC_API_KEY` | *(vide)* | Clé API Anthropic — active le chatbot IA |
+
+    | `ENABLE_EMAIL_ALERTS` | `false` | Active les alertes e-mail |
+
+    | `SMTP_HOST` | *(vide)* | Serveur SMTP (ex. smtp.gmail.com) |
+
+    | `SMTP_PORT` | `587` | Port SMTP |
+
+    | `SMTP_STARTTLS` | `true` | Chiffrement STARTTLS |
+
+    | `SMTP_USER` | *(vide)* | Utilisateur SMTP |
+
+    | `SMTP_PASSWORD` | *(vide)* | Mot de passe SMTP |
+
+    | `SMTP_FROM` | *(vide)* | Adresse expéditeur |
+
+    | `ALERT_EMAIL_TO` | *(vide)* | Destinataires des alertes (virgule-séparés) |
+
+    | `WEEKLY_REPORT_ENABLED` | `false` | Active le rapport hebdomadaire |
+
+    | `WEEKLY_REPORT_DAY` | `monday` | Jour d''envoi du rapport |
+
+    | `WEEKLY_REPORT_HOUR` | `8` | Heure d''envoi (UTC) |
+
+    | `PERFORMANCE_DRIFT_ALERT_THRESHOLD` | `0.10` | Seuil chute performance (10%) |
+
+    | `ERROR_RATE_ALERT_THRESHOLD` | `0.10` | Seuil taux d''erreur (10%) |
+
 
     Les secrets sont générés automatiquement par `scripts/init_env.sh` lors du premier
     déploiement.
@@ -1630,6 +1667,43 @@ services:
     Les mots de passe sont masqués par défaut — activez le toggle pour les copier.
 
     '
+  config_section_title: Configuration des services externes
+  config_section_caption: Variables d'environnement à définir dans `.env` pour activer
+    les fonctionnalités optionnelles (alertes, chatbot IA).
+  smtp_section_title: "📧 Alertes e-mail (SMTP)"
+  smtp_section_caption: Configuration de l'envoi d'alertes et rapports par e-mail.
+    Géré par le worker ARQ (conteneur `retrain-worker`).
+  smtp_status_enabled: "✅ Alertes e-mail actives"
+  smtp_status_disabled: "ℹ️ Alertes e-mail désactivées — `ENABLE_EMAIL_ALERTS=false`"
+  smtp_not_configured: "⚠️ SMTP non configuré — définissez `SMTP_HOST` dans `.env`\
+    \ pour activer les alertes."
+  smtp_host_label: Serveur SMTP
+  smtp_port_label: Port
+  smtp_tls_help: STARTTLS chiffre la connexion après le handshake initial (recommandé
+    sur le port 587).
+  smtp_user_label: Utilisateur SMTP
+  smtp_from_label: Adresse d'expédition (FROM)
+  smtp_password_label: Mot de passe SMTP
+  smtp_to_label: Destinataires des alertes (TO)
+  smtp_perf_threshold_label: Seuil dérive perf.
+  smtp_perf_threshold_help: Une alerte est envoyée si la précision chute de plus de
+    ce pourcentage entre deux périodes consécutives.
+  smtp_error_threshold_label: Seuil taux d'erreur
+  smtp_error_threshold_help: Une alerte est envoyée si le taux d'erreur de prédiction
+    dépasse ce seuil.
+  smtp_weekly_report: Rapport hebdo
+  smtp_weekly_report_schedule: "Tous les {day} à {hour}h UTC"
+  smtp_weekly_report_disabled: Désactivé
+  anthropic_section_title: "🤖 Chatbot IA (Anthropic)"
+  anthropic_section_caption: Clé API Anthropic utilisée par la page **AutoTrain Chatbot**
+    pour générer des scripts `train.py` et interagir avec la base de données.
+  anthropic_key_label: Clé API
+  anthropic_key_missing: "⚠️ `ANTHROPIC_API_KEY` non définie — la page Chatbot sera\
+    \ inaccessible."
+  anthropic_key_set: "✅ Clé API Anthropic configurée"
+  anthropic_model_label: Modèle utilisé
+  anthropic_model_caption: "Modèle Claude défini dans `12_AutoTrain_Chatbot.py`. Pour\
+    \ changer de modèle, modifiez la constante `MODEL_ID` dans ce fichier."
 golden_tests:
   page_title: Golden Tests — PredictML
   title: 🧪 Golden Tests
@@ -1873,6 +1947,11 @@ code_example:
   tab_curl: curl / bash
   tab_js: JavaScript
   footer_caption: 'API : `{api_url}` — MLflow : `{mlflow_url}`'
+  mode_label: Mode du code
+  mode_minimal: Minimal
+  mode_complete: Complet
+  mode_help: "Minimal : démarrage rapide avec uniquement les appels essentiels. Complet\
+    \ : prêt pour la production — tous les paramètres des scripts de référence."
   python:
     section1_title: 1. Entraîner un modèle et le tracker avec MLflow
     section1_install: 'Installez les dépendances : `pip install scikit-learn mlflow
@@ -2865,27 +2944,35 @@ models:
       elle est automatiquement passée en production. Mettre 0 sur un critère le désactive.
     auto_promote_label: Activer l'auto-promotion
     min_accuracy_label: Accuracy minimale (0 = désactivé)
-    min_accuracy_help: Accuracy requise sur les paires de validation pour promotion.
+    min_accuracy_help: "Accuracy requise sur les paires récentes (prédiction → résultat observé) pour valider la promotion. Ex. : 0.90 → la nouvelle version doit prédire correctement au moins 90 % des cas de validation."
     min_golden_label: Taux Golden Tests min (0 = désactivé)
+    min_golden_help: "Proportion de golden tests à réussir. Ex. : 0.95 → 95 % des cas de référence doivent correspondre. Configurer les golden tests dans la page Golden Tests."
     max_mae_label: MAE maximale (0 = désactivé)
-    max_mae_help: MAE maximale autorisée (régression uniquement).
+    max_mae_help: "Erreur absolue moyenne maximale autorisée (modèles de régression uniquement). Ex. : 5.0 → l'erreur moyenne ne doit pas dépasser 5 unités."
     max_latency_label: Latence P95 max (ms, 0 = désactivé)
-    min_samples_label: Échantillons de validation min
+    max_latency_help: "Le 95e percentile du temps de réponse doit rester sous ce seuil. Ex. : 200 → 95 % des prédictions doivent se terminer en moins de 200 ms."
+    min_samples_label: Paires de validation min
+    min_samples_help: "Nombre minimum de paires (prédiction, résultat observé) nécessaires pour une évaluation fiable. Si les données de vérité terrain sont insuffisantes, l'auto-promotion est ignorée."
+    criteria_summary_header: "**✅ Critères de promotion actifs (tous doivent être satisfaits) :**"
+    criteria_accuracy: "Accuracy ≥ {val:.2f}"
+    criteria_mae: "MAE ≤ {val}"
+    criteria_latency: "Latence P95 ≤ {val:.0f} ms"
+    criteria_samples: "Au moins {val} paires de validation"
+    criteria_golden: "Taux Golden Tests ≥ {val:.2f}"
+    criteria_none: "⚠️ Auto-promotion activée mais **aucun critère de qualité configuré** — la nouvelle version sera promue après chaque retrain sans vérification."
     cb_header_active: '**⚡ Circuit breaker (auto-demotion)** — 🔴 Activé'
     cb_header_inactive: '**⚡ Circuit breaker (auto-demotion)** — ⬜ Inactif'
-    cb_help: Surveille en continu la version en production. Si le drift des features
-      dépasse le niveau configuré **ou** si l'accuracy descend sous le seuil, la version
-      est automatiquement rétrogradée (`is_production=false`). Le cooldown évite les
-      oscillations rapides entre promotions et démotions.
+    cb_help: "Surveille en continu la version en production **toutes les 6 heures** (container `retrain-worker`). Si le drift des features dépasse le niveau configuré **ou** si l'accuracy descend sous le seuil, la version est automatiquement rétrogradée (`is_production=false`)."
+    cb_frequency_note: "🕐 Vérifié automatiquement toutes les **6 heures** par le container `retrain-worker`."
     auto_demote_label: Activer le circuit breaker
     drift_level_label: Niveau de drift déclencheur
-    drift_warning: ⚠️ Warning
-    drift_critical: 🔴 Critical
-    drift_level_help: Warning = plus sensible, Critical = seuil strict.
-    demote_accuracy_label: Accuracy minimale (0 = désactivé)
-    demote_accuracy_help: Descend sous ce seuil → demotion automatique.
+    drift_warning: "⚠️ Warning (plus sensible)"
+    drift_critical: "🔴 Critical (strict — recommandé)"
+    drift_level_help: "`Warning` = se déclenche sur un drift modéré. `Critical` = uniquement sur drift sévère. Utiliser `Critical` pour éviter des démotions inutiles."
+    demote_accuracy_label: Accuracy min avant demotion (0 = désactivé)
+    demote_accuracy_help: "Si l'accuracy du modèle en production sur les paires récentes descend sous ce seuil, il est automatiquement retiré de la production. Ex. : 0.80 → demotion si l'accuracy passe sous 80 %."
     cooldown_label: Cooldown (heures)
-    cooldown_help: Délai minimal entre deux auto-demotions.
+    cooldown_help: "Délai minimum entre deux déclenchements du circuit breaker. Évite les oscillations (promotion → demotion → promotion…). Mettre 0 pour désactiver le cooldown."
     btn_save: 💾 Sauvegarder la politique
     save_toast: Politique mise à jour.
     save_error: 'Erreur : {error}'
