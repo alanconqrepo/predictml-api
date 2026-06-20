@@ -2230,6 +2230,7 @@ models:
   detail_version: '**Version :** `{version}`'
   detail_description: '**Description :** {value}'
   detail_algorithm: '**Algorithme :** {value}'
+  detail_task: '**Type de tâche :** {value}'
   detail_training_dataset: '**Dataset d''entraînement :** `{value}`'
   detail_trained_by: '**Entraîné par :** {value}'
   detail_derived_from: '**Dérivé de :** `v{version}`'
@@ -2262,6 +2263,9 @@ models:
   btn_download_model: ⬇️ Télécharger le modèle{size}
   feature_importances:
     expander: 📊 Feature Importances
+    source_note: Importances extraites à l'entraînement depuis l'attribut `feature_importances_`
+      du modèle sklearn (tree-based). Ces valeurs sont statiques et ne reflètent pas
+      le comportement du modèle en production.
     chart_header: "**Importance relative des features**"
     table_header: "**Classement**"
     axis_importance: "Importance (%)"
@@ -2276,6 +2280,14 @@ models:
     btn_load: 📊 Charger l'analyse
     btn_load_caption: Charge les métriques SHAP, la performance, le drift de sortie
       et le drift des features.
+    volume_header: '#### 📦 Volume'
+    volume_prod_count: Prédictions prod
+    volume_shadow_count: Prédictions shadow
+    volume_first_date: Première prédiction
+    volume_last_date: Dernière prédiction
+    volume_gt_pct: Avec ground truth
+    volume_gt_pct_help: '{n} prédiction(s) sur {total} appariées à un résultat observé.'
+    volume_error: 'Impossible de charger le volume : {error}'
     metrics_header: '#### 📈 Métriques'
     col_metric: Métrique
     col_training: Entraînement
@@ -2328,6 +2340,9 @@ models:
     shap_error_404: Modèle introuvable.
     shap_error_generic: 'Impossible de calculer l''importance des features : {error}'
     perf_header: '#### 📈 Métriques de performance'
+    perf_caption: Calculées sur les prédictions de production appariées à un résultat
+      observé (via `POST /observed-results`). Ne reflète pas les prédictions sans
+      ground truth.
     perf_no_data: Aucune paire (prédiction, résultat observé) disponible. Ajoutez
       des résultats via POST /observed-results pour activer cette vue.
     perf_n_paired: '{n} prédictions appariées'
@@ -2475,7 +2490,15 @@ models:
       calculer le drift sur la période sélectionnée. Un faible N rend le drift moins
       fiable statistiquement.
     feature_drift_zscore_chart_title: Z-score par feature (|Δμ / σ baseline|)
+    feature_drift_zscore_chart_help: 'Écart entre la moyenne de production et la moyenne
+      baseline, normalisé par l''écart-type baseline. Plus la valeur est élevée, plus
+      la feature a dérivé. Seuils : ok < 2 | warning 2–3 | critical ≥ 3. Les barres
+      sont triées par valeur absolue croissante.'
     feature_drift_psi_chart_title: PSI par feature (Population Stability Index)
+    feature_drift_psi_chart_help: 'Population Stability Index : mesure le changement
+      global de distribution entre le dataset d''entraînement (baseline) et les prédictions
+      de production. Seuils : ok < 0.1 | warning 0.1–0.2 | critical ≥ 0.2. Calculé
+      sur les 5 000 dernières prédictions de la période.'
     feature_drift_warning_2sigma: seuil warning (2σ)
     feature_drift_critical_3sigma: seuil critical (3σ)
     feature_drift_warning_01: seuil warning (0.1)
@@ -2500,6 +2523,15 @@ models:
     response_example_header: '**Exemple de réponse :**'
   golden_tests:
     expander: 🧪 Tests de régression
+    intro: "**À quoi ça sert ?**  \nConstituer un jeu de cas de référence (features
+      → sortie attendue) pour détecter les **régressions** après un ré-entraînement
+      ou une mise à jour : si un cas qui fonctionnait avant échoue maintenant, le modèle
+      a régressé.\n\n**Comment ça fonctionne ?**\n1. **Ajoutez** des cas de test :
+      features d'entrée + prédiction attendue + description optionnelle.\n2. **Lancez**
+      les tests (▶️) : chaque cas est soumis en live au modèle sélectionné.\n3. **Résultat**
+      : ✅ si la prédiction correspond à la sortie attendue, ❌ sinon.\n\n*Conseil
+      : couvrez les cas critiques métier, les valeurs limites et les exemples représentatifs
+      de chaque classe.*"
     n_cases: '**{n} cas enregistré(s)**'
     no_cases: Aucun cas de test golden enregistré pour ce modèle.
     input_features_header: '**Features d''entrée**'
@@ -2648,8 +2680,17 @@ models:
     expander_cb_only: ⚙️ Politique de promotion  ⚡ CB
     expander_default: ⚙️ Politique de promotion
     caption: Appliquée à **toutes les versions** de `{name}`. 0 = critère désactivé.
+    intro: "Automatise deux mécanismes du cycle de vie du modèle :\n\n🚀 **Auto-promotion**\
+      \ — passe automatiquement une nouvelle version en production si les critères\
+      \ de qualité sont satisfaits après un ré-entraînement.\n\n⚡ **Circuit breaker**\
+      \ — rétrograde automatiquement la version en production si ses performances\
+      \ se dégradent en exploitation."
     promote_header_active: '**🚀 Auto-promotion post-retrain** — 🟢 Activée'
     promote_header_inactive: '**🚀 Auto-promotion post-retrain** — ⬜ Inactive'
+    promote_help: Après chaque ré-entraînement, la nouvelle version est évaluée sur
+      les paires (prédiction → résultat observé) récentes. Si **tous** les critères
+      configurés sont satisfaits et que le nombre minimum d'échantillons est atteint,
+      elle est automatiquement passée en production. Mettre 0 sur un critère le désactive.
     auto_promote_label: Activer l'auto-promotion
     min_accuracy_label: Accuracy minimale (0 = désactivé)
     min_accuracy_help: Accuracy requise sur les paires de validation pour promotion.
@@ -2660,6 +2701,10 @@ models:
     min_samples_label: Échantillons de validation min
     cb_header_active: '**⚡ Circuit breaker (auto-demotion)** — 🔴 Activé'
     cb_header_inactive: '**⚡ Circuit breaker (auto-demotion)** — ⬜ Inactif'
+    cb_help: Surveille en continu la version en production. Si le drift des features
+      dépasse le niveau configuré **ou** si l'accuracy descend sous le seuil, la version
+      est automatiquement rétrogradée (`is_production=false`). Le cooldown évite les
+      oscillations rapides entre promotions et démotions.
     auto_demote_label: Activer le circuit breaker
     drift_level_label: Niveau de drift déclencheur
     drift_warning: ⚠️ Warning
