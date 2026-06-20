@@ -1806,9 +1806,9 @@ async def get_ab_comparison(
     days: int = Query(30, ge=1, le=90, description="Analysis window in days (max 90)"),
     metric: Optional[str] = Query(
         None,
-        description="Metric for significance test: 'error_rate', 'mae', 'response_time_ms'. "
+        description="Metric for significance test: 'error_rate', 'mae', 'response_time_ms', 'auc'. "
         "Default: automatic selection.",
-        pattern=r"^(error_rate|mae|response_time_ms)$",
+        pattern=r"^(error_rate|mae|response_time_ms|auc)$",
     ),
     _auth: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
@@ -1839,7 +1839,7 @@ async def get_ab_comparison(
     raw_stats = await DBService.get_ab_comparison_stats(db, name, days=days)
     agreement_by_version = await DBService.get_shadow_agreement_rate(db, name, days=days)
 
-    # Enrich each version with absolute prediction errors (for regression)
+    # Enrich each version with absolute prediction errors (regression) and AUC data (binary)
     def _try_abs_error(pred, obs) -> Optional[float]:
         try:
             return abs(float(pred) - float(obs))
@@ -1850,6 +1850,28 @@ async def get_ab_comparison(
         pairs = await DBService.get_performance_pairs(db, name, model_version=s["version"])
         errors = [e for p, o, _, _ in pairs if (e := _try_abs_error(p, o)) is not None]
         s["prediction_errors"] = errors
+
+        # (positive_class_probability, str_observed_label) for binary AUC significance
+        # + classification correct/wrong counts from ground truth (for Chi-² error rate)
+        auc_data = []
+        clf_correct = 0
+        clf_wrong = 0
+        for pred_result, obs_result, probs, _ in pairs:
+            if isinstance(probs, (list, tuple)) and len(probs) >= 2 and probs[1] is not None:
+                try:
+                    auc_data.append((float(probs[1]), str(obs_result)))
+                except (ValueError, TypeError):
+                    pass
+            try:
+                if str(pred_result) == str(obs_result):
+                    clf_correct += 1
+                else:
+                    clf_wrong += 1
+            except Exception:
+                pass
+        s["auc_data"] = auc_data
+        s["clf_n_correct"] = clf_correct
+        s["clf_n_errors"] = clf_wrong
 
     versions_out = []
     for s in raw_stats:

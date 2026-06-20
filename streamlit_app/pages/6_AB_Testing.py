@@ -51,6 +51,32 @@ ab_filtered = [n for n in model_names if ab_search.lower() in n.lower()] if ab_s
 selected_model = _ab_col2.selectbox(t("ab_testing.model_select"), ab_filtered or model_names, key="ab_model_select")
 versions_for_model = model_groups[selected_model]
 
+
+def _vfm_is_regression(versions: list) -> bool:
+    for v in versions:
+        mt = v.get("model_task") or ""
+        if "regression" in mt:
+            return True
+        tm = v.get("training_metrics") or {}
+        if any(tm.get(k) is not None for k in ("r2", "rmse", "mae")):
+            return True
+    return False
+
+
+def _vfm_is_binary(versions: list) -> bool:
+    for v in versions:
+        mt = v.get("model_task") or ""
+        if "binary" in mt:
+            return True
+        classes = v.get("classes") or []
+        if isinstance(classes, list) and len(classes) == 2:
+            return True
+    return False
+
+
+_is_regression = _vfm_is_regression(versions_for_model)
+_is_binary = not _is_regression and _vfm_is_binary(versions_for_model)
+
 st.divider()
 
 # ===========================================================================
@@ -193,13 +219,20 @@ days = max((_ab_end - _ab_start).days, 1)
 
 # Read the metric from session_state BEFORE the API call
 # (Streamlit stores the new widget value there before rerun)
-_METRIC_OPTIONS = {
-    t("ab_testing.ab_test.metric_auto"):          None,
-    t("ab_testing.ab_test.metric_error_rate"):    "error_rate",
-    t("ab_testing.ab_test.metric_mae"):           "mae",
-    t("ab_testing.ab_test.metric_response_time"): "response_time_ms",
-}
+# Options are filtered by model type: MAE only for regression, chi2/AUC only for classification
+_METRIC_OPTIONS: dict[str, str | None] = {t("ab_testing.ab_test.metric_auto"): None}
+if _is_regression:
+    _METRIC_OPTIONS[t("ab_testing.ab_test.metric_mae")] = "mae"
+else:
+    _METRIC_OPTIONS[t("ab_testing.ab_test.metric_error_rate")] = "error_rate"
+    if _is_binary:
+        _METRIC_OPTIONS[t("ab_testing.ab_test.metric_auc")] = "auc"
+_METRIC_OPTIONS[t("ab_testing.ab_test.metric_response_time")] = "response_time_ms"
+
 _sig_metric_label = st.session_state.get("ab_sig_metric", t("ab_testing.ab_test.metric_auto"))
+# If session state holds a metric no longer valid for this model type, fall back to auto
+if _sig_metric_label not in _METRIC_OPTIONS:
+    _sig_metric_label = t("ab_testing.ab_test.metric_auto")
 _sig_metric = _METRIC_OPTIONS.get(_sig_metric_label)
 
 try:
@@ -210,6 +243,36 @@ except Exception as e:
     st.error(t("ab_testing.comparison.load_error", error=e))
     versions_stats = []
     ab_significance = None
+
+def _dist_stats(dist: dict) -> "dict | None":
+    """Compute mean and std from a prediction_distribution (regression models)."""
+    try:
+        pairs = [(float(k), v) for k, v in dist.items()]
+        total = sum(cnt for _, cnt in pairs)
+        if total == 0:
+            return None
+        mean = sum(v * c for v, c in pairs) / total
+        std = (sum((v - mean) ** 2 * c for v, c in pairs) / total) ** 0.5
+        return {"mean": mean, "std": std, "total": int(total)}
+    except (ValueError, TypeError):
+        return None
+
+
+def _dist_sample(dist: dict, n_max: int = 300) -> list:
+    """Return a sampled list of float values from a distribution dict."""
+    try:
+        pairs = sorted([(float(k), v) for k, v in dist.items()], key=lambda x: x[0])
+        total = sum(c for _, c in pairs)
+        if total == 0:
+            return []
+        ratio = min(1.0, n_max / total)
+        result = []
+        for val, cnt in pairs:
+            result.extend([val] * max(1, round(cnt * ratio)))
+        return result[:n_max]
+    except (ValueError, TypeError):
+        return []
+
 
 def _output_summary(dist: dict, meta: dict) -> "str | None":
     """
@@ -282,20 +345,7 @@ else:
     # --- Comparison table ---
     _BADGE_CMP = {"ab_test": "🟠 A/B", "shadow": "🟣 Shadow", "production": "🟢 Production"}
     _vfm_lookup = {v["version"]: v for v in versions_for_model}
-
-    # Detect whether the selected model is a regression model (from any version)
-    def _model_is_regression(vfm: dict) -> bool:
-        """Returns True if model_task = 'regression', with fallback on training_metrics."""
-        for v in vfm.values():
-            mt = v.get("model_task") or ""
-            if "regression" in mt:
-                return True
-            tm = v.get("training_metrics") or {}
-            if any(tm.get(k) is not None for k in ("r2", "rmse", "mae")):
-                return True
-        return False
-
-    _is_regression = _model_is_regression(_vfm_lookup)
+    # _is_regression and _is_binary already computed above from versions_for_model
 
     # Resolve column name strings once
     _col_version = t("ab_testing.comparison.col_version")
@@ -405,6 +455,7 @@ else:
             _no_data_reasons = {
                 "error_rate":       t("ab_testing.ab_test.no_data_reason_error_rate"),
                 "mae":              t("ab_testing.ab_test.no_data_reason_mae"),
+                "auc":              t("ab_testing.ab_test.no_data_reason_auc"),
                 "response_time_ms": t("ab_testing.ab_test.no_data_reason_response_time"),
             }
             if _sig_metric:
@@ -480,10 +531,16 @@ else:
             # --- Significance KPIs ---
             sig_cols = st.columns(4)
 
-            test_label = {"chi2": "Chi-²", "mann_whitney_u": "Mann-Whitney U"}.get(test, test)
-            metric_label = {"error_rate": "Error rate", "response_time_ms": "Latency (ms)"}.get(
-                metric, metric
-            )
+            test_label = {
+                "chi2": "Chi-²",
+                "mann_whitney_u": "Mann-Whitney U",
+                "hanley_mcneil_z": "Hanley-McNeil Z",
+            }.get(test, test)
+            metric_label = {
+                "error_rate": "Error rate",
+                "auc": "AUC",
+                "response_time_ms": "Latency (ms)",
+            }.get(metric, metric)
 
             sig_cols[0].metric(t("ab_testing.ab_test.kpi_test"), test_label, help=t("metrics.test_statistique"))
             sig_cols[1].metric(t("ab_testing.ab_test.kpi_metric"), metric_label, help=t("metrics.metrique_analysee"))
@@ -703,36 +760,72 @@ else:
                     st.info(t("ab_testing.ab_test.dist_no_data"))
 
     with st.expander(t("ab_testing.shadow.expander"), expanded=False):
-        # Shadow concordance rate
-        shadow_versions = [vs for vs in versions_stats if vs.get("agreement_rate") is not None]
-        if shadow_versions:
-            st.divider()
-            st.markdown(t("ab_testing.shadow.concordance_title"))
-            st.caption(t("ab_testing.shadow.concordance_caption"))
-            _col_conc_version = t("ab_testing.shadow.concordance_col_version")
-            _col_conc_rate = t("ab_testing.shadow.concordance_col_rate")
-            _col_conc_score = t("ab_testing.shadow.concordance_col_score")
-            agree_data = [
-                {
-                    _col_conc_version: vs["version"],
-                    _col_conc_rate:    f"{vs['agreement_rate']:.1%}",
-                    _col_conc_score:   vs["agreement_rate"],
-                }
-                for vs in shadow_versions
-            ]
-            agree_df = pd.DataFrame(agree_data)
-            fig_agree = px.bar(
-                agree_df,
-                x=_col_conc_version,
-                y=_col_conc_score,
-                text=_col_conc_rate,
-                color_discrete_sequence=["#7c3aed"],
-                range_y=[0, 1],
-            )
-            fig_agree.update_layout(height=250, yaxis_tickformat=".0%")
-            st.plotly_chart(fig_agree, width='stretch')
+        # Shadow concordance rate (classification) / prediction distribution (regression)
+        if _is_regression:
+            _reg_conc_rows = []
+            for _vs in versions_stats:
+                _mode = _vs.get("deployment_mode", "")
+                if _mode not in ("shadow", "production"):
+                    continue
+                _role = (
+                    t("ab_testing.shadow.regression_role_shadow")
+                    if _mode == "shadow"
+                    else t("ab_testing.shadow.regression_role_prod")
+                )
+                for _val in _dist_sample(_vs.get("prediction_distribution", {})):
+                    _reg_conc_rows.append({"role": _role, "prediction": _val})
+            if _reg_conc_rows:
+                st.divider()
+                st.markdown(t("ab_testing.shadow.concordance_title_regression"))
+                st.caption(t("ab_testing.shadow.concordance_caption_regression"))
+                _reg_conc_df = pd.DataFrame(_reg_conc_rows)
+                _col_conc_role = t("ab_testing.shadow.regression_dist_col_role")
+                _col_conc_pred = t("ab_testing.shadow.regression_dist_col_pred")
+                _reg_conc_df = _reg_conc_df.rename(
+                    columns={"role": _col_conc_role, "prediction": _col_conc_pred}
+                )
+                fig_reg_conc = px.violin(
+                    _reg_conc_df,
+                    x=_col_conc_role,
+                    y=_col_conc_pred,
+                    color=_col_conc_role,
+                    box=True,
+                    color_discrete_sequence=["#7c3aed", "#16a34a"],
+                )
+                fig_reg_conc.update_layout(height=280, showlegend=False)
+                st.plotly_chart(fig_reg_conc, width='stretch')
+            else:
+                st.info(t("ab_testing.shadow.concordance_no_data_regression"))
         else:
-            st.info(t("ab_testing.shadow.concordance_no_data"))
+            shadow_versions = [vs for vs in versions_stats if vs.get("agreement_rate") is not None]
+            if shadow_versions:
+                st.divider()
+                st.markdown(t("ab_testing.shadow.concordance_title"))
+                st.caption(t("ab_testing.shadow.concordance_caption"))
+                _col_conc_version = t("ab_testing.shadow.concordance_col_version")
+                _col_conc_rate = t("ab_testing.shadow.concordance_col_rate")
+                _col_conc_score = t("ab_testing.shadow.concordance_col_score")
+                agree_data = [
+                    {
+                        _col_conc_version: vs["version"],
+                        _col_conc_rate:    f"{vs['agreement_rate']:.1%}",
+                        _col_conc_score:   vs["agreement_rate"],
+                    }
+                    for vs in shadow_versions
+                ]
+                agree_df = pd.DataFrame(agree_data)
+                fig_agree = px.bar(
+                    agree_df,
+                    x=_col_conc_version,
+                    y=_col_conc_score,
+                    text=_col_conc_rate,
+                    color_discrete_sequence=["#7c3aed"],
+                    range_y=[0, 1],
+                )
+                fig_agree.update_layout(height=250, yaxis_tickformat=".0%")
+                st.plotly_chart(fig_agree, width='stretch')
+            else:
+                st.info(t("ab_testing.shadow.concordance_no_data"))
 
         # ── Enriched shadow analysis ──────────────────────────────────────────
         # ===========================================================================
@@ -775,72 +868,140 @@ else:
                 t("ab_testing.shadow.vs_banner", sv=sv, pv=pv, badge=_rec_badge[0], recommendation=_rec_badge[1])
             )
 
-            _cols = st.columns(5)
-            _cols[0].metric(t("ab_testing.shadow.kpi_pairs"), n_comparable)
-            _cols[1].metric(
-                t("ab_testing.shadow.kpi_agreement"),
-                f"{agreement_rate:.1%}" if agreement_rate is not None else "—",
-                help=t("ab_testing.shadow.kpi_agreement_help"),
-            )
-            _cols[2].metric(
-                t("ab_testing.shadow.kpi_conf_delta"),
-                f"{conf_delta:+.3f}" if conf_delta is not None else "—",
-                delta_color="normal" if conf_delta is not None else "off",
-                delta=f"{conf_delta:+.3f}" if conf_delta is not None else None,
-                help=t("ab_testing.shadow.kpi_conf_delta_help"),
-            )
-            _cols[3].metric(
-                t("ab_testing.shadow.kpi_lat_delta"),
-                f"{lat_delta:+.1f}" if lat_delta is not None else "—",
-                delta=f"{lat_delta:+.1f}" if lat_delta is not None else None,
-                delta_color="inverse" if lat_delta is not None else "off",
-                help=t("ab_testing.shadow.kpi_lat_delta_help"),
-            )
-
-            if accuracy_available and shadow_acc is not None and prod_acc is not None:
-                _cols[4].metric(
-                    t("ab_testing.shadow.kpi_accuracy"),
-                    f"{shadow_acc:.1%} / {prod_acc:.1%}",
-                    help=t("ab_testing.shadow.kpi_accuracy_help"),
+            if _is_regression:
+                # Regression: show mean predictions and bias instead of agreement/confidence
+                _sv_stats = next((vs for vs in versions_stats if vs.get("version") == sv), None)
+                _pv_stats = next((vs for vs in versions_stats if vs.get("version") == pv), None)
+                _shadow_dstats = _dist_stats(
+                    _sv_stats.get("prediction_distribution", {}) if _sv_stats else {}
                 )
-            else:
-                _cols[4].metric(
-                    t("ab_testing.shadow.kpi_accuracy_na"),
-                    "—",
-                    help=t("ab_testing.shadow.kpi_accuracy_na_help"),
+                _prod_dstats = _dist_stats(
+                    _pv_stats.get("prediction_distribution", {}) if _pv_stats else {}
                 )
-
-            if agreement_rate is not None and n_comparable > 0:
-                fig_agree_gauge = go.Figure(
-                    go.Indicator(
-                        mode="gauge+number",
-                        value=agreement_rate * 100,
-                        number={"valueformat": ".1f", "suffix": "%"},
-                        gauge={
-                            "axis": {"range": [0, 100]},
-                            "bar": {
-                                "color": (
-                                    "#16a34a"
-                                    if agreement_rate >= 0.9
-                                    else "#f59e0b" if agreement_rate >= 0.7 else "#dc2626"
-                                )
-                            },
-                            "steps": [
-                                {"range": [0, 70], "color": "#fee2e2"},
-                                {"range": [70, 90], "color": "#fef3c7"},
-                                {"range": [90, 100], "color": "#dcfce7"},
-                            ],
-                            "threshold": {
-                                "line": {"color": "#7c3aed", "width": 3},
-                                "thickness": 0.85,
-                                "value": 90,
-                            },
-                        },
-                        title={"text": t("ab_testing.shadow.gauge_title")},
+                _pred_bias = (
+                    round(_shadow_dstats["mean"] - _prod_dstats["mean"], 4)
+                    if _shadow_dstats and _prod_dstats
+                    else None
+                )
+                _cols = st.columns(5)
+                _cols[0].metric(t("ab_testing.shadow.kpi_pairs"), n_comparable)
+                _cols[1].metric(
+                    t("ab_testing.shadow.kpi_shadow_mean"),
+                    f"{_shadow_dstats['mean']:.4f}" if _shadow_dstats else "—",
+                    help=t("ab_testing.shadow.kpi_shadow_mean_help"),
+                )
+                _cols[2].metric(
+                    t("ab_testing.shadow.kpi_prod_mean"),
+                    f"{_prod_dstats['mean']:.4f}" if _prod_dstats else "—",
+                    help=t("ab_testing.shadow.kpi_prod_mean_help"),
+                )
+                _cols[3].metric(
+                    t("ab_testing.shadow.kpi_pred_bias"),
+                    f"{_pred_bias:+.4f}" if _pred_bias is not None else "—",
+                    delta=f"{_pred_bias:+.4f}" if _pred_bias is not None else None,
+                    delta_color="off",
+                    help=t("ab_testing.shadow.kpi_pred_bias_help"),
+                )
+                _cols[4].metric(
+                    t("ab_testing.shadow.kpi_lat_delta"),
+                    f"{lat_delta:+.1f} ms" if lat_delta is not None else "—",
+                    delta=f"{lat_delta:+.1f}" if lat_delta is not None else None,
+                    delta_color="inverse" if lat_delta is not None else "off",
+                    help=t("ab_testing.shadow.kpi_lat_delta_help"),
+                )
+                # Distribution comparison violin chart (replaces the agreement gauge)
+                _reg_ana_rows = []
+                for _role_lbl, _vstats in [
+                    (t("ab_testing.shadow.regression_role_shadow"), _sv_stats),
+                    (t("ab_testing.shadow.regression_role_prod"), _pv_stats),
+                ]:
+                    if _vstats:
+                        for _val in _dist_sample(_vstats.get("prediction_distribution", {})):
+                            _reg_ana_rows.append({"role": _role_lbl, "prediction": _val})
+                if _reg_ana_rows:
+                    _reg_ana_df = pd.DataFrame(_reg_ana_rows)
+                    _col_role_ana = t("ab_testing.shadow.regression_dist_col_role")
+                    _col_pred_ana = t("ab_testing.shadow.regression_dist_col_pred")
+                    _reg_ana_df = _reg_ana_df.rename(
+                        columns={"role": _col_role_ana, "prediction": _col_pred_ana}
                     )
+                    fig_reg_ana = px.violin(
+                        _reg_ana_df,
+                        x=_col_role_ana,
+                        y=_col_pred_ana,
+                        color=_col_role_ana,
+                        box=True,
+                        color_discrete_sequence=["#7c3aed", "#16a34a"],
+                        title=t("ab_testing.shadow.regression_dist_comparison_title"),
+                    )
+                    fig_reg_ana.update_layout(height=300, showlegend=False)
+                    st.plotly_chart(fig_reg_ana, width='stretch')
+            else:
+                # Classification: agreement rate, confidence delta, accuracy
+                _cols = st.columns(5)
+                _cols[0].metric(t("ab_testing.shadow.kpi_pairs"), n_comparable)
+                _cols[1].metric(
+                    t("ab_testing.shadow.kpi_agreement"),
+                    f"{agreement_rate:.1%}" if agreement_rate is not None else "—",
+                    help=t("ab_testing.shadow.kpi_agreement_help"),
                 )
-                fig_agree_gauge.update_layout(height=240, margin=dict(t=40, b=10, l=20, r=20))
-                st.plotly_chart(fig_agree_gauge, width='stretch')
+                _cols[2].metric(
+                    t("ab_testing.shadow.kpi_conf_delta"),
+                    f"{conf_delta:+.3f}" if conf_delta is not None else "—",
+                    delta_color="normal" if conf_delta is not None else "off",
+                    delta=f"{conf_delta:+.3f}" if conf_delta is not None else None,
+                    help=t("ab_testing.shadow.kpi_conf_delta_help"),
+                )
+                _cols[3].metric(
+                    t("ab_testing.shadow.kpi_lat_delta"),
+                    f"{lat_delta:+.1f}" if lat_delta is not None else "—",
+                    delta=f"{lat_delta:+.1f}" if lat_delta is not None else None,
+                    delta_color="inverse" if lat_delta is not None else "off",
+                    help=t("ab_testing.shadow.kpi_lat_delta_help"),
+                )
+                if accuracy_available and shadow_acc is not None and prod_acc is not None:
+                    _cols[4].metric(
+                        t("ab_testing.shadow.kpi_accuracy"),
+                        f"{shadow_acc:.1%} / {prod_acc:.1%}",
+                        help=t("ab_testing.shadow.kpi_accuracy_help"),
+                    )
+                else:
+                    _cols[4].metric(
+                        t("ab_testing.shadow.kpi_accuracy_na"),
+                        "—",
+                        help=t("ab_testing.shadow.kpi_accuracy_na_help"),
+                    )
+                if agreement_rate is not None and n_comparable > 0:
+                    fig_agree_gauge = go.Figure(
+                        go.Indicator(
+                            mode="gauge+number",
+                            value=agreement_rate * 100,
+                            number={"valueformat": ".1f", "suffix": "%"},
+                            gauge={
+                                "axis": {"range": [0, 100]},
+                                "bar": {
+                                    "color": (
+                                        "#16a34a"
+                                        if agreement_rate >= 0.9
+                                        else "#f59e0b" if agreement_rate >= 0.7 else "#dc2626"
+                                    )
+                                },
+                                "steps": [
+                                    {"range": [0, 70], "color": "#fee2e2"},
+                                    {"range": [70, 90], "color": "#fef3c7"},
+                                    {"range": [90, 100], "color": "#dcfce7"},
+                                ],
+                                "threshold": {
+                                    "line": {"color": "#7c3aed", "width": 3},
+                                    "thickness": 0.85,
+                                    "value": 90,
+                                },
+                            },
+                            title={"text": t("ab_testing.shadow.gauge_title")},
+                        )
+                    )
+                    fig_agree_gauge.update_layout(height=240, margin=dict(t=40, b=10, l=20, r=20))
+                    st.plotly_chart(fig_agree_gauge, width='stretch')
 
             if recommendation == "shadow_better" and is_admin:
                 with st.container(border=True):
@@ -899,26 +1060,62 @@ else:
             _col_sh_ver = t("ab_testing.shadow.col_version")
             _col_sh_idobs = t("ab_testing.shadow.col_id_obs")
             _col_sh_result = t("ab_testing.shadow.col_result")
+            _col_sh_prod_result = t("ab_testing.shadow.col_result_prod")
             _col_sh_latency = t("ab_testing.shadow.col_latency")
             _col_sh_status = t("ab_testing.shadow.col_status")
 
+            # Build lookup: id_obs → production prediction result
+            _prod_by_idobs = {}
+            for _p in all_preds:
+                if not _p.get("is_shadow") and _p.get("id_obs") is not None:
+                    _prod_by_idobs[str(_p["id_obs"])] = _p.get("prediction_result")
+
+            # Class labels for multiclass label display
+            _is_multiclass = not _is_regression and not _is_binary
+            _classes = None
+            if _is_multiclass:
+                for _v in versions_for_model:
+                    _cls = _v.get("classes") or []
+                    if isinstance(_cls, list) and len(_cls) > 2:
+                        _classes = _cls
+                        break
+
+            def _fmt_shadow_result(raw):
+                if raw is None or raw == "":
+                    return "—"
+                if _is_regression:
+                    try:
+                        return f"{float(raw):.2f}"
+                    except (TypeError, ValueError):
+                        return str(raw)
+                if _is_multiclass and _classes:
+                    try:
+                        idx = int(float(raw))
+                        if 0 <= idx < len(_classes):
+                            return str(_classes[idx])
+                    except (TypeError, ValueError):
+                        pass
+                return str(raw)
+
             shadow_rows = []
             for p in shadow_preds:
+                _idobs_key = str(p["id_obs"]) if p.get("id_obs") is not None else None
                 shadow_rows.append(
                     {
-                        _col_sh_id:      p.get("id"),
-                        _col_sh_ts:      (
+                        _col_sh_id:          p.get("id"),
+                        _col_sh_ts:          (
                             pd.to_datetime(p.get("timestamp")).strftime("%Y-%m-%d %H:%M:%S")
                             if p.get("timestamp")
                             else "—"
                         ),
-                        _col_sh_ver:     p.get("model_version") or "—",
-                        _col_sh_idobs:   p.get("id_obs") or "—",
-                        _col_sh_result:  str(p.get("prediction_result", "")),
-                        _col_sh_latency: (
+                        _col_sh_ver:         p.get("model_version") or "—",
+                        _col_sh_idobs:       p.get("id_obs") or "—",
+                        _col_sh_result:      _fmt_shadow_result(p.get("prediction_result")),
+                        _col_sh_prod_result: _fmt_shadow_result(_prod_by_idobs.get(_idobs_key)) if _idobs_key else "—",
+                        _col_sh_latency:     (
                             f"{p['response_time_ms']:.1f}" if p.get("response_time_ms") is not None else "—"
                         ),
-                        _col_sh_status:  "✅" if p.get("status") == "success" else "❌",
+                        _col_sh_status:      "✅" if p.get("status") == "success" else "❌",
                     }
                 )
 
@@ -947,6 +1144,10 @@ else:
                     _col_sh_result: st.column_config.TextColumn(
                         _col_sh_result,
                         help=t("ab_testing.shadow.col_result_help"),
+                    ),
+                    _col_sh_prod_result: st.column_config.TextColumn(
+                        _col_sh_prod_result,
+                        help=t("ab_testing.shadow.col_result_prod_help"),
                     ),
                     _col_sh_latency: st.column_config.TextColumn(
                         _col_sh_latency,

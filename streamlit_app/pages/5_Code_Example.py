@@ -12,7 +12,7 @@ st.set_page_config(page_title=t("code_example.page_title"), page_icon="💡", la
 require_auth()
 
 st.title(t("code_example.title"))
-st.markdown(t("code_example.intro"))
+st.caption(t("code_example.intro"))
 
 API_URL = st.session_state.get("api_url", "http://localhost:8000")
 TOKEN = st.session_state.get("api_token", "VOTRE_TOKEN_ICI")

@@ -39,6 +39,7 @@ st.set_page_config(
 require_auth()
 
 st.title(t("supervision.page_title"))
+st.caption(t("supervision.caption"))
 
 client = get_client()
 

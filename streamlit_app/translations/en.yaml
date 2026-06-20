@@ -123,6 +123,7 @@ metrics:
 stats:
   page_title: Stats — PredictML
   title: 📈 Statistics
+  caption: "Statistics based on **production predictions** (is_shadow=False). Volume, success rate, P95 latency and model performance leaderboard."
   btn_refresh: 🔄 Refresh
   date_start: Start date
   date_end: End date
@@ -179,10 +180,24 @@ stats:
     col_drift_help: Deviation between production feature distribution and training
       baseline. 🔴 critical = significant drift, model sees data different from training
       data.
-    col_predictions_help: Total predictions served over the last {days} days.
+    col_predictions_help: Total predictions over the last {days} days (includes shadow
+      predictions is_shadow=True).
+    col_task: Task
+    col_task_help: "Task type detected at upload: Binary (2 classes), Multiclass (≥
+      3 classes), or Regression."
+    col_task_binary: Binary
+    col_task_regression: Regression
+    col_task_multiclass: Multiclass
+    col_task_unknown: "—"
+    filter_model: Filter by model
+    filter_version: Filter by version
+    filter_all_models: All models
+    filter_all_versions: All versions
+    kpis_hidden_no_pred: Performance KPIs hidden (no predictions in the selected period).
     scatter_x_axis: X Axis
     scatter_label_latency: p95 Latency (ms)
     scatter_label_accuracy: Accuracy
+    scatter_label_auc: AUC-ROC
     scatter_label_f1: F1 Score
     scatter_label_r2: R²
     scatter_label_rmse: RMSE
@@ -193,7 +208,8 @@ stats:
       = disabled.
     scatter_threshold_y_help: Displays a horizontal line on the Y axis ({label}).
       0 = disabled.
-    scatter_no_data: 'Insufficient data: models must have {x_label} and {y_label}
+    scatter_filtered: '{n} model(s) without {x_label} or {y_label} excluded from chart.'
+    scatter_no_data: 'Insufficient data: no model has both {x_label} and {y_label}
       values.'
     scatter_hover_predictions: 'Predictions: {count}'
     scatter_hover_drift: 'Drift: {label}'
@@ -282,6 +298,7 @@ stats:
     gran_month: Month
     metrics_label: Metrics to display
     metric_accuracy: Accuracy
+    metric_auc: AUC-ROC
     metric_f1: Weighted F1
     metric_pairs: Observed pairs
     metric_mae: MAE
@@ -390,11 +407,14 @@ ab_testing:
     metric_auto: Auto (smart selection)
     metric_error_rate: Error rate — Chi-²
     metric_mae: Prediction MAE — Mann-Whitney
+    metric_auc: AUC — Hanley-McNeil Z-test
     metric_response_time: Response latency — Mann-Whitney
-    no_data_reason_error_rate: Chi-² requires at least one observed error in one of
-      the groups
+    no_data_reason_error_rate: Chi-² requires observed results (ground truth) and at
+      least one misclassification in one of the groups
     no_data_reason_mae: Mann-Whitney on MAE requires prediction residuals (regression
       model with observed-results)
+    no_data_reason_auc: Hanley-McNeil test requires probability scores and observed
+      results for a binary model (at least 10 pairs with both classes)
     no_data_reason_response_time: Mann-Whitney on latency requires at least 2 predictions
       per version
     no_data_metric: ⚠️ Not enough data for metric **{metric}** in this period ({reason}).
@@ -469,6 +489,25 @@ ab_testing:
     concordance_col_score: Score
     concordance_no_data: 💡 The shadow/production concordance rate will be computed
       automatically once predictions with `id_obs` are recorded for both versions.
+    concordance_title_regression: '**🔮 Shadow vs production prediction distribution**'
+    concordance_caption_regression: Compared distribution of predicted values by the
+      shadow version and the production version, computed on recent predictions.
+    concordance_no_data_regression: No distribution data available to compare shadow
+      and production versions.
+    regression_dist_col_role: Version
+    regression_dist_col_pred: Predicted value
+    regression_role_shadow: Shadow
+    regression_role_prod: Production
+    regression_dist_comparison_title: Prediction distribution — shadow vs production
+    kpi_shadow_mean: Shadow mean
+    kpi_shadow_mean_help: Mean of predicted values by the shadow version (computed from
+      the recent prediction distribution).
+    kpi_prod_mean: Production mean
+    kpi_prod_mean_help: Mean of predicted values by the production version (computed
+      from the recent prediction distribution).
+    kpi_pred_bias: Shadow bias
+    kpi_pred_bias_help: "Shadow mean − Production mean. Positive\xA0= shadow predicts
+      higher values on average."
     enriched_title: 🔮 Enriched shadow analysis
     enriched_caption: Differential metrics between the shadow version and the production
       version on predictions with a common `id_obs`.
@@ -518,6 +557,9 @@ ab_testing:
     col_latency_help: Computation time of the shadow prediction in milliseconds.
     col_status: Status
     col_status_help: ✅ Success or ❌ Error during prediction computation.
+    col_result_prod: Prod result
+    col_result_prod_help: Value predicted by the production version for the same id_obs.
+      Shows "—" if no matching production prediction is found for this id_obs.
 login:
   title: 🤖 PredictML Admin Dashboard
   subtitle: Log in with your API token to access the dashboard.
@@ -658,6 +700,7 @@ ui:
   copy_success: ✅ Copied!
 predictions:
   page_title: 📊 Predictions
+  caption: "Full history of predictions made via the API — filter by model, date or status, export to CSV and annotate observed results."
   refresh_btn: 🔄 Refresh
   tab_history: 📋 History
   tab_batch: 📦 Batch predictions
@@ -702,6 +745,20 @@ predictions:
     mismatch_only_label: Incorrect predictions only
     mismatch_only_help: Show only rows where the prediction differs from the ground
       truth
+    version_label: Version
+    version_all: (all)
+    result_label: Result (contains)
+    result_placeholder: 'e.g. setosa'
+    gt_label: Ground truth (contains)
+    gt_placeholder: 'e.g. versicolor'
+    shadow_label: Shadow
+    shadow_all: All
+    shadow_only: Shadow only
+    shadow_exclude: Exclude shadow
+    user_label: User
+    user_placeholder: 'e.g. alice'
+    id_obs_label: id_obs
+    id_obs_placeholder: 'e.g. obs-001'
   warnings:
     no_model: No model available. Create a model via the API first.
     date_order: Start date must be before end date.
@@ -874,6 +931,9 @@ predictions:
     import_hint: Fill in the `observed_result` column of the exported CSV, then import
       it via the form below.
     error: 'Error loading the labeling queue: {error}'
+    api_code_header: '##### 🐍 Submit ground truth via API'
+    api_code_caption: 'Send your labels directly via `POST /observed-results` — useful
+      for automated pipeline integration:'
   purge:
     expander_title: 🗑️ GDPR Maintenance — Prediction purge
     caption: Permanently deletes old predictions. Use **Simulate** before confirming.
@@ -938,6 +998,7 @@ predictions:
     class_col: Class
 supervision:
   page_title: 🔍 Model Supervision
+  caption: "Real-time health monitoring of production models: feature drift, anomalies, ROC curve and alert configuration."
   filters:
     from_label: From
     to_label: To
@@ -1546,6 +1607,7 @@ golden_tests:
 users:
   page_title: Users — PredictML
   title: 👥 User Management
+  caption: "Manage user accounts: roles, prediction quotas, API tokens and pending access requests. Administrators only."
   tab_users: 👥 Users
   tab_requests: 📋 Access Requests
   my_profile: My profile
@@ -1716,6 +1778,7 @@ code_example:
 retrain:
   page_title: Retrain — PredictML
   title: 🔄 Retraining Management
+  caption: "Trigger manual retraining or schedule automatic crons per version. View logs and configure the auto-promotion policy."
   admin_only: ⛔ Access restricted to administrators.
   error_load_models: 'Unable to load models: {error}'
   no_models: No models available.
@@ -1947,6 +2010,7 @@ aide:
 models:
   page_title: "Models — PredictML"
   title: "🤖 Model Management"
+  caption: "Upload, compare and configure your ML models — metrics, feature importance, drift, regression tests and deployment actions."
   btn_refresh: "🔄 Refresh"
   load_error: "Unable to load models: {error}"
   no_models: "No models available."
@@ -2324,6 +2388,7 @@ models:
     result_actual_header: "**Actual**"
     result_features_header: "**Features used**"
     run_error: "Error running tests: {error}"
+    full_page_link: "🧪 View Golden Tests page →"
 
   whatif:
     expander: "🔮 What-if Explorer"

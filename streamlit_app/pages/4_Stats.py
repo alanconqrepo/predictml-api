@@ -21,6 +21,7 @@ col_title.title(t("stats.title"))
 if col_refresh.button(t("stats.btn_refresh"), key="stats_refresh", width='stretch'):
     st.cache_data.clear()
     st.rerun()
+st.caption(t("stats.caption"))
 
 client = get_client()
 
@@ -29,7 +30,7 @@ col_d1, col_d2 = st.columns([1, 1])
 
 date_start = col_d1.date_input(
     t("stats.date_start"),
-    value=date.today() - timedelta(days=7),
+    value=date.today() - timedelta(days=30),
     max_value=date.today(),
     key="stats_date_start",
 )
@@ -55,7 +56,13 @@ try:
     )
     model_names = sorted({m["name"] for m in models})
 except Exception:
+    models = []
     model_names = []
+
+_model_task_lookup = {
+    (m["name"], m["version"]): m.get("model_task")
+    for m in (models or [])
+}
 
 if not model_names:
     st.warning(t("stats.no_models"))
@@ -183,14 +190,42 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
         except Exception:
             leaderboard = []
 
+    # Model / version multiselect filters
+    _lb_display = leaderboard
+    if leaderboard:
+        _lb_all_names = sorted({e["name"] for e in leaderboard})
+        _lb_all_versions = sorted({e["version"] for e in leaderboard})
+        _lb_fcol1, _lb_fcol2 = st.columns([1, 1])
+        _lb_sel_models = _lb_fcol1.multiselect(
+            t("stats.leaderboard.filter_model"),
+            options=_lb_all_names,
+            default=[],
+            placeholder=t("stats.leaderboard.filter_all_models"),
+            key="lb_filter_models",
+        )
+        _lb_sel_versions = _lb_fcol2.multiselect(
+            t("stats.leaderboard.filter_version"),
+            options=_lb_all_versions,
+            default=[],
+            placeholder=t("stats.leaderboard.filter_all_versions"),
+            key="lb_filter_versions",
+        )
+        if _lb_sel_models or _lb_sel_versions:
+            _lb_display = [
+                e for e in leaderboard
+                if (not _lb_sel_models or e["name"] in _lb_sel_models)
+                and (not _lb_sel_versions or e["version"] in _lb_sel_versions)
+            ]
+
     tab_table, tab_scatter = st.tabs([t("stats.leaderboard.tab_table"), t("stats.leaderboard.tab_scatter")])
 
     with tab_table:
-        if leaderboard:
+        if _lb_display:
             # Column names used both for rename and column_config — define once
             _col_rank       = t("stats.leaderboard.col_rank")
             _col_model      = t("stats.leaderboard.col_model")
             _col_version    = t("stats.leaderboard.col_version")
+            _col_task       = t("stats.leaderboard.col_task")
             _col_accuracy   = t("stats.leaderboard.col_accuracy")
             _col_auc        = t("stats.leaderboard.col_auc")
             _col_f1         = t("stats.leaderboard.col_f1")
@@ -200,12 +235,36 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
             _col_drift      = t("stats.leaderboard.col_drift")
             _col_preds      = t("stats.leaderboard.col_predictions", days=days)
 
-            df_lb = pd.DataFrame(leaderboard)
+            _TASK_LABELS = {
+                "classification_binary":     t("stats.leaderboard.col_task_binary"),
+                "classification_multiclass": t("stats.leaderboard.col_task_multiclass"),
+                "regression":                t("stats.leaderboard.col_task_regression"),
+            }
+
+            df_lb = pd.DataFrame(_lb_display)
+
+            # Enrich with task type from models metadata
+            df_lb["model_task_label"] = df_lb.apply(
+                lambda r: _TASK_LABELS.get(
+                    _model_task_lookup.get((r["name"], r["version"])),
+                    t("stats.leaderboard.col_task_unknown"),
+                ),
+                axis=1,
+            )
+
+            # When no predictions in the period, perf KPIs from training are misleading
+            _zero_mask = df_lb["predictions_count"] == 0
+            if _zero_mask.any():
+                for _perf_col in ["accuracy", "auc", "f1_score", "r2", "rmse"]:
+                    if _perf_col in df_lb.columns:
+                        df_lb.loc[_zero_mask, _perf_col] = None
+
             df_display = df_lb.rename(
                 columns={
                     "rank":              _col_rank,
                     "name":              _col_model,
                     "version":           _col_version,
+                    "model_task_label":  _col_task,
                     "accuracy":          _col_accuracy,
                     "auc":               _col_auc,
                     "f1_score":          _col_f1,
@@ -245,6 +304,10 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
             styled = _style_map.hide(axis="index")
 
             _col_config = {
+                _col_task: st.column_config.TextColumn(
+                    _col_task,
+                    help=t("stats.leaderboard.col_task_help"),
+                ),
                 _col_accuracy: st.column_config.NumberColumn(
                     _col_accuracy,
                     help=t("stats.leaderboard.col_accuracy_help"),
@@ -283,12 +346,14 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                     help=t("stats.leaderboard.col_predictions_help", days=days),
                 ),
             }
+            if _zero_mask.any():
+                st.caption(t("stats.leaderboard.kpis_hidden_no_pred"))
             st.dataframe(styled, width='stretch', column_config=_col_config)
         else:
             st.info(t("stats.leaderboard.no_models_prod"))
 
     with tab_scatter:
-        if not leaderboard:
+        if not _lb_display:
             st.info(t("stats.leaderboard.no_models_prod"))
         else:
             df_scatter = pd.DataFrame([
@@ -296,6 +361,7 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                     "name": e["name"],
                     "version": e["version"],
                     "accuracy": e["accuracy"],
+                    "auc": e.get("auc"),
                     "f1_score": e["f1_score"],
                     "r2": e.get("r2"),
                     "rmse": e.get("rmse"),
@@ -303,13 +369,14 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                     "drift_status": e["drift_status"],
                     "predictions_count": e["predictions_count"],
                 }
-                for e in leaderboard
+                for e in _lb_display
             ])
 
             # Config for each metric: label, ratio [0-1] or not, step and max for threshold
             _METRIC_CFG = {
                 "latency_p95_ms":    {"label": t("stats.leaderboard.scatter_label_latency"),  "is_ratio": False, "step": 10.0,  "max": None, "fmt_hover": lambda v: f"{v:.0f} ms"},
                 "accuracy":          {"label": t("stats.leaderboard.scatter_label_accuracy"), "is_ratio": True,  "step": 0.05,  "max": 1.0,  "fmt_hover": lambda v: f"{v:.4f}"},
+                "auc":               {"label": t("stats.leaderboard.scatter_label_auc"),      "is_ratio": True,  "step": 0.05,  "max": 1.0,  "fmt_hover": lambda v: f"{v:.4f}"},
                 "f1_score":          {"label": t("stats.leaderboard.scatter_label_f1"),       "is_ratio": True,  "step": 0.05,  "max": 1.0,  "fmt_hover": lambda v: f"{v:.4f}"},
                 "r2":                {"label": t("stats.leaderboard.scatter_label_r2"),       "is_ratio": True,  "step": 0.05,  "max": 1.0,  "fmt_hover": lambda v: f"{v:.4f}"},
                 "rmse":              {"label": t("stats.leaderboard.scatter_label_rmse"),     "is_ratio": False, "step": 0.1,   "max": None, "fmt_hover": lambda v: f"{v:.4f}"},
@@ -376,6 +443,7 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
             )
 
             df_plot = df_scatter.dropna(subset=[scatter_x_metric, scatter_y_metric]).copy()
+            _n_filtered = len(df_scatter) - len(df_plot)
             df_plot["color"] = df_plot["drift_status"].map(
                 lambda s: _DRIFT_COLOR.get(s, _DRIFT_COLOR["unknown"])
             )
@@ -383,6 +451,9 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                 lambda s: _DRIFT_EMOJI.get(s, s)
             )
             df_plot["label"] = df_plot["name"] + " v" + df_plot["version"]
+
+            if _n_filtered > 0 and not df_plot.empty:
+                st.caption(t("stats.leaderboard.scatter_filtered", n=_n_filtered, x_label=x_label, y_label=y_label))
 
             if df_plot.empty:
                 st.info(t("stats.leaderboard.scatter_no_data", x_label=x_label, y_label=y_label))
@@ -938,9 +1009,18 @@ with st.expander(t("stats.multi_metric.expander"), expanded=False):
 
     with _pm_col_ver:
         _pm_ver_all = t("stats.multi_metric.version_all")
+        def _parse_ver(v: str):
+            parts = []
+            for seg in v.split("."):
+                try:
+                    parts.append(int(seg))
+                except ValueError:
+                    parts.append(0)
+            return parts
+
         _pm_versions = [_pm_ver_all] + sorted(
             {m["version"] for m in models if m["name"] == perf_model},
-            key=lambda v: [int(x) for x in v.split(".")],
+            key=_parse_ver,
             reverse=True,
         )
         perf_ver_sel = st.selectbox(t("stats.multi_metric.version_label"), _pm_versions, key="pm_ver_select")
@@ -978,6 +1058,7 @@ with st.expander(t("stats.multi_metric.expander"), expanded=False):
     # ── Catalogue of available metrics by model type ────────────────────
     _PM_METRICS_CLASSIF: dict[str, dict] = {
         "accuracy":      {"label": t("stats.multi_metric.metric_accuracy"), "ratio": True},
+        "auc":           {"label": t("stats.multi_metric.metric_auc"),      "ratio": True},
         "f1_weighted":   {"label": t("stats.multi_metric.metric_f1"),       "ratio": True},
         "matched_count": {"label": t("stats.multi_metric.metric_pairs"),    "ratio": False},
     }
@@ -988,6 +1069,12 @@ with st.expander(t("stats.multi_metric.expander"), expanded=False):
     }
     _pm_catalog = _PM_METRICS_CLASSIF if _pm_mtype == "classification" else _PM_METRICS_REGRESS
     _pm_defaults = ["accuracy", "f1_weighted"] if _pm_mtype == "classification" else ["mae", "rmse"]
+
+    # Reset multiselect when the model or its type changes to avoid empty selection
+    _pm_model_key = f"{perf_model}__{_pm_mtype}"
+    if st.session_state.get("_pm_prev_model_key") != _pm_model_key:
+        st.session_state.pop("pm_metrics_select", None)
+        st.session_state["_pm_prev_model_key"] = _pm_model_key
 
     perf_metrics = st.multiselect(
         t("stats.multi_metric.metrics_label"),
@@ -1090,6 +1177,7 @@ with st.expander(t("stats.multi_metric.expander"), expanded=False):
         # ── Global summary for the period ───────────────────────────────────────
         _pm_global_metrics = {
             "accuracy": _pm_perf.get("accuracy"),
+            "auc": _pm_perf.get("auc"),
             "f1_weighted": _pm_perf.get("f1_weighted"),
             "mae": _pm_perf.get("mae"),
             "rmse": _pm_perf.get("rmse"),

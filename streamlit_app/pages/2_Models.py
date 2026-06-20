@@ -74,6 +74,7 @@ col_title.title(t("models.title"))
 if col_refresh.button(t("models.btn_refresh"), key="models_refresh", width='stretch'):
     st.cache_data.clear()
     st.rerun()
+st.caption(t("models.caption"))
 
 client = get_client()
 is_admin = st.session_state.get("is_admin", False)
@@ -705,6 +706,13 @@ with st.expander(t("models.compare.expander"), expanded=False):
                         def _r(val, n=3):
                             return round(val, n) if val is not None else None
 
+                        # Binary if any version is explicitly tagged or has exactly 2 classes
+                        _is_binary_model = not is_regression and any(
+                            m.get("model_task") == "classification_binary"
+                            or (m.get("classes") and len(m.get("classes", [])) == 2)
+                            for m in _full_meta.values()
+                        )
+
                         # Rule: display a (eval, live) pair only if eval is present
                         show = {}
                         if is_regression:
@@ -713,7 +721,7 @@ with st.expander(t("models.compare.expander"), expanded=False):
                             show["r2"]   = any(v.get("r2_eval")   is not None for v in cmp_versions)
                         else:
                             show["accuracy"] = any(v.get("accuracy")  is not None for v in cmp_versions)
-                            show["auc"]      = any(v.get("auc") is not None or v.get("live_auc") is not None for v in cmp_versions)
+                            show["auc"]      = _is_binary_model or any(v.get("auc") is not None or v.get("live_auc") is not None for v in cmp_versions)
                             show["f1"]       = any(v.get("f1_score")  is not None for v in cmp_versions)
                             show["brier"]    = any(v.get("brier_score") is not None for v in cmp_versions)
 
@@ -2003,11 +2011,12 @@ with st.expander(t("models.validate.expander"), expanded=False):
     st.markdown(t("models.validate.code_example_header"))
     _predict_payload = {
         "model_name": selected["name"],
+        "id_obs": "obs-2024-001",
         "features": example_payload,
     }
     _python_code = (
         "import requests\n\n"
-        'url = "http://localhost:8000/predict"\n'
+        'url = "http://localhost:8000/predict?explain=true"\n'
         "headers = {\n"
         '    "Authorization": "Bearer <YOUR_TOKEN>",\n'
         '    "Content-Type": "application/json",\n'
@@ -2019,17 +2028,24 @@ with st.expander(t("models.validate.expander"), expanded=False):
     st.code(_python_code, language="python")
 
     st.markdown(t("models.validate.response_example_header"))
+
+    _model_classes = selected.get("classes") or []
+    _ex_prediction = 0.87 if _detail_is_regression else (_model_classes[0] if _model_classes else "class_A")
+    _ex_shap_feats = (feature_names_list or list(feature_baseline.keys()) or ["feature_1", "feature_2", "feature_3"])[:4]
+    _shap_magnitudes = [0.31, -0.14, 0.08, -0.05]
+    _ex_shap = {feat: _shap_magnitudes[i % len(_shap_magnitudes)] for i, feat in enumerate(_ex_shap_feats)}
+
     _example_response = _json.dumps(
         {
             "model_name": selected["name"],
             "model_version": selected["version"],
-            "prediction": "<result>",
+            "prediction": _ex_prediction,
             "probability": [0.98, 0.01, 0.01],
             "low_confidence": False,
-            "id_obs": None,
-            "selected_version": None,
-            "shap_values": None,
-            "shap_base_value": None,
+            "id_obs": "obs-2024-001",
+            "selected_version": selected["version"],
+            "shap_values": _ex_shap,
+            "shap_base_value": 0.33,
         },
         indent=4,
         ensure_ascii=False,
@@ -2039,6 +2055,7 @@ with st.expander(t("models.validate.expander"), expanded=False):
 # Regression tests (Golden Test Set)
 with st.expander(t("models.golden_tests.expander"), expanded=False):
     st.info(t("models.golden_tests.intro"))
+    st.page_link("pages/9_Golden_Tests.py", label=t("models.golden_tests.full_page_link"))
     is_admin_gt = st.session_state.get("is_admin", False)
     gt_model_name = selected["name"]
     gt_version = selected["version"]

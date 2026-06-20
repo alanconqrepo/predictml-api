@@ -56,6 +56,7 @@ col_title.title(t("predictions.page_title"))
 if col_refresh.button(t("predictions.refresh_btn"), key="pred_refresh", width='stretch'):
     st.cache_data.clear()
     st.rerun()
+st.caption(t("predictions.caption"))
 
 client = get_client()
 
@@ -97,12 +98,34 @@ with tab_history:
             by_model = coverage_data.get("by_model") or []
             if by_model:
                 st.markdown(t("predictions.coverage.by_model"))
-                for m in by_model:
-                    cov = m.get("coverage", 0.0)
-                    st.progress(
-                        cov,
-                        text=f"{m['model_name']} — {m['labeled']}/{m['predictions']} ({cov * 100:.1f} %)",
-                    )
+                _cov_rows = [
+                    {
+                        "label": f"{m['model_name']}  {m['labeled']}/{m['predictions']} ({m.get('coverage', 0) * 100:.1f}%)",
+                        "coverage": m.get("coverage", 0.0),
+                    }
+                    for m in by_model
+                ]
+                _cov_df = pd.DataFrame(_cov_rows)
+                _fig_cov = px.bar(
+                    _cov_df,
+                    x="coverage",
+                    y="label",
+                    orientation="h",
+                    color_discrete_sequence=["#0984e3"],
+                    range_x=[0, 1],
+                )
+                _fig_cov.update_traces(
+                    text=_cov_df["coverage"].apply(lambda v: f"{v * 100:.1f}%"),
+                    textposition="outside",
+                )
+                _fig_cov.update_layout(
+                    xaxis=dict(tickformat=".0%", title=""),
+                    yaxis=dict(title="", autorange="reversed"),
+                    margin=dict(l=10, r=60, t=10, b=10),
+                    height=max(120, len(by_model) * 45 + 70),
+                    showlegend=False,
+                )
+                st.plotly_chart(_fig_cov, width="stretch")
         except Exception:
             st.caption(t("predictions.coverage.unavailable"))
 
@@ -140,6 +163,49 @@ with tab_history:
         _LIMIT_VALUES = [50, 100, 500, None]
         _limit_label = col5.selectbox(t("predictions.filters.limit_label"), _LIMIT_LABELS, index=1)
         limit = _LIMIT_VALUES[_LIMIT_LABELS.index(_limit_label)]
+
+        # Row 2: version / id_obs / user / result / shadow / ground truth
+        _versions_for_model = sorted(
+            {m["version"] for m in models if m.get("name") == model_name},
+            reverse=True,
+        ) if model_name else []
+        col_v, col_idobs, col_user, col_res, col_sh, col_gt = st.columns(6)
+        _version_sel = col_v.selectbox(
+            t("predictions.filters.version_label"),
+            [t("predictions.filters.version_all")] + _versions_for_model,
+            key="hist_version_filter",
+        )
+        version_filter = None if _version_sel == t("predictions.filters.version_all") else _version_sel
+        id_obs_filter = col_idobs.text_input(
+            t("predictions.filters.id_obs_label"),
+            key="hist_id_obs_filter",
+            placeholder=t("predictions.filters.id_obs_placeholder"),
+        ).strip() or None
+        user_filter = col_user.text_input(
+            t("predictions.filters.user_label"),
+            key="hist_user_filter",
+            placeholder=t("predictions.filters.user_placeholder"),
+        ).strip() or None
+        result_filter = col_res.text_input(
+            t("predictions.filters.result_label"),
+            key="hist_result_filter",
+            placeholder=t("predictions.filters.result_placeholder"),
+        ).strip()
+        _SHADOW_OPTS = [
+            t("predictions.filters.shadow_all"),
+            t("predictions.filters.shadow_only"),
+            t("predictions.filters.shadow_exclude"),
+        ]
+        shadow_filter_sel = col_sh.selectbox(
+            t("predictions.filters.shadow_label"),
+            _SHADOW_OPTS,
+            key="hist_shadow_filter",
+        )
+        gt_filter = col_gt.text_input(
+            t("predictions.filters.gt_label"),
+            key="hist_gt_filter",
+            placeholder=t("predictions.filters.gt_placeholder"),
+        ).strip()
 
         is_classifier = any(
             m.get("name") == model_name and m.get("classes")
@@ -192,10 +258,13 @@ with tab_history:
                     model_name=model_name,
                     start=start_iso,
                     end=end_iso,
+                    version=version_filter,
                     limit=1,
                     offset=0,
                     min_confidence=filter_min_conf,
                     max_confidence=filter_max_conf,
+                    user=user_filter,
+                    id_obs=id_obs_filter,
                 )
                 _total_count = _probe.get("total", 0)
                 _all_preds: list = []
@@ -206,10 +275,13 @@ with tab_history:
                         model_name=model_name,
                         start=start_iso,
                         end=end_iso,
+                        version=version_filter,
                         limit=_API_MAX,
                         offset=_offset,
                         min_confidence=filter_min_conf,
                         max_confidence=filter_max_conf,
+                        user=user_filter,
+                        id_obs=id_obs_filter,
                     )
                     _preds = _chunk.get("predictions", [])
                     _all_preds.extend(_preds)
@@ -225,10 +297,13 @@ with tab_history:
                     model_name=model_name,
                     start=start_iso,
                     end=end_iso,
+                    version=version_filter,
                     limit=limit,
                     offset=0,
                     min_confidence=filter_min_conf,
                     max_confidence=filter_max_conf,
+                    user=user_filter,
+                    id_obs=id_obs_filter,
                 )
         except Exception as e:
             st.error(t("predictions.errors.load_error", error=e))
@@ -237,8 +312,36 @@ with tab_history:
         total = data.get("total", 0)
         predictions = data.get("predictions", [])
 
+        # --- Client-side filters ---
         if status_filter != t("predictions.filters.status_all"):
             predictions = [p for p in predictions if p.get("status") == status_filter]
+        if shadow_filter_sel == t("predictions.filters.shadow_only"):
+            predictions = [p for p in predictions if p.get("is_shadow")]
+        elif shadow_filter_sel == t("predictions.filters.shadow_exclude"):
+            predictions = [p for p in predictions if not p.get("is_shadow")]
+        if result_filter:
+            predictions = [p for p in predictions if result_filter.lower() in str(p.get("prediction_result", "")).lower()]
+
+        # Build GT lookup for all loaded predictions (needed for gt_filter + mismatch)
+        gt_lookup: dict = {}
+        _id_obs_all = [p["id_obs"] for p in predictions if p.get("id_obs")]
+        if _id_obs_all:
+            try:
+                obs_data = client.get_observed_results(
+                    model_name=model_name or None,
+                    limit=len(_id_obs_all) + 50,
+                )
+                for obs in obs_data.get("results", obs_data if isinstance(obs_data, list) else []):
+                    if obs.get("id_obs"):
+                        gt_lookup[obs["id_obs"]] = str(obs.get("observed_result", ""))
+            except Exception:
+                pass
+
+        if gt_filter:
+            predictions = [
+                p for p in predictions
+                if gt_filter.lower() in gt_lookup.get(p.get("id_obs", ""), "").lower()
+            ]
 
         with st.expander(t("predictions.results.expander_title"), expanded=False):
             st.caption(t("predictions.results.filter_note"))
@@ -247,21 +350,7 @@ with tab_history:
             if not predictions:
                 st.info(t("predictions.results.no_predictions"))
             else:
-                # Fetch ground truth for visible id_obs values
-                gt_lookup: dict = {}
-                id_obs_list = [p["id_obs"] for p in predictions if p.get("id_obs")]
-                if id_obs_list:
-                    try:
-                        obs_data = client.get_observed_results(
-                            model_name=model_name or None,
-                            limit=len(id_obs_list) + 50,
-                        )
-                        for obs in obs_data.get("results", obs_data if isinstance(obs_data, list) else []):
-                            if obs.get("id_obs"):
-                                gt_lookup[obs["id_obs"]] = str(obs.get("observed_result", ""))
-                    except Exception:
-                        pass
-
+                # gt_lookup is already built above (needed for gt_filter + mismatch)
                 rows = []
                 for p in predictions:
                     mc = p.get("max_confidence")
@@ -857,6 +946,39 @@ with tab_history:
                     st.caption(t("predictions.labeling_queue.import_hint"))
             except Exception as _lq_exc:
                 st.error(t("predictions.labeling_queue.error", error=_lq_exc))
+
+            st.divider()
+            st.markdown(t("predictions.labeling_queue.api_code_header"))
+            st.caption(t("predictions.labeling_queue.api_code_caption"))
+            _gt_api_code = (
+                "import requests\n"
+                "from datetime import datetime\n\n"
+                'url = "http://localhost:8000/observed-results"\n'
+                "headers = {\n"
+                '    "Authorization": "Bearer <YOUR_TOKEN>",\n'
+                '    "Content-Type": "application/json",\n'
+                "}\n"
+                "payload = {\n"
+                '    "data": [\n'
+                "        {\n"
+                '            "id_obs": "obs-2024-001",\n'
+                '            "model_name": "iris-classifier",\n'
+                '            "observed_result": "setosa",\n'
+                '            "date_time": datetime.utcnow().isoformat()\n'
+                "        },\n"
+                "        {\n"
+                '            "id_obs": "obs-2024-002",\n'
+                '            "model_name": "iris-classifier",\n'
+                '            "observed_result": "versicolor",\n'
+                '            "date_time": datetime.utcnow().isoformat()\n'
+                "        }\n"
+                "    ]\n"
+                "}\n\n"
+                "response = requests.post(url, headers=headers, json=payload)\n"
+                "print(response.json())\n"
+                "# {'upserted': 2, 'skipped_rows': 0}"
+            )
+            st.code(_gt_api_code, language="python")
 
         # --- Import / Export observed results ---
         CSV_TEMPLATE = (

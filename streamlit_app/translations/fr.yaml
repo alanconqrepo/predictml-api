@@ -126,6 +126,7 @@ metrics:
 stats:
   page_title: Stats — PredictML
   title: 📈 Statistiques
+  caption: "Statistiques basées sur les **prédictions en production** (is_shadow=False). Volume, taux de succès, latences P95 et classement des modèles par performance."
   btn_refresh: 🔄 Rafraîchir
   date_start: Date début
   date_end: Date fin
@@ -182,11 +183,24 @@ stats:
     col_drift_help: Écart entre la distribution des features en production et la baseline
       d'entraînement. 🔴 critique = dérive significative, le modèle voit des données
       différentes de celles sur lesquelles il a été entraîné.
-    col_predictions_help: Nombre total de prédictions servies sur les {days} derniers
-      jours.
+    col_predictions_help: Nombre total de prédictions sur les {days} derniers jours
+      (inclut les prédictions shadow is_shadow=True).
+    col_task: Tâche
+    col_task_help: "Type de tâche détecté à l'upload : Binaire (2 classes), Multiclasse
+      (≥ 3 classes) ou Régression."
+    col_task_binary: Binaire
+    col_task_regression: Régression
+    col_task_multiclass: Multiclasse
+    col_task_unknown: "—"
+    filter_model: Filtrer par modèle
+    filter_version: Filtrer par version
+    filter_all_models: Tous les modèles
+    filter_all_versions: Toutes les versions
+    kpis_hidden_no_pred: KPIs de performance masqués (aucune prédiction sur la période).
     scatter_x_axis: Axe X
     scatter_label_latency: Latence p95 (ms)
     scatter_label_accuracy: Accuracy
+    scatter_label_auc: AUC-ROC
     scatter_label_f1: F1 Score
     scatter_label_r2: R²
     scatter_label_rmse: RMSE
@@ -197,8 +211,9 @@ stats:
       = désactivé.
     scatter_threshold_y_help: Affiche une ligne horizontale sur l'axe Y ({label}).
       0 = désactivé.
-    scatter_no_data: 'Données insuffisantes : les modèles doivent avoir {x_label}
-      et {y_label} renseignés.'
+    scatter_filtered: '{n} modèle(s) sans {x_label} ou {y_label} exclus du graphique.'
+    scatter_no_data: 'Données insuffisantes : aucun modèle n''a {x_label} et {y_label}
+      renseignés simultanément.'
     scatter_hover_predictions: 'Prédictions : {count}'
     scatter_hover_drift: 'Drift : {label}'
     scatter_vline_max: Max {label} {value}
@@ -287,6 +302,7 @@ stats:
     gran_month: Mois
     metrics_label: Métriques à afficher
     metric_accuracy: Accuracy
+    metric_auc: AUC-ROC
     metric_f1: F1 pondéré
     metric_pairs: Paires observées
     metric_mae: MAE
@@ -396,11 +412,14 @@ ab_testing:
     metric_auto: Auto (sélection intelligente)
     metric_error_rate: Taux d'erreur — Chi-²
     metric_mae: MAE prédiction — Mann-Whitney
+    metric_auc: AUC — Test Z de Hanley-McNeil
     metric_response_time: Latence réponse — Mann-Whitney
-    no_data_reason_error_rate: le Chi-² requiert au moins une erreur observée dans
-      l'un des groupes
+    no_data_reason_error_rate: le Chi-² requiert des observed-results (vérité terrain)
+      et au moins une mauvaise classification dans l'un des groupes
     no_data_reason_mae: Mann-Whitney sur MAE requiert des résidus de prédiction (modèle
       de régression avec observed-results)
+    no_data_reason_auc: le test Hanley-McNeil requiert des scores de probabilité et
+      des observed-results pour un modèle binaire (minimum 10 paires avec les deux classes)
     no_data_reason_response_time: Mann-Whitney sur la latence requiert au moins 2
       prédictions par version
     no_data_metric: ⚠️ Pas assez de données pour la métrique **{metric}** sur cette
@@ -478,6 +497,25 @@ ab_testing:
     concordance_col_score: Score
     concordance_no_data: 💡 Le taux de concordance shadow/production sera calculé automatiquement
       dès que des prédictions avec `id_obs` seront enregistrées pour les deux versions.
+    concordance_title_regression: '**🔮 Distribution des prédictions shadow vs production**'
+    concordance_caption_regression: Distribution comparée des valeurs prédites par la
+      version shadow et la version production, calculée sur les prédictions récentes.
+    concordance_no_data_regression: Aucune donnée de distribution disponible pour comparer
+      les versions shadow et production.
+    regression_dist_col_role: Version
+    regression_dist_col_pred: Valeur prédite
+    regression_role_shadow: Shadow
+    regression_role_prod: Production
+    regression_dist_comparison_title: Distribution des prédictions — shadow vs production
+    kpi_shadow_mean: Moyenne shadow
+    kpi_shadow_mean_help: Moyenne des valeurs prédites par la version shadow (calculée
+      sur la distribution des prédictions récentes).
+    kpi_prod_mean: Moyenne production
+    kpi_prod_mean_help: Moyenne des valeurs prédites par la version production (calculée
+      sur la distribution des prédictions récentes).
+    kpi_pred_bias: Biais shadow
+    kpi_pred_bias_help: "Moyenne shadow − Moyenne production. Positif\xA0= le shadow
+      pr\xE9dit des valeurs plus \xE9lev\xE9es en moyenne."
     enriched_title: 🔮 Analyse shadow enrichie
     enriched_caption: Métriques différentielles entre la version shadow et la version
       production sur les prédictions avec `id_obs` commun.
@@ -528,6 +566,9 @@ ab_testing:
     col_latency_help: Temps de calcul de la prédiction shadow en millisecondes.
     col_status: Statut
     col_status_help: ✅ Succès ou ❌ Erreur lors du calcul de la prédiction.
+    col_result_prod: Résultat prod.
+    col_result_prod_help: Valeur prédite par la version en production pour le même
+      id_obs. Affiche "—" si aucune prédiction production correspondante n'est trouvée.
 login:
   title: 🤖 PredictML Admin Dashboard
   subtitle: Connectez-vous avec votre API token pour accéder au dashboard.
@@ -670,6 +711,7 @@ ui:
   copy_success: ✅ Copié !
 predictions:
   page_title: 📊 Prédictions
+  caption: "Historique complet des prédictions effectuées via l'API — filtres par modèle, date ou statut, export CSV et annotation des résultats observés."
   refresh_btn: 🔄 Rafraîchir
   tab_history: 📋 Historique
   tab_batch: 📦 Prédictions batch
@@ -715,6 +757,20 @@ predictions:
     mismatch_only_label: Prédictions incorrectes uniquement
     mismatch_only_help: N'afficher que les lignes où la prédiction diffère du ground
       truth
+    version_label: Version
+    version_all: (toutes)
+    result_label: Résultat (contient)
+    result_placeholder: 'ex : setosa'
+    gt_label: Ground truth (contient)
+    gt_placeholder: 'ex : versicolor'
+    shadow_label: Shadow
+    shadow_all: Tous
+    shadow_only: Shadow uniquement
+    shadow_exclude: Hors shadow
+    user_label: Utilisateur
+    user_placeholder: 'ex : alice'
+    id_obs_label: id_obs
+    id_obs_placeholder: 'ex : obs-001'
   warnings:
     no_model: Aucun modèle disponible. Créez d'abord un modèle via l'API.
     date_order: La date de début doit être avant la date de fin.
@@ -891,6 +947,9 @@ predictions:
     import_hint: Remplissez la colonne `observed_result` du CSV exporté, puis importez-le
       via le formulaire ci-dessous.
     error: 'Erreur lors du chargement de la file : {error}'
+    api_code_header: '##### 🐍 Alimenter le ground truth par API'
+    api_code_caption: 'Envoyez vos labels directement via `POST /observed-results` — pratique pour
+      l''intégration dans un pipeline automatisé :'
   purge:
     expander_title: 🗑️ Maintenance RGPD — Purge des prédictions
     caption: Supprime définitivement les prédictions anciennes. Utilisez **Simuler**
@@ -958,6 +1017,7 @@ predictions:
     class_col: Classe
 supervision:
   page_title: 🔍 Supervision des modèles
+  caption: "Surveillance en temps réel de la santé des modèles en production : drift de features, anomalies, courbe ROC et configuration des alertes."
   filters:
     from_label: Du
     to_label: Au
@@ -1572,6 +1632,7 @@ golden_tests:
 users:
   page_title: Utilisateurs — PredictML
   title: 👥 Gestion des utilisateurs
+  caption: "Gérez les comptes utilisateurs : rôles, quotas de prédictions, tokens d'API et demandes d'accès en attente. Réservé aux administrateurs."
   tab_users: 👥 Utilisateurs
   tab_requests: 📋 Demandes d'accès
   my_profile: Mon profil
@@ -1747,6 +1808,7 @@ code_example:
 retrain:
   page_title: Ré-entraînement — PredictML
   title: 🔄 Ré-entraînement des modèles
+  caption: "Déclenchez un ré-entraînement manuel ou planifiez des crons automatiques par version. Consultez les logs et configurez la politique de promotion automatique."
   admin_only: Accès réservé aux administrateurs.
   error_load_models: 'Impossible de charger les modèles : {error}'
   no_models: Aucun modèle disponible.
@@ -1957,6 +2019,7 @@ aide:
 models:
   page_title: Models — PredictML
   title: 🤖 Gestion des modèles
+  caption: "Uploadez, comparez et configurez vos modèles ML — métriques, feature importance, drift, tests de régression et actions de déploiement."
   btn_refresh: 🔄 Rafraîchir
   load_error: 'Impossible de charger les modèles : {error}'
   no_models: Aucun modèle disponible.
@@ -2565,6 +2628,7 @@ models:
     result_actual_header: '**Obtenu**'
     result_features_header: '**Features utilisées**'
     run_error: 'Erreur lors de l''exécution des tests : {error}'
+    full_page_link: "🧪 Voir la page Golden Tests →"
   whatif:
     expander: 🔮 Explorateur What-if
     no_baseline: ⚠️ Ce modèle n'a pas de baseline de features. Calculez-en une dans

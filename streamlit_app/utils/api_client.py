@@ -409,6 +409,8 @@ class APIClient:
         offset: int = 0,
         min_confidence: Optional[float] = None,
         max_confidence: Optional[float] = None,
+        user: Optional[str] = None,
+        id_obs: Optional[str] = None,
     ) -> dict:
         params: dict = {
             "name": model_name,
@@ -422,6 +424,10 @@ class APIClient:
             params["min_confidence"] = min_confidence
         if max_confidence is not None:
             params["max_confidence"] = max_confidence
+        if user:
+            params["user"] = user
+        if id_obs:
+            params["id_obs"] = id_obs
         r = self._get("/predictions", params=params)
         r.raise_for_status()
         return r.json()
