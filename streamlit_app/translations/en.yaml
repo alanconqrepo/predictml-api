@@ -2073,7 +2073,7 @@ models:
     no_versions: "No active versions found."
     col_version: "Version"
     col_task: "Task"
-    col_nb_pred: "Predictions"
+    col_nb_pred: "Prod. predictions"
     col_nb_pred_help: "Production predictions (is_shadow=False) over the period {start} → {end}."
     col_nb_shadow: "Shadow pred."
     col_nb_shadow_help: "Shadow predictions (is_shadow=True) over the period {start} → {end}."

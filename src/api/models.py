@@ -2663,8 +2663,8 @@ async def compare_model_versions(
     days: int = Query(
         7,
         ge=1,
-        le=90,
-        description="Time window for latency stats and live metrics (days)",
+        le=365,
+        description="Time window for latency stats and live metrics (days). Ignored when start_date/end_date are provided.",
     ),
     start_date: Optional[str] = Query(
         None, description="Start date ISO (YYYY-MM-DD) — takes priority over days"

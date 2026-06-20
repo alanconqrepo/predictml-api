@@ -255,7 +255,7 @@ except Exception as _e:
 feature_importances: dict = {}
 try:
     import numpy as _np
-    _est = model
+    _est = pipeline
     if hasattr(_est, "steps"):
         _est = _est.steps[-1][1]
     _raw_imp = None
@@ -269,7 +269,7 @@ try:
         if _total > 0:
             _raw_imp = _raw_imp / _total
         _feat_names = (
-            list(model.feature_names_in_) if hasattr(model, "feature_names_in_")
+            list(pipeline.feature_names_in_) if hasattr(pipeline, "feature_names_in_")
             else list(X_train.columns) if hasattr(X_train, "columns")
             else [f"feature_{i}" for i in range(len(_raw_imp))]
         )
