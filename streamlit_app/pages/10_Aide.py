@@ -269,7 +269,7 @@ _token: str = st.session_state.get("api_token", "")
 # ── Header ────────────────────────────────────────────────────────────────────
 
 st.title(t("aide.title"))
-st.markdown(t("aide.subtitle"))
+st.caption(t("aide.subtitle"))
 
 ctx_parts = []
 if docs:

@@ -252,7 +252,7 @@ _token: str = st.session_state.get("api_token", "")
 
 # Header
 st.title(t("autotrain.title"))
-st.markdown(t("autotrain.subtitle"))
+st.caption(t("autotrain.subtitle"))
 
 # Status badges in header
 dataset_info = st.session_state.get("autotrain_dataset_info")

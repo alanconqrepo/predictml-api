@@ -88,6 +88,7 @@ if not st.session_state.get("is_admin"):
 require_admin()
 
 st.title(t("users.title"))
+st.caption(t("users.caption"))
 
 client = get_client()
 

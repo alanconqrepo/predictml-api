@@ -19,6 +19,7 @@ if not is_admin:
     st.stop()
 
 st.title(t("retrain.title"))
+st.caption(t("retrain.caption"))
 
 client = get_client()
 
