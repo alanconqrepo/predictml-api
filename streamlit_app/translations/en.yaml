@@ -1007,6 +1007,7 @@ supervision:
     overview: Loading overview…
     timeseries: Loading time series…
     detail: Loading detail for {model}…
+    alerts: Loading configured alerts…
   errors:
     overview_load: 'Unable to load overview: {error}'
     detail_load: 'Unable to load detail: {error}'
@@ -1028,11 +1029,37 @@ supervision:
     export_csv_help: Download supervision metrics in CSV format
     export_md_btn: 📄 Export Markdown
     export_md_help: Download a narrative summary of alerts and recommendations
+    alerts_expander: 🔔 Configured alerts
+    alerts_caption: "Versions that have at least one alert threshold defined. Only
+      the production version is shown per model."
+    alerts_col_model: Model
+    alerts_col_version: Version
+    alerts_col_mode: Mode
+    alerts_col_error_max: Max error rate
+    alerts_col_accuracy_min: Min accuracy
+    alerts_col_auc_min: Min AUC
+    alerts_col_drift: Auto drift
+    alerts_col_webhook: Webhook
+    alerts_none: No model has alert thresholds configured.
+    alerts_manage_header: '**Manage thresholds**'
+    alerts_select_label: Select a version
+    alerts_disable_btn: ⬜ Disable alerts
+    alerts_disable_help: "Disables automatic notifications (drift_auto_alert=false)\
+      \ while keeping the configured thresholds."
+    alerts_delete_btn: 🗑️ Delete thresholds
+    alerts_delete_help: Deletes all alert thresholds for this version.
+    alerts_disabled_ok: ✅ Alerts disabled for {model} v{version}.
+    alerts_deleted_ok: ✅ Thresholds deleted for {model} v{version}.
+    alerts_create_header: '**➕ Configure thresholds for a version**'
+    alerts_create_select: Model and version to configure
     health_subheader: 🏥 Health by model
   health_table:
     col_model: Model
     col_versions: Versions
     col_mode: Mode
+    col_nb_prod: "Nb prod. versions"
+    col_nb_shadow: "Nb shadow versions"
+    col_nb_active: "Nb active versions"
     col_predictions: Predictions
     col_shadow: Shadow
     col_errors: Errors
@@ -1044,6 +1071,9 @@ supervision:
     col_status: Status
     help_model: Name of the deployed ML model.
     help_versions: Active versions (is_active=True).
+    help_nb_prod: Number of versions currently in production mode (🟢).
+    help_nb_shadow: Number of versions currently in shadow mode (🟣).
+    help_nb_active: Total number of active versions (all versions with is_active=True).
     help_mode: 'Deployment mode(s) of active versions:
 
       🟢 Production · 🟠 A/B · 🟣 Shadow · ⚪ — (no routing)'
@@ -1166,7 +1196,13 @@ supervision:
     help_p95: 95th percentile — SLA indicator.
   drift:
     perf_drift_header: '**📈 Performance drift**'
+    perf_drift_note: "Compares model performance (accuracy, R²…) between the first
+      and second half of the period. A drop ≥ 5 pts triggers a warning, ≥ 10 pts
+      a critical. Requires observed results submitted via /observed-results."
     feat_drift_header: '**🌡️ Feature drift**'
+    feat_drift_note: "Detects whether input feature values have shifted relative to
+      the training baseline. A feature drift may indicate an upstream pipeline change
+      or a population shift."
     metric_r2_day: R² / day
     metric_mae_day: MAE / day
     metric_accuracy_day: Accuracy / day
@@ -1209,8 +1245,20 @@ supervision:
     help_z_score: Z = |μ_prod − μ_baseline| / σ_baseline. 🟡 ≥ 2 · 🔴 ≥ 3
     help_psi: PSI = Population Stability Index. 🟡 ≥ 0.1 · 🔴 ≥ 0.2
     help_n_prod: Number of recent predictions used to compute production statistics.
+    zscore_psi_legend: "**How to interpret these columns?**\n\n\
+      • **Z-score** = \\|μ_prod − μ_baseline\\| / σ_baseline: measures the gap in\
+      \ standard deviations between the production mean and the training mean. 🟡\
+      \ ≥ 2 (warning) · 🔴 ≥ 3 (critical). A high Z-score means the received value\
+      \ distribution has significantly shifted from what the model saw during training.\n\n\
+      • **PSI** (Population Stability Index): measures the overall shape of the distribution\
+      \ (not just the mean). 🟡 ≥ 0.1 (moderate change) · 🔴 ≥ 0.2 (major change).\
+      \ A high PSI suggests the data population has fundamentally changed."
   confidence:
     header: '**📉 Confidence trend**'
+    note: "Evolution of the maximum probability returned by the model (classifiers
+      only). A declining confidence over time may signal input data drift or a model
+      reaching its generalization limit. The blue band represents the interquartile
+      range (P25–P75)."
     no_probabilities: This model does not return probabilities — confidence trend
       unavailable.
     delta_str: '{val} (1st vs 2nd half)'
@@ -1229,6 +1277,10 @@ supervision:
       has a Z-score ≥ threshold relative to training data.
 
       '
+    note: "Use this table to identify outlier requests sent to your model. Adjust
+      the Z threshold (slider) to broaden or narrow detection. A high Z-score on
+      a feature indicates a value very unusual compared to the training distribution.
+      Click a prediction to drill down feature by feature."
     window_label: Window (days)
     z_threshold_label: Z-score threshold
     z_threshold_help: Detection threshold for anomalous features. Z = |received value
@@ -1383,14 +1435,36 @@ supervision:
     version_to_configure: Version to configure
     threshold_error_rate_max: Max error rate
     threshold_accuracy_min: Min accuracy
+    threshold_auc_min: Min AUC
     threshold_drift_alert: Drift alert
     drift_alert_enabled: ✅ Enabled
     drift_alert_disabled: ⬜ Disabled
+    thresholds_note: "**What these thresholds trigger:**\n\n\
+      Alert thresholds color the model's health status in the global table (🟡 warning\
+      \ / 🔴 critical) and appear as reference lines on this page's charts. The **Drift\
+      \ alert** checkbox enables automatic notifications when drift is detected on\
+      \ this model.\n\n\
+      **Available notification channels:**\n\n\
+      • **Webhook (per model)** — set `webhook_url` directly on the model version\
+      \ via `PATCH /models/{name}/{version}` with `{\"webhook_url\": \"https://hooks.slack.com/…\"}`.\
+      \ The API sends a JSON POST to this URL on each alert.\n\n\
+      • **Email (global)** — configure these environment variables in the API container:\
+      \ `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_STARTTLS`\
+      \ and `ALERT_EMAIL_TO` (recipient address(es), comma-separated). Restart the\
+      \ container after any change."
     form_error_rate_max: Max error rate (%)
     form_error_rate_help: Triggers an alert if the error rate exceeds this threshold.
     form_accuracy_min: Minimum accuracy
     form_accuracy_help: Triggers an alert if accuracy falls below this threshold.
+    form_auc_min: Minimum AUC (binary classifier)
+    form_auc_min_help: "Triggers an alert if the model's stored AUC falls below this
+      threshold. Visible only for binary classification models. The AUC compared is
+      the one recorded during the last training or retrain."
     form_drift_auto_alert: Automatic alert on feature drift
+    form_drift_auto_alert_help: "If checked, the supervision job (every 6 h) sends an\
+      \ alert (email + webhook) as soon as a critical drift is detected on the production\
+      \ model's input features. Uncheck to silence alerts without deleting the other\
+      \ thresholds."
     form_save_btn: 💾 Save thresholds
     thresholds_saved: ✅ Thresholds updated for {model} v{version}.
     auto_promote_caption: Automatically promotes the retrained model if all criteria
@@ -2199,6 +2273,11 @@ models:
   detail_tags_empty: "**Tags:** —"
   detail_webhook: "**Webhook URL:** `{url}`"
   detail_webhook_empty: "**Webhook URL:** —"
+  detail_webhook_help: "Receives a JSON POST on every alert triggered for this model
+    (error rate, drift, AUC). Configure the URL via ⚙️ Edit metadata or via
+    PATCH /models/{name}/{version} with {\"webhook_url\": \"https://…\"}.
+    Email and webhook are independent: the webhook fires even when email alerts
+    are disabled."
   detail_mlflow: "**MLflow run:** [{run_id}]({link})"
   detail_mlflow_empty: "**MLflow run:** —"
   detail_minio: "**MinIO object:** `{bucket}/{minio_key}`"
@@ -2456,6 +2535,9 @@ models:
     tags_placeholder: "production, finance, v2"
     webhook_label: "Webhook URL"
     webhook_placeholder: "https://example.com/webhook"
+    webhook_help: "URL called by the alert worker on every critical event (error
+      spike, drift, low AUC). The worker sends a JSON POST with the model name,
+      version, timestamp, and alert details. Works independently of email alerts."
     section_inference: "**Inference**"
     confidence_label: "Confidence threshold"
     confidence_help: "Threshold below which the prediction is marked `low_confidence=True` in the response."

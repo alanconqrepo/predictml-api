@@ -223,16 +223,18 @@ class EmailService:
             html_body=self._base_html("Performance drift alert", body),
         )
 
-    def send_error_spike_alert(self, model_name: str, error_rate: float) -> bool:
+    def send_error_spike_alert(
+        self, model_name: str, error_rate: float, threshold: float | None = None
+    ) -> bool:
         """Error spike alert."""
-        threshold = settings.ERROR_RATE_ALERT_THRESHOLD
+        effective_threshold = threshold if threshold is not None else settings.ERROR_RATE_ALERT_THRESHOLD
         body = f"""
         <p>An error spike has been detected on model
            <strong>{model_name}</strong>.</p>
         <table>
           <tr><th>Current error rate</th>
               <td><strong>{error_rate:.1%}</strong></td></tr>
-          <tr><th>Configured threshold</th><td>{threshold:.1%}</td></tr>
+          <tr><th>Configured threshold</th><td>{effective_threshold:.1%}</td></tr>
           <tr><th>Detected on</th>
               <td>{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC</td></tr>
         </table>
@@ -242,6 +244,30 @@ class EmailService:
             to=settings.ALERT_EMAIL_TO,
             subject=f"[PredictML] 🔴 Error spike — {model_name} ({error_rate:.1%})",
             html_body=self._base_html("Error spike alert", body),
+        )
+
+    def send_auc_alert(
+        self, model_name: str, current_auc: float, auc_min: float
+    ) -> bool:
+        """AUC below minimum threshold alert (binary classifiers only)."""
+        gap = auc_min - current_auc
+        body = f"""
+        <p>The AUC of binary classifier <strong>{model_name}</strong>
+           has fallen below the configured minimum threshold.</p>
+        <table>
+          <tr><th>Current AUC</th><td><strong>{current_auc:.4f}</strong></td></tr>
+          <tr><th>Minimum required</th><td>{auc_min:.4f}</td></tr>
+          <tr><th>Gap</th><td><strong>−{gap:.4f}</strong></td></tr>
+          <tr><th>Detected on</th>
+              <td>{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC</td></tr>
+        </table>
+        <p>The AUC shown is the value recorded at the last training or retrain.
+           Consider retraining with more recent data or reviewing the feature pipeline.</p>"""
+
+        return self._send_email(
+            to=settings.ALERT_EMAIL_TO,
+            subject=f"[PredictML] 🔴 AUC below threshold — {model_name} ({current_auc:.4f} < {auc_min:.4f})",
+            html_body=self._base_html("AUC below minimum threshold", body),
         )
 
     def send_auto_demotion_alert(

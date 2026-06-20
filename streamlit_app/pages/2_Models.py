@@ -988,7 +988,10 @@ with st.expander(t("models.details_expander"), expanded=True):
         else:
             st.markdown(t("models.detail_tags_empty"))
         webhook = selected.get("webhook_url")
-        st.markdown(t("models.detail_webhook", url=webhook) if webhook else t("models.detail_webhook_empty"))
+        _wh_help = t("models.detail_webhook_help")
+        _wh_abbr = f'<abbr title="{_wh_help}" style="cursor:help;text-decoration:none;">ℹ️</abbr>'
+        _wh_text = t("models.detail_webhook", url=webhook) if webhook else t("models.detail_webhook_empty")
+        st.markdown(f"{_wh_text} {_wh_abbr}", unsafe_allow_html=True)
 
         mlflow_id = selected.get("mlflow_run_id")
         if mlflow_id:
@@ -2601,6 +2604,7 @@ if is_admin:
                     t("models.edit_meta.webhook_label"),
                     value=selected.get("webhook_url") or "",
                     placeholder=t("models.edit_meta.webhook_placeholder"),
+                    help=t("models.edit_meta.webhook_help"),
                 )
 
             # ── Inference ─────────────────────────────────────────────────────

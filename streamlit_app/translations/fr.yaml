@@ -1026,6 +1026,7 @@ supervision:
     overview: Chargement de la vue d'ensemble…
     timeseries: Chargement des séries temporelles…
     detail: Chargement du détail pour {model}…
+    alerts: Chargement des alertes configurées…
   errors:
     overview_load: 'Impossible de charger la vue d''ensemble : {error}'
     detail_load: 'Impossible de charger le détail : {error}'
@@ -1047,11 +1048,37 @@ supervision:
     export_csv_help: Télécharger les métriques de supervision au format CSV
     export_md_btn: 📄 Exporter Markdown
     export_md_help: Télécharger un résumé narratif des alertes et recommandations
+    alerts_expander: 🔔 Alertes configurées
+    alerts_caption: "Versions qui ont au moins un seuil d'alerte défini. Seule la version
+      de production est affichée par modèle."
+    alerts_col_model: Modèle
+    alerts_col_version: Version
+    alerts_col_mode: Mode
+    alerts_col_error_max: Taux erreur max
+    alerts_col_accuracy_min: Accuracy min
+    alerts_col_auc_min: AUC min
+    alerts_col_drift: Drift auto
+    alerts_col_webhook: Webhook
+    alerts_none: Aucun modèle n'a de seuils d'alerte configurés.
+    alerts_manage_header: '**Gérer les seuils**'
+    alerts_select_label: Sélectionner une version
+    alerts_disable_btn: ⬜ Désactiver les alertes
+    alerts_disable_help: "Désactive les notifications automatiques (drift_auto_alert=false)\
+      \ tout en conservant les seuils configurés."
+    alerts_delete_btn: 🗑️ Supprimer les seuils
+    alerts_delete_help: Supprime tous les seuils d'alerte de cette version.
+    alerts_disabled_ok: ✅ Alertes désactivées pour {model} v{version}.
+    alerts_deleted_ok: ✅ Seuils supprimés pour {model} v{version}.
+    alerts_create_header: '**➕ Configurer les seuils d''une version**'
+    alerts_create_select: Modèle et version à configurer
     health_subheader: 🏥 Santé par modèle
   health_table:
     col_model: Modèle
     col_versions: Versions
     col_mode: Mode
+    col_nb_prod: "Nb version prod."
+    col_nb_shadow: "Nb version shadow"
+    col_nb_active: "Nb versions actives"
     col_predictions: Prédictions
     col_shadow: Shadow
     col_errors: Erreurs
@@ -1063,6 +1090,9 @@ supervision:
     col_status: Statut
     help_model: Nom du modèle ML déployé.
     help_versions: Versions actives (is_active=True).
+    help_nb_prod: Nombre de versions actuellement en mode production (🟢).
+    help_nb_shadow: Nombre de versions actuellement en mode shadow (🟣).
+    help_nb_active: Nombre total de versions actives (toutes les versions avec is_active=True).
     help_mode: 'Mode(s) de déploiement des versions actives :
 
       🟢 Production · 🟠 A/B · 🟣 Shadow · ⚪ — (aucun routage)'
@@ -1187,7 +1217,13 @@ supervision:
     help_p95: 95e percentile — indicateur SLA.
   drift:
     perf_drift_header: '**📈 Drift de performance**'
+    perf_drift_note: "Compare la performance du modèle (accuracy, R²…) entre la 1ère
+      et la 2ème moitié de la période. Une baisse ≥ 5 pts déclenche un warning, ≥
+      10 pts un critical. Nécessite des résultats observés soumis via /observed-results."
     feat_drift_header: '**🌡️ Drift des features**'
+    feat_drift_note: "Détecte si les valeurs des features d'entrée ont changé par rapport
+      à la baseline d'entraînement. Un drift feature peut indiquer un changement de
+      pipeline amont ou de population."
     metric_r2_day: R² / jour
     metric_mae_day: MAE / jour
     metric_accuracy_day: Accuracy / jour
@@ -1230,8 +1266,21 @@ supervision:
     help_z_score: Z = |μ_prod − μ_baseline| / σ_baseline. 🟡 ≥ 2 · 🔴 ≥ 3
     help_psi: PSI = Population Stability Index. 🟡 ≥ 0.1 · 🔴 ≥ 0.2
     help_n_prod: Nombre de prédictions récentes utilisées pour calculer les statistiques.
+    zscore_psi_legend: "**Comment interpréter ces colonnes ?**\n\n\
+      • **Z-score** = \\|μ_prod − μ_baseline\\| / σ_baseline : mesure l'écart en nombre\
+      \ d'écarts-types entre la moyenne de production et la moyenne d'entraînement.\
+      \ 🟡 ≥ 2 (attention) · 🔴 ≥ 3 (critique). Un Z-score élevé indique que la\
+      \ distribution des valeurs reçues s'est significativement décalée par rapport\
+      \ à ce que le modèle a vu à l'entraînement.\n\n\
+      • **PSI** (Population Stability Index) : mesure la forme globale de la distribution\
+      \ (pas seulement la moyenne). 🟡 ≥ 0.1 (changement modéré) · 🔴 ≥ 0.2 (changement\
+      \ majeur). Un PSI élevé suggère que la population de données a changé de nature."
   confidence:
     header: '**📉 Tendance de confiance**'
+    note: "Évolution de la probabilité maximale retournée par le modèle (classifieurs\
+      \ uniquement). Une confiance qui baisse dans le temps peut signaler un drift\
+      \ des données d'entrée ou un modèle en limite de généralisation. La zone bleue\
+      \ représente l'intervalle interquartile (P25–P75)."
     no_probabilities: Ce modèle ne retourne pas de probabilités — tendance de confiance
       indisponible.
     delta_str: '{val} (1re vs 2e moitié)'
@@ -1250,6 +1299,11 @@ supervision:
       présente un Z-score ≥ seuil par rapport aux données d''entraînement.
 
       '
+    note: "Utilisez ce tableau pour détecter les requêtes outliers envoyées à votre
+      modèle. Ajustez le seuil Z (curseur) pour élargir ou resserrer la détection.
+      Un Z-score élevé sur une feature indique une valeur très inhabituelle par rapport
+      à la distribution d'entraînement. Cliquez sur une prédiction pour voir le détail
+      feature par feature."
     window_label: Fenêtre (jours)
     z_threshold_label: Seuil z-score
     z_threshold_help: Seuil de détection des features aberrantes. Z = |valeur reçue
@@ -1402,14 +1456,36 @@ supervision:
     version_to_configure: Version à configurer
     threshold_error_rate_max: Taux d'erreur max
     threshold_accuracy_min: Accuracy min
+    threshold_auc_min: AUC min
     threshold_drift_alert: Alerte drift
     drift_alert_enabled: ✅ Activée
     drift_alert_disabled: ⬜ Désactivée
+    thresholds_note: "**Ce que déclenchent ces seuils :**\n\n\
+      Les seuils d'alerte colorent le statut de santé du modèle dans le tableau global\
+      \ (🟡 warning / 🔴 critical) et apparaissent comme lignes de référence sur les\
+      \ graphiques de cette page. La case **Alerte drift** active les notifications\
+      \ automatiques quand une dérive est détectée sur ce modèle.\n\n\
+      **Canaux de notification disponibles :**\n\n\
+      • **Webhook (par modèle)** — configurez `webhook_url` directement sur la version\
+      \ du modèle via `PATCH /models/{name}/{version}` avec `{\"webhook_url\": \"https://hooks.slack.com/…\"}`.\
+      \ L'API envoie un POST JSON à cette URL à chaque alerte.\n\n\
+      • **Email (global)** — configurez ces variables d'environnement dans le conteneur\
+      \ API : `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`,\
+      \ `SMTP_STARTTLS` et `ALERT_EMAIL_TO` (adresse(s) destinataire(s), séparées\
+      \ par des virgules). Redémarrez le conteneur après modification."
     form_error_rate_max: Taux d'erreur max (%)
     form_error_rate_help: Déclenche une alerte si le taux d'erreur dépasse ce seuil.
     form_accuracy_min: Accuracy minimale
     form_accuracy_help: Déclenche une alerte si l'accuracy tombe sous ce seuil.
+    form_auc_min: AUC minimal (classifieur binaire)
+    form_auc_min_help: "Déclenche une alerte si l'AUC stocké sur le modèle passe sous\
+      \ ce seuil. Visible uniquement pour les modèles de classification binaire. L'AUC\
+      \ comparé est celui enregistré lors du dernier entraînement (ou retrain)."
     form_drift_auto_alert: Alerte automatique sur drift de features
+    form_drift_auto_alert_help: "Si coché, le job de supervision (toutes les 6 h) envoie\
+      \ une alerte (email + webhook) dès qu'un drift critique est détecté sur les\
+      \ features d'entrée du modèle en production. Décocher pour mettre en silencieux\
+      \ sans supprimer les autres seuils."
     form_save_btn: 💾 Enregistrer les seuils
     thresholds_saved: ✅ Seuils mis à jour pour {model} v{version}.
     auto_promote_caption: Promeut automatiquement le modèle ré-entraîné si tous les
@@ -2301,6 +2377,11 @@ models:
   detail_tags_empty: '**Tags :** —'
   detail_webhook: '**Webhook URL :** `{url}`'
   detail_webhook_empty: '**Webhook URL :** —'
+  detail_webhook_help: "Reçoit un POST JSON à chaque alerte déclenchée sur ce modèle
+    (taux d'erreur, drift, AUC). Configurez l'URL via ⚙️ Modifier les métadonnées
+    ou via PATCH /models/{name}/{version} avec {\"webhook_url\": \"https://…\"}.
+    Email et webhook sont indépendants : le webhook se déclenche même si les alertes
+    email sont désactivées."
   detail_mlflow: '**MLflow run :** [{run_id}]({link})'
   detail_mlflow_empty: '**MLflow run :** —'
   detail_minio: '**MinIO object :** `{bucket}/{minio_key}`'
@@ -2694,6 +2775,10 @@ models:
     tags_placeholder: production, finance, v2
     webhook_label: Webhook URL
     webhook_placeholder: https://example.com/webhook
+    webhook_help: "URL appelée par le worker d'alertes à chaque événement critique
+      (erreur spike, drift, AUC bas). Le worker envoie un POST JSON avec le nom du
+      modèle, la version, le timestamp et les détails de l'alerte. Fonctionne
+      indépendamment des alertes email."
     section_inference: '**Inférence**'
     confidence_label: Confidence threshold
     confidence_help: Seuil en dessous duquel la prédiction est marquée `low_confidence=True`
