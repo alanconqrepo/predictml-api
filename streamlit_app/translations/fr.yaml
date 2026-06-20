@@ -1516,6 +1516,18 @@ supervision:
     circuit_breaker_saved: Circuit breaker mis à jour.
     last_demote_error: 🔴 **Auto-démis le {ts} UTC** — {reason}
     no_recent_demote: 🟢 Aucune auto-demotion récente détectée.
+    cb_status_label: "Statut Circuit Breaker"
+    cb_status_active_value: "🔴 ACTIF"
+    cb_status_inactive_value: "⬜ INACTIF"
+    cb_intro_panel: "Le **circuit breaker** surveille automatiquement ce modèle toutes\
+      \ les **6 h** (container `retrain-worker`). S'il détecte un drift critique ou\
+      \ une chute d'accuracy en dessous du seuil, il retire la version de production\
+      \ (`is_production=false`).\n\n📋 **Prérequis** : une version de **secours** (non-production,\
+      \ active) doit exister. Le **cooldown** empêche les oscillations rapides."
+    cb_trigger_summary_drift: "Déclencheur drift : **{level}**"
+    cb_trigger_summary_acc: "Accuracy min : **{val}**"
+    cb_trigger_summary_acc_disabled: "Accuracy min : ⬜ désactivé"
+    cb_trigger_summary_cooldown: "Cooldown : **{hours} h**"
 access_request:
   title: 📝 Demande d'accès à PredictML
   intro: Remplissez ce formulaire pour demander un compte. Un administrateur examinera
@@ -2824,16 +2836,27 @@ models:
     logs_empty: (vide)
     error_toast: 'Erreur lors du ré-entraînement : {error}'
   policy:
-    expander_active: ⚙️ Politique de promotion  🚀 Promo ⚡ CB
-    expander_promote_only: ⚙️ Politique de promotion  🚀 Promo
-    expander_cb_only: ⚙️ Politique de promotion  ⚡ CB
-    expander_default: ⚙️ Politique de promotion
+    expander_active: "⚙️ Politique de promotion — 🚀 Promo ACTIVE  ⚡ CB ACTIF"
+    expander_promote_only: "⚙️ Politique de promotion — 🚀 Promo ACTIVE  ⬜ CB inactif"
+    expander_cb_only: "⚙️ Politique de promotion — ⬜ Promo inactive  ⚡ CB ACTIF"
+    expander_default: "⚙️ Politique de promotion — ⬜ tout inactif"
     caption: Appliquée à **toutes les versions** de `{name}`. 0 = critère désactivé.
     intro: "Automatise deux mécanismes du cycle de vie du modèle :\n\n🚀 **Auto-promotion**\
       \ — passe automatiquement une nouvelle version en production si les critères\
       \ de qualité sont satisfaits après un ré-entraînement.\n\n⚡ **Circuit breaker**\
       \ — rétrograde automatiquement la version en production si ses performances\
       \ se dégradent en exploitation."
+    status_box_both_active: "🟢 **Auto-promotion** et **Circuit breaker** sont tous les deux **actifs** pour ce modèle."
+    status_box_promote_only: "🚀 **Auto-promotion** est **active**. ⬜ Circuit breaker **inactif**."
+    status_box_cb_only: "⚡ **Circuit breaker** est **actif**. ⬜ Auto-promotion **inactive**."
+    status_box_none: "⬜ Aucune automatisation active. Les promotions et démotions restent manuelles."
+    howto_expander: "💡 Comment ça fonctionne ?"
+    howto_callout: "**Comment ça fonctionne ?**\n\n🚀 **Auto-promotion** : après chaque\
+      \ ré-entraînement, si tous les critères (accuracy, MAE, latence…) sont satisfaits,\
+      \ la nouvelle version passe automatiquement en production.\n\n⚡ **Circuit breaker**\
+      \ : toutes les **6 heures**, le container `retrain-worker` surveille le modèle\
+      \ en production. S'il détecte un drift critique ou une chute d'accuracy en\
+      \ dessous du seuil, il le retire automatiquement de production (`is_production=false`)."
     promote_header_active: '**🚀 Auto-promotion post-retrain** — 🟢 Activée'
     promote_header_inactive: '**🚀 Auto-promotion post-retrain** — ⬜ Inactive'
     promote_help: Après chaque ré-entraînement, la nouvelle version est évaluée sur

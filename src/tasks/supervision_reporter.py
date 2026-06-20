@@ -1,13 +1,14 @@
 """
-Supervision scheduler — weekly report and automatic alerts.
+Supervision reporter — weekly report and automatic alerts.
 
-Uses APScheduler (AsyncIOScheduler) integrated into the FastAPI lifecycle.
+Scheduled by the ARQ worker (``arq_worker.py``) in the ``retrain-worker``
+container — runs every 6 h via ``alert_check_task`` (0 h, 6 h, 12 h, 18 h UTC).
 Enabled via environment variables:
-  - ENABLE_EMAIL_ALERTS=true   → check every 6 h (emails)
-  - WEEKLY_REPORT_ENABLED=true → report on WEEKLY_REPORT_DAY at WEEKLY_REPORT_HOUR h
+  - ENABLE_EMAIL_ALERTS=true   → send alert emails
+  - WEEKLY_REPORT_ENABLED=true → weekly report on WEEKLY_REPORT_DAY at WEEKLY_REPORT_HOUR h
 
 The alert job always runs (even without email) to trigger webhooks
-configured on models (drift_critical, error_rate_threshold).
+configured on models (drift_critical, error_rate_threshold, auto_demote…).
 """
 
 import asyncio
@@ -28,17 +29,6 @@ def _get_model_threshold(thresholds: dict | None, key: str, default: float) -> f
     if thresholds and (val := thresholds.get(key)) is not None:
         return val
     return default
-
-
-try:
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
-    _scheduler = AsyncIOScheduler(timezone="UTC")
-    _APSCHEDULER_AVAILABLE = True
-except ImportError:
-    _scheduler = None  # type: ignore[assignment]
-    _APSCHEDULER_AVAILABLE = False
-    logger.warning("APScheduler not installed — supervision scheduler disabled")
 
 
 # ---------------------------------------------------------------------------
@@ -426,49 +416,3 @@ async def run_weekly_report() -> None:
 
     except Exception as exc:
         logger.error("Error during weekly report generation", error=str(exc))
-
-
-# ---------------------------------------------------------------------------
-# Lifecycle
-# ---------------------------------------------------------------------------
-
-
-def start_scheduler() -> None:
-    """Start the scheduler with the configured jobs."""
-    if not _APSCHEDULER_AVAILABLE or _scheduler is None:
-        logger.warning("APScheduler unavailable, scheduler not started")
-        return
-
-    _scheduler.add_job(
-        run_alert_check,
-        "interval",
-        hours=6,
-        id="alert_check",
-        replace_existing=True,
-    )
-    logger.info("Alert check job configured (every 6 h)")
-
-    if settings.WEEKLY_REPORT_ENABLED:
-        _scheduler.add_job(
-            run_weekly_report,
-            "cron",
-            day_of_week=settings.WEEKLY_REPORT_DAY,
-            hour=settings.WEEKLY_REPORT_HOUR,
-            minute=0,
-            id="weekly_report",
-            replace_existing=True,
-        )
-        logger.info(
-            "Weekly report job configured",
-            day=settings.WEEKLY_REPORT_DAY,
-            hour=settings.WEEKLY_REPORT_HOUR,
-        )
-
-    _scheduler.start()
-
-
-def stop_scheduler() -> None:
-    """Gracefully stop the scheduler."""
-    if _scheduler is not None and _scheduler.running:
-        _scheduler.shutdown(wait=False)
-        logger.info("Supervision scheduler stopped")
