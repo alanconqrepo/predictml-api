@@ -46,11 +46,20 @@ def compute_auc(
             return None
 
         if n_classes == 2:
-            # Binary classification: probability of the 2nd class (index 1, alphabetical order)
-            probs = [p[1] if isinstance(p, (list, tuple)) and len(p) >= 2 else None for p in y_prob]
-            if any(v is None for v in probs):
+            # Binary: filter to pairs that have valid probabilities, then use p[1]
+            valid_bin = [
+                (yt, p[1])
+                for yt, p in zip(y_true_s, y_prob)
+                if isinstance(p, (list, tuple)) and len(p) >= 2 and p[1] is not None
+            ]
+            if not valid_bin:
                 return None
-            return round(float(roc_auc_score(y_true_s, probs)), 4)
+            _yt_bin = [yt for yt, _ in valid_bin]
+            _pb_bin = [pb for _, pb in valid_bin]
+            if len(set(_yt_bin)) < 2:
+                return None
+            _pos_label = sorted(set(_yt_bin))[-1]
+            return round(float(roc_auc_score(_yt_bin, _pb_bin, pos_label=_pos_label)), 4)
         else:
             # Multiclass classification: weighted OvR
             if not all(isinstance(p, (list, tuple)) for p in y_prob):
@@ -101,16 +110,24 @@ def compute_roc_curve(
     try:
         from sklearn.metrics import roc_curve as sklearn_roc_curve
 
-        y_true_s = [str(v) for v in y_true]
+        # Keep only pairs where probabilities are valid (list/tuple with at least 2 values)
+        valid = [
+            (str(yt), p[1])
+            for yt, p in zip(y_true, y_prob)
+            if isinstance(p, (list, tuple)) and len(p) >= 2 and p[1] is not None
+        ]
+        if not valid:
+            return None, None
+
+        y_true_s = [yt for yt, _ in valid]
+        probs = [prob for _, prob in valid]
+
         unique_labels = sorted(set(y_true_s))
         if len(unique_labels) != 2:
             return None, None
 
-        probs = [p[1] if isinstance(p, (list, tuple)) and len(p) >= 2 else None for p in y_prob]
-        if any(v is None for v in probs):
-            return None, None
-
-        fpr, tpr, _ = sklearn_roc_curve(y_true_s, probs)
+        # pos_label must be explicit when y_true contains string labels (sklearn >= 1.1)
+        fpr, tpr, _ = sklearn_roc_curve(y_true_s, probs, pos_label=unique_labels[-1])
         return (
             [round(float(v), 4) for v in fpr],
             [round(float(v), 4) for v in tpr],

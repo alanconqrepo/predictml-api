@@ -2161,7 +2161,7 @@ models:
     no_versions: Aucune version active trouvée.
     col_version: Version
     col_task: Tâche
-    col_nb_pred: Nb préd.
+    col_nb_pred: Nb préd. production
     col_nb_pred_help: Prédictions production (is_shadow=False) sur la période {start}
       → {end}.
     col_nb_shadow: Nb préd. shadow

@@ -138,6 +138,8 @@ try:
             data["accuracy"] = str(round(acc, 4))
         if f1 is not None:
             data["f1_score"] = str(round(f1, 4))
+        if roc_auc is not None:
+            data["auc"] = str(round(roc_auc, 4))
         if metrics.get("features_count") is not None:
             data["features_count"] = str(metrics["features_count"])
         if metrics.get("classes"):
