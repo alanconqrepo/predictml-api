@@ -5,11 +5,13 @@ Each model is:
 - Trained directly (without an advanced Pipeline)
 - Logged to MLflow (params, metrics, artifact in s3://mlflow/)
 - Registered via POST /models with mlflow_run_id (no separate MinIO upload)
+- PATCH'd after registration to store training_stats (label_distribution + n_rows)
 
 Execution order:
     docker-compose up -d
     python init_data/create_multiple_models.py
 """
+import json
 import os
 import sys
 
@@ -17,8 +19,10 @@ import sys
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+import numpy as np
+import pandas as pd
 import requests
-from sklearn.datasets import load_iris, load_wine, load_breast_cancer
+from sklearn.datasets import load_breast_cancer, load_iris, load_wine
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
@@ -53,6 +57,31 @@ def configure_mlflow():
         print("   Bucket 'mlflow' created in MinIO")
 
 
+def _patch_training_stats(name: str, y_train) -> None:
+    """PATCH the model to store label_distribution and n_rows in training_stats."""
+    total = len(y_train)
+    label_distribution = {
+        str(int(cls)): round(float(np.sum(y_train == cls)) / total, 4)
+        for cls in np.unique(y_train)
+    }
+    patch_body = {
+        "training_stats": {
+            "label_distribution": label_distribution,
+            "n_rows": total,
+        }
+    }
+    resp = requests.patch(
+        f"{API_URL}/models/{name}/{MODEL_VERSION}",
+        headers={"Authorization": f"Bearer {API_TOKEN}", "Content-Type": "application/json"},
+        json=patch_body,
+        timeout=30,
+    )
+    if resp.status_code == 200:
+        print(f"   training_stats stored (label_distribution: {label_distribution})")
+    else:
+        print(f"   [WARN] PATCH training_stats failed ({resp.status_code}): {resp.text[:120]}")
+
+
 def train_and_register(name, model, X_train, X_test, y_train, y_test, params, description, classes):
     """Train the model, log to MLflow, register via POST /models."""
     mlflow.set_experiment(name)
@@ -82,7 +111,6 @@ def train_and_register(name, model, X_train, X_test, y_train, y_test, params, de
         print(f"   MLflow run ID : {run_id}")
 
     # Register via POST /models (mlflow_run_id only, no separate MinIO upload)
-    import json
     data = {
         "name": name,
         "version": MODEL_VERSION,
@@ -106,6 +134,7 @@ def train_and_register(name, model, X_train, X_test, y_train, y_test, params, de
 
     if response.status_code == 201:
         print(f"   Model registered via API (id={response.json()['id']})")
+        _patch_training_stats(name, y_train)
     elif response.status_code == 409:
         print(f"   Model '{name}' already exists — skipped")
     else:
@@ -115,7 +144,9 @@ def train_and_register(name, model, X_train, X_test, y_train, y_test, params, de
 
 def create_iris():
     print("\n[1/3] iris_model — RandomForest")
-    X, y = load_iris(return_X_y=True)
+    iris = load_iris()
+    X = pd.DataFrame(iris.data, columns=iris.feature_names)
+    y = iris.target
     X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     train_and_register(
         name="iris_model",
@@ -129,7 +160,9 @@ def create_iris():
 
 def create_wine():
     print("\n[2/3] wine_model — LogisticRegression")
-    X, y = load_wine(return_X_y=True)
+    wine = load_wine()
+    X = pd.DataFrame(wine.data, columns=wine.feature_names)
+    y = wine.target
     X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     train_and_register(
         name="wine_model",
@@ -143,7 +176,9 @@ def create_wine():
 
 def create_cancer():
     print("\n[3/3] cancer_model — DecisionTree")
-    X, y = load_breast_cancer(return_X_y=True)
+    cancer = load_breast_cancer()
+    X = pd.DataFrame(cancer.data, columns=cancer.feature_names)
+    y = cancer.target
     X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     train_and_register(
         name="cancer_model",

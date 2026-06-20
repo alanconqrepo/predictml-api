@@ -34,6 +34,31 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
+
+def _patch_training_stats(name: str, version: str, y_train, api_url: str, api_token: str) -> None:
+    """PATCH the model to store label_distribution and n_rows in training_stats."""
+    total = len(y_train)
+    label_distribution = {
+        str(int(cls)): round(float(np.sum(y_train == cls)) / total, 4)
+        for cls in np.unique(y_train)
+    }
+    patch_body = {
+        "training_stats": {
+            "label_distribution": label_distribution,
+            "n_rows": total,
+        }
+    }
+    resp = requests.patch(
+        f"{api_url}/models/{name}/{version}",
+        headers={"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"},
+        json=patch_body,
+        timeout=30,
+    )
+    if resp.status_code == 200:
+        print(f"   training_stats stored (label_distribution: {label_distribution})")
+    else:
+        print(f"   [WARN] PATCH training_stats failed ({resp.status_code}): {resp.text[:120]}")
+
 MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "localhost:9000")
 MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
@@ -162,6 +187,7 @@ def train_and_register(
 
     if response.status_code == 201:
         print(f"   Model registered via API (id={response.json()['id']})")
+        _patch_training_stats(name, MODEL_VERSION, y_train, API_URL, API_TOKEN)
     elif response.status_code == 409:
         print(f"   Model '{name}' already exists — skipped")
     else:
@@ -176,7 +202,9 @@ def train_and_register(
 
 def create_iris_advanced():
     print("\n[1/4] iris_advanced_model — RandomForest + StandardScaler")
-    X, y = load_iris(return_X_y=True)
+    iris = load_iris()
+    X = pd.DataFrame(iris.data, columns=iris.feature_names)
+    y = iris.target
     X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     pipeline = make_numeric_pipeline(RandomForestClassifier(n_estimators=200, random_state=42))
     train_and_register(
@@ -201,7 +229,9 @@ def create_iris_advanced():
 
 def create_wine_advanced():
     print("\n[2/4] wine_advanced_model — LogisticRegression + StandardScaler")
-    X, y = load_wine(return_X_y=True)
+    wine = load_wine()
+    X = pd.DataFrame(wine.data, columns=wine.feature_names)
+    y = wine.target
     X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     pipeline = make_numeric_pipeline(
         LogisticRegression(C=1.0, max_iter=5000, solver="lbfgs", random_state=42)
@@ -230,7 +260,9 @@ def create_wine_advanced():
 
 def create_cancer_advanced():
     print("\n[3/4] cancer_advanced_model — GradientBoosting + StandardScaler")
-    X, y = load_breast_cancer(return_X_y=True)
+    cancer = load_breast_cancer()
+    X = pd.DataFrame(cancer.data, columns=cancer.feature_names)
+    y = cancer.target
     X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     pipeline = make_numeric_pipeline(
         GradientBoostingClassifier(
@@ -361,14 +393,23 @@ def create_loan_model():
     score += rng.uniform(-0.1, 0.1, n)
     approved = (score > 0.5).astype(int)
 
-    X = np.column_stack([age, income, loan_amount, employment, education, credit])
+    NUMERIC_COLS = ["age", "income", "loan_amount"]
+    CATEGORICAL_COLS = ["employment", "education", "credit_score"]
+    X = pd.DataFrame({
+        "age": age,
+        "income": income,
+        "loan_amount": loan_amount,
+        "employment": employment,
+        "education": education,
+        "credit_score": credit,
+    })
     y = approved
 
     X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
     pipeline = make_mixed_pipeline(
-        numeric_cols=[0, 1, 2],
-        categorical_cols=[3, 4, 5],
+        numeric_cols=NUMERIC_COLS,
+        categorical_cols=CATEGORICAL_COLS,
         estimator=GradientBoostingClassifier(
             n_estimators=100, max_depth=3, learning_rate=0.1, random_state=42
         ),

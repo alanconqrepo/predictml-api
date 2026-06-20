@@ -949,7 +949,7 @@ async def get_model_drift(
 @router.get("/models/{name}/output-drift", response_model=OutputDriftResponse)
 async def get_model_output_drift(
     name: ModelNamePath,
-    period_days: int = Query(7, ge=1, le=90, description="Time window in days"),
+    period_days: int = Query(7, ge=1, le=3650, description="Time window in days"),
     model_version: Optional[str] = Query(
         None,
         description="Model version (default: production/latest)",
@@ -1168,7 +1168,8 @@ async def get_feature_importance(
         if not feature_set.issubset(set(input_features.keys())):
             continue
         try:
-            x = np.array([[input_features[f] for f in feature_names]], dtype=float)
+            import pandas as _pd
+            x = _pd.DataFrame([{f: input_features[f] for f in feature_names}])
             prediction_result = pred.prediction_result
             explanation = compute_shap_explanation(
                 model=model,
@@ -2420,7 +2421,8 @@ async def _build_feature_importance_section(
             if not feature_set.issubset(set(input_features.keys())):
                 continue
             try:
-                x = np.array([[input_features[f] for f in feature_names]], dtype=float)
+                import pandas as _pd
+                x = _pd.DataFrame([{f: input_features[f] for f in feature_names}])
                 explanation = compute_shap_explanation(
                     model=model,
                     feature_names=feature_names,
