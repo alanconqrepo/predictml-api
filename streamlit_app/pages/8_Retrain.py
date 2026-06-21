@@ -233,7 +233,8 @@ with tab_manual:
             else:
                 with st.spinner(t("retrain.manual.spinner")):
                     try:
-                        result = client.retrain_model(
+                        import time as _time
+                        enqueued = client.retrain_model(
                             name=sel["name"],
                             version=sel["version"],
                             start_date=str(start_date),
@@ -241,6 +242,25 @@ with tab_manual:
                             new_version=new_version_input.strip() or None,
                             set_production=set_prod,
                         )
+                        job_id = enqueued["job_id"]
+                        _TERMINAL = {"success", "failed", "cancelled"}
+                        _deadline = _time.monotonic() + 750
+                        job = enqueued
+                        while job.get("status") not in _TERMINAL:
+                            if _time.monotonic() > _deadline:
+                                break
+                            _time.sleep(3)
+                            job = client.get_job_status(job_id)
+                        _job_result = job.get("result") or {}
+                        result = {
+                            "success": job.get("status") == "success",
+                            "new_version": job.get("new_version") or _job_result.get("new_version"),
+                            "error": job.get("error"),
+                            "stdout": job.get("logs", ""),
+                            "stderr": "",
+                            "auto_promoted": _job_result.get("auto_promoted"),
+                            "auto_promote_reason": _job_result.get("auto_promote_reason"),
+                        }
                         if result.get("success"):
                             st.toast(
                                 t("retrain.manual.toast_success", new_version=result['new_version']),
