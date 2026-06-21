@@ -648,16 +648,15 @@ async def do_retrain(  # noqa: C901 — complexity inherent to the pipeline
 
         # Update last_run_at / next_run_at for scheduled retrains
         if trigger == "scheduler":
-            from apscheduler.triggers.cron import CronTrigger
+            from croniter import croniter as _croniter
 
             sched = source_fields.get("retrain_schedule") or {}
             cron_expr = sched.get("cron", "")
             next_run = None
-            if cron_expr:
+            if cron_expr and _croniter.is_valid(cron_expr):
                 try:
-                    _trigger = CronTrigger.from_crontab(cron_expr, timezone="UTC")
-                    _next = _trigger.get_next_fire_time(None, now_utc)
-                    next_run = _next.replace(tzinfo=None) if _next else None
+                    it = _croniter(cron_expr, now_utc)
+                    next_run = it.get_next(datetime).replace(tzinfo=None)
                 except Exception:
                     pass
 

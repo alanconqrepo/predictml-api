@@ -328,9 +328,14 @@ async def run_alert_check() -> None:
                                 + timedelta(hours=cooldown_hours)
                             )
                             if cooldown_ok:
-                                from src.tasks.retrain_scheduler import _run_retrain_job
+                                from src.core.arq_pool import get_arq_pool
 
-                                asyncio.create_task(_run_retrain_job(model_name, prod_meta.version))
+                                pool = await get_arq_pool()
+                                await pool.enqueue_job(
+                                    "scheduled_retrain_task",
+                                    model_name=model_name,
+                                    source_version=prod_meta.version,
+                                )
                                 logger.info(
                                     "Retrain triggered by drift",
                                     model=model_name,
