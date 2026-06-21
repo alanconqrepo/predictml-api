@@ -89,7 +89,7 @@ with tab_overview:
                 t("retrain.overview.col_script"): "✅" if has_script else "❌",
                 t("retrain.overview.col_cron"): cron,
                 t("retrain.overview.col_lookback"): lookback,
-                t("retrain.overview.col_auto_promote"): auto_promote,
+                t("retrain.overview.col_auto_promote"): "✅" if auto_promote else "❌",
                 t("retrain.overview.col_last_retrain"): (
                     pd.to_datetime(last_run).strftime("%Y-%m-%d %H:%M") if last_run else "—"
                 ),
@@ -136,7 +136,7 @@ with tab_overview:
                 help=t("retrain.overview.help_lookback"),
                 format="%d j",
             ),
-            col_auto_promote: st.column_config.CheckboxColumn(
+            col_auto_promote: st.column_config.TextColumn(
                 col_auto_promote,
                 help=t("retrain.overview.help_auto_promote"),
             ),
@@ -751,11 +751,11 @@ with tab_history:
 
         with st.spinner(t("retrain.history.fi_spinner")):
             try:
-                fi_baseline = client.get_feature_importance(hist_model_name, version=source_version)
+                fi_baseline = client.get_feature_importance(hist_model_name, version=source_version, days=365)
             except Exception as exc:
                 fi_error_baseline = str(exc)
             try:
-                fi_new = client.get_feature_importance(hist_model_name, version=new_version)
+                fi_new = client.get_feature_importance(hist_model_name, version=new_version, days=365)
             except Exception as exc:
                 fi_error_new = str(exc)
 
@@ -775,6 +775,20 @@ with tab_history:
             new_fi = fi_new.get("feature_importance") or {}
             baseline_sample = fi_baseline.get("sample_size", 0)
             new_sample = fi_new.get("sample_size", 0)
+
+            # Fallback: use model-metadata feature_importances when no SHAP predictions available
+            def _meta_fi(version_str):
+                meta = next(
+                    (m for m in models if m["name"] == hist_model_name and str(m.get("version", "")) == str(version_str or "")),
+                    None,
+                )
+                raw = (meta or {}).get("feature_importances") or {}
+                return {f: {"mean_abs_shap": v} for f, v in raw.items()} if raw else {}
+
+            if not baseline_fi:
+                baseline_fi = _meta_fi(source_version)
+            if not new_fi:
+                new_fi = _meta_fi(new_version)
 
             all_features = set(baseline_fi.keys()) | set(new_fi.keys())
 
