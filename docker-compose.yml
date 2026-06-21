@@ -619,6 +619,7 @@ services:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-4-6}
       # Alertes e-mail — reflétées depuis l'API pour affichage sur la page Services
       - ENABLE_EMAIL_ALERTS=${ENABLE_EMAIL_ALERTS:-false}
       - WEEKLY_REPORT_ENABLED=${WEEKLY_REPORT_ENABLED:-false}

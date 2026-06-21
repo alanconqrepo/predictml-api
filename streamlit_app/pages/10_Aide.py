@@ -39,7 +39,7 @@ def _src_popup(filename: str, content: str) -> None:
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
-MODEL_ID = "claude-sonnet-4-6"
+MODEL_ID = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
 QUICK_TOPICS = [
     (
@@ -263,7 +263,7 @@ system_prompt = build_system_prompt(docs, snippets)
 anthropic_client = get_anthropic_client()
 
 # URL and token of the current session
-_api_url: str = st.session_state.get("api_url", "http://localhost:8000")
+_api_url: str = st.session_state.get("api_url", os.environ.get("API_URL", "http://localhost:8000"))
 _token: str = st.session_state.get("api_token", "")
 
 # ── Header ────────────────────────────────────────────────────────────────────
