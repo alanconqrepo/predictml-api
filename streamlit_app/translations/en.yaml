@@ -170,13 +170,15 @@ stats:
     col_date_start_help: Date of the first prediction recorded with this version in production (all time).
     col_date_end: Version end
     col_date_end_help: Date of the last prediction recorded with this version in production (all time).
-    col_accuracy_help: Proportion of correct predictions on the test set (classification).
-      Between 0 and 1 — closer to 1 is better.
+    col_accuracy_help: Model accuracy in production. Computed from predictions in
+      the selected period with available observed results (classification). Between
+      0 and 1 — closer to 1 is better.
     col_auc_help: Area under the ROC curve — measures the model's discriminatory ability
       independent of threshold (classification). 1.0 = perfect, 0.5 = random. Requires
       predicted probabilities.
-    col_f1_help: Harmonic mean of precision/recall on the test set (classification).
-      Robust to imbalanced classes. Between 0 and 1.
+    col_f1_help: Model F1-score in production. Computed from predictions in the
+      selected period with available observed results. Robust to imbalanced classes.
+      Between 0 and 1.
     col_mae_help: Mean Absolute Error (regression). Average absolute deviation between
       prediction and actual value, expressed in the unit of the target variable — lower
       is better. Sorted ascending when selected. '—' for classification models.

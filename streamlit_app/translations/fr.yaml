@@ -173,12 +173,14 @@ stats:
     col_date_start_help: Date de la première prédiction enregistrée avec cette version en production (toutes périodes confondues).
     col_date_end: Fin version
     col_date_end_help: Date de la dernière prédiction enregistrée avec cette version en production (toutes périodes confondues).
-    col_accuracy_help: Proportion de prédictions correctes sur le jeu de test (classification).
-      Entre 0 et 1 — plus c'est proche de 1, meilleur est le modèle.
+    col_accuracy_help: Précision du modèle en production. Calculée sur les prédictions
+      de la période sélectionnée pour lesquelles un résultat observé est disponible
+      (classification). Entre 0 et 1 — plus c'est proche de 1, meilleur est le modèle.
     col_auc_help: Aire sous la courbe ROC — mesure la capacité discriminatoire du
       modèle indépendamment du seuil (classification). 1.0 = parfait, 0.5 = aléatoire.
       Requiert des probabilités prédites.
-    col_f1_help: Moyenne harmonique précision/rappel sur le jeu de test (classification).
+    col_f1_help: F1-score du modèle en production. Calculé sur les prédictions de
+      la période sélectionnée pour lesquelles un résultat observé est disponible.
       Robuste aux classes déséquilibrées. Entre 0 et 1.
     col_mae_help: Mean Absolute Error (régression). Écart absolu moyen entre la prédiction
       et la valeur réelle, exprimé dans l'unité de la variable cible — plus c'est faible,
