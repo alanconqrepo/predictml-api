@@ -337,9 +337,11 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                     lambda x: "✅" if x else "—"
                 )
             _col_is_prod = t("models.analysis.col_production")
-            _cols = [c for c in df_display.columns if c != _col_task]
+            _cols = [c for c in df_display.columns if c not in (_col_task, _col_status)]
             _ins = _cols.index(_col_version) + 1 if _col_version in _cols else len(_cols)
             _cols.insert(_ins, _col_task)
+            _ins_status = _cols.index(_col_task) + 1
+            _cols.insert(_ins_status, _col_status)
             df_display = df_display[_cols]
             df_display[_col_drift] = df_display[_col_drift].map(lambda x: _DRIFT_EMOJI.get(x, x))
 
