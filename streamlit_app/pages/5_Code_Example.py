@@ -15,7 +15,6 @@ st.title(t("code_example.title"))
 st.caption(t("code_example.intro"))
 
 API_URL = st.session_state.get("api_url", "http://localhost:8000")
-TOKEN = st.session_state.get("api_token", "VOTRE_TOKEN_ICI")
 MLFLOW_URL = os.environ.get("MLFLOW_URL", "http://localhost:5000")
 
 # ── Mode toggle ──────────────────────────────────────────────────────────────
@@ -222,10 +221,13 @@ print(json.dumps(output))   # MUST be the very last print
     with st.expander(t("code_example.python.section2_title"), expanded=False):
         if not is_complete:
             code_upload = f"""\
+import os
 import requests
+from dotenv import load_dotenv
 
+load_dotenv()
 API_URL = "{API_URL}"
-API_TOKEN = "{TOKEN}"
+API_TOKEN = os.getenv("PREDICTML_API_TOKEN")
 MODEL_NAME = "iris-classifier"
 MODEL_VERSION = "1.0.0"
 
@@ -263,10 +265,12 @@ print("Version set to production.")
 """
         else:
             code_upload = f"""\
-import json, requests
+import json, os, requests
+from dotenv import load_dotenv
 
+load_dotenv()
 API_URL = "{API_URL}"
-API_TOKEN = "{TOKEN}"
+API_TOKEN = os.getenv("PREDICTML_API_TOKEN")
 MODEL_NAME = "iris-classifier"
 MODEL_VERSION = "1.0.0"
 
@@ -345,10 +349,13 @@ print("Set to production (ab_test, 50 % traffic, confidence_threshold=0.60).")
     with st.expander(t("code_example.python.section3_title"), expanded=False):
         if not is_complete:
             code_predict = f"""\
+import os
 import requests
+from dotenv import load_dotenv
 
+load_dotenv()
 API_URL = "{API_URL}"
-API_TOKEN = "{TOKEN}"
+API_TOKEN = os.getenv("PREDICTML_API_TOKEN")
 headers = {{"Authorization": f"Bearer {{API_TOKEN}}"}}
 
 payload = {{
@@ -371,10 +378,13 @@ print(f"Probabilities: {{result.get('probability')}}")
 """
         else:
             code_predict = f"""\
+import os
 import requests
+from dotenv import load_dotenv
 
+load_dotenv()
 API_URL = "{API_URL}"
-API_TOKEN = "{TOKEN}"
+API_TOKEN = os.getenv("PREDICTML_API_TOKEN")
 headers = {{"Authorization": f"Bearer {{API_TOKEN}}"}}
 
 # ── Single prediction — specific version + SHAP explanation ──────────────────
@@ -440,11 +450,14 @@ print(f"valid={{val_result['valid']}}  errors={{val_result['errors']}}")
         st.markdown(t("code_example.python.section4_caption"))
         if not is_complete:
             code_observed = f"""\
+import os
 import requests
 from datetime import datetime
+from dotenv import load_dotenv
 
+load_dotenv()
 API_URL = "{API_URL}"
-API_TOKEN = "{TOKEN}"
+API_TOKEN = os.getenv("PREDICTML_API_TOKEN")
 headers = {{"Authorization": f"Bearer {{API_TOKEN}}"}}
 
 payload = {{
@@ -464,10 +477,13 @@ print(f"{{response.json()['upserted']}} result(s) recorded.")
 """
         else:
             code_observed = f"""\
+import os
 import requests
+from dotenv import load_dotenv
 
+load_dotenv()
 API_URL = "{API_URL}"
-API_TOKEN = "{TOKEN}"
+API_TOKEN = os.getenv("PREDICTML_API_TOKEN")
 headers = {{"Authorization": f"Bearer {{API_TOKEN}}"}}
 
 # ── Batch submit observed results ─────────────────────────────────────────────
@@ -519,8 +535,9 @@ with tab_curl:
         if not is_complete:
             code_curl_upload = f"""\
 #!/usr/bin/env bash
+source .env  # charge PREDICTML_API_TOKEN depuis .env
 API_URL="{API_URL}"
-TOKEN="{TOKEN}"
+TOKEN="${{PREDICTML_API_TOKEN}}"
 
 curl -X POST "$API_URL/models" \\
   -H "Authorization: Bearer $TOKEN" \\
@@ -537,8 +554,9 @@ curl -X POST "$API_URL/models" \\
         else:
             code_curl_upload = f"""\
 #!/usr/bin/env bash
+source .env  # charge PREDICTML_API_TOKEN depuis .env
 API_URL="{API_URL}"
-TOKEN="{TOKEN}"
+TOKEN="${{PREDICTML_API_TOKEN}}"
 
 # ── Upload model + training script ────────────────────────────────────────────
 # train_file enables automatic / scheduled retraining from the dashboard
@@ -577,8 +595,9 @@ curl -X PATCH "$API_URL/models/iris-classifier/1.0.0" \\
     with st.expander(t("code_example.curl.section2_title"), expanded=False):
         if not is_complete:
             code_curl_predict = f"""\
+source .env  # charge PREDICTML_API_TOKEN depuis .env
 API_URL="{API_URL}"
-TOKEN="{TOKEN}"
+TOKEN="${{PREDICTML_API_TOKEN}}"
 
 curl -X POST "$API_URL/predict" \\
   -H "Authorization: Bearer $TOKEN" \\
@@ -596,8 +615,9 @@ curl -X POST "$API_URL/predict" \\
 """
         else:
             code_curl_predict = f"""\
+source .env  # charge PREDICTML_API_TOKEN depuis .env
 API_URL="{API_URL}"
-TOKEN="{TOKEN}"
+TOKEN="${{PREDICTML_API_TOKEN}}"
 
 # ── Single prediction — specific version + SHAP explanation ──────────────────
 curl -X POST "$API_URL/predict?explain=true" \\
@@ -648,8 +668,9 @@ curl -X POST "$API_URL/predict?strict_validation=true" \\
     with st.expander(t("code_example.curl.section3_title"), expanded=False):
         if not is_complete:
             code_curl_history = f"""\
+source .env  # charge PREDICTML_API_TOKEN depuis .env
 API_URL="{API_URL}"
-TOKEN="{TOKEN}"
+TOKEN="${{PREDICTML_API_TOKEN}}"
 
 curl -G "$API_URL/predictions" \\
   -H "Authorization: Bearer $TOKEN" \\
@@ -658,8 +679,9 @@ curl -G "$API_URL/predictions" \\
 """
         else:
             code_curl_history = f"""\
+source .env  # charge PREDICTML_API_TOKEN depuis .env
 API_URL="{API_URL}"
-TOKEN="{TOKEN}"
+TOKEN="${{PREDICTML_API_TOKEN}}"
 
 # ── Prediction history — id-based cursor pagination ───────────────────────────
 curl -G "$API_URL/predictions" \\
@@ -695,8 +717,9 @@ curl -X DELETE -G "$API_URL/predictions/purge" \\
     with st.expander(t("code_example.curl.section4_title"), expanded=False):
         if not is_complete:
             code_curl_observed = f"""\
+source .env  # charge PREDICTML_API_TOKEN depuis .env
 API_URL="{API_URL}"
-TOKEN="{TOKEN}"
+TOKEN="${{PREDICTML_API_TOKEN}}"
 
 curl -X POST "$API_URL/observed-results" \\
   -H "Authorization: Bearer $TOKEN" \\
@@ -714,8 +737,9 @@ curl -X POST "$API_URL/observed-results" \\
 """
         else:
             code_curl_observed = f"""\
+source .env  # charge PREDICTML_API_TOKEN depuis .env
 API_URL="{API_URL}"
-TOKEN="{TOKEN}"
+TOKEN="${{PREDICTML_API_TOKEN}}"
 
 # ── Batch submit observed results ─────────────────────────────────────────────
 curl -X POST "$API_URL/observed-results" \\
@@ -753,8 +777,9 @@ with tab_js:
         st.markdown(t("code_example.js.section1_caption"))
         if not is_complete:
             code_js_upload = f"""\
+import 'dotenv/config'; // npm install dotenv
 const API_URL = "{API_URL}";
-const TOKEN = "{TOKEN}";
+const TOKEN = process.env.PREDICTML_API_TOKEN;
 
 // fileInput is an <input type="file"> element in your HTML page
 const modelFile = fileInput.files[0];
@@ -780,8 +805,9 @@ console.log(`Uploaded: ${{model.name}} v${{model.version}}`);
 """
         else:
             code_js_upload = f"""\
+import 'dotenv/config'; // npm install dotenv
 const API_URL = "{API_URL}";
-const TOKEN = "{TOKEN}";
+const TOKEN = process.env.PREDICTML_API_TOKEN;
 
 // modelInput / trainInput are <input type="file"> elements
 const modelFile = modelInput.files[0];
@@ -839,8 +865,9 @@ console.log("Set to production (ab_test, 50 % traffic).");
     with st.expander(t("code_example.js.section2_title"), expanded=False):
         if not is_complete:
             code_js_predict = f"""\
+import 'dotenv/config'; // npm install dotenv
 const API_URL = "{API_URL}";
-const TOKEN = "{TOKEN}";
+const TOKEN = process.env.PREDICTML_API_TOKEN;
 
 const response = await fetch(`${{API_URL}}/predict`, {{
   method: "POST",
@@ -865,8 +892,9 @@ console.log(`Probabilities:`, result.probability);
 """
         else:
             code_js_predict = f"""\
+import 'dotenv/config'; // npm install dotenv
 const API_URL = "{API_URL}";
-const TOKEN = "{TOKEN}";
+const TOKEN = process.env.PREDICTML_API_TOKEN;
 
 // ── Single prediction — specific version + SHAP explanation ──────────────────
 const response = await fetch(`${{API_URL}}/predict?explain=true`, {{
@@ -924,8 +952,9 @@ console.log(`valid=${{val.valid}}`, val.errors);
     with st.expander(t("code_example.js.section3_title"), expanded=False):
         if not is_complete:
             code_js_history = f"""\
+import 'dotenv/config'; // npm install dotenv
 const API_URL = "{API_URL}";
-const TOKEN = "{TOKEN}";
+const TOKEN = process.env.PREDICTML_API_TOKEN;
 
 const params = new URLSearchParams({{ model_name: "iris-classifier", limit: "10" }});
 const response = await fetch(`${{API_URL}}/predictions?${{params}}`, {{
@@ -936,8 +965,9 @@ console.log(`${{history.total}} prediction(s) total`);
 """
         else:
             code_js_history = f"""\
+import 'dotenv/config'; // npm install dotenv
 const API_URL = "{API_URL}";
-const TOKEN = "{TOKEN}";
+const TOKEN = process.env.PREDICTML_API_TOKEN;
 
 // ── Prediction history — id-based cursor pagination ───────────────────────────
 const params = new URLSearchParams({{
@@ -969,8 +999,9 @@ stats.stats.forEach(s => {{
     with st.expander(t("code_example.js.section4_title"), expanded=False):
         if not is_complete:
             code_js_observed = f"""\
+import 'dotenv/config'; // npm install dotenv
 const API_URL = "{API_URL}";
-const TOKEN = "{TOKEN}";
+const TOKEN = process.env.PREDICTML_API_TOKEN;
 
 const response = await fetch(`${{API_URL}}/observed-results`, {{
   method: "POST",
@@ -994,8 +1025,9 @@ console.log(`${{result.upserted}} result(s) recorded.`);
 """
         else:
             code_js_observed = f"""\
+import 'dotenv/config'; // npm install dotenv
 const API_URL = "{API_URL}";
-const TOKEN = "{TOKEN}";
+const TOKEN = process.env.PREDICTML_API_TOKEN;
 
 // ── Batch submit observed results ─────────────────────────────────────────────
 // Matched by id_obs — powers live accuracy, AUC and confusion matrix.

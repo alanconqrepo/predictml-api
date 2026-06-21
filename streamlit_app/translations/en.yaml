@@ -144,6 +144,7 @@ stats:
       accuracy: Accuracy
       auc: AUC-ROC
       f1_score: F1 Score
+      mae: MAE (regression)
       r2: R² (regression)
       rmse: RMSE (regression)
       latency_p95_ms: p95 latency
@@ -157,11 +158,18 @@ stats:
     col_accuracy: Accuracy
     col_auc: AUC-ROC
     col_f1: F1 Score
+    col_mae: MAE
     col_r2: R²
     col_rmse: RMSE
     col_latency: p95 Latency (ms)
     col_drift: Drift
-    col_predictions: Predictions ({days}d)
+    col_predictions: Model predictions ({days}d)
+    col_version_predictions: "Version predictions ({days}d)"
+    col_version_predictions_help: "Number of predictions made by this specific version over the last {days} days. Compare with « Model predictions » which totals all versions combined."
+    col_date_start: Version start
+    col_date_start_help: Date of the first prediction recorded with this version in production (all time).
+    col_date_end: Version end
+    col_date_end_help: Date of the last prediction recorded with this version in production (all time).
     col_accuracy_help: Proportion of correct predictions on the test set (classification).
       Between 0 and 1 — closer to 1 is better.
     col_auc_help: Area under the ROC curve — measures the model's discriminatory ability
@@ -169,6 +177,9 @@ stats:
       predicted probabilities.
     col_f1_help: Harmonic mean of precision/recall on the test set (classification).
       Robust to imbalanced classes. Between 0 and 1.
+    col_mae_help: Mean Absolute Error (regression). Average absolute deviation between
+      prediction and actual value, expressed in the unit of the target variable — lower
+      is better. Sorted ascending when selected. '—' for classification models.
     col_r2_help: 'R² coefficient of determination (regression). Measures the share
       of variance explained by the model: 1.0 = perfect, 0.0 = null model, < 0 = worse
       than average. ''—'' for classification models.'
@@ -185,10 +196,12 @@ stats:
     col_task: Task
     col_task_help: "Task type detected at upload: Binary (2 classes), Multiclass (≥
       3 classes), or Regression."
-    col_task_binary: Binary
-    col_task_regression: Regression
-    col_task_multiclass: Multiclass
+    col_task_binary: 🔵 Binary
+    col_task_regression: 📈 Regression
+    col_task_multiclass: 🟡 Multiclass
     col_task_unknown: "—"
+    col_status: Status
+    col_status_help: "Deployment mode of the version: A/B test, Shadow, Active or Production."
     filter_model: Filter by model
     filter_version: Filter by version
     filter_all_models: All models
@@ -199,6 +212,7 @@ stats:
     scatter_label_accuracy: Accuracy
     scatter_label_auc: AUC-ROC
     scatter_label_f1: F1 Score
+    scatter_label_mae: MAE
     scatter_label_r2: R²
     scatter_label_rmse: RMSE
     scatter_label_volume: Prediction volume
@@ -1678,8 +1692,8 @@ services:
     \ unavailable."
   anthropic_key_set: "✅ Anthropic API key configured"
   anthropic_model_label: Model in use
-  anthropic_model_caption: "Claude model defined in `12_AutoTrain_Chatbot.py`. To\
-    \ change the model, update the `MODEL_ID` constant in that file."
+  anthropic_model_caption: "Claude model read from the `ANTHROPIC_MODEL` environment\
+    \ variable (`.env`). Default: `claude-sonnet-4-6`."
 golden_tests:
   page_title: Golden Tests — PredictML
   title: 🧪 Golden Tests
@@ -1704,6 +1718,8 @@ golden_tests:
   col_expected_output_help: Expected model output for these features.
   col_date: Date
   col_date_help: Date and time this test case was recorded.
+  col_created_by: Created by
+  col_created_by_help: Username of the admin who created this test case.
   tests_count: '{count} test case(s) registered.'
   run_all_btn: ▶ Run all tests on v{version}
   delete_expander: 🗑️ Delete a test case
@@ -1723,7 +1739,7 @@ golden_tests:
   received_label: '**Received**'
   diff_label: '**Diff**'
   diff_content: '`expected` → **{expected}** | `received` → **{actual}**'
-  input_used_label: '**Input used**'
+  input_used_label: Input used (JSON)
   run_error: 'Error running tests: {error}'
   section_add_test: 3. Add a test case
   admin_only: Section restricted to administrators.
@@ -1737,8 +1753,10 @@ golden_tests:
   form_expected_help: Expected model output for these features (free text)
   form_save_btn: 💾 Save
   error_invalid_json: 'Invalid JSON in features: {error}'
+  error_description_required: Description is required.
   error_expected_required: Expected output is required.
   error_features_empty: Input features cannot be empty.
+  error_expected_not_in_classes: 'Expected output must be one of the model''s known classes: {classes}.'
   save_success: Test case saved successfully.
   save_error: 'Error saving: {error}'
   csv_expander: 📥 CSV Import (batch tests)
@@ -1964,6 +1982,8 @@ retrain:
     col_version: Version
     col_script: train.py Script
     col_cron: Cron
+    col_lookback: Lookback (d)
+    col_auto_promote: Auto-promote
     col_last_retrain: Last Retrain
     col_next_retrain: Next Retrain
     col_status: Status
@@ -1973,6 +1993,8 @@ retrain:
       ❌ No script — upload one via POST /models with train_file.
     help_cron: 'Cron expression (5 fields, UTC) defining the automatic trigger. E.g.:
       ''0 3 * * 1'' = every Monday at 3:00 UTC.'
+    help_lookback: Number of history days used as training data (TRAIN_START_DATE = today - lookback).
+    help_auto_promote: If enabled, the auto-promotion policy is evaluated after each scheduled retraining.
     help_last_retrain: Date and time of the last retraining triggered by this schedule.
     help_next_retrain: Scheduled date and time of the next automatic trigger.
     help_status: '🟢 Active: the schedule is enabled and will run automatically. 🔴
@@ -1991,6 +2013,8 @@ retrain:
     set_production: Set as production after training
     submit_btn: 🚀 Launch retraining
     error_date_order: Start date must be before end date.
+    help_new_version: "Leave empty to auto-generate a timestamped version.\n\nExpected format: X.Y.Z or X.Y.Z-suffix\n• Digits and dots for the semantic version\n• Dashes and alphanumeric chars for the suffix\n\nValid examples:\n  1.3.0\n  1.3.0-retrain-20260621\n  2.0.0-custom\n\nForbidden characters: spaces, underscores, @, /, etc."
+    error_version_format: 'Invalid format. Examples: 1.2.0 · 1.2.0-retrain-20260621 · 2.0.0-custom. Allowed characters: digits, dots, dashes and letters.'
     spinner: Retraining in progress… (may take up to 10 minutes)
     toast_success: 'Retraining successful! New version: {new_version}'
     auto_promoted_yes: ✅ Auto-promotion applied — the new version is in production.
@@ -2022,6 +2046,14 @@ retrain:
       '
     select_model: Model to schedule
     current_schedule: '**Current schedule:**'
+    field_enabled_on: "✅ Active"
+    field_enabled_off: "⬜ Paused"
+    field_lookback_label: Lookback
+    field_auto_promote_label: Auto-promotion
+    field_last_run_label: Last run
+    field_next_run_label: Next run
+    field_yes: "✅ Yes"
+    field_no: "⬜ No"
     cron_label: Cron expression (5 fields, UTC)
     cron_help: Leave empty to disable without clearing the expression
     lookback_label: History window lookback_days
@@ -2039,18 +2071,51 @@ retrain:
     caption: The policy applies to all active versions of the selected model.
     model_label: Model
     current_policy: '**Current policy:**'
-    no_policy: No auto-promotion policy defined for this model.
-    enable_min_accuracy: Enable min_accuracy
-    help_min_accuracy: Minimum accuracy required on (prediction, observed result)
-      pairs
-    enable_max_latency: Enable max_latency_p95_ms
-    help_max_latency: Maximum allowed P95 latency in ms
-    enable_max_mae: Enable max_mae
-    help_max_mae: Maximum allowed mean absolute error (regression models)
-    help_min_samples: Minimum number of (prediction, observed result) pairs to evaluate
-      the policy
-    enable_auto_promote: Enable auto_promote
-    help_auto_promote: If disabled, the policy is stored but never evaluated automatically
+    no_policy: No auto-promotion policy defined for this model yet. Fill in the form
+      below to create one.
+    current_policy_title: "**Current policy for {name}:**"
+    field_not_set: "—"
+    field_auto_promote_label: Auto-promotion
+    field_auto_promote_on: "✅ Active"
+    field_auto_promote_off: "⬜ Inactive"
+    field_min_accuracy_label: Min. accuracy
+    field_min_auc_label: Min. AUC
+    field_max_mae_label: Max. MAE
+    field_max_latency_label: Max. P95 latency
+    field_min_samples_label: Min. samples
+    form_intro: "After each retraining, the new model version is automatically promoted
+      to production **only if all activated criteria below are met**. Check a box
+      to activate a criterion; uncheck it to ignore it."
+    section_activation: Activation
+    section_performance: Performance criteria
+    section_speed: Speed criteria
+    section_validation: Validation threshold
+    label_auto_promote: Enable automatic promotion after each retraining
+    label_min_accuracy: "Minimum accuracy required (0.0 → 1.0)"
+    label_min_auc: "Minimum AUC-ROC (0.5 → 1.0)"
+    label_max_mae: "Maximum MAE — mean absolute error (0.0 → 1.0)"
+    label_max_latency: Maximum P95 response time (ms)
+    label_min_samples: Minimum number of validation pairs required
+    enable_min_accuracy: Activate the accuracy criterion
+    help_min_accuracy: "The retrained model must reach at least this accuracy on (prediction,
+      observed result) pairs. Example: 0.90 = 90% of predictions correct."
+    enable_min_auc: "Activate the AUC criterion (binary classification only)"
+    help_min_auc: "Area Under the ROC Curve — measures the model's ability to distinguish
+      between two classes. 1.0 = perfect, 0.5 = random. Requires predicted probabilities
+      to be stored. Example: 0.80."
+    enable_max_latency: Activate the latency criterion
+    help_max_latency: "95% of predictions must be served in under this time. Example:
+      200 ms."
+    enable_max_mae: Activate the MAE criterion (regression models only)
+    help_max_mae: "For regression models: the mean absolute error must stay below
+      this threshold (0.0 → 1.0 for normalized errors). Example: 0.05."
+    help_min_samples: "Minimum number of (prediction, observed result) pairs needed
+      to evaluate the policy. Below this count, auto-promotion is skipped even if
+      all criteria would be met."
+    enable_auto_promote: Enable auto-promotion
+    help_auto_promote: "When enabled, the criteria above are evaluated automatically
+      after each retraining. If all activated criteria are met, the new version is
+      promoted to production without manual intervention."
     save_btn: 💾 Save policy
     toast_saved: Policy saved for {name} ({updated} version(s) updated).
     toast_error: 'Error saving policy: {error}'
@@ -2378,6 +2443,7 @@ models:
   detail_last_pred: "**Last prediction:** {value}"
   detail_classes: "**Classes:** {value}"
   detail_confidence_threshold: "**Confidence threshold:** {value}"
+  detail_confidence_threshold_help: "Minimum confidence score (0–1) below which a prediction is flagged as uncertain. If the model's top-class probability is below this threshold, the prediction is marked with a warning in the response. Set via ⚙️ Edit metadata."
   detail_hyperparams: "**Hyperparameters:**"
   detail_hyperparams_empty: "**Hyperparameters:** —"
   detail_param_col: "Parameter"
@@ -2815,3 +2881,18 @@ autotrain:
   dates:
     train_start: Training start date
     train_end: Training end date
+nav_pages:
+  home: Home
+  users: Users
+  models: Models
+  predictions: Predictions
+  stats: Statistics
+  ab_testing: A/B Testing
+  supervision: Supervision
+  retrain: Retraining
+  golden_tests: Golden Tests
+  help: Help
+  code_example: Code Example
+  services: Services
+  login: Login
+  access_request: Access Request

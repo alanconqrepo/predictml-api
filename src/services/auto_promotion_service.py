@@ -24,6 +24,7 @@ from src.db.models.model_metadata import ModelMetadata
 from src.services import drift_service
 from src.services.db_service import DBService
 from src.services.email_service import email_service
+from src.services.metrics_service import compute_auc
 
 logger = structlog.get_logger(__name__)
 
@@ -66,6 +67,7 @@ async def evaluate_auto_promotion(
        successful predictions → not promoted if P95 > threshold.
     """
     min_accuracy: Optional[float] = policy.get("min_accuracy")
+    min_auc: Optional[float] = policy.get("min_auc")
     max_mae: Optional[float] = policy.get("max_mae")
     max_latency_p95_ms: Optional[float] = policy.get("max_latency_p95_ms")
     min_sample_validation: int = int(policy.get("min_sample_validation", 10))
@@ -106,6 +108,16 @@ async def evaluate_auto_promotion(
                 return (
                     False,
                     (f"Insufficient accuracy: {accuracy:.4f} " f"< {min_accuracy:.4f} required."),
+                )
+
+        if min_auc is not None:
+            y_true = [obs for _, obs, _, _ in recent]
+            y_prob = [prob for _, _, prob, _ in recent]
+            auc = compute_auc(y_true, y_prob)
+            if auc is not None and auc < min_auc:
+                return (
+                    False,
+                    f"Insufficient AUC: {auc:.4f} < {min_auc:.4f} required.",
                 )
 
     # --- P95 latency check ---

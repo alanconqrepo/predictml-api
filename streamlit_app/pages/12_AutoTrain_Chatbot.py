@@ -28,7 +28,7 @@ require_admin()
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 
-MODEL_ID = "claude-sonnet-4-6"
+MODEL_ID = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
 _DEFAULT_START = (date.today() - timedelta(days=90)).isoformat()
 _DEFAULT_END = date.today().isoformat()

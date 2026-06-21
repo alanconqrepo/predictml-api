@@ -350,6 +350,7 @@ class APIClient:
 
         auto_promote: bool = False,
         min_accuracy: Optional[float] = None,
+        min_auc: Optional[float] = None,
         max_mae: Optional[float] = None,
         max_latency_p95_ms: Optional[float] = None,
         min_sample_validation: int = 10,
@@ -367,6 +368,7 @@ class APIClient:
             json={
                 "auto_promote": auto_promote,
                 "min_accuracy": min_accuracy,
+                "min_auc": min_auc,
                 "max_mae": max_mae,
                 "max_latency_p95_ms": max_latency_p95_ms,
                 "min_sample_validation": min_sample_validation,

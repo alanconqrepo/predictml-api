@@ -443,6 +443,7 @@ class PromotionPolicy(BaseModel):
     """Auto-promotion policy applied after retraining"""
 
     min_accuracy: Optional[float] = Field(None, ge=0.0, le=1.0)
+    min_auc: Optional[float] = Field(None, ge=0.0, le=1.0)
     max_mae: Optional[float] = Field(None, gt=0.0)
     max_latency_p95_ms: Optional[float] = Field(None, gt=0.0)
     min_sample_validation: int = Field(10, ge=1)
@@ -894,10 +895,14 @@ class LeaderboardEntry(BaseModel):
     accuracy: Optional[float] = None
     auc: Optional[float] = None
     f1_score: Optional[float] = None
+    mae: Optional[float] = None
     r2: Optional[float] = None
     rmse: Optional[float] = None
     latency_p95_ms: Optional[float] = None
     drift_status: str = "unknown"
     predictions_count: int = 0
+    version_predictions_count: int = 0
+    first_prediction_at: Optional[datetime] = None
+    last_prediction_at: Optional[datetime] = None
     deployment_mode: Optional[str] = None
     is_production: bool = False
