@@ -1069,6 +1069,22 @@ supervision:
     alerts_create_header: '**➕ Configure thresholds for a version**'
     alerts_create_select: Model and version to configure
     health_subheader: 🏥 Health by model
+  alert_digest:
+    subheader: 🚨 Alert Digest
+    caption: Models in warning or critical state — detailed trigger breakdown.
+    no_triggers: No specific trigger identified.
+    status_critical: CRITICAL
+    status_warning: WARNING
+    dim_error_rate: Error rate
+    dim_feature_drift: Feature drift
+    dim_performance_drift: Performance drift
+    dim_output_drift: Output drift
+    trigger_error_rate: "{value}% (threshold ≥ {threshold}%)"
+    trigger_feature_drift: "{count} feature(s) drifted"
+    trigger_performance_drift_warning: "Performance drop ≥ 5 pp (1st vs 2nd half)"
+    trigger_performance_drift_critical: "Performance drop ≥ 10 pp (1st vs 2nd half)"
+    trigger_output_drift_warning: "Output distribution shifted — PSI ≥ 0.1"
+    trigger_output_drift_critical: "Output distribution shifted — PSI ≥ 0.2"
   health_table:
     col_model: Model
     col_versions: Versions

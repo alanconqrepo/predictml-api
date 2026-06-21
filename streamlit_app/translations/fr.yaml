@@ -1089,6 +1089,22 @@ supervision:
     alerts_create_header: '**➕ Configurer les seuils d''une version**'
     alerts_create_select: Modèle et version à configurer
     health_subheader: 🏥 Santé par modèle
+  alert_digest:
+    subheader: 🚨 Résumé des alertes
+    caption: Modèles en état warning ou critical — détail des déclencheurs.
+    no_triggers: Aucun déclencheur spécifique identifié.
+    status_critical: CRITIQUE
+    status_warning: ALERTE
+    dim_error_rate: Taux d'erreur
+    dim_feature_drift: Drift de features
+    dim_performance_drift: Drift de performance
+    dim_output_drift: Drift de sortie
+    trigger_error_rate: "{value} % (seuil ≥ {threshold} %)"
+    trigger_feature_drift: "{count} feature(s) en dérive"
+    trigger_performance_drift_warning: Baisse de performance ≥ 5 pp (1re vs 2e moitié)
+    trigger_performance_drift_critical: Baisse de performance ≥ 10 pp (1re vs 2e moitié)
+    trigger_output_drift_warning: Distribution de sortie modifiée — PSI ≥ 0.1
+    trigger_output_drift_critical: Distribution de sortie modifiée — PSI ≥ 0.2
   health_table:
     col_model: Modèle
     col_versions: Versions
