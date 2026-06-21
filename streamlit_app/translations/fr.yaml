@@ -638,6 +638,9 @@ home:
     alerts_label: Modèles en alerte
     alerts_label_help: Nombre de modèles dont le statut de santé est "warning" ou "critical" sur les 30 derniers jours. Vérifiez la page Supervision pour le détail.
     alerts_count: 🔴 {count}
+    alerts_critical_only: '🔴 {count} critique(s)'
+    alerts_warning_only: '⚠️ {count} warning(s)'
+    alerts_both: '🔴 {crit} crit. · ⚠️ {warn} warn.'
     alerts_none: ✅ Aucune
   kpis:
     subheader: 📊 Activité — 30 derniers jours
