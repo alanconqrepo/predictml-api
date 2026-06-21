@@ -1757,13 +1757,7 @@ async def update_retrain_schedule(
 
     Reserved for administrators.
     """
-    from apscheduler.triggers.cron import CronTrigger
-
-    from src.tasks.retrain_scheduler import (
-        _compute_next_run_at,
-        add_retrain_job,
-        remove_retrain_job,
-    )
+    from croniter import croniter as _croniter
 
     # 1. Verify the version exists
     result = await db.execute(
@@ -1782,14 +1776,13 @@ async def update_retrain_schedule(
     cron = payload.cron
     next_run_at: Optional[datetime] = None
     if cron:
-        try:
-            CronTrigger.from_crontab(cron, timezone="UTC")
-        except Exception as exc:
+        if not _croniter.is_valid(cron):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Invalid cron expression: {exc}",
+                detail=f"Invalid cron expression: '{cron}'",
             )
-        next_run_at = _compute_next_run_at(cron)
+        it = _croniter(cron, datetime.now(timezone.utc))
+        next_run_at = it.get_next(datetime).replace(tzinfo=None)
     elif payload.enabled:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -1813,12 +1806,6 @@ async def update_retrain_schedule(
     model.retrain_schedule = schedule_dict
     await db.commit()
     await db.refresh(model)
-
-    # 5. Update the live scheduler
-    if payload.enabled and cron:
-        add_retrain_job(name, version, schedule_dict)
-    else:
-        remove_retrain_job(name, version)
 
     logger.info(
         "Retraining schedule updated",

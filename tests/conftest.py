@@ -55,9 +55,7 @@ _minio_mock.async_upload_file_bytes = AsyncMock(return_value=_upload_return)
 _minio_mock.async_download_file_bytes = AsyncMock(return_value=b"fake-model-bytes")
 
 import src.api.models  # noqa: E402 — must be imported before patching
-import src.tasks.retrain_scheduler  # noqa: E402 — must be imported before patching
 patch("src.api.models.minio_service", _minio_mock).start()
-# Covers lazy imports from the scheduler and retrain_service
 patch("src.services.minio_service.minio_service", _minio_mock).start()
 # model_service is imported transitively by src.api.models before patching,
 # so its local binding to minio_service points to the original client.

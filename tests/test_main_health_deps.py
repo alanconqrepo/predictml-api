@@ -155,11 +155,6 @@ def test_shutdown_close_db_failure_does_not_crash():
         with (
             patch("src.main.run_migrations", new_callable=AsyncMock),
             patch("src.main.init_db", new_callable=AsyncMock),
-            patch("src.tasks.supervision_reporter.start_scheduler"),
-            patch(
-                "src.tasks.retrain_scheduler.start_retrain_scheduler",
-                new_callable=AsyncMock,
-            ),
             patch("src.main.close_db", side_effect=Exception("DB fermeture échouée")),
             patch("src.main.model_service.close", new_callable=AsyncMock),
         ):
@@ -177,11 +172,6 @@ def test_shutdown_model_service_close_failure_does_not_crash():
         with (
             patch("src.main.run_migrations", new_callable=AsyncMock),
             patch("src.main.init_db", new_callable=AsyncMock),
-            patch("src.tasks.supervision_reporter.start_scheduler"),
-            patch(
-                "src.tasks.retrain_scheduler.start_retrain_scheduler",
-                new_callable=AsyncMock,
-            ),
             patch("src.main.close_db", new_callable=AsyncMock),
             patch(
                 "src.main.model_service.close",

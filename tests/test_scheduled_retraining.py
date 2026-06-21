@@ -10,33 +10,27 @@ Covers:
   - Success: retrain_schedule stored with non-null next_run_at
   - next_run_at is in the future
   - Disable (enabled=False): schedule stored with enabled=False
-- _run_retrain_job() / _do_retrain() (job unit tests)
-  - Skip if schedule.enabled=False
-  - Skip if train_script_object_key is missing
-  - Skip if Redis lock is already held
-  - Success: new version created in database
-  - last_run_at updated after success
-  - Subprocess failure: no new version created
-- Scheduler lifecycle
-  - start_retrain_scheduler() loads active jobs
-  - stop_retrain_scheduler() calls shutdown(wait=False)
+- Drift-triggered retrain
+  - Retrain enqueued to ARQ on critical drift + expired cooldown
+  - No retrain when drift below threshold
+  - No retrain when cooldown not expired
+  - No retrain when no train script
 """
 
 import asyncio
 import io
-import joblib
 from contextlib import asynccontextmanager
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import joblib
 from fastapi.testclient import TestClient
 from sklearn.datasets import load_iris
 from sklearn.linear_model import LogisticRegression
-from sqlalchemy import func, select
 
 from src.main import app
 from src.services.db_service import DBService
-from tests.conftest import _minio_mock, _TestSessionLocal
+from tests.conftest import _TestSessionLocal
 
 client = TestClient(app)
 
@@ -133,47 +127,6 @@ async def _setup():
 
 asyncio.run(_setup())
 
-# Configure the MinIO mock for the scheduler
-_minio_mock.download_file_bytes.return_value = VALID_TRAIN_SCRIPT.encode()
-_minio_mock.upload_file_bytes.return_value = {
-    "bucket": "models",
-    "object_name": "mock_train.py",
-    "size": len(VALID_TRAIN_SCRIPT),
-}
-
-
-# ---------------------------------------------------------------------------
-# Subprocess mocks for job tests
-# ---------------------------------------------------------------------------
-
-
-async def _mock_exec_success(*args, **kwargs):
-    """Subprocess mock: writes a dummy model and returns success (code 0)."""
-    env = kwargs.get("env", {})
-    output_path = env.get("OUTPUT_MODEL_PATH", "")
-    if output_path:
-        X, y = load_iris(return_X_y=True)  # noqa: N806
-        model = LogisticRegression(max_iter=200).fit(X, y)
-        with open(output_path, "wb") as f:
-            joblib.dump(model, f)
-
-    proc = MagicMock()
-    proc.returncode = 0
-    proc.communicate = AsyncMock(
-        return_value=(b'Train done\n{"accuracy": 0.95, "f1_score": 0.93}\n', b"")
-    )
-    proc.kill = MagicMock()
-    return proc
-
-
-async def _mock_exec_failure(*args, **kwargs):
-    """Subprocess mock: returncode != 0."""
-    proc = MagicMock()
-    proc.returncode = 1
-    proc.communicate = AsyncMock(return_value=(b"", b"Error: training failed\n"))
-    proc.kill = MagicMock()
-    return proc
-
 
 # ---------------------------------------------------------------------------
 # Tests for endpoint PATCH /models/{name}/{version}/schedule
@@ -269,360 +222,14 @@ class TestScheduleEndpointSuccess:
             json={"cron": "0 3 * * 1", "enabled": True},
         )
         # Then disable
-        with patch("src.tasks.retrain_scheduler.remove_retrain_job") as mock_remove:
-            r = client.patch(
-                f"/models/{name}/1.0.0/schedule",
-                headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
-                json={"cron": "0 3 * * 1", "enabled": False},
-            )
+        r = client.patch(
+            f"/models/{name}/1.0.0/schedule",
+            headers={"Authorization": f"Bearer {ADMIN_TOKEN}"},
+            json={"cron": "0 3 * * 1", "enabled": False},
+        )
         assert r.status_code == 200
         sched = r.json()["retrain_schedule"]
         assert sched["enabled"] is False
-        mock_remove.assert_called_once_with(name, "1.0.0")
-
-
-# ---------------------------------------------------------------------------
-# Unit tests for _run_retrain_job / _do_retrain
-# ---------------------------------------------------------------------------
-
-
-class TestRunRetrainJob:
-    def test_skips_when_disabled(self):
-        """schedule.enabled=False → _do_retrain stops without creating a new model."""
-        from src.db.models import ModelMetadata
-
-        name = f"{MODEL_PREFIX}_job_disabled"
-        _create_model(name, with_train_script=True)
-
-        # Store a disabled schedule directly in the database
-        async def _set_disabled():
-            async with _TestSessionLocal() as db:
-                result = await db.execute(
-                    select(ModelMetadata).where(
-                        ModelMetadata.name == name, ModelMetadata.version == "1.0.0"
-                    )
-                )
-                m = result.scalar_one()
-                m.retrain_schedule = {
-                    "cron": "0 3 * * 1",
-                    "lookback_days": 30,
-                    "auto_promote": False,
-                    "enabled": False,
-                }
-                await db.commit()
-
-        asyncio.run(_set_disabled())
-
-        async def _count():
-            async with _TestSessionLocal() as db:
-                result = await db.execute(
-                    select(func.count(ModelMetadata.id)).where(ModelMetadata.name == name)
-                )
-                return result.scalar()
-
-        count_before = asyncio.run(_count())
-
-        from src.tasks.retrain_scheduler import _run_retrain_job
-
-        with patch("src.db.database.AsyncSessionLocal", new=_test_session_cm):
-            asyncio.run(_run_retrain_job(name, "1.0.0"))
-
-        count_after = asyncio.run(_count())
-        assert count_after == count_before
-
-    def test_skips_when_no_train_script(self):
-        """train_script_object_key=None → job stops without creating a new version."""
-        from src.db.models import ModelMetadata
-
-        name = f"{MODEL_PREFIX}_job_noscript"
-        _create_model(name, with_train_script=False)  # without script
-
-        async def _set_schedule():
-            async with _TestSessionLocal() as db:
-                result = await db.execute(
-                    select(ModelMetadata).where(
-                        ModelMetadata.name == name, ModelMetadata.version == "1.0.0"
-                    )
-                )
-                m = result.scalar_one()
-                m.retrain_schedule = {
-                    "cron": "0 3 * * 1",
-                    "lookback_days": 30,
-                    "auto_promote": False,
-                    "enabled": True,
-                }
-                await db.commit()
-
-        asyncio.run(_set_schedule())
-
-        async def _count():
-            async with _TestSessionLocal() as db:
-                result = await db.execute(
-                    select(func.count(ModelMetadata.id)).where(ModelMetadata.name == name)
-                )
-                return result.scalar()
-
-        count_before = asyncio.run(_count())
-
-        from src.tasks.retrain_scheduler import _run_retrain_job
-
-        with patch("src.db.database.AsyncSessionLocal", new=_test_session_cm):
-            asyncio.run(_run_retrain_job(name, "1.0.0"))
-
-        count_after = asyncio.run(_count())
-        assert count_after == count_before
-
-    def test_skips_when_redis_lock_held(self):
-        """Redis lock already held → _do_retrain is not called."""
-        from src.services.model_service import model_service
-        from src.tasks.retrain_scheduler import _run_retrain_job
-
-        name = f"{MODEL_PREFIX}_job_lock"
-        _create_model(name, with_train_script=True)
-
-        # Pre-set the lock on the test FakeRedis
-        lock_key = f"retrain_lock:{name}:1.0.0"
-
-        async def _run():
-            await model_service._redis.set(lock_key, "1", nx=True, ex=700)
-            try:
-                with patch("src.db.database.AsyncSessionLocal", new=_test_session_cm):
-                    with patch(
-                        "src.tasks.retrain_scheduler._do_retrain", new_callable=AsyncMock
-                    ) as mock_do:
-                        await _run_retrain_job(name, "1.0.0")
-                        mock_do.assert_not_called()
-            finally:
-                await model_service._redis.delete(lock_key)
-
-        asyncio.run(_run())
-
-    def test_success_creates_new_version(self):
-        """Subprocess succeeds → a new version is created in the database."""
-        from src.db.models import ModelMetadata
-
-        name = f"{MODEL_PREFIX}_job_ok"
-        _create_model(name, with_train_script=True)
-
-        async def _set_schedule():
-            async with _TestSessionLocal() as db:
-                result = await db.execute(
-                    select(ModelMetadata).where(
-                        ModelMetadata.name == name, ModelMetadata.version == "1.0.0"
-                    )
-                )
-                m = result.scalar_one()
-                m.retrain_schedule = {
-                    "cron": "0 3 * * 1",
-                    "lookback_days": 30,
-                    "auto_promote": False,
-                    "enabled": True,
-                }
-                await db.commit()
-
-        asyncio.run(_set_schedule())
-
-        async def _count():
-            async with _TestSessionLocal() as db:
-                result = await db.execute(
-                    select(func.count(ModelMetadata.id)).where(ModelMetadata.name == name)
-                )
-                return result.scalar()
-
-        count_before = asyncio.run(_count())
-
-        from src.tasks.retrain_scheduler import _run_retrain_job
-
-        with (
-            patch("src.db.database.AsyncSessionLocal", new=_test_session_cm),
-            patch("src.services.minio_service.minio_service", _minio_mock),
-            patch("asyncio.create_subprocess_exec", side_effect=_mock_exec_success),
-        ):
-            asyncio.run(_run_retrain_job(name, "1.0.0"))
-
-        count_after = asyncio.run(_count())
-        assert count_after == count_before + 1
-
-        async def _get_new():
-            async with _TestSessionLocal() as db:
-                result = await db.execute(
-                    select(ModelMetadata).where(
-                        ModelMetadata.name == name,
-                        ModelMetadata.version != "1.0.0",
-                    )
-                )
-                return result.scalars().all()
-
-        new_models = asyncio.run(_get_new())
-        assert len(new_models) == 1
-        assert "sched" in new_models[0].version
-        assert new_models[0].trained_by == "scheduler"
-
-    def test_updates_last_run_at(self):
-        """After success, retrain_schedule.last_run_at is updated on the source model."""
-        from src.db.models import ModelMetadata
-
-        name = f"{MODEL_PREFIX}_last_run"
-        _create_model(name, with_train_script=True)
-
-        async def _set_schedule():
-            async with _TestSessionLocal() as db:
-                result = await db.execute(
-                    select(ModelMetadata).where(
-                        ModelMetadata.name == name, ModelMetadata.version == "1.0.0"
-                    )
-                )
-                m = result.scalar_one()
-                m.retrain_schedule = {
-                    "cron": "0 3 * * 1",
-                    "lookback_days": 30,
-                    "auto_promote": False,
-                    "enabled": True,
-                    "last_run_at": None,
-                }
-                await db.commit()
-
-        asyncio.run(_set_schedule())
-
-        from src.tasks.retrain_scheduler import _run_retrain_job
-
-        with (
-            patch("src.db.database.AsyncSessionLocal", new=_test_session_cm),
-            patch("src.services.minio_service.minio_service", _minio_mock),
-            patch("asyncio.create_subprocess_exec", side_effect=_mock_exec_success),
-        ):
-            asyncio.run(_run_retrain_job(name, "1.0.0"))
-
-        async def _get_schedule():
-            async with _TestSessionLocal() as db:
-                result = await db.execute(
-                    select(ModelMetadata).where(
-                        ModelMetadata.name == name, ModelMetadata.version == "1.0.0"
-                    )
-                )
-                m = result.scalar_one()
-                return m.retrain_schedule
-
-        sched = asyncio.run(_get_schedule())
-        assert sched is not None
-        assert sched["last_run_at"] is not None
-
-    def test_subprocess_failure_does_not_create_version(self):
-        """Script returns returncode != 0 → no new version created."""
-        from src.db.models import ModelMetadata
-
-        name = f"{MODEL_PREFIX}_job_fail"
-        _create_model(name, with_train_script=True)
-
-        async def _set_schedule():
-            async with _TestSessionLocal() as db:
-                result = await db.execute(
-                    select(ModelMetadata).where(
-                        ModelMetadata.name == name, ModelMetadata.version == "1.0.0"
-                    )
-                )
-                m = result.scalar_one()
-                m.retrain_schedule = {
-                    "cron": "0 3 * * 1",
-                    "lookback_days": 30,
-                    "auto_promote": False,
-                    "enabled": True,
-                }
-                await db.commit()
-
-        asyncio.run(_set_schedule())
-
-        async def _count():
-            async with _TestSessionLocal() as db:
-                result = await db.execute(
-                    select(func.count(ModelMetadata.id)).where(ModelMetadata.name == name)
-                )
-                return result.scalar()
-
-        count_before = asyncio.run(_count())
-
-        from src.tasks.retrain_scheduler import _run_retrain_job
-
-        with (
-            patch("src.db.database.AsyncSessionLocal", new=_test_session_cm),
-            patch("src.services.minio_service.minio_service", _minio_mock),
-            patch("asyncio.create_subprocess_exec", side_effect=_mock_exec_failure),
-        ):
-            asyncio.run(_run_retrain_job(name, "1.0.0"))
-
-        count_after = asyncio.run(_count())
-        assert count_after == count_before
-
-
-# ---------------------------------------------------------------------------
-# Scheduler lifecycle tests
-# ---------------------------------------------------------------------------
-
-
-class TestSchedulerLifecycle:
-    def test_start_scheduler_loads_active_jobs(self):
-        """start_retrain_scheduler() adds a job for each model with an active schedule."""
-        from src.db.models import ModelMetadata
-        from src.tasks.retrain_scheduler import start_retrain_scheduler
-
-        name = f"{MODEL_PREFIX}_lifecycle"
-        _create_model(name, with_train_script=True)
-
-        async def _set_schedule():
-            async with _TestSessionLocal() as db:
-                result = await db.execute(
-                    select(ModelMetadata).where(
-                        ModelMetadata.name == name, ModelMetadata.version == "1.0.0"
-                    )
-                )
-                m = result.scalar_one()
-                m.retrain_schedule = {
-                    "cron": "0 3 * * 1",
-                    "lookback_days": 30,
-                    "auto_promote": False,
-                    "enabled": True,
-                }
-                await db.commit()
-
-        asyncio.run(_set_schedule())
-
-        mock_sched = MagicMock()
-        mock_sched.running = False
-
-        with (
-            patch("src.db.database.AsyncSessionLocal", new=_test_session_cm),
-            patch("src.tasks.retrain_scheduler._retrain_scheduler", mock_sched),
-        ):
-            asyncio.run(start_retrain_scheduler())
-
-        mock_sched.add_job.assert_called()
-        job_ids = [call.kwargs.get("id") for call in mock_sched.add_job.call_args_list]
-        assert f"retrain_schedule:{name}:1.0.0" in job_ids
-        mock_sched.start.assert_called_once()
-
-    def test_stop_scheduler_calls_shutdown_when_running(self):
-        """stop_retrain_scheduler() with running=True → shutdown(wait=False) called."""
-        from src.tasks.retrain_scheduler import stop_retrain_scheduler
-
-        mock_sched = MagicMock()
-        mock_sched.running = True
-
-        with patch("src.tasks.retrain_scheduler._retrain_scheduler", mock_sched):
-            stop_retrain_scheduler()
-
-        mock_sched.shutdown.assert_called_once_with(wait=False)
-
-    def test_stop_scheduler_noop_when_not_running(self):
-        """stop_retrain_scheduler() with running=False → shutdown is not called."""
-        from src.tasks.retrain_scheduler import stop_retrain_scheduler
-
-        mock_sched = MagicMock()
-        mock_sched.running = False
-
-        with patch("src.tasks.retrain_scheduler._retrain_scheduler", mock_sched):
-            stop_retrain_scheduler()
-
-        mock_sched.shutdown.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -632,7 +239,7 @@ class TestSchedulerLifecycle:
 
 class TestDriftTriggeredRetrain:
     """
-    Verifies that run_alert_check() triggers _run_retrain_job via asyncio.create_task
+    Verifies that run_alert_check() enqueues a scheduled_retrain_task via ARQ
     when drift reaches or exceeds the threshold configured in retrain_schedule.
     """
 
@@ -693,12 +300,9 @@ class TestDriftTriggeredRetrain:
             "shadow_predictions": 0,
         }
 
-        mock_retrain_job = AsyncMock()
-
-        def _close_coro(coro, **_):
-            if hasattr(coro, "close"):
-                coro.close()
-            return MagicMock()
+        mock_pool = AsyncMock()
+        mock_pool.enqueue_job = AsyncMock()
+        mock_get_arq_pool = AsyncMock(return_value=mock_pool)
 
         with (
             patch("src.db.database.AsyncSessionLocal", new=_test_session_cm),
@@ -731,36 +335,41 @@ class TestDriftTriggeredRetrain:
                 new_callable=AsyncMock,
                 return_value=self._output_report(out_status),
             ),
-            patch("src.tasks.retrain_scheduler._run_retrain_job", mock_retrain_job),
-            patch("asyncio.create_task", side_effect=_close_coro),
+            patch("src.core.arq_pool.get_arq_pool", mock_get_arq_pool),
         ):
             asyncio.run(run_alert_check())
 
-        return mock_retrain_job
+        return mock_pool.enqueue_job
 
     def test_trigger_fires_on_critical_input_drift(self):
-        """Critical feature drift + threshold=critical + expired cooldown → retrain triggered."""
+        """Critical feature drift + threshold=critical + expired cooldown → retrain enqueued."""
         meta = self._make_prod_meta("drift_fire_input", trigger_on_drift="critical")
-        mock_job = self._run_check_with_mocks(meta, feat_status="critical", out_status="ok")
-        mock_job.assert_called_once_with(meta.name, "1.0.0")
+        mock_enqueue = self._run_check_with_mocks(meta, feat_status="critical", out_status="ok")
+        mock_enqueue.assert_called_once_with(
+            "scheduled_retrain_task", model_name=meta.name, source_version="1.0.0"
+        )
 
     def test_trigger_fires_on_critical_output_drift(self):
-        """Critical output drift + threshold=critical + expired cooldown → retrain triggered."""
+        """Critical output drift + threshold=critical + expired cooldown → retrain enqueued."""
         meta = self._make_prod_meta("drift_fire_output", trigger_on_drift="critical")
-        mock_job = self._run_check_with_mocks(meta, feat_status="ok", out_status="critical")
-        mock_job.assert_called_once_with(meta.name, "1.0.0")
+        mock_enqueue = self._run_check_with_mocks(meta, feat_status="ok", out_status="critical")
+        mock_enqueue.assert_called_once_with(
+            "scheduled_retrain_task", model_name=meta.name, source_version="1.0.0"
+        )
 
     def test_no_trigger_if_warning_with_critical_threshold(self):
         """Warning feature drift + threshold=critical → no retrain."""
         meta = self._make_prod_meta("drift_no_fire_warn", trigger_on_drift="critical")
-        mock_job = self._run_check_with_mocks(meta, feat_status="warning", out_status="ok")
-        mock_job.assert_not_called()
+        mock_enqueue = self._run_check_with_mocks(meta, feat_status="warning", out_status="ok")
+        mock_enqueue.assert_not_called()
 
     def test_trigger_fires_when_threshold_is_warning(self):
-        """Warning feature drift + threshold=warning → retrain triggered."""
+        """Warning feature drift + threshold=warning → retrain enqueued."""
         meta = self._make_prod_meta("drift_fire_warn_thresh", trigger_on_drift="warning")
-        mock_job = self._run_check_with_mocks(meta, feat_status="warning", out_status="ok")
-        mock_job.assert_called_once_with(meta.name, "1.0.0")
+        mock_enqueue = self._run_check_with_mocks(meta, feat_status="warning", out_status="ok")
+        mock_enqueue.assert_called_once_with(
+            "scheduled_retrain_task", model_name=meta.name, source_version="1.0.0"
+        )
 
     def test_cooldown_blocks_second_fire(self):
         """Recent last_run_at (cooldown not expired) → no retrain triggered."""
@@ -773,20 +382,20 @@ class TestDriftTriggeredRetrain:
             cooldown_hours=24,
             last_run_at=recent,
         )
-        mock_job = self._run_check_with_mocks(meta, feat_status="critical", out_status="ok")
-        mock_job.assert_not_called()
+        mock_enqueue = self._run_check_with_mocks(meta, feat_status="critical", out_status="ok")
+        mock_enqueue.assert_not_called()
 
     def test_no_trigger_without_train_script(self):
         """No train_script_object_key → retrain not triggered even on critical drift."""
         meta = self._make_prod_meta(
             "drift_no_script", trigger_on_drift="critical", has_script=False
         )
-        mock_job = self._run_check_with_mocks(meta, feat_status="critical", out_status="ok")
-        mock_job.assert_not_called()
+        mock_enqueue = self._run_check_with_mocks(meta, feat_status="critical", out_status="ok")
+        mock_enqueue.assert_not_called()
 
     def test_no_trigger_when_trigger_on_drift_is_null(self):
         """trigger_on_drift=None → no retrain even on critical drift."""
         meta = self._make_prod_meta("drift_null_trigger", trigger_on_drift=None)
         meta.retrain_schedule = None  # no schedule configured
-        mock_job = self._run_check_with_mocks(meta, feat_status="critical", out_status="ok")
-        mock_job.assert_not_called()
+        mock_enqueue = self._run_check_with_mocks(meta, feat_status="critical", out_status="ok")
+        mock_enqueue.assert_not_called()
