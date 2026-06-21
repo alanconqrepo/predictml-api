@@ -24,6 +24,7 @@ import structlog
 from arq import cron
 from arq.connections import RedisSettings
 from prometheus_client import Counter, Histogram, start_http_server
+from src.core.config import settings
 
 TASK_TOTAL = Counter(
     "arq_task_total",
@@ -133,7 +134,12 @@ async def retrain_task(
     status = "success" if result.get("success") else "failed"
     TASK_DURATION.labels(task="retrain_task").observe(time.monotonic() - t0)
     TASK_TOTAL.labels(task="retrain_task", status=status).inc()
-    final_logs = await _get_redis_logs(redis, job_id) if redis else ""
+    stdout_logs = await _get_redis_logs(redis, job_id) if redis else result.get("stdout", "")
+    stderr_text = result.get("stderr", "")
+    if stderr_text:
+        final_logs = stdout_logs + "\n\n--- STDERR ---\n" + stderr_text if stdout_logs else "--- STDERR ---\n" + stderr_text
+    else:
+        final_logs = stdout_logs
 
     await _update_task_run(
         job_id,
@@ -442,11 +448,21 @@ class WorkerSettings:
 
     # Fixed cron jobs (alerts + weekly report)
     # Dynamic retrain crons are added at startup via on_startup
+    _WEEKDAY_MAP = {
+        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+        "friday": 4, "saturday": 5, "sunday": 6,
+    }
     cron_jobs = [
         # Alert check every 6 h (0h, 6h, 12h, 18h UTC)
         cron(alert_check_task, hour={0, 6, 12, 18}, minute=0, run_at_startup=False),
-        # Weekly report — Monday at 8h UTC
-        cron(weekly_report_task, weekday=0, hour=8, minute=0, run_at_startup=False),
+        # Weekly report — day and hour driven by WEEKLY_REPORT_DAY / WEEKLY_REPORT_HOUR
+        cron(
+            weekly_report_task,
+            weekday=_WEEKDAY_MAP.get(settings.WEEKLY_REPORT_DAY.lower(), 0),
+            hour=settings.WEEKLY_REPORT_HOUR,
+            minute=0,
+            run_at_startup=False,
+        ),
     ]
 
     on_startup = startup

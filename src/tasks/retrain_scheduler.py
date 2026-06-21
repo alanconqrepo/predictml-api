@@ -510,6 +510,16 @@ async def _do_retrain(name: str, version: str) -> None:
                 promoted=should_promote,
                 reason=reason,
             )
+            if should_promote and settings.ENABLE_EMAIL_ALERTS:
+                from src.services.email_service import email_service as _email_svc
+
+                _email_svc.send_auto_promotion_alert(
+                    name,
+                    new_version,
+                    reason,
+                    accuracy=new_metadata.accuracy,
+                    f1_score=new_metadata.f1_score,
+                )
 
         # Persist auto_promoted outcome in training_stats for retrain-history
         if schedule.get("auto_promote") and source_fields["promotion_policy"]:

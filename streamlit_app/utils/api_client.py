@@ -298,12 +298,7 @@ class APIClient:
         new_version: Optional[str] = None,
         set_production: bool = False,
     ) -> dict:
-        """
-        Trigger retraining of a model via its train.py script stored in MinIO.
-
-        Timeout of 660 s to accommodate long training runs (up to 10 min).
-        Requires an admin token.
-        """
+        """Enqueue a model retraining — returns immediately with job_id (202)."""
         payload: dict = {
             "start_date": start_date,
             "end_date": end_date,
@@ -315,8 +310,14 @@ class APIClient:
             f"{self.base_url}/models/{name}/{version}/retrain",
             headers=self._headers(),
             json=payload,
-            timeout=660,
+            timeout=30,
         )
+        r.raise_for_status()
+        return r.json()
+
+    def get_job_status(self, job_id: str) -> dict:
+        """Return the current status of an ARQ job (GET /jobs/{job_id})."""
+        r = self._get(f"/jobs/{job_id}")
         r.raise_for_status()
         return r.json()
 
