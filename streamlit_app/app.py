@@ -197,9 +197,9 @@ def show_home():  # noqa: C901
     db_status = health.get("database", "unknown")
     cached = health.get("models_cached", health.get("cached_models", 0))
     mon_models: list = monitoring.get("models", [])
-    models_alert_count = sum(
-        1 for m in mon_models if m.get("health_status") in ("warning", "critical")
-    )
+    n_critical = sum(1 for m in mon_models if m.get("health_status") == "critical")
+    n_warning = sum(1 for m in mon_models if m.get("health_status") == "warning")
+    models_alert_count = n_critical + n_warning
 
     st.subheader(t("home.status.subheader"))
     st.caption(t("home.status.subheader_caption"))
@@ -223,9 +223,17 @@ def show_home():  # noqa: C901
         t("home.status.cache_value", count=cached) if cached else "—",
         help=t("home.status.cache_label_help"),
     )
+    if n_critical > 0 and n_warning > 0:
+        _alerts_val = t("home.status.alerts_both", crit=n_critical, warn=n_warning)
+    elif n_critical > 0:
+        _alerts_val = t("home.status.alerts_critical_only", count=n_critical)
+    elif n_warning > 0:
+        _alerts_val = t("home.status.alerts_warning_only", count=n_warning)
+    else:
+        _alerts_val = t("home.status.alerts_none")
     col_alerts.metric(
         t("home.status.alerts_label"),
-        t("home.status.alerts_count", count=models_alert_count) if models_alert_count > 0 else t("home.status.alerts_none"),
+        _alerts_val,
         help=t("home.status.alerts_label_help"),
     )
 
@@ -283,18 +291,26 @@ def show_home():  # noqa: C901
     st.subheader(t("home.leaderboard.subheader"))
     st.caption(t("home.leaderboard.subheader_caption"))
     if leaderboard:
-        _mode_badge = {
-            "ab":      "🟠 A/B",
-            "ab_test": "🟠 A/B",
-            "shadow":  "🟣 Shadow",
+        _drift_emoji = {
+            "ok":                t("stats.drift.ok"),
+            "warning":           t("stats.drift.warning"),
+            "critical":          t("stats.drift.critical"),
+            "no_baseline":       t("stats.drift.no_baseline"),
+            "no_data":           t("stats.drift.no_data"),
+            "insufficient_data": t("stats.drift.insufficient_data"),
+            "unknown":           t("stats.drift.unknown"),
         }
         rows = []
         for item in leaderboard[:5]:
             acc = item.get("accuracy")
-            drift = item.get("drift_status") or "—"
+            drift_raw = item.get("drift_status")
+            drift = _drift_emoji.get(drift_raw, drift_raw) if drift_raw else "—"
             mode = item.get("deployment_mode")
-            if mode in _mode_badge:
-                mode_label = _mode_badge[mode]
+            weight = item.get("traffic_weight")
+            if mode in ("ab", "ab_test"):
+                mode_label = f"🟠 A/B ({float(weight):.0%})" if weight is not None else "🟠 A/B"
+            elif mode == "shadow":
+                mode_label = "🟣 Shadow"
             elif item.get("is_production"):
                 mode_label = "🟢 Production"
             else:

@@ -627,6 +627,9 @@ home:
     alerts_label: Models in alert
     alerts_label_help: Number of models whose health status is "warning" or "critical" over the last 30 days. Check the Supervision page for details.
     alerts_count: 🔴 {count}
+    alerts_critical_only: '🔴 {count} critical'
+    alerts_warning_only: '⚠️ {count} warning(s)'
+    alerts_both: '🔴 {crit} crit. · ⚠️ {warn} warn.'
     alerts_none: ✅ None
   kpis:
     subheader: 📊 Activity — last 30 days
