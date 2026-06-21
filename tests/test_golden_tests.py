@@ -206,7 +206,7 @@ class TestGoldenTestCRUD:
         r_create = client.post(
             f"/models/{GT_MODEL}/golden-tests",
             headers=_admin_headers(),
-            json={"input_features": {"f1": 1.0}, "expected_output": "x"},
+            json={"input_features": {"f1": 1.0}, "expected_output": "x", "description": "delete auth test"},
         )
         assert r_create.status_code == 201
         test_id = r_create.json()["id"]
@@ -221,7 +221,7 @@ class TestGoldenTestCRUD:
         r_create = client.post(
             f"/models/{GT_MODEL}/golden-tests",
             headers=_admin_headers(),
-            json={"input_features": {"f1": 2.0}, "expected_output": "y"},
+            json={"input_features": {"f1": 2.0}, "expected_output": "y", "description": "delete success test"},
         )
         assert r_create.status_code == 201
         test_id = r_create.json()["id"]
@@ -240,7 +240,7 @@ class TestGoldenTestCRUD:
         r_create = client.post(
             f"/models/{GT_MODEL}/golden-tests",
             headers=_admin_headers(),
-            json={"input_features": {"f1": 3.0}, "expected_output": "z"},
+            json={"input_features": {"f1": 3.0}, "expected_output": "z", "description": "wrong model 404 test"},
         )
         assert r_create.status_code == 201
         test_id = r_create.json()["id"]

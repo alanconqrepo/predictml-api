@@ -9,7 +9,6 @@ Usage in any page:
 
 from __future__ import annotations
 
-import functools
 from pathlib import Path
 from typing import Any
 
@@ -23,16 +22,29 @@ DEFAULT_LANG = "fr"
 _TRANSLATIONS_DIR = Path(__file__).parent.parent / "translations"
 
 
-# ── YAML loading — cached at module level (survives Streamlit hot-reloads) ─────
+# ── YAML loading — mtime-aware cache (auto-reloads when file changes on disk) ──
 
-@functools.lru_cache(maxsize=None)
+# { lang: (mtime_float, data_dict) }
+_lang_cache: dict[str, tuple[float, dict]] = {}
+
+
 def _load_lang(lang: str) -> dict:
-    """Load and parse a YAML translation file. LRU-cached: parsed once per process."""
+    """Load and parse a YAML translation file.
+
+    Cached in-process but invalidated automatically whenever the file's
+    modification time changes — no container restart needed after editing a YAML.
+    """
     path = _TRANSLATIONS_DIR / f"{lang}.yaml"
     if not path.exists():
         return {}
+    mtime = path.stat().st_mtime
+    cached = _lang_cache.get(lang)
+    if cached and cached[0] == mtime:
+        return cached[1]
     with path.open(encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        data = yaml.safe_load(f) or {}
+    _lang_cache[lang] = (mtime, data)
+    return data
 
 
 def _get_nested(data: dict, key: str) -> str | None:

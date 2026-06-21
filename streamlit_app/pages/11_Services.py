@@ -55,6 +55,7 @@ ERROR_RATE_THRESHOLD = os.environ.get("ERROR_RATE_ALERT_THRESHOLD", "0.10")
 
 # Anthropic / Chatbot
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 st.title(t("services.title"))
@@ -361,7 +362,7 @@ with col_ai:
 
     st.markdown("---")
     st.markdown(f"**{t('services.anthropic_model_label')}**")
-    st.code("claude-sonnet-4-6", language=None)
+    st.code(ANTHROPIC_MODEL, language=None)
     st.caption(t("services.anthropic_model_caption"))
 
 # ── Security note ───────────────────────────────────────────────────────────

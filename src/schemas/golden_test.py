@@ -11,7 +11,7 @@ class GoldenTestCreate(BaseModel):
 
     input_features: Dict[str, Union[float, int, str]]
     expected_output: str = Field(..., max_length=500)
-    description: Optional[str] = Field(None, max_length=500)
+    description: str = Field(..., min_length=1, max_length=500)
 
 
 class GoldenTestResponse(BaseModel):
@@ -24,6 +24,7 @@ class GoldenTestResponse(BaseModel):
     description: Optional[str]
     created_at: datetime
     created_by_user_id: Optional[int]
+    created_by_username: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

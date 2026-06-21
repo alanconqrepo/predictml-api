@@ -205,6 +205,7 @@ class ModelService:
                 "model_task": m.model_task,
                 "alert_thresholds": m.alert_thresholds,
                 "promotion_policy": m.promotion_policy,
+                "retrain_schedule": m.retrain_schedule,
                 "created_at": m.created_at,
                 "user_id_creator": m.user_id_creator,
                 "creator_username": m.creator.username if m.creator else None,

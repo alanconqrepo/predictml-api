@@ -162,7 +162,7 @@ ModelNamePath = Annotated[
 ]
 ModelVersionPath = Annotated[
     str,
-    Path(pattern=r"^\d+\.\d+(\.\d+)?$", description="Model version (X.Y or X.Y.Z)"),
+    Path(pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$", description="Model version (e.g. 1.2.0 or 1.2.0-retrain-20260530)"),
 ]
 
 
@@ -547,7 +547,7 @@ async def list_cached_models():
 @router.get("/models/leaderboard", response_model=List[LeaderboardEntry])
 async def get_models_leaderboard(
     metric: Literal[
-        "accuracy", "auc", "f1_score", "r2", "rmse", "latency_p95_ms", "predictions_count"
+        "accuracy", "auc", "f1_score", "mae", "r2", "rmse", "latency_p95_ms", "predictions_count"
     ] = Query("accuracy", description="Metric to rank by"),
     days: int = Query(30, ge=1, le=365, description="Sliding window in days"),
     db: AsyncSession = Depends(get_read_db),
@@ -565,7 +565,14 @@ async def get_models_leaderboard(
         return cached["data"]
 
     models = await DBService.get_all_active_models(db, is_production=True)
-    pred_stats_list = await DBService.get_prediction_stats(db, days=days)
+    model_versions = [(m.name, m.version) for m in models]
+
+    pred_stats_list, version_counts, perf_pairs_batch, date_ranges = await asyncio.gather(
+        DBService.get_prediction_stats(db, days=days),
+        DBService.get_prediction_count_per_version(db, days=days),
+        DBService.get_performance_pairs_batch(db, model_versions, days=days),
+        DBService.get_prediction_date_range_per_version(db),
+    )
     stats_by_name = {s["model_name"]: s for s in pred_stats_list}
 
     entries: List[LeaderboardEntry] = []
@@ -574,20 +581,25 @@ async def get_models_leaderboard(
         drift_status = await _get_leaderboard_drift_status(
             db, m.name, m.version, days, m.feature_baseline, m.categorical_baseline
         )
-        tm = m.training_metrics or {}
+        live = _compute_live_metrics(perf_pairs_batch.get((m.name, m.version), []), m)
+        _dr = date_ranges.get((m.name, m.version), (None, None))
         entries.append(
             LeaderboardEntry(
                 rank=0,
                 name=m.name,
                 version=m.version,
-                accuracy=m.accuracy,
-                auc=m.auc,
-                f1_score=m.f1_score,
-                r2=tm.get("r2"),
-                rmse=tm.get("rmse"),
+                accuracy=live["accuracy"],
+                auc=live["auc"],
+                f1_score=live["f1_score"],
+                mae=live["mae"],
+                r2=live["r2"],
+                rmse=live["rmse"],
                 latency_p95_ms=ps.get("p95_response_time_ms"),
                 drift_status=drift_status,
                 predictions_count=ps.get("total_predictions", 0),
+                version_predictions_count=version_counts.get((m.name, m.version), 0),
+                first_prediction_at=_dr[0],
+                last_prediction_at=_dr[1],
                 deployment_mode=m.deployment_mode,
                 is_production=bool(m.is_production),
             )
@@ -605,6 +617,8 @@ async def get_models_leaderboard(
         entries.sort(key=lambda e: e.f1_score if e.f1_score is not None else -1, reverse=True)
     elif metric == "r2":
         entries.sort(key=lambda e: e.r2 if e.r2 is not None else -float("inf"), reverse=True)
+    elif metric == "mae":
+        entries.sort(key=lambda e: e.mae if e.mae is not None else float("inf"))
     elif metric == "rmse":
         # RMSE: lower is better → ascending order, None last
         entries.sort(key=lambda e: e.rmse if e.rmse is not None else float("inf"))
@@ -621,6 +635,34 @@ async def get_models_leaderboard(
 # ---------------------------------------------------------------------------
 # Helpers pour GET /models/{name}/performance
 # ---------------------------------------------------------------------------
+
+
+def _compute_live_metrics(pairs: list, metadata) -> dict:
+    """
+    Compute live production metrics from (prediction_result, observed_result, probabilities) pairs.
+    Returns a dict with accuracy, f1_score, auc, mae, r2, rmse — all None if no pairs.
+    """
+    valid = [p for p in pairs if p.prediction_result is not None and p.observed_result is not None]
+    if not valid:
+        return {"accuracy": None, "f1_score": None, "auc": None, "mae": None, "r2": None, "rmse": None}
+
+    model_type = _detect_model_type(metadata, valid)
+    y_true = [p.observed_result for p in valid]
+    y_pred = [p.prediction_result for p in valid]
+    y_prob = [p.probabilities for p in valid]
+
+    if model_type == "classification":
+        acc, _, _, f1, _, _, _ = _compute_classification_metrics(y_true, y_pred, getattr(metadata, "classes", None))
+        auc = compute_auc(y_true, y_prob, getattr(metadata, "classes", None))
+        return {"accuracy": round(acc, 4), "f1_score": round(float(f1), 4), "auc": auc, "mae": None, "r2": None, "rmse": None}
+    else:
+        try:
+            y_true_f = [float(v) for v in y_true]
+            y_pred_f = [float(v) for v in y_pred]
+            mae, _, rmse, r2 = _compute_regression_metrics(y_true_f, y_pred_f)
+            return {"accuracy": None, "f1_score": None, "auc": None, "mae": round(mae, 4), "r2": round(r2, 4), "rmse": round(rmse, 4)}
+        except Exception:
+            return {"accuracy": None, "f1_score": None, "auc": None, "mae": None, "r2": None, "rmse": None}
 
 
 def _detect_model_type(metadata: Optional[ModelMetadata], pairs: list) -> str:
@@ -692,7 +734,7 @@ async def get_model_performance(
     start: Optional[datetime] = Query(None, description="Start of period (ISO 8601)"),
     end: Optional[datetime] = Query(None, description="End of period (ISO 8601)"),
     version: Optional[str] = Query(
-        None, description="Model version (optional)", pattern=r"^\d+\.\d+(\.\d+)?$"
+        None, description="Model version (optional)", pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$"
     ),
     granularity: Optional[Literal["day", "week", "month"]] = Query(
         None, description="Temporal aggregation (day, week, month)"
@@ -851,7 +893,7 @@ async def get_model_drift(
     version: Optional[str] = Query(
         None,
         description="Model version (default: production/latest)",
-        pattern=r"^\d+\.\d+(\.\d+)?$",
+        pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$",
     ),
     days: int = Query(7, ge=1, le=90, description="Time window in days"),
     min_predictions: int = Query(
@@ -953,7 +995,7 @@ async def get_model_output_drift(
     model_version: Optional[str] = Query(
         None,
         description="Model version (default: production/latest)",
-        pattern=r"^\d+\.\d+(\.\d+)?$",
+        pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$",
     ),
     min_predictions: int = Query(
         30, ge=5, description="Minimum number of predictions to compute drift"
@@ -994,7 +1036,7 @@ async def get_model_output_drift(
 @router.get("/models/{name}/readiness")
 async def get_model_readiness(
     name: ModelNamePath,
-    version: str = Query(..., description="Model version to check", pattern=r"^\d+\.\d+(\.\d+)?$"),
+    version: str = Query(..., description="Model version to check", pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$"),
     user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
@@ -1087,7 +1129,7 @@ async def get_feature_importance(
     version: Optional[str] = Query(
         None,
         description="Model version (default: production/latest)",
-        pattern=r"^\d+\.\d+(\.\d+)?$",
+        pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$",
     ),
     last_n: int = Query(100, ge=1, le=500, description="Number of predictions to sample"),
     days: int = Query(7, ge=1, le=90, description="Time window in days"),
@@ -1993,7 +2035,7 @@ async def get_shadow_comparison(
 async def get_model_calibration(
     name: ModelNamePath,
     version: Optional[str] = Query(
-        None, description="Model version (all if absent)", pattern=r"^\d+\.\d+(\.\d+)?$"
+        None, description="Model version (all if absent)", pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$"
     ),
     start: Optional[datetime] = Query(None, description="Start of the time range"),
     end: Optional[datetime] = Query(None, description="End of the time range"),
@@ -2557,7 +2599,7 @@ async def get_performance_report(
 async def get_confidence_trend(
     name: ModelNamePath,
     version: Optional[str] = Query(
-        None, description="Model version (all if absent)", pattern=r"^\d+\.\d+(\.\d+)?$"
+        None, description="Model version (all if absent)", pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$"
     ),
     days: int = Query(30, ge=1, le=365, description="Sliding window in days"),
     granularity: str = Query("day", description="Temporal granularity (day)"),
@@ -2620,7 +2662,7 @@ async def get_confidence_trend(
 async def get_confidence_distribution(
     name: ModelNamePath,
     version: Optional[str] = Query(
-        None, description="Model version (all if absent)", pattern=r"^\d+\.\d+(\.\d+)?$"
+        None, description="Model version (all if absent)", pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$"
     ),
     days: int = Query(7, ge=1, le=90, description="Sliding window in days"),
     high_threshold: float = Query(0.80, ge=0.5, le=1.0, description="High confidence threshold"),
@@ -3209,6 +3251,14 @@ async def list_golden_tests(
 ):
     """Lists the registered golden test cases for a model."""
     tests = await GoldenTestService.get_tests(db, name)
+
+    user_ids = {t.created_by_user_id for t in tests if t.created_by_user_id is not None}
+    usernames: dict[int, str] = {}
+    if user_ids:
+        rows = await db.execute(select(User).where(User.id.in_(user_ids)))
+        for u in rows.scalars().all():
+            usernames[u.id] = u.username
+
     return [
         GoldenTestResponse(
             id=t.id,
@@ -3218,6 +3268,7 @@ async def list_golden_tests(
             description=t.description,
             created_at=t.created_at,
             created_by_user_id=t.created_by_user_id,
+            created_by_username=usernames.get(t.created_by_user_id) if t.created_by_user_id else None,
         )
         for t in tests
     ]
@@ -4408,6 +4459,18 @@ async def create_golden_test(
     db: AsyncSession = Depends(get_db),
 ):
     """Creates a golden test case for a model (admin only)."""
+    # Validate expected_output against model classes if known
+    ref_meta = await DBService.get_model_metadata(db, name)
+    known_classes: list = [str(c) for c in ref_meta.classes] if ref_meta and ref_meta.classes else []
+    if known_classes and payload.expected_output not in known_classes:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"expected_output '{payload.expected_output}' is not a valid class for model '{name}'. "
+                f"Allowed values: {known_classes}"
+            ),
+        )
+
     gt = await GoldenTestService.create_test(
         db,
         model_name=name,
@@ -4425,6 +4488,7 @@ async def create_golden_test(
         description=gt.description,
         created_at=gt.created_at,
         created_by_user_id=gt.created_by_user_id,
+        created_by_username=user.username,
     )
 
 

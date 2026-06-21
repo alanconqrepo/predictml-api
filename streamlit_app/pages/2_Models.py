@@ -988,7 +988,7 @@ with st.expander(t("models.details_expander"), expanded=True):
         else:
             st.markdown(t("models.detail_tags_empty"))
         webhook = selected.get("webhook_url")
-        _wh_help = t("models.detail_webhook_help")
+        _wh_help = t("models.detail_webhook_help").replace('"', '&quot;')
         _wh_abbr = f'<abbr title="{_wh_help}" style="cursor:help;text-decoration:none;">ℹ️</abbr>'
         _wh_text = t("models.detail_webhook", url=webhook) if webhook else t("models.detail_webhook_empty")
         st.markdown(f"{_wh_text} {_wh_abbr}", unsafe_allow_html=True)
@@ -1045,7 +1045,10 @@ with st.expander(t("models.details_expander"), expanded=True):
             st.markdown(t("models.detail_classes", value=classes if classes else '—'))
         ct = selected.get("confidence_threshold")
         if not _detail_is_regression or ct is not None:
-            st.markdown(t("models.detail_confidence_threshold", value=f'{ct:.2f}' if ct is not None else '—'))
+            _ct_help = t("models.detail_confidence_threshold_help").replace('"', '&quot;')
+            _ct_abbr = f'<abbr title="{_ct_help}" style="cursor:help;text-decoration:none;">ℹ️</abbr>'
+            _ct_text = t("models.detail_confidence_threshold", value=f'{ct:.2f}' if ct is not None else '—')
+            st.markdown(f"{_ct_text} {_ct_abbr}", unsafe_allow_html=True)
 
         hp = selected.get("hyperparameters")
         if hp:

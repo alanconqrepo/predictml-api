@@ -75,6 +75,7 @@ else:
     _col_input = t("golden_tests.col_input_features")
     _col_expected = t("golden_tests.col_expected_output")
     _col_date = t("golden_tests.col_date")
+    _col_created_by = t("golden_tests.col_created_by")
 
     rows = []
     for test in golden_tests:
@@ -89,6 +90,7 @@ else:
                     if test.get("created_at")
                     else "—"
                 ),
+                _col_created_by: test.get("created_by_username") or "—",
             }
         )
 
@@ -102,6 +104,7 @@ else:
             _col_input: st.column_config.TextColumn(_col_input, help=t("golden_tests.col_input_features_help")),
             _col_expected: st.column_config.TextColumn(_col_expected, help=t("golden_tests.col_expected_output_help")),
             _col_date: st.column_config.TextColumn(_col_date, help=t("golden_tests.col_date_help")),
+            _col_created_by: st.column_config.TextColumn(_col_created_by, help=t("golden_tests.col_created_by_help")),
         },
     )
     st.caption(t("golden_tests.tests_count", count=len(golden_tests)))
@@ -146,25 +149,20 @@ else:
                 col_m1, col_m2, col_m3, col_m4 = st.columns(4)
                 col_m1.metric(t("golden_tests.metric_total"), total)
                 col_m2.metric(t("golden_tests.metric_passed"), passed)
-                col_m3.metric(
-                    t("golden_tests.metric_failed"),
-                    failed,
-                    delta=f"-{failed}" if failed else None,
-                    delta_color="inverse",
-                )
+                col_m3.metric(t("golden_tests.metric_failed"), failed)
                 col_m4.metric(t("golden_tests.metric_pass_rate"), f"{pass_rate * 100:.1f}%")
 
                 if not details:
                     st.info(t("golden_tests.no_details"))
                 else:
                     st.markdown(t("golden_tests.detailed_results_header"))
-                    for r in details:
+                    for i, r in enumerate(details):
                         test_passed = r.get("passed", False)
                         icon = "✅" if test_passed else "❌"
                         desc = r.get("description") or t("golden_tests.test_id_label", id=r.get('test_id'))
                         label = f"{icon} {desc}"
 
-                        with st.expander(label, expanded=not test_passed):
+                        with st.expander(label, expanded=(i == 0)):
                             col_exp, col_rec = st.columns(2)
                             with col_exp:
                                 st.markdown(t("golden_tests.expected_label"))
@@ -187,8 +185,8 @@ else:
                                           expected=expected_val, actual=actual_val)
                                     )
 
-                            st.markdown(t("golden_tests.input_used_label"))
-                            st.json(r.get("input", {}))
+                            with st.expander(t("golden_tests.input_used_label"), expanded=False):
+                                st.json(r.get("input", {}))
 
             except Exception as e:
                 st.error(t("golden_tests.run_error", error=e))
@@ -246,16 +244,20 @@ else:
             except json.JSONDecodeError as e:
                 st.error(t("golden_tests.error_invalid_json", error=e))
             else:
-                if not expected_output.strip():
+                if not description.strip():
+                    st.error(t("golden_tests.error_description_required"))
+                elif not expected_output.strip():
                     st.error(t("golden_tests.error_expected_required"))
                 elif not features:
                     st.error(t("golden_tests.error_features_empty"))
+                elif _classes and expected_output.strip() not in [str(c) for c in _classes]:
+                    st.error(t("golden_tests.error_expected_not_in_classes", classes=", ".join(str(c) for c in _classes)))
                 else:
                     try:
                         payload = {
                             "input_features": features,
                             "expected_output": expected_output.strip(),
-                            "description": description.strip() or None,
+                            "description": description.strip(),
                         }
                         client.create_golden_test(selected_name, payload)
                         st.toast(t("golden_tests.save_success"), icon="✅")

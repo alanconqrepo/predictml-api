@@ -147,6 +147,7 @@ stats:
       accuracy: Accuracy
       auc: AUC-ROC
       f1_score: F1 Score
+      mae: MAE (régression)
       r2: R² (régression)
       rmse: RMSE (régression)
       latency_p95_ms: Latence p95
@@ -160,11 +161,18 @@ stats:
     col_accuracy: Accuracy
     col_auc: AUC-ROC
     col_f1: F1 Score
+    col_mae: MAE
     col_r2: R²
     col_rmse: RMSE
     col_latency: Latence p95 (ms)
     col_drift: Drift
-    col_predictions: Prédictions ({days}j)
+    col_predictions: Prédictions modèle ({days}j)
+    col_version_predictions: "Prédictions version ({days}j)"
+    col_version_predictions_help: "Nombre de prédictions émises uniquement par cette version sur les {days} derniers jours. À comparer avec « Prédictions modèle » qui cumule toutes les versions."
+    col_date_start: Début version
+    col_date_start_help: Date de la première prédiction enregistrée avec cette version en production (toutes périodes confondues).
+    col_date_end: Fin version
+    col_date_end_help: Date de la dernière prédiction enregistrée avec cette version en production (toutes périodes confondues).
     col_accuracy_help: Proportion de prédictions correctes sur le jeu de test (classification).
       Entre 0 et 1 — plus c'est proche de 1, meilleur est le modèle.
     col_auc_help: Aire sous la courbe ROC — mesure la capacité discriminatoire du
@@ -172,6 +180,10 @@ stats:
       Requiert des probabilités prédites.
     col_f1_help: Moyenne harmonique précision/rappel sur le jeu de test (classification).
       Robuste aux classes déséquilibrées. Entre 0 et 1.
+    col_mae_help: Mean Absolute Error (régression). Écart absolu moyen entre la prédiction
+      et la valeur réelle, exprimé dans l'unité de la variable cible — plus c'est faible,
+      meilleur est le modèle. Trié croissant quand sélectionné. '—' pour les modèles
+      de classification.
     col_r2_help: 'Coefficient de détermination R² (régression). Mesure la part de
       variance expliquée par le modèle : 1.0 = parfait, 0.0 = modèle nul, < 0 = pire
       que la moyenne. ''—'' pour les modèles de classification.'
@@ -188,10 +200,12 @@ stats:
     col_task: Tâche
     col_task_help: "Type de tâche détecté à l'upload : Binaire (2 classes), Multiclasse
       (≥ 3 classes) ou Régression."
-    col_task_binary: Binaire
-    col_task_regression: Régression
-    col_task_multiclass: Multiclasse
+    col_task_binary: 🔵 Binaire
+    col_task_regression: 📈 Régression
+    col_task_multiclass: 🟡 Multiclasse
     col_task_unknown: "—"
+    col_status: Statut
+    col_status_help: "Mode de déploiement de la version : A/B test, Shadow, Actif ou Production."
     filter_model: Filtrer par modèle
     filter_version: Filtrer par version
     filter_all_models: Tous les modèles
@@ -202,6 +216,7 @@ stats:
     scatter_label_accuracy: Accuracy
     scatter_label_auc: AUC-ROC
     scatter_label_f1: F1 Score
+    scatter_label_mae: MAE
     scatter_label_r2: R²
     scatter_label_rmse: RMSE
     scatter_label_volume: Volume prédictions
@@ -1702,8 +1717,8 @@ services:
     \ inaccessible."
   anthropic_key_set: "✅ Clé API Anthropic configurée"
   anthropic_model_label: Modèle utilisé
-  anthropic_model_caption: "Modèle Claude défini dans `12_AutoTrain_Chatbot.py`. Pour\
-    \ changer de modèle, modifiez la constante `MODEL_ID` dans ce fichier."
+  anthropic_model_caption: "Modèle Claude lu depuis la variable d'environnement `ANTHROPIC_MODEL`\
+    \ (`.env`). Valeur par défaut : `claude-sonnet-4-6`."
 golden_tests:
   page_title: Golden Tests — PredictML
   title: 🧪 Golden Tests
@@ -1729,6 +1744,8 @@ golden_tests:
   col_expected_output_help: Valeur de sortie attendue du modèle pour ces features.
   col_date: Date
   col_date_help: Date et heure à laquelle ce cas de test a été enregistré.
+  col_created_by: Créé par
+  col_created_by_help: Nom de l'administrateur qui a créé ce cas de test.
   tests_count: '{count} cas de test(s) enregistré(s).'
   run_all_btn: ▶ Lancer tous les tests sur v{version}
   delete_expander: 🗑️ Supprimer un cas de test
@@ -1748,7 +1765,7 @@ golden_tests:
   received_label: '**Reçu**'
   diff_label: '**Diff**'
   diff_content: '`attendu` → **{expected}** | `reçu` → **{actual}**'
-  input_used_label: '**Input utilisé**'
+  input_used_label: Input utilisé (JSON)
   run_error: 'Erreur lors de l''exécution des tests : {error}'
   section_add_test: 3. Ajouter un cas de test
   admin_only: Section réservée aux administrateurs.
@@ -1763,8 +1780,10 @@ golden_tests:
     libre)
   form_save_btn: 💾 Enregistrer
   error_invalid_json: 'JSON invalide dans les features : {error}'
+  error_description_required: La description est obligatoire.
   error_expected_required: La sortie attendue est obligatoire.
   error_features_empty: Les features d'entrée ne peuvent pas être vides.
+  error_expected_not_in_classes: 'La sortie attendue doit être l''une des classes connues du modèle : {classes}.'
   save_success: Cas de test enregistré avec succès.
   save_error: 'Erreur lors de l''enregistrement : {error}'
   csv_expander: 📥 Import CSV (lot de tests)
@@ -1995,6 +2014,8 @@ retrain:
     col_version: Version
     col_script: Script
     col_cron: Cron
+    col_lookback: Lookback (j)
+    col_auto_promote: Auto-promotion
     col_last_retrain: Dernier retrain
     col_next_retrain: Prochain retrain
     col_status: Statut
@@ -2002,9 +2023,11 @@ retrain:
     help_version: Version du modèle
     help_script: Script train.py disponible
     help_cron: Expression cron du planning
+    help_lookback: Nombre de jours d'historique utilisés comme données d'entraînement (TRAIN_START_DATE = aujourd'hui - lookback).
+    help_auto_promote: Si activé, la politique d'auto-promotion est évaluée après chaque ré-entraînement planifié.
     help_last_retrain: Date du dernier ré-entraînement
     help_next_retrain: Date du prochain ré-entraînement planifié
-    help_status: Statut du planning
+    help_status: '✅ Actif : planning cron activé, s''exécute automatiquement. ⏸️ Désactivé : planning configuré mais en pause. ➖ Aucun : aucun planning configuré.'
     metric_active_schedules: Plannings actifs
     metric_trainable_models: Modèles avec script
     metric_total_models: Total modèles
@@ -2018,6 +2041,8 @@ retrain:
     set_production: Passer en production après l'entraînement
     submit_btn: ▶️ Lancer le ré-entraînement
     error_date_order: La date de début doit être antérieure à la date de fin.
+    help_new_version: "Laissez vide pour générer automatiquement une version horodatée.\n\nFormat attendu : X.Y.Z ou X.Y.Z-suffixe\n• Chiffres et points pour la version sémantique\n• Tirets et lettres/chiffres pour le suffixe\n\nExemples valides :\n  1.3.0\n  1.3.0-retrain-20260621\n  2.0.0-custom\n\nCaractères interdits : espaces, underscores, @, /, etc."
+    error_version_format: 'Format invalide. Exemples : 1.2.0 · 1.2.0-retrain-20260621 · 2.0.0-custom. Caractères autorisés : chiffres, points, tirets et lettres.'
     spinner: Ré-entraînement en cours…
     toast_success: ✅ Ré-entraînement terminé — nouvelle version {new_version}
     auto_promoted_yes: 🎉 Nouvelle version promue en production automatiquement.
@@ -2049,6 +2074,14 @@ retrain:
 
       '
     current_schedule: '**Planning actuel :**'
+    field_enabled_on: "✅ Actif"
+    field_enabled_off: "⬜ En pause"
+    field_lookback_label: Lookback
+    field_auto_promote_label: Auto-promotion
+    field_last_run_label: Dernier run
+    field_next_run_label: Prochain run
+    field_yes: "✅ Oui"
+    field_no: "⬜ Non"
     cron_label: Expression cron
     cron_help: 'Format 5 champs : `min heure jour mois jour_semaine`. Ex : `0 3 *
       * 1` (lundi à 3h UTC)'
@@ -2064,23 +2097,57 @@ retrain:
     toast_error: '❌ Erreur : {error}'
     next_run_info: 'ℹ️ Prochain déclenchement : {next_run}'
   policy:
-    subheader: Politique d'auto-promotion
-    caption: Définissez les critères de qualité à atteindre pour promouvoir automatiquement
-      un modèle après ré-entraînement.
+    subheader: Politique d'auto-promotion après ré-entraînement
+    caption: La politique s'applique à toutes les versions actives du modèle sélectionné.
     model_label: Modèle
     current_policy: '**Politique actuelle :**'
-    no_policy: Aucune politique définie pour ce modèle.
-    enable_min_accuracy: Accuracy minimale
-    help_min_accuracy: Accuracy minimale requise (0–1)
-    enable_max_latency: Latence P95 maximale (ms)
-    help_max_latency: Latence P95 maximale autorisée en millisecondes
-    enable_max_mae: MAE maximale
-    help_max_mae: Erreur absolue moyenne maximale autorisée
-    help_min_samples: Nombre minimal de paires (prédiction, résultat observé) pour
-      valider la politique
+    no_policy: Aucune politique définie pour ce modèle. Remplissez le formulaire ci-dessous
+      pour en créer une.
+    current_policy_title: "**Politique actuelle pour {name} :**"
+    field_not_set: "—"
+    field_auto_promote_label: Auto-promotion
+    field_auto_promote_on: "✅ Active"
+    field_auto_promote_off: "⬜ Inactive"
+    field_min_accuracy_label: Accuracy min.
+    field_min_auc_label: AUC min.
+    field_max_mae_label: MAE max.
+    field_max_latency_label: Latence P95 max.
+    field_min_samples_label: Échantillons min.
+    form_intro: "Après chaque ré-entraînement, la nouvelle version du modèle est promue
+      automatiquement en production **uniquement si tous les critères activés ci-dessous
+      sont respectés**. Cochez une case pour activer un critère ; décochez-la pour
+      l'ignorer."
+    section_activation: Activation
+    section_performance: Critères de performance
+    section_speed: Critères de vitesse
+    section_validation: Seuil de validation
+    label_auto_promote: Activer la promotion automatique après chaque ré-entraînement
+    label_min_accuracy: "Accuracy minimale requise (0.0 → 1.0)"
+    label_min_auc: "AUC-ROC minimale (0.5 → 1.0)"
+    label_max_mae: "MAE maximale — erreur absolue moyenne (0.0 → 1.0)"
+    label_max_latency: Temps de réponse P95 maximum (ms)
+    label_min_samples: Nombre minimal de paires de validation requises
+    enable_min_accuracy: Activer le critère d'accuracy
+    help_min_accuracy: "Le modèle ré-entraîné doit atteindre au moins cette accuracy
+      sur les paires (prédiction, résultat observé). Exemple : 0.90 = 90 % de
+      prédictions correctes."
+    enable_min_auc: "Activer le critère AUC (classification binaire uniquement)"
+    help_min_auc: "Aire sous la courbe ROC — mesure la capacité du modèle à distinguer
+      deux classes. 1.0 = parfait, 0.5 = aléatoire. Nécessite que les probabilités
+      soient enregistrées. Exemple : 0.80."
+    enable_max_latency: Activer le critère de latence
+    help_max_latency: "95 % des prédictions doivent être renvoyées en moins de ce
+      temps. Exemple : 200 ms."
+    enable_max_mae: Activer le critère MAE (modèles de régression uniquement)
+    help_max_mae: "Pour les modèles de régression : l'erreur absolue moyenne doit
+      rester sous ce seuil (0.0 → 1.0 pour les erreurs normalisées). Exemple : 0.05."
+    help_min_samples: "Nombre minimal de paires (prédiction, résultat observé) nécessaires
+      pour évaluer la politique. En dessous de ce seuil, l'auto-promotion est ignorée
+      même si tous les critères seraient satisfaits."
     enable_auto_promote: Activer l'auto-promotion
-    help_auto_promote: Promouvoir automatiquement en production si tous les critères
-      sont satisfaits
+    help_auto_promote: "Lorsqu'elle est activée, les critères ci-dessus sont évalués
+      automatiquement après chaque ré-entraînement. Si tous les critères actifs sont
+      satisfaits, la nouvelle version est mise en production sans intervention manuelle."
     save_btn: 💾 Enregistrer la politique
     toast_saved: ✅ Politique enregistrée pour {name} ({updated} version(s) mise(s)
       à jour)
@@ -2480,7 +2547,8 @@ models:
   detail_nb_features: '**Nb features :** {value}'
   detail_last_pred: '**Dernière prédiction :** {value}'
   detail_classes: '**Classes :** {value}'
-  detail_confidence_threshold: '**Confidence threshold :** {value}'
+  detail_confidence_threshold: '**Seuil de confiance :** {value}'
+  detail_confidence_threshold_help: "Score de confiance minimum (0–1) en dessous duquel une prédiction est signalée comme incertaine. Si la probabilité de la classe majoritaire est inférieure à ce seuil, la prédiction est marquée d'un avertissement dans la réponse. À configurer via ⚙️ Modifier les métadonnées."
   detail_hyperparams: '**Hyperparamètres :**'
   detail_hyperparams_empty: '**Hyperparamètres :** —'
   detail_param_col: Paramètre
@@ -2871,7 +2939,7 @@ models:
       modèle, la version, le timestamp et les détails de l'alerte. Fonctionne
       indépendamment des alertes email."
     section_inference: '**Inférence**'
-    confidence_label: Confidence threshold
+    confidence_label: Seuil de confiance
     confidence_help: Seuil en dessous duquel la prédiction est marquée `low_confidence=True`
       dans la réponse.
     section_deployment: '**Déploiement A/B / Shadow**'
@@ -3072,3 +3140,18 @@ autotrain:
   dates:
     train_start: Date début entraînement
     train_end: Date fin entraînement
+nav_pages:
+  home: Accueil
+  users: Utilisateurs
+  models: Modèles
+  predictions: Prédictions
+  stats: Statistiques
+  ab_testing: A/B Testing
+  supervision: Supervision
+  retrain: Réentraînement
+  golden_tests: Golden Tests
+  help: Aide
+  code_example: Exemple de code
+  services: Services
+  login: Connexion
+  access_request: Demande d'accès

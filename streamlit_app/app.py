@@ -542,20 +542,20 @@ if _logged_in:
 
     # Build navigation first so st.page_link calls in the sidebar are valid
     _base_pages = [
-        st.Page(show_home, title="Home", default=True),
-        st.Page("pages/1_Users.py", title="Users"),
-        st.Page("pages/2_Models.py", title="Models"),
-        st.Page("pages/3_Predictions.py", title="Predictions"),
-        st.Page("pages/4_Stats.py", title="Stats"),
-        st.Page("pages/6_AB_Testing.py", title="AB Testing"),
-        st.Page("pages/7_Supervision.py", title="Supervision"),
-        st.Page("pages/8_Retrain.py", title="Retrain"),
-        st.Page("pages/9_Golden_Tests.py", title="Golden Tests"),
-        st.Page("pages/10_Aide.py", title="Help"),
-        st.Page("pages/5_Code_Example.py", title="Code Example"),
+        st.Page(show_home, title=t("nav_pages.home"), default=True),
+        st.Page("pages/1_Users.py", title=t("nav_pages.users")),
+        st.Page("pages/2_Models.py", title=t("nav_pages.models")),
+        st.Page("pages/3_Predictions.py", title=t("nav_pages.predictions")),
+        st.Page("pages/4_Stats.py", title=t("nav_pages.stats")),
+        st.Page("pages/6_AB_Testing.py", title=t("nav_pages.ab_testing")),
+        st.Page("pages/7_Supervision.py", title=t("nav_pages.supervision")),
+        st.Page("pages/8_Retrain.py", title=t("nav_pages.retrain")),
+        st.Page("pages/9_Golden_Tests.py", title=t("nav_pages.golden_tests")),
+        st.Page("pages/10_Aide.py", title=t("nav_pages.help")),
+        st.Page("pages/5_Code_Example.py", title=t("nav_pages.code_example")),
     ]
     if st.session_state.get("is_admin"):
-        _base_pages.append(st.Page("pages/11_Services.py", title="Services"))
+        _base_pages.append(st.Page("pages/11_Services.py", title=t("nav_pages.services")))
     _pg = st.navigation(_base_pages)
 
     # Sidebar "My account" — shown on all pages
@@ -611,8 +611,8 @@ if _logged_in:
 else:
     _pg = st.navigation(
         [
-            st.Page(show_login, title="Login", default=True),
-            st.Page("pages/0_Demande_Acces.py", title="Access Request"),
+            st.Page(show_login, title=t("nav_pages.login"), default=True),
+            st.Page("pages/0_Demande_Acces.py", title=t("nav_pages.access_request")),
         ]
     )
 

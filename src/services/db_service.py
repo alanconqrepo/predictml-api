@@ -494,6 +494,62 @@ class DBService:
         return result.scalar() or 0
 
     @staticmethod
+    async def get_performance_pairs_batch(
+        db: AsyncSession,
+        model_versions: list[tuple[str, str]],
+        days: int = 30,
+    ) -> dict[tuple[str, str], list]:
+        """
+        Fetch performance pairs for multiple (model_name, model_version) in one query.
+        Returns {(name, version): [rows]} with prediction_result, observed_result, probabilities.
+        """
+        if not model_versions:
+            return {}
+
+        days = min(days, settings.ANALYTICS_MAX_DAYS)
+        cutoff = _utcnow() - timedelta(days=days)
+
+        stmt = (
+            select(
+                Prediction.model_name,
+                Prediction.model_version,
+                Prediction.prediction_result,
+                ObservedResult.observed_result,
+                Prediction.probabilities,
+            )
+            .join(
+                ObservedResult,
+                and_(
+                    Prediction.id_obs == ObservedResult.id_obs,
+                    Prediction.model_name == ObservedResult.model_name,
+                ),
+            )
+            .where(
+                and_(
+                    Prediction.status == "success",
+                    Prediction.id_obs.isnot(None),
+                    Prediction.timestamp >= cutoff,
+                    or_(
+                        *[
+                            and_(
+                                Prediction.model_name == name,
+                                Prediction.model_version == version,
+                            )
+                            for name, version in model_versions
+                        ]
+                    ),
+                )
+            )
+            .limit(settings.MAX_ROWS_ANALYTICS)
+        )
+
+        result = await db.execute(stmt)
+        batched: dict[tuple[str, str], list] = defaultdict(list)
+        for row in result.all():
+            batched[(row.model_name, row.model_version)].append(row)
+        return dict(batched)
+
+    @staticmethod
     async def get_performance_pairs(
         db: AsyncSession,
         model_name: str,
@@ -1461,6 +1517,67 @@ class DBService:
                 }
             )
         return stats
+
+    @staticmethod
+    async def get_prediction_count_per_version(
+        db: AsyncSession,
+        days: int = 30,
+    ) -> dict[tuple[str, str], int]:
+        """Return prediction counts grouped by (model_name, model_version) over the last N days."""
+        days = min(days, settings.ANALYTICS_MAX_DAYS)
+        cutoff = _utcnow() - timedelta(days=days)
+
+        if _pg(db):
+            sql = text("""
+                SELECT model_name, model_version, COUNT(*) AS cnt
+                FROM predictions
+                WHERE timestamp >= :cutoff
+                GROUP BY model_name, model_version
+            """)
+            result = await db.execute(sql, {"cutoff": cutoff})
+            return {(row.model_name, row.model_version): int(row.cnt) for row in result.all()}
+
+        # SQLite fallback
+        stmt = select(Prediction.model_name, Prediction.model_version).where(
+            Prediction.timestamp >= cutoff
+        )
+        result = await db.execute(stmt)
+        counts: dict[tuple[str, str], int] = defaultdict(int)
+        for row in result.all():
+            counts[(row.model_name, row.model_version)] += 1
+        return dict(counts)
+
+    @staticmethod
+    async def get_prediction_date_range_per_version(
+        db: AsyncSession,
+    ) -> "dict[tuple[str, str], tuple[datetime, datetime]]":
+        """Return (first_timestamp, last_timestamp) per (model_name, model_version) — all-time."""
+        if _pg(db):
+            sql = text("""
+                SELECT model_name, model_version,
+                       MIN(timestamp) AS first_at,
+                       MAX(timestamp) AS last_at
+                FROM predictions
+                GROUP BY model_name, model_version
+            """)
+            result = await db.execute(sql)
+            return {
+                (row.model_name, row.model_version): (row.first_at, row.last_at)
+                for row in result.all()
+            }
+
+        # SQLite fallback
+        stmt = select(
+            Prediction.model_name,
+            Prediction.model_version,
+            func.min(Prediction.timestamp).label("first_at"),
+            func.max(Prediction.timestamp).label("last_at"),
+        ).group_by(Prediction.model_name, Prediction.model_version)
+        result = await db.execute(stmt)
+        return {
+            (row.model_name, row.model_version): (row.first_at, row.last_at)
+            for row in result.all()
+        }
 
     @staticmethod
     async def delete_prediction(db: AsyncSession, prediction_id: int) -> bool:

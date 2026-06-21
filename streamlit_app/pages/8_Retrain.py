@@ -2,6 +2,7 @@
 Centralized management of retraining jobs and cron schedules
 """
 
+import re
 from datetime import date, timedelta
 
 import pandas as pd
@@ -69,19 +70,17 @@ with tab_overview:
     rows = []
     for m in models:
         sched = m.get("retrain_schedule") or {}
+        if not sched:
+            continue
         has_script = bool(m.get("train_script_object_key"))
 
-        if sched:
-            cron = sched.get("cron") or "—"
-            last_run = sched.get("last_run_at")
-            next_run = sched.get("next_run_at")
-            enabled = sched.get("enabled", True)
-            badge = t("retrain.overview.badge_active") if enabled else t("retrain.overview.badge_disabled")
-        else:
-            cron = "—"
-            last_run = None
-            next_run = None
-            badge = t("retrain.overview.badge_none")
+        cron = sched.get("cron") or "—"
+        last_run = sched.get("last_run_at")
+        next_run = sched.get("next_run_at")
+        enabled = sched.get("enabled", True)
+        badge = t("retrain.overview.badge_active") if enabled else t("retrain.overview.badge_disabled")
+        lookback = sched.get("lookback_days")
+        auto_promote = sched.get("auto_promote", False)
 
         rows.append(
             {
@@ -89,6 +88,8 @@ with tab_overview:
                 t("retrain.overview.col_version"): m.get("version", ""),
                 t("retrain.overview.col_script"): "✅" if has_script else "❌",
                 t("retrain.overview.col_cron"): cron,
+                t("retrain.overview.col_lookback"): lookback,
+                t("retrain.overview.col_auto_promote"): auto_promote,
                 t("retrain.overview.col_last_retrain"): (
                     pd.to_datetime(last_run).strftime("%Y-%m-%d %H:%M") if last_run else "—"
                 ),
@@ -103,6 +104,8 @@ with tab_overview:
     col_version = t("retrain.overview.col_version")
     col_script = t("retrain.overview.col_script")
     col_cron = t("retrain.overview.col_cron")
+    col_lookback = t("retrain.overview.col_lookback")
+    col_auto_promote = t("retrain.overview.col_auto_promote")
     col_last_retrain = t("retrain.overview.col_last_retrain")
     col_next_retrain = t("retrain.overview.col_next_retrain")
     col_status = t("retrain.overview.col_status")
@@ -127,6 +130,15 @@ with tab_overview:
             col_cron: st.column_config.TextColumn(
                 col_cron,
                 help=t("retrain.overview.help_cron"),
+            ),
+            col_lookback: st.column_config.NumberColumn(
+                col_lookback,
+                help=t("retrain.overview.help_lookback"),
+                format="%d j",
+            ),
+            col_auto_promote: st.column_config.CheckboxColumn(
+                col_auto_promote,
+                help=t("retrain.overview.help_auto_promote"),
             ),
             col_last_retrain: st.column_config.TextColumn(
                 col_last_retrain,
@@ -166,17 +178,20 @@ with tab_manual:
         st.warning(t("retrain.manual.no_trainable"))
     else:
         model_opts = {f"{m['name']} v{m['version']}": m for m in trainable}
-        retrain_search = st.text_input(
-            t("retrain.filter_by_name"), key="retrain_search", placeholder=t("retrain.search_placeholder")
-        )
+        _col_s, _col_sel = st.columns([1, 2])
+        with _col_s:
+            retrain_search = st.text_input(
+                t("retrain.filter_by_name"), key="retrain_search", placeholder=t("retrain.search_placeholder")
+            )
         retrain_keys = (
             [k for k in model_opts if retrain_search.lower() in k.lower()]
             if retrain_search
             else list(model_opts.keys())
         )
-        selected_label = st.selectbox(
-            t("retrain.manual.select_model"), retrain_keys or list(model_opts.keys()), key="retrain_select"
-        )
+        with _col_sel:
+            selected_label = st.selectbox(
+                t("retrain.manual.select_model"), retrain_keys or list(model_opts.keys()), key="retrain_select"
+            )
         sel = model_opts[selected_label]
 
         with st.form("manual_retrain_form"):
@@ -198,6 +213,7 @@ with tab_manual:
                 value="",
                 placeholder=f"{sel['version']}-retrain-YYYYMMDDHHMMSS",
                 key="manual_new_version",
+                help=t("retrain.manual.help_new_version"),
             )
             set_prod = st.checkbox(
                 t("retrain.manual.set_production"),
@@ -207,8 +223,13 @@ with tab_manual:
             submitted = st.form_submit_button(t("retrain.manual.submit_btn"), type="primary")
 
         if submitted:
+            _version_re = re.compile(r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$")
+            _version_val = new_version_input.strip()
+            _version_ok = not _version_val or _version_re.match(_version_val)
             if start_date > end_date:
                 st.error(t("retrain.manual.error_date_order"))
+            elif not _version_ok:
+                st.error(t("retrain.manual.error_version_format"))
             else:
                 with st.spinner(t("retrain.manual.spinner")):
                     try:
@@ -265,39 +286,78 @@ with tab_schedule:
             st.markdown(t("retrain.schedule.help_table"))
 
         sched_opts = {f"{m['name']} v{m['version']}": m for m in trainable_sched}
-        sched_search = st.text_input(
-            t("retrain.filter_by_name"), key="sched_search", placeholder=t("retrain.search_placeholder")
-        )
+        _col_s, _col_sel = st.columns([1, 2])
+        with _col_s:
+            sched_search = st.text_input(
+                t("retrain.filter_by_name"), key="sched_search", placeholder=t("retrain.search_placeholder")
+            )
         sched_keys = (
             [k for k in sched_opts if sched_search.lower() in k.lower()]
             if sched_search
             else list(sched_opts.keys())
         )
-        sched_label = st.selectbox(
-            t("retrain.schedule.select_model"), sched_keys or list(sched_opts.keys()), key="sched_select"
-        )
+        with _col_sel:
+            sched_label = st.selectbox(
+                t("retrain.schedule.select_model"), sched_keys or list(sched_opts.keys()), key="sched_select"
+            )
         sched_sel = sched_opts[sched_label]
         existing_sched = sched_sel.get("retrain_schedule") or {}
 
         if existing_sched:
+            _s_enabled = existing_sched.get("enabled", True)
+            _s_cron = existing_sched.get("cron") or "—"
+            _s_lookback = existing_sched.get("lookback_days")
+            _s_auto_promote = existing_sched.get("auto_promote", False)
+            _s_last_run = existing_sched.get("last_run_at")
+            _s_next_run = existing_sched.get("next_run_at")
+
             st.markdown(t("retrain.schedule.current_schedule"))
-            st.json(existing_sched)
+            _s_icon = "🟢" if _s_enabled else "🔴"
+            st.markdown(
+                f"{_s_icon} "
+                + (t("retrain.schedule.field_enabled_on") if _s_enabled else t("retrain.schedule.field_enabled_off"))
+                + f"  —  {t('retrain.schedule.cron_label')} : `{_s_cron}`"
+            )
+            _sc1, _sc2, _sc3, _sc4 = st.columns(4)
+            with _sc1:
+                st.metric(
+                    t("retrain.schedule.field_lookback_label"),
+                    f"{_s_lookback} j" if _s_lookback is not None else "—",
+                )
+            with _sc2:
+                st.metric(
+                    t("retrain.schedule.field_auto_promote_label"),
+                    t("retrain.schedule.field_yes") if _s_auto_promote else t("retrain.schedule.field_no"),
+                )
+            with _sc3:
+                st.metric(
+                    t("retrain.schedule.field_last_run_label"),
+                    pd.to_datetime(_s_last_run).strftime("%Y-%m-%d %H:%M") if _s_last_run else "—",
+                )
+            with _sc4:
+                st.metric(
+                    t("retrain.schedule.field_next_run_label"),
+                    pd.to_datetime(_s_next_run).strftime("%Y-%m-%d %H:%M") if _s_next_run else "—",
+                )
 
         with st.form("schedule_form"):
-            cron_val = st.text_input(
-                t("retrain.schedule.cron_label"),
-                value=existing_sched.get("cron") or "",
-                placeholder="0 3 * * 1",
-                help=t("retrain.schedule.cron_help"),
-            )
-            lookback = st.slider(
-                t("retrain.schedule.lookback_label"),
-                min_value=1,
-                max_value=365,
-                value=int(existing_sched.get("lookback_days") or 30),
-                help=t("retrain.schedule.lookback_help"),
-            )
-            col_ap, col_en = st.columns(2)
+            col_cron, col_lb = st.columns(2)
+            with col_cron:
+                cron_val = st.text_input(
+                    t("retrain.schedule.cron_label"),
+                    value=existing_sched.get("cron") or "",
+                    placeholder="0 3 * * 1",
+                    help=t("retrain.schedule.cron_help"),
+                )
+            with col_lb:
+                lookback = st.slider(
+                    t("retrain.schedule.lookback_label"),
+                    min_value=1,
+                    max_value=365,
+                    value=int(existing_sched.get("lookback_days") or 30),
+                    help=t("retrain.schedule.lookback_help"),
+                )
+            col_ap, col_en, col_btn = st.columns([2, 2, 1])
             with col_ap:
                 auto_promote_sched = st.checkbox(
                     t("retrain.schedule.auto_promote_label"),
@@ -312,7 +372,10 @@ with tab_schedule:
                     key="sched_enabled",
                     help=t("retrain.schedule.enabled_help"),
                 )
-            save_sched = st.form_submit_button(t("retrain.schedule.save_btn"), type="primary")
+            with col_btn:
+                save_sched = st.form_submit_button(
+                    t("retrain.schedule.save_btn"), type="primary", use_container_width=True
+                )
 
         if save_sched:
             try:
@@ -342,15 +405,18 @@ with tab_policy:
     st.caption(t("retrain.policy.caption"))
 
     model_names = sorted({m["name"] for m in models})
-    policy_search = st.text_input(
-        t("retrain.filter_by_name"), key="policy_model_search", placeholder=t("retrain.search_placeholder")
-    )
+    _col_s, _col_sel = st.columns([1, 2])
+    with _col_s:
+        policy_search = st.text_input(
+            t("retrain.filter_by_name"), key="policy_model_search", placeholder=t("retrain.search_placeholder")
+        )
     policy_filtered = (
         [n for n in model_names if policy_search.lower() in n.lower()]
         if policy_search
         else model_names
     )
-    policy_name = st.selectbox(t("retrain.policy.model_label"), policy_filtered or model_names, key="policy_model_select")
+    with _col_sel:
+        policy_name = st.selectbox(t("retrain.policy.model_label"), policy_filtered or model_names, key="policy_model_select")
 
     matching = [m for m in models if m["name"] == policy_name]
     current_policy: dict = {}
@@ -359,67 +425,139 @@ with tab_policy:
             current_policy = m["promotion_policy"]
             break
 
+    is_classification = any(m.get("classes") for m in matching)
+
+    # ── Pretty display of current policy ──────────────────────────
     if current_policy:
-        st.markdown(t("retrain.policy.current_policy"))
-        st.json(current_policy)
+        _auto_promote = current_policy.get("auto_promote", False)
+        _min_accuracy = current_policy.get("min_accuracy")
+        _min_auc = current_policy.get("min_auc")
+        _max_mae = current_policy.get("max_mae")
+        _max_latency = current_policy.get("max_latency_p95_ms")
+        _min_samples = current_policy.get("min_sample_validation", 100)
+
+        st.markdown(t("retrain.policy.current_policy_title", name=policy_name))
+        _status_icon = "🟢" if _auto_promote else "🔴"
+        st.markdown(
+            f"{_status_icon} **{t('retrain.policy.field_auto_promote_label')} :** "
+            + (t("retrain.policy.field_auto_promote_on") if _auto_promote else t("retrain.policy.field_auto_promote_off"))
+        )
+        _c1, _c2, _c3, _c4 = st.columns(4)
+        with _c1:
+            st.metric(
+                t("retrain.policy.field_min_accuracy_label"),
+                f"{_min_accuracy:.0%}" if _min_accuracy is not None else t("retrain.policy.field_not_set"),
+            )
+        with _c2:
+            if is_classification:
+                st.metric(
+                    t("retrain.policy.field_min_auc_label"),
+                    f"{_min_auc:.2f}" if _min_auc is not None else t("retrain.policy.field_not_set"),
+                )
+            else:
+                st.metric(
+                    t("retrain.policy.field_max_mae_label"),
+                    f"{_max_mae:.4f}" if _max_mae is not None else t("retrain.policy.field_not_set"),
+                )
+        with _c3:
+            st.metric(
+                t("retrain.policy.field_max_latency_label"),
+                f"{_max_latency:.0f} ms" if _max_latency is not None else t("retrain.policy.field_not_set"),
+            )
+        with _c4:
+            st.metric(
+                t("retrain.policy.field_min_samples_label"),
+                str(_min_samples),
+            )
     else:
         st.info(t("retrain.policy.no_policy"))
 
-    with st.form("policy_form"):
-        col_l, col_r = st.columns(2)
+    st.divider()
 
+    # ── Form ──────────────────────────────────────────────────────
+    st.info(t("retrain.policy.form_intro"))
+
+    # Defaults for widgets that may not be rendered
+    min_auc_enabled = False
+    min_auc = float(current_policy.get("min_auc") or 0.8)
+    max_mae_enabled = False
+    max_mae = min(float(current_policy.get("max_mae") or 0.1), 1.0)
+
+    with st.form("policy_form"):
+        st.markdown(f"#### 🚀 {t('retrain.policy.section_activation')}")
+        auto_promote_policy = st.checkbox(
+            t("retrain.policy.label_auto_promote"),
+            value=bool(current_policy.get("auto_promote", False)),
+            help=t("retrain.policy.help_auto_promote"),
+        )
+
+        st.divider()
+        st.markdown(f"#### 📊 {t('retrain.policy.section_performance')}")
+        col_l, col_r = st.columns(2)
         with col_l:
             min_acc_enabled = st.checkbox(
                 t("retrain.policy.enable_min_accuracy"),
                 value=current_policy.get("min_accuracy") is not None,
             )
             min_acc = st.slider(
-                "min_accuracy",
+                t("retrain.policy.label_min_accuracy"),
                 min_value=0.0,
                 max_value=1.0,
                 value=float(current_policy.get("min_accuracy") or 0.9),
                 step=0.01,
                 help=t("retrain.policy.help_min_accuracy"),
             )
-
-            max_latency_enabled = st.checkbox(
-                t("retrain.policy.enable_max_latency"),
-                value=current_policy.get("max_latency_p95_ms") is not None,
-            )
-            max_latency = st.number_input(
-                "max_latency_p95_ms",
-                min_value=1.0,
-                value=float(current_policy.get("max_latency_p95_ms") or 200.0),
-                step=10.0,
-                help=t("retrain.policy.help_max_latency"),
-            )
-
         with col_r:
-            max_mae_enabled = st.checkbox(
-                t("retrain.policy.enable_max_mae"),
-                value=current_policy.get("max_mae") is not None,
-            )
-            max_mae = st.number_input(
-                "max_mae",
-                min_value=0.0,
-                value=float(current_policy.get("max_mae") or 0.1),
-                step=0.01,
-                format="%.3f",
-                help=t("retrain.policy.help_max_mae"),
-            )
+            if is_classification:
+                min_auc_enabled = st.checkbox(
+                    t("retrain.policy.enable_min_auc"),
+                    value=current_policy.get("min_auc") is not None,
+                )
+                min_auc = st.slider(
+                    t("retrain.policy.label_min_auc"),
+                    min_value=0.5,
+                    max_value=1.0,
+                    value=float(current_policy.get("min_auc") or 0.8),
+                    step=0.01,
+                    help=t("retrain.policy.help_min_auc"),
+                )
+            else:
+                max_mae_enabled = st.checkbox(
+                    t("retrain.policy.enable_max_mae"),
+                    value=current_policy.get("max_mae") is not None,
+                )
+                max_mae = st.slider(
+                    t("retrain.policy.label_max_mae"),
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=min(float(current_policy.get("max_mae") or 0.1), 1.0),
+                    step=0.001,
+                    help=t("retrain.policy.help_max_mae"),
+                )
 
-            min_samples = st.number_input(
-                "min_sample_validation",
-                min_value=1,
-                value=int(current_policy.get("min_sample_validation") or 10),
-                step=1,
-                help=t("retrain.policy.help_min_samples"),
-            )
-            auto_promote_policy = st.checkbox(
-                t("retrain.policy.enable_auto_promote"),
-                value=bool(current_policy.get("auto_promote", False)),
-                help=t("retrain.policy.help_auto_promote"),
-            )
+        st.divider()
+        st.markdown(f"#### ⚡ {t('retrain.policy.section_speed')}")
+        max_latency_enabled = st.checkbox(
+            t("retrain.policy.enable_max_latency"),
+            value=current_policy.get("max_latency_p95_ms") is not None,
+        )
+        max_latency = st.number_input(
+            t("retrain.policy.label_max_latency"),
+            min_value=1,
+            value=int(current_policy.get("max_latency_p95_ms") or 200),
+            step=10,
+            help=t("retrain.policy.help_max_latency"),
+        )
+
+        st.divider()
+        st.markdown(f"#### 🔢 {t('retrain.policy.section_validation')}")
+        min_samples = st.number_input(
+            t("retrain.policy.label_min_samples"),
+            min_value=1,
+            value=int(current_policy.get("min_sample_validation") or 100),
+            step=1,
+            help=t("retrain.policy.help_min_samples"),
+        )
 
         save_policy = st.form_submit_button(t("retrain.policy.save_btn"), type="primary")
 
@@ -428,6 +566,7 @@ with tab_policy:
             result = client.set_policy(
                 name=policy_name,
                 min_accuracy=min_acc if min_acc_enabled else None,
+                min_auc=min_auc if min_auc_enabled else None,
                 max_mae=max_mae if max_mae_enabled else None,
                 max_latency_p95_ms=max_latency if max_latency_enabled else None,
                 min_sample_validation=int(min_samples),
@@ -448,17 +587,20 @@ with tab_history:
     st.subheader(t("retrain.history.subheader"))
 
     model_names_hist = sorted({m["name"] for m in models})
-    hist_search = st.text_input(
-        t("retrain.filter_by_name"), key="hist_model_search", placeholder=t("retrain.search_placeholder")
-    )
+    _col_search, _col_select = st.columns([1, 2])
+    with _col_search:
+        hist_search = st.text_input(
+            t("retrain.filter_by_name"), key="hist_model_search", placeholder=t("retrain.search_placeholder")
+        )
     hist_filtered = (
         [n for n in model_names_hist if hist_search.lower() in n.lower()]
         if hist_search
         else model_names_hist
     )
-    hist_model_name = st.selectbox(
-        t("retrain.history.model_label"), hist_filtered or model_names_hist, key="hist_model_select"
-    )
+    with _col_select:
+        hist_model_name = st.selectbox(
+            t("retrain.history.model_label"), hist_filtered or model_names_hist, key="hist_model_select"
+        )
 
     try:
         retrain_data = client.get_retrain_history(name=hist_model_name, limit=100)

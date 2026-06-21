@@ -63,6 +63,10 @@ _model_task_lookup = {
     (m["name"], m["version"]): m.get("model_task")
     for m in (models or [])
 }
+_model_weight_lookup = {
+    (m["name"], m["version"]): m.get("traffic_weight")
+    for m in (models or [])
+}
 
 if not model_names:
     st.warning(t("stats.no_models"))
@@ -81,6 +85,8 @@ _DRIFT_EMOJI = {
 
 
 def _bg_accuracy(val):
+    if pd.isna(val):
+        return ""
     try:
         v = float(val)
     except (TypeError, ValueError):
@@ -94,6 +100,8 @@ def _bg_accuracy(val):
 
 def _bg_r2(val):
     """R² coloring: green ≥ 0.90, yellow ≥ 0.70, red < 0.70, grey if None/NaN."""
+    if pd.isna(val):
+        return ""
     try:
         v = float(val)
     except (TypeError, ValueError):
@@ -101,6 +109,21 @@ def _bg_r2(val):
     if v >= 0.90:
         return "background-color: rgba(39, 174, 96, 0.25)"
     if v >= 0.70:
+        return "background-color: rgba(241, 196, 15, 0.25)"
+    return "background-color: rgba(231, 76, 60, 0.25)"
+
+
+def _bg_error(val):
+    """MAE/RMSE coloring — lower is better: green ≤ 0.10, yellow ≤ 0.50, red > 0.50."""
+    if pd.isna(val):
+        return ""
+    try:
+        v = float(val)
+    except (TypeError, ValueError):
+        return ""
+    if v <= 0.10:
+        return "background-color: rgba(39, 174, 96, 0.25)"
+    if v <= 0.50:
         return "background-color: rgba(241, 196, 15, 0.25)"
     return "background-color: rgba(231, 76, 60, 0.25)"
 
@@ -116,6 +139,7 @@ def _build_leaderboard_fallback(models_list, stats_list, metric, n_days):
             "accuracy": m.get("accuracy"),
             "auc": m.get("auc"),
             "f1_score": m.get("f1_score"),
+            "mae": (m.get("training_metrics") or {}).get("mae"),
             "r2": (m.get("training_metrics") or {}).get("r2"),
             "rmse": (m.get("training_metrics") or {}).get("rmse"),
             "latency_p95_ms": stats_by_name.get(m["name"], {}).get("p95_response_time_ms"),
@@ -137,6 +161,8 @@ def _build_leaderboard_fallback(models_list, stats_list, metric, n_days):
         rows.sort(key=lambda r: r["f1_score"] if r["f1_score"] is not None else -1, reverse=True)
     elif metric == "r2":
         rows.sort(key=lambda r: r["r2"] if r["r2"] is not None else -float("inf"), reverse=True)
+    elif metric == "mae":
+        rows.sort(key=lambda r: r["mae"] if r["mae"] is not None else float("inf"))
     elif metric == "rmse":
         rows.sort(key=lambda r: r["rmse"] if r["rmse"] is not None else float("inf"))
     else:
@@ -165,6 +191,7 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
         "accuracy":         t("stats.leaderboard.sort_options.accuracy"),
         "auc":              t("stats.leaderboard.sort_options.auc"),
         "f1_score":         t("stats.leaderboard.sort_options.f1_score"),
+        "mae":              t("stats.leaderboard.sort_options.mae"),
         "r2":               t("stats.leaderboard.sort_options.r2"),
         "rmse":             t("stats.leaderboard.sort_options.rmse"),
         "latency_p95_ms":   t("stats.leaderboard.sort_options.latency_p95_ms"),
@@ -225,15 +252,20 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
             _col_rank       = t("stats.leaderboard.col_rank")
             _col_model      = t("stats.leaderboard.col_model")
             _col_version    = t("stats.leaderboard.col_version")
+            _col_status     = t("stats.leaderboard.col_status")
             _col_task       = t("stats.leaderboard.col_task")
             _col_accuracy   = t("stats.leaderboard.col_accuracy")
             _col_auc        = t("stats.leaderboard.col_auc")
             _col_f1         = t("stats.leaderboard.col_f1")
+            _col_mae        = t("stats.leaderboard.col_mae")
             _col_r2         = t("stats.leaderboard.col_r2")
             _col_rmse       = t("stats.leaderboard.col_rmse")
-            _col_latency    = t("stats.leaderboard.col_latency")
-            _col_drift      = t("stats.leaderboard.col_drift")
-            _col_preds      = t("stats.leaderboard.col_predictions", days=days)
+            _col_latency        = t("stats.leaderboard.col_latency")
+            _col_drift          = t("stats.leaderboard.col_drift")
+            _col_preds          = t("stats.leaderboard.col_predictions", days=days)
+            _col_ver_preds      = t("stats.leaderboard.col_version_predictions", days=days)
+            _col_date_start     = t("stats.leaderboard.col_date_start")
+            _col_date_end       = t("stats.leaderboard.col_date_end")
 
             _TASK_LABELS = {
                 "classification_binary":     t("stats.leaderboard.col_task_binary"),
@@ -252,86 +284,132 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                 axis=1,
             )
 
+            # Compute localized status badge from raw deployment_mode / is_production fields
+            def _lb_statut(row) -> str:
+                mode = row.get("deployment_mode")
+                weight = row.get("traffic_weight") or _model_weight_lookup.get((row.get("name"), row.get("version")))
+                if mode == "ab_test":
+                    return f"🟠 A/B ({float(weight):.0%})" if weight is not None else "🟠 A/B"
+                if mode == "shadow":
+                    return "🟣 Shadow"
+                if row.get("is_production"):
+                    return t("models.table.status_production")
+                return t("models.table.status_active")
+
+            df_lb[_col_status] = df_lb.apply(_lb_statut, axis=1)
+
             # When no predictions in the period, perf KPIs from training are misleading
             _zero_mask = df_lb["predictions_count"] == 0
             if _zero_mask.any():
-                for _perf_col in ["accuracy", "auc", "f1_score", "r2", "rmse"]:
+                for _perf_col in ["accuracy", "auc", "f1_score", "mae", "r2", "rmse"]:
                     if _perf_col in df_lb.columns:
                         df_lb.loc[_zero_mask, _perf_col] = None
 
             df_display = df_lb.rename(
                 columns={
-                    "rank":              _col_rank,
-                    "name":              _col_model,
-                    "version":           _col_version,
-                    "model_task_label":  _col_task,
-                    "accuracy":          _col_accuracy,
-                    "auc":               _col_auc,
-                    "f1_score":          _col_f1,
-                    "r2":                _col_r2,
-                    "rmse":              _col_rmse,
-                    "latency_p95_ms":    _col_latency,
-                    "drift_status":      _col_drift,
-                    "predictions_count": _col_preds,
+                    "rank":                       _col_rank,
+                    "name":                       _col_model,
+                    "version":                    _col_version,
+                    "model_task_label":           _col_task,
+                    "accuracy":                   _col_accuracy,
+                    "auc":                        _col_auc,
+                    "f1_score":                   _col_f1,
+                    "mae":                        _col_mae,
+                    "r2":                         _col_r2,
+                    "rmse":                       _col_rmse,
+                    "latency_p95_ms":             _col_latency,
+                    "drift_status":               _col_drift,
+                    "predictions_count":          _col_preds,
+                    "version_predictions_count":  _col_ver_preds,
+                    "first_prediction_at":        _col_date_start,
+                    "last_prediction_at":         _col_date_end,
                 }
             )
-            df_display[_col_drift] = df_display[_col_drift].map(lambda x: _DRIFT_EMOJI.get(x, x))
-            df_display[_col_accuracy] = df_display[_col_accuracy].apply(
-                lambda x: round(x, 4) if pd.notna(x) and x is not None else None
+
+            # Fix the 3 last columns: drop raw deployment_mode (replaced by _col_status),
+            # rename is_production, then move Tâche just after Version
+            df_display = df_display.drop(
+                columns=["deployment_mode", "traffic_weight"], errors="ignore"
             )
-            if _col_auc in df_display.columns:
-                df_display[_col_auc] = df_display[_col_auc].apply(
-                    lambda x: round(x, 4) if pd.notna(x) and x is not None else None
+            if "is_production" in df_display.columns:
+                df_display = df_display.rename(columns={"is_production": t("models.analysis.col_production")})
+                df_display[t("models.analysis.col_production")] = df_display[t("models.analysis.col_production")].map(
+                    lambda x: "✅" if x else "—"
                 )
-            df_display[_col_f1] = df_display[_col_f1].apply(
-                lambda x: round(x, 4) if pd.notna(x) and x is not None else None
-            )
-            df_display[_col_r2] = df_display[_col_r2].apply(
-                lambda x: round(x, 4) if pd.notna(x) and x is not None else None
-            )
-            df_display[_col_rmse] = df_display[_col_rmse].apply(
-                lambda x: round(x, 4) if pd.notna(x) and x is not None else None
-            )
+            _col_is_prod = t("models.analysis.col_production")
+            _cols = [c for c in df_display.columns if c != _col_task]
+            _ins = _cols.index(_col_version) + 1 if _col_version in _cols else len(_cols)
+            _cols.insert(_ins, _col_task)
+            df_display = df_display[_cols]
+            df_display[_col_drift] = df_display[_col_drift].map(lambda x: _DRIFT_EMOJI.get(x, x))
+
+            # Force float64 on all metric columns (converts None/NaN → NaN)
+            for _mc in [_col_accuracy, _col_auc, _col_f1, _col_mae, _col_r2, _col_rmse]:
+                if _mc in df_display.columns:
+                    df_display[_mc] = pd.to_numeric(df_display[_mc], errors="coerce")
+
             df_display[_col_latency] = df_display[_col_latency].apply(
                 lambda x: f"{x:.0f} ms" if pd.notna(x) and x is not None else "—"
             )
+            for _dc in (_col_date_start, _col_date_end):
+                if _dc in df_display.columns:
+                    df_display[_dc] = pd.to_datetime(df_display[_dc], errors="coerce").dt.date
 
+            # Background coloring (NaN → "" via pd.isna guard in each function)
             _style_map = df_display.style.map(_bg_accuracy, subset=[_col_accuracy])
             if _col_auc in df_display.columns and df_display[_col_auc].notna().any():
                 _style_map = _style_map.map(_bg_accuracy, subset=[_col_auc])
+            if _col_f1 in df_display.columns and df_display[_col_f1].notna().any():
+                _style_map = _style_map.map(_bg_accuracy, subset=[_col_f1])
+            if _col_mae in df_display.columns and df_display[_col_mae].notna().any():
+                _style_map = _style_map.map(_bg_error, subset=[_col_mae])
             if _col_r2 in df_display.columns and df_display[_col_r2].notna().any():
                 _style_map = _style_map.map(_bg_r2, subset=[_col_r2])
-            styled = _style_map.hide(axis="index")
+            if _col_rmse in df_display.columns and df_display[_col_rmse].notna().any():
+                _style_map = _style_map.map(_bg_error, subset=[_col_rmse])
+
+            # Use Styler .format() to display "" for NaN — avoids "None" text
+            _nan_fmt = lambda x: f"{x:.2f}" if pd.notna(x) else ""
+            _fmt_map = {
+                _mc: _nan_fmt
+                for _mc in [_col_accuracy, _col_auc, _col_f1, _col_mae, _col_r2, _col_rmse]
+                if _mc in df_display.columns
+            }
+            styled = _style_map.hide(axis="index").format(_fmt_map)
 
             _col_config = {
+                _col_status: st.column_config.TextColumn(
+                    _col_status,
+                    help=t("stats.leaderboard.col_status_help"),
+                ),
                 _col_task: st.column_config.TextColumn(
                     _col_task,
                     help=t("stats.leaderboard.col_task_help"),
                 ),
-                _col_accuracy: st.column_config.NumberColumn(
+                _col_is_prod: st.column_config.TextColumn(_col_is_prod),
+                _col_accuracy: st.column_config.TextColumn(
                     _col_accuracy,
                     help=t("stats.leaderboard.col_accuracy_help"),
-                    format="%.4f",
                 ),
-                _col_auc: st.column_config.NumberColumn(
+                _col_auc: st.column_config.TextColumn(
                     _col_auc,
                     help=t("stats.leaderboard.col_auc_help"),
-                    format="%.4f",
                 ),
-                _col_f1: st.column_config.NumberColumn(
+                _col_f1: st.column_config.TextColumn(
                     _col_f1,
                     help=t("stats.leaderboard.col_f1_help"),
-                    format="%.4f",
                 ),
-                _col_r2: st.column_config.NumberColumn(
+                _col_mae: st.column_config.TextColumn(
+                    _col_mae,
+                    help=t("stats.leaderboard.col_mae_help"),
+                ),
+                _col_r2: st.column_config.TextColumn(
                     _col_r2,
                     help=t("stats.leaderboard.col_r2_help"),
-                    format="%.4f",
                 ),
-                _col_rmse: st.column_config.NumberColumn(
+                _col_rmse: st.column_config.TextColumn(
                     _col_rmse,
                     help=t("stats.leaderboard.col_rmse_help"),
-                    format="%.4f",
                 ),
                 _col_latency: st.column_config.TextColumn(
                     _col_latency,
@@ -341,9 +419,23 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                     _col_drift,
                     help=t("stats.leaderboard.col_drift_help"),
                 ),
+                _col_ver_preds: st.column_config.NumberColumn(
+                    _col_ver_preds,
+                    help=t("stats.leaderboard.col_version_predictions_help", days=days),
+                ),
                 _col_preds: st.column_config.NumberColumn(
                     _col_preds,
                     help=t("stats.leaderboard.col_predictions_help", days=days),
+                ),
+                _col_date_start: st.column_config.DateColumn(
+                    _col_date_start,
+                    help=t("stats.leaderboard.col_date_start_help"),
+                    format="DD/MM/YYYY",
+                ),
+                _col_date_end: st.column_config.DateColumn(
+                    _col_date_end,
+                    help=t("stats.leaderboard.col_date_end_help"),
+                    format="DD/MM/YYYY",
                 ),
             }
             if _zero_mask.any():
@@ -363,6 +455,7 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                     "accuracy": e["accuracy"],
                     "auc": e.get("auc"),
                     "f1_score": e["f1_score"],
+                    "mae": e.get("mae"),
                     "r2": e.get("r2"),
                     "rmse": e.get("rmse"),
                     "latency_p95_ms": e["latency_p95_ms"],
@@ -378,6 +471,7 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
                 "accuracy":          {"label": t("stats.leaderboard.scatter_label_accuracy"), "is_ratio": True,  "step": 0.05,  "max": 1.0,  "fmt_hover": lambda v: f"{v:.4f}"},
                 "auc":               {"label": t("stats.leaderboard.scatter_label_auc"),      "is_ratio": True,  "step": 0.05,  "max": 1.0,  "fmt_hover": lambda v: f"{v:.4f}"},
                 "f1_score":          {"label": t("stats.leaderboard.scatter_label_f1"),       "is_ratio": True,  "step": 0.05,  "max": 1.0,  "fmt_hover": lambda v: f"{v:.4f}"},
+                "mae":               {"label": t("stats.leaderboard.scatter_label_mae"),      "is_ratio": False, "step": 0.01,  "max": None, "fmt_hover": lambda v: f"{v:.4f}"},
                 "r2":                {"label": t("stats.leaderboard.scatter_label_r2"),       "is_ratio": True,  "step": 0.05,  "max": 1.0,  "fmt_hover": lambda v: f"{v:.4f}"},
                 "rmse":              {"label": t("stats.leaderboard.scatter_label_rmse"),     "is_ratio": False, "step": 0.1,   "max": None, "fmt_hover": lambda v: f"{v:.4f}"},
                 "predictions_count": {"label": t("stats.leaderboard.scatter_label_volume"),  "is_ratio": False, "step": 100.0, "max": None, "fmt_hover": lambda v: f"{int(v):,}"},
@@ -407,7 +501,7 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
             y_label = cfg_y["label"]
 
             # X threshold (vertical line)
-            _sx_is_lower_better = scatter_x_metric == "rmse"
+            _sx_is_lower_better = scatter_x_metric in ("rmse", "mae")
             _sx_label = (
                 t("stats.leaderboard.scatter_threshold_max", label=x_label)
                 if _sx_is_lower_better
@@ -425,7 +519,7 @@ with st.expander(t("stats.leaderboard.expander"), expanded=True):
             )
 
             # Y threshold (horizontal line)
-            _sy_is_lower_better = scatter_y_metric == "rmse"
+            _sy_is_lower_better = scatter_y_metric in ("rmse", "mae")
             _sy_label = (
                 t("stats.leaderboard.scatter_threshold_max", label=y_label)
                 if _sy_is_lower_better
@@ -984,7 +1078,7 @@ with st.expander(t("stats.accuracy_timeline.expander"), expanded=False):
                     metric_label: st.column_config.NumberColumn(
                         metric_label,
                         help=t("stats.accuracy_timeline.col_metric_help"),
-                        format="%.4f",
+                        format="%.2f",
                     ),
                     _col_obs_pairs: st.column_config.NumberColumn(
                         _col_obs_pairs,
