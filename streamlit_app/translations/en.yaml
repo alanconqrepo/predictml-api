@@ -694,6 +694,8 @@ home:
     golden_desc: Non-regression test suites with assertions on predictions
     help_title: Help
     help_desc: Documentation, code examples and API integration guide
+    autotrain_title: AutoTrain
+    autotrain_desc: Generate, test and upload train.py scripts with AI
 sidebar:
   account_title: My account
   quota_caption: '{used} / {limit} today'
@@ -2894,5 +2896,6 @@ nav_pages:
   help: Help
   code_example: Code Example
   services: Services
+  autotrain: AutoTrain
   login: Login
   access_request: Access Request

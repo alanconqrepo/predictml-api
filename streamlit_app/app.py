@@ -433,6 +433,14 @@ def show_home():  # noqa: C901
                 "pages/1_Users.py",
             ),
         )
+        nav_items.append(
+            (
+                "🤖",
+                t("home.nav.autotrain_title"),
+                t("home.nav.autotrain_desc"),
+                "pages/12_AutoTrain_Chatbot.py",
+            ),
+        )
 
     for i in range(0, len(nav_items), 3):
         row = nav_items[i : i + 3]
@@ -556,6 +564,7 @@ if _logged_in:
     ]
     if st.session_state.get("is_admin"):
         _base_pages.append(st.Page("pages/11_Services.py", title=t("nav_pages.services")))
+        _base_pages.append(st.Page("pages/12_AutoTrain_Chatbot.py", title=t("nav_pages.autotrain")))
     _pg = st.navigation(_base_pages)
 
     # Sidebar "My account" — shown on all pages
