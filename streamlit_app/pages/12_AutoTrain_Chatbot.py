@@ -247,7 +247,7 @@ _init_session_state()
 system_prompt = build_autotraining_system_prompt()
 anthropic_client = get_anthropic_client()
 
-_api_url: str = st.session_state.get("api_url", "http://localhost:8000")
+_api_url: str = st.session_state.get("api_url", os.environ.get("API_URL", "http://localhost:8000"))
 _token: str = st.session_state.get("api_token", "")
 
 # Header
