@@ -393,7 +393,7 @@ class TestAutoPromotionInRetrain:
         result = asyncio.run(_run())
         assert result["success"] is True
         assert result["auto_promoted"] is False
-        assert "insufficient" in result["auto_promote_reason"].lower()
+        assert "insuffisant" in result["auto_promote_reason"].lower()
         assert result["is_production"] is False
 
     def test_retrain_auto_promote_success(self):
@@ -563,7 +563,7 @@ class TestEvaluateAutoPromotion:
         ):
             ok, reason = self._run(evaluate_auto_promotion(db, "m", policy))
         assert ok is False
-        assert "insufficient" in reason.lower()
+        assert "insuffisant" in reason.lower()
 
     def test_sufficient_samples_accuracy_ok_returns_true(self):
         pairs = self._make_pairs(10, correct_ratio=1.0)  # 100% accuracy
@@ -633,7 +633,7 @@ class TestEvaluateAutoPromotion:
         ):
             ok, reason = self._run(evaluate_auto_promotion(db, "m", policy))
         assert ok is False
-        assert "latency" in reason.lower()
+        assert "latence" in reason.lower()
 
     def test_no_latency_data_skips_latency_check(self):
         """No latency data → latency criterion ignored."""
@@ -850,7 +850,7 @@ class TestAutoDemotion:
             mock_settings.ENABLE_EMAIL_ALERTS = True
             ok, reason = self._run(evaluate_auto_demotion(db, "m", self._base_policy()))
         assert ok is False
-        assert "fallback" in reason.lower()
+        assert "secours" in reason.lower()
         mock_email.send_auto_demotion_alert.assert_called_once()
         call_kwargs = mock_email.send_auto_demotion_alert.call_args
         assert call_kwargs.kwargs.get("no_fallback") is True or (

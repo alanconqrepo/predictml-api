@@ -80,8 +80,8 @@ async def evaluate_auto_promotion(
         return (
             False,
             (
-                f"Insufficient samples for validation: "
-                f"{n_samples}/{min_sample_validation} required."
+                f"Échantillons insuffisants pour la validation : "
+                f"{n_samples}/{min_sample_validation} requis."
             ),
         )
 
@@ -98,7 +98,7 @@ async def evaluate_auto_promotion(
             if mae is not None and mae > max_mae:
                 return (
                     False,
-                    (f"MAE too high: {mae:.4f} > {max_mae:.4f} required."),
+                    (f"MAE trop élevé : {mae:.4f} > {max_mae:.4f} (maximum autorisé)."),
                 )
     else:
         if min_accuracy is not None:
@@ -107,7 +107,7 @@ async def evaluate_auto_promotion(
             if accuracy < min_accuracy:
                 return (
                     False,
-                    (f"Insufficient accuracy: {accuracy:.4f} " f"< {min_accuracy:.4f} required."),
+                    (f"Accuracy insuffisante : {accuracy:.4f} < {min_accuracy:.4f} (minimum requis)."),
                 )
 
         if min_auc is not None:
@@ -117,7 +117,7 @@ async def evaluate_auto_promotion(
             if auc is not None and auc < min_auc:
                 return (
                     False,
-                    f"Insufficient AUC: {auc:.4f} < {min_auc:.4f} required.",
+                    f"AUC insuffisant : {auc:.4f} < {min_auc:.4f} (minimum requis).",
                 )
 
     # --- P95 latency check ---
@@ -137,7 +137,7 @@ async def evaluate_auto_promotion(
             if p95 > max_latency_p95_ms:
                 return (
                     False,
-                    (f"P95 latency too high: {p95:.1f}ms " f"> {max_latency_p95_ms:.1f}ms max."),
+                    (f"Latence P95 trop élevée : {p95:.1f} ms > {max_latency_p95_ms:.1f} ms (maximum autorisé)."),
                 )
 
     # --- Golden tests check ---
@@ -150,13 +150,13 @@ async def evaluate_auto_promotion(
             return (
                 False,
                 (
-                    f"Insufficient regression tests: {result.pass_rate:.2%} "
-                    f"< {min_golden_test_pass_rate:.2%} required "
-                    f"({result.failed}/{result.total_tests} failures)."
+                    f"Tests de régression insuffisants : {result.pass_rate:.2%} "
+                    f"< {min_golden_test_pass_rate:.2%} requis "
+                    f"({result.failed}/{result.total_tests} échecs)."
                 ),
             )
 
-    return True, "All promotion criteria are satisfied."
+    return True, "Tous les critères de promotion sont satisfaits."
 
 
 # ---------------------------------------------------------------------------
@@ -230,9 +230,12 @@ async def evaluate_auto_demotion(
         )
         if settings.ENABLE_EMAIL_ALERTS:
             email_service.send_auto_demotion_alert(
-                model_name, prod_meta.version, "Drift ou dégradation détectée", no_fallback=True
+                model_name,
+                prod_meta.version,
+                "Dérive ou dégradation de performance détectée — aucune version de secours disponible.",
+                no_fallback=True,
             )
-        return False, "No fallback version available — demotion cancelled."
+        return False, "Aucune version de secours disponible — rétrogradation annulée."
 
     # --- Guardrail: cooldown ---
     if demote_cooldown_hours > 0:

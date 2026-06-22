@@ -354,6 +354,8 @@ async def run_weekly_report() -> None:
     """
     if not settings.WEEKLY_REPORT_ENABLED:
         return
+    if not settings.ENABLE_EMAIL_ALERTS:
+        return
 
     logger.info("Generating weekly report")
 
@@ -368,32 +370,77 @@ async def run_weekly_report() -> None:
         async with AsyncSessionLocal() as db:
             raw_stats = await DBService.get_global_monitoring_stats(db, start, end)
             all_metas = await DBService.get_all_active_models(db)
-            meta_by_name = {}
+            meta_by_name: dict[str, list] = {}
             for m in all_metas:
                 meta_by_name.setdefault(m.name, []).append(m)
 
-        # Build a dict compatible with email_service.send_weekly_report()
-        models_summary = []
-        total_pred = 0
-        total_errors = 0
-        for raw in raw_stats:
-            total_pred += raw["total_predictions"]
-            total_errors += raw["error_count"]
-            models_summary.append(
-                {
-                    "model_name": raw["model_name"],
-                    "total_predictions": raw["total_predictions"],
-                    "error_rate": raw["error_rate"],
-                    "avg_latency_ms": raw["avg_latency_ms"],
-                    "feature_drift_status": "no_data",
-                    "performance_drift_status": "no_data",
-                    "health_status": (
-                        "critical"
-                        if raw["error_rate"] >= settings.ERROR_RATE_ALERT_THRESHOLD
-                        else "ok"
-                    ),
-                }
-            )
+            # Build a dict compatible with email_service.send_weekly_report()
+            models_summary = []
+            total_pred = 0
+            total_errors = 0
+            for raw in raw_stats:
+                model_name = raw["model_name"]
+                total_pred += raw["total_predictions"]
+                total_errors += raw["error_count"]
+
+                # Compute performance drift status from 7-day accuracy trend
+                perf_status = "no_data"
+                metas = meta_by_name.get(model_name, [])
+                prod_meta = next((m for m in metas if m.is_production), metas[0] if metas else None)
+                thresholds = prod_meta.alert_thresholds if prod_meta else None
+
+                perf_by_day = await DBService.get_accuracy_drift(db, model_name, start, end)
+                if len(perf_by_day) >= 2:
+                    use_mae = any(d.get("mae") is not None for d in perf_by_day)
+                    if use_mae:
+                        metrics = [
+                            -d["mae"]
+                            for d in perf_by_day
+                            if d["matched_count"] > 0 and d.get("mae") is not None
+                        ]
+                    else:
+                        metrics = [d["accuracy"] for d in perf_by_day if d["matched_count"] > 0]
+                    if len(metrics) >= 2:
+                        mid = len(metrics) // 2
+                        avg_first = sum(metrics[:mid]) / mid
+                        avg_second = sum(metrics[mid:]) / (len(metrics) - mid)
+                        accuracy_min = thresholds.get("accuracy_min") if thresholds else None
+                        if accuracy_min is not None and not use_mae:
+                            if avg_second < accuracy_min:
+                                perf_status = "critical"
+                            else:
+                                perf_status = "ok"
+                        else:
+                            drop = avg_first - avg_second
+                            if drop >= settings.PERFORMANCE_DRIFT_ALERT_THRESHOLD:
+                                perf_status = "critical"
+                            elif drop >= settings.PERFORMANCE_DRIFT_ALERT_THRESHOLD / 2:
+                                perf_status = "warning"
+                            else:
+                                perf_status = "ok"
+
+                error_rate = raw["error_rate"]
+                error_threshold = _get_model_threshold(
+                    thresholds, "error_rate_max", settings.ERROR_RATE_ALERT_THRESHOLD
+                )
+                if error_rate >= error_threshold:
+                    health_status = "critical"
+                elif perf_status in ("warning", "critical"):
+                    health_status = "warning"
+                else:
+                    health_status = "ok"
+
+                models_summary.append(
+                    {
+                        "model_name": model_name,
+                        "total_predictions": raw["total_predictions"],
+                        "error_rate": error_rate,
+                        "avg_latency_ms": raw["avg_latency_ms"],
+                        "feature_drift_status": "no_data",
+                        "performance_drift_status": perf_status,
+                        "health_status": health_status,
+                    }
+                )
 
         overview = {
             "period": {
@@ -411,7 +458,9 @@ async def run_weekly_report() -> None:
                 "models_critical": sum(
                     1 for m in models_summary if m["health_status"] == "critical"
                 ),
-                "models_warning": 0,
+                "models_warning": sum(
+                    1 for m in models_summary if m["health_status"] == "warning"
+                ),
                 "models_ok": sum(1 for m in models_summary if m["health_status"] == "ok"),
             },
             "models": models_summary,

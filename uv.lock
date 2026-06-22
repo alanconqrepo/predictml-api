@@ -67,18 +67,6 @@ wheels = [
 ]
 
 [[package]]
-name = "apscheduler"
-version = "3.11.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "tzlocal" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/07/12/3e4389e5920b4c1763390c6d371162f3784f86f85cd6d6c1bfe68eef14e2/apscheduler-3.11.2.tar.gz", hash = "sha256:2a9966b052ec805f020c8c4c3ae6e6a06e24b1bf19f2e11d91d8cca0473eef41", size = 108683, upload-time = "2025-12-22T00:39:34.884Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9f/64/2e54428beba8d9992aa478bb8f6de9e4ecaa5f8f513bcfd567ed7fb0262d/apscheduler-3.11.2-py3-none-any.whl", hash = "sha256:ce005177f741409db4e4dd40a7431b76feb856b9dd69d57e0da49d6715bfd26d", size = 64439, upload-time = "2025-12-22T00:39:33.303Z" },
-]
-
-[[package]]
 name = "arq"
 version = "0.28.0"
 source = { registry = "https://pypi.org/simple" }
@@ -546,6 +534,18 @@ wheels = [
 [package.optional-dependencies]
 toml = [
     { name = "tomli", marker = "python_full_version <= '3.11'" },
+]
+
+[[package]]
+name = "croniter"
+version = "6.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/df/de/5832661ed55107b8a09af3f0a2e71e0957226a59eb1dcf0a445cce6daf20/croniter-6.2.2.tar.gz", hash = "sha256:ba60832a5ec8e12e51b8691c3309a113d1cf6526bdf1a48150ce8ec7a532d0ab", size = 113762, upload-time = "2026-03-15T08:43:48.112Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d0/39/783980e78cb92c2d7bdb1fc7dbc86e94ccc6d58224d76a7f1f51b6c51e30/croniter-6.2.2-py3-none-any.whl", hash = "sha256:a5d17b1060974d36251ea4faf388233eca8acf0d09cbd92d35f4c4ac8f279960", size = 45422, upload-time = "2026-03-15T08:43:46.626Z" },
 ]
 
 [[package]]
@@ -2004,8 +2004,8 @@ name = "predictml"
 version = "2.0.0"
 source = { editable = "." }
 dependencies = [
-    { name = "apscheduler" },
     { name = "arq" },
+    { name = "croniter" },
     { name = "email-validator" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -2046,9 +2046,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiosqlite", marker = "extra == 'dev'", specifier = ">=0.20.0" },
-    { name = "apscheduler", specifier = ">=3.10.0" },
     { name = "arq", specifier = ">=0.25.0" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.0.0" },
+    { name = "croniter", specifier = ">=2.0" },
     { name = "email-validator", specifier = ">=2.0.0" },
     { name = "fakeredis", marker = "extra == 'dev'", specifier = ">=2.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
@@ -3030,18 +3030,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/19/f5/cd531b2d15a671a40c0f66cf06bc3570a12cd56eef98960068ebbad1bf5a/tzdata-2026.1.tar.gz", hash = "sha256:67658a1903c75917309e753fdc349ac0efd8c27db7a0cb406a25be4840f87f98", size = 197639, upload-time = "2026-04-03T11:25:22.002Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b0/70/d460bd685a170790ec89317e9bd33047988e4bce507b831f5db771e142de/tzdata-2026.1-py2.py3-none-any.whl", hash = "sha256:4b1d2be7ac37ceafd7327b961aa3a54e467efbdb563a23655fbfe0d39cfc42a9", size = 348952, upload-time = "2026-04-03T11:25:20.313Z" },
-]
-
-[[package]]
-name = "tzlocal"
-version = "5.3.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "tzdata", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/8b/2e/c14812d3d4d9cd1773c6be938f89e5735a1f11a9f184ac3639b93cef35d5/tzlocal-5.3.1.tar.gz", hash = "sha256:cceffc7edecefea1f595541dbd6e990cb1ea3d19bf01b2809f362a03dd7921fd", size = 30761, upload-time = "2025-03-05T21:17:41.549Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c2/14/e2a54fabd4f08cd7af1c07030603c3356b74da07f7cc056e600436edfa17/tzlocal-5.3.1-py3-none-any.whl", hash = "sha256:eb1a66c3ef5847adf7a834f1be0800581b683b5608e74f86ecbcef8ab91bb85d", size = 18026, upload-time = "2025-03-05T21:17:39.857Z" },
 ]
 
 [[package]]
