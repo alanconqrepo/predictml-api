@@ -283,16 +283,32 @@ def show_home():  # noqa: C901
             name = m.get("model_name", "?")
             err = m.get("error_rate")
             p95 = m.get("p95_latency_ms") or m.get("latency_p95_ms") or m.get("response_time_p95_ms")
-            details = []
+            feat_drift = m.get("feature_drift_status", "")
+            perf_drift = m.get("performance_drift_status", "")
+            out_drift = m.get("output_drift_status", "")
+
+            _si = {"warning": "⚠️", "critical": "🔴"}
+            triggers = []
             if err is not None:
-                details.append(f"erreur {err:.1%}")
-            if p95 is not None:
-                details.append(f"P95 {int(p95)} ms")
-            detail_line = f"<br><small style='opacity:.75'>{' · '.join(details)}</small>" if details else ""
+                if err >= 0.10:
+                    triggers.append(f"🔴 Taux d'erreur : {err:.1%}")
+                elif err >= 0.05:
+                    triggers.append(f"⚠️ Taux d'erreur : {err:.1%}")
+            if feat_drift in ("warning", "critical"):
+                triggers.append(f"{_si[feat_drift]} Drift features")
+            if perf_drift in ("warning", "critical"):
+                triggers.append(f"{_si[perf_drift]} Drift performance")
+            if out_drift in ("warning", "critical"):
+                triggers.append(f"{_si[out_drift]} Drift sortie")
+
+            p95_str = f"<span style='opacity:.6;font-size:.82em;margin-left:8px'>P95 {int(p95)} ms</span>" if p95 else ""
+            triggers_html = "".join(
+                f"<div style='font-size:.82em;margin-top:3px'>{t}</div>" for t in triggers
+            )
             return (
                 f"<div style='background:{bg};border-left:4px solid {border};"
                 f"padding:8px 14px;border-radius:4px;margin:4px 0'>"
-                f"<strong>{name}</strong>{detail_line}</div>"
+                f"<strong>{name}</strong>{p95_str}{triggers_html}</div>"
             )
 
         if critical:
