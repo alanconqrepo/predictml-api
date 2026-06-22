@@ -141,6 +141,8 @@ class Settings:
     WEEKLY_REPORT_ENABLED: bool = os.getenv("WEEKLY_REPORT_ENABLED", "false").lower() == "true"
     WEEKLY_REPORT_DAY: str = os.getenv("WEEKLY_REPORT_DAY", "monday")
     WEEKLY_REPORT_HOUR: int = int(os.getenv("WEEKLY_REPORT_HOUR", "8"))
+    # Email language — "EN" (default) or "FR"
+    DEFAULT_LANGUAGE: str = os.getenv("DEFAULT_LANGUAGE", "EN").upper()
 
     # Token expiration (days) — 0 = no expiration
     TOKEN_LIFETIME_DAYS: int = int(os.getenv("TOKEN_LIFETIME_DAYS", "90"))
