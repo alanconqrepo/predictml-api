@@ -59,10 +59,10 @@ def _run_chi2_error_rate(
     va: dict, vb: dict, alpha: float, confidence_level: float
 ) -> Optional[dict]:
     """Chi-squared on the classification error rate (misclassification vs ground truth)."""
-    err_a = va.get("clf_n_errors", 0)
-    ok_a = va.get("clf_n_correct", 0)
-    err_b = vb.get("clf_n_errors", 0)
-    ok_b = vb.get("clf_n_correct", 0)
+    err_a = va.get("clf_n_errors", va.get("error_count", 0))
+    ok_a = va.get("clf_n_correct", va.get("total_predictions", 0) - err_a)
+    err_b = vb.get("clf_n_errors", vb.get("error_count", 0))
+    ok_b = vb.get("clf_n_correct", vb.get("total_predictions", 0) - err_b)
 
     n_a = err_a + ok_a
     n_b = err_b + ok_b
@@ -175,13 +175,11 @@ def _run_auc_significance(
 
     def _hm_variance(auc: float, n_pos: int, n_neg: int) -> float:
         """Hanley & McNeil (1982) variance estimator for the AUC."""
-        Q1 = auc / (2 - auc)
-        Q2 = 2 * auc ** 2 / (1 + auc)
-        return (
-            auc * (1 - auc)
-            + (n_pos - 1) * (Q1 - auc ** 2)
-            + (n_neg - 1) * (Q2 - auc ** 2)
-        ) / (n_pos * n_neg)
+        q1 = auc / (2 - auc)
+        q2 = 2 * auc**2 / (1 + auc)
+        return (auc * (1 - auc) + (n_pos - 1) * (q1 - auc**2) + (n_neg - 1) * (q2 - auc**2)) / (
+            n_pos * n_neg
+        )
 
     var_total = _hm_variance(auc_a, n_pos_a, n_neg_a) + _hm_variance(auc_b, n_pos_b, n_neg_b)
     if var_total <= 0:

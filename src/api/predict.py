@@ -1070,6 +1070,7 @@ async def predict(
         if explain:
             try:
                 from sklearn.pipeline import Pipeline as _Pipeline
+
                 _feat_names = list(model.feature_names_in_)
                 if isinstance(model, _Pipeline):
                     x_shap = pd.DataFrame([{n: input_data.features[n] for n in _feat_names}])

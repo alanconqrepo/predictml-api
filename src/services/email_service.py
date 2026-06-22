@@ -112,8 +112,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     "perf_title": {"EN": "Performance drift alert", "FR": "Alerte dégradation de performance"},
     "perf_intro": {
         "EN": (
-            "A performance degradation has been detected on model "
-            "<strong>{model_name}</strong>."
+            "A performance degradation has been detected on model " "<strong>{model_name}</strong>."
         ),
         "FR": (
             "Une dégradation de performance a été détectée sur le modèle "
@@ -137,14 +136,8 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "error_title": {"EN": "Error spike alert", "FR": "Alerte pic d'erreurs"},
     "error_intro": {
-        "EN": (
-            "An error spike has been detected on model "
-            "<strong>{model_name}</strong>."
-        ),
-        "FR": (
-            "Un pic d'erreurs a été détecté sur le modèle "
-            "<strong>{model_name}</strong>."
-        ),
+        "EN": ("An error spike has been detected on model " "<strong>{model_name}</strong>."),
+        "FR": ("Un pic d'erreurs a été détecté sur le modèle " "<strong>{model_name}</strong>."),
     },
     "lbl_current_error": {"EN": "Current error rate", "FR": "Taux d'erreur actuel"},
     "lbl_threshold": {"EN": "Configured threshold", "FR": "Seuil configuré"},
@@ -501,7 +494,9 @@ class EmailService:
         self, model_name: str, error_rate: float, threshold: float | None = None
     ) -> bool:
         """Error spike alert."""
-        effective_threshold = threshold if threshold is not None else settings.ERROR_RATE_ALERT_THRESHOLD
+        effective_threshold = (
+            threshold if threshold is not None else settings.ERROR_RATE_ALERT_THRESHOLD
+        )
         body = f"""
         <p>{self._t("error_intro", model_name=model_name)}</p>
         <table>
@@ -519,9 +514,7 @@ class EmailService:
             html_body=self._base_html(self._t("error_title"), body),
         )
 
-    def send_auc_alert(
-        self, model_name: str, current_auc: float, auc_min: float
-    ) -> bool:
+    def send_auc_alert(self, model_name: str, current_auc: float, auc_min: float) -> bool:
         """AUC below minimum threshold alert (binary classifiers only)."""
         gap = auc_min - current_auc
         body = f"""
@@ -563,8 +556,7 @@ class EmailService:
             )
         if f1_score is not None:
             metrics_rows += (
-                f"<tr><th>{self._t('lbl_f1')}</th>"
-                f"<td><strong>{f1_score:.4f}</strong></td></tr>"
+                f"<tr><th>{self._t('lbl_f1')}</th>" f"<td><strong>{f1_score:.4f}</strong></td></tr>"
             )
         body = f"""
         <p>{self._t("promo_intro", model_name=model_name, new_version=new_version)}</p>
@@ -596,9 +588,7 @@ class EmailService:
         fallback_warning = ""
         if no_fallback:
             warn_text = self._t("demote_no_fallback_warning")
-            fallback_warning = (
-                f'<p style="color:#c0392b;font-weight:bold">{warn_text}</p>'
-            )
+            fallback_warning = f'<p style="color:#c0392b;font-weight:bold">{warn_text}</p>'
         body = f"""
         <p>{self._t("demote_intro", model_name=model_name, version=version, action=action)}</p>
         {fallback_warning}

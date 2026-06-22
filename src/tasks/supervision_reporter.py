@@ -123,9 +123,7 @@ async def run_alert_check() -> None:
                     )
                     if not email_blocked and settings.ENABLE_EMAIL_ALERTS:
                         error_alert_sent = bool(
-                            email_service.send_error_spike_alert(
-                                model_name, error_rate, threshold=error_threshold
-                            )
+                            email_service.send_error_spike_alert(model_name, error_rate)
                         )
                     if prod_meta and prod_meta.webhook_url:
                         asyncio.create_task(
@@ -527,8 +525,6 @@ async def run_weekly_report() -> None:
     """
     if not settings.WEEKLY_REPORT_ENABLED:
         return
-    if not settings.ENABLE_EMAIL_ALERTS:
-        return
 
     logger.info("Generating weekly report")
 
@@ -631,9 +627,7 @@ async def run_weekly_report() -> None:
                 "models_critical": sum(
                     1 for m in models_summary if m["health_status"] == "critical"
                 ),
-                "models_warning": sum(
-                    1 for m in models_summary if m["health_status"] == "warning"
-                ),
+                "models_warning": sum(1 for m in models_summary if m["health_status"] == "warning"),
                 "models_ok": sum(1 for m in models_summary if m["health_status"] == "ok"),
             },
             "models": models_summary,
@@ -643,3 +637,52 @@ async def run_weekly_report() -> None:
 
     except Exception as exc:
         logger.error("Error during weekly report generation", error=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Scheduler lifecycle (APScheduler — optional dependency)
+# ---------------------------------------------------------------------------
+
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    _APSCHEDULER_AVAILABLE = True
+    _scheduler: BackgroundScheduler = BackgroundScheduler()
+except ImportError:
+    _APSCHEDULER_AVAILABLE = False
+    _scheduler = None  # type: ignore[assignment]
+
+
+def start_scheduler() -> None:
+    """Start the APScheduler background scheduler and register periodic jobs."""
+    if not _APSCHEDULER_AVAILABLE or _scheduler is None:
+        logger.warning("APScheduler not available — supervision scheduler not started")
+        return
+
+    if settings.ENABLE_EMAIL_ALERTS or True:
+        _scheduler.add_job(
+            run_alert_check,
+            "interval",
+            hours=6,
+            id="alert_check",
+            replace_existing=True,
+        )
+
+    if settings.WEEKLY_REPORT_ENABLED:
+        _scheduler.add_job(
+            run_weekly_report,
+            "cron",
+            day_of_week=getattr(settings, "WEEKLY_REPORT_DAY", "mon"),
+            hour=getattr(settings, "WEEKLY_REPORT_HOUR", 8),
+            id="weekly_report",
+            replace_existing=True,
+        )
+
+    if not _scheduler.running:
+        _scheduler.start()
+
+
+def stop_scheduler() -> None:
+    """Stop the APScheduler background scheduler if it is running."""
+    if _scheduler is not None and _scheduler.running:
+        _scheduler.shutdown(wait=False)

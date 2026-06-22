@@ -195,7 +195,11 @@ def _explain_pipeline(
     # Ensure x is a DataFrame so the preprocessor handles mixed types correctly
     if not isinstance(x, pd.DataFrame):
         x_df = pd.DataFrame(
-            x if hasattr(x, "__len__") and len(np.array(x).shape) == 2 else np.array(x).reshape(1, -1),
+            (
+                x
+                if hasattr(x, "__len__") and len(np.array(x).shape) == 2
+                else np.array(x).reshape(1, -1)
+            ),
             columns=feature_names,
         )
     else:
@@ -216,7 +220,11 @@ def _explain_pipeline(
         result = _explain_tree(final_estimator, transformed_names, x_transformed, prediction_result)
     else:
         result = _explain_linear(
-            final_estimator, transformed_names, x_transformed, prediction_result, feature_baseline=None
+            final_estimator,
+            transformed_names,
+            x_transformed,
+            prediction_result,
+            feature_baseline=None,
         )
 
     # Aggregate OHE-expanded SHAP values back to the original input feature names

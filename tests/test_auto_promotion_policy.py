@@ -393,7 +393,7 @@ class TestAutoPromotionInRetrain:
         result = asyncio.run(_run())
         assert result["success"] is True
         assert result["auto_promoted"] is False
-        assert "insuffisant" in result["auto_promote_reason"].lower()
+        assert "insufficient" in result["auto_promote_reason"].lower()
         assert result["is_production"] is False
 
     def test_retrain_auto_promote_success(self):
