@@ -143,7 +143,7 @@ def test_readiness_no_baseline():
     assert response.status_code == 200
     data = response.json()
     assert data["checks"]["baseline_computed"]["pass"] is False
-    assert data["checks"]["baseline_computed"]["detail"] == "feature_baseline is null"
+    assert data["checks"]["baseline_computed"]["detail"] == "feature_baseline and categorical_baseline are null"
 
 
 def test_readiness_file_not_accessible():

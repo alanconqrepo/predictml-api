@@ -1575,8 +1575,7 @@ class DBService:
         ).group_by(Prediction.model_name, Prediction.model_version)
         result = await db.execute(stmt)
         return {
-            (row.model_name, row.model_version): (row.first_at, row.last_at)
-            for row in result.all()
+            (row.model_name, row.model_version): (row.first_at, row.last_at) for row in result.all()
         }
 
     @staticmethod

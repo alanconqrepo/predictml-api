@@ -60,6 +60,7 @@ from src.schemas.model import (
     ABSignificance,
     ABVersionStats,
     CalibrationResponse,
+    CategoricalDriftResult,
     ComputeBaselineResponse,
     ConfidenceBin,
     ConfidenceDistributionResponse,
@@ -67,7 +68,6 @@ from src.schemas.model import (
     ConfidenceTrendPoint,
     ConfidenceTrendResponse,
     DeprecateModelResponse,
-    CategoricalDriftResult,
     DriftReportResponse,
     FeatureDriftResult,
     FeatureImportanceItem,
@@ -162,7 +162,10 @@ ModelNamePath = Annotated[
 ]
 ModelVersionPath = Annotated[
     str,
-    Path(pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$", description="Model version (e.g. 1.2.0 or 1.2.0-retrain-20260530)"),
+    Path(
+        pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$",
+        description="Model version (e.g. 1.2.0 or 1.2.0-retrain-20260530)",
+    ),
 ]
 
 
@@ -187,7 +190,9 @@ async def _get_leaderboard_drift_status(
         categorical_baseline or {}, cat_prod_stats, min_count=10
     )
     return drift_service.summarize_drift(
-        features, baseline_available=has_numeric or has_categorical, categorical_features=cat_features
+        features,
+        baseline_available=has_numeric or has_categorical,
+        categorical_features=cat_features,
     )
 
 
@@ -588,9 +593,9 @@ async def get_models_leaderboard(
                 rank=0,
                 name=m.name,
                 version=m.version,
-                accuracy=live["accuracy"],
+                accuracy=live["accuracy"] if live["accuracy"] is not None else m.accuracy,
                 auc=live["auc"],
-                f1_score=live["f1_score"],
+                f1_score=live["f1_score"] if live["f1_score"] is not None else m.f1_score,
                 mae=live["mae"],
                 r2=live["r2"],
                 rmse=live["rmse"],
@@ -644,7 +649,14 @@ def _compute_live_metrics(pairs: list, metadata) -> dict:
     """
     valid = [p for p in pairs if p.prediction_result is not None and p.observed_result is not None]
     if not valid:
-        return {"accuracy": None, "f1_score": None, "auc": None, "mae": None, "r2": None, "rmse": None}
+        return {
+            "accuracy": None,
+            "f1_score": None,
+            "auc": None,
+            "mae": None,
+            "r2": None,
+            "rmse": None,
+        }
 
     model_type = _detect_model_type(metadata, valid)
     y_true = [p.observed_result for p in valid]
@@ -652,17 +664,40 @@ def _compute_live_metrics(pairs: list, metadata) -> dict:
     y_prob = [p.probabilities for p in valid]
 
     if model_type == "classification":
-        acc, _, _, f1, _, _, _ = _compute_classification_metrics(y_true, y_pred, getattr(metadata, "classes", None))
+        acc, _, _, f1, _, _, _ = _compute_classification_metrics(
+            y_true, y_pred, getattr(metadata, "classes", None)
+        )
         auc = compute_auc(y_true, y_prob, getattr(metadata, "classes", None))
-        return {"accuracy": round(acc, 4), "f1_score": round(float(f1), 4), "auc": auc, "mae": None, "r2": None, "rmse": None}
+        return {
+            "accuracy": round(acc, 4),
+            "f1_score": round(float(f1), 4),
+            "auc": auc,
+            "mae": None,
+            "r2": None,
+            "rmse": None,
+        }
     else:
         try:
             y_true_f = [float(v) for v in y_true]
             y_pred_f = [float(v) for v in y_pred]
             mae, _, rmse, r2 = _compute_regression_metrics(y_true_f, y_pred_f)
-            return {"accuracy": None, "f1_score": None, "auc": None, "mae": round(mae, 4), "r2": round(r2, 4), "rmse": round(rmse, 4)}
+            return {
+                "accuracy": None,
+                "f1_score": None,
+                "auc": None,
+                "mae": round(mae, 4),
+                "r2": round(r2, 4),
+                "rmse": round(rmse, 4),
+            }
         except Exception:
-            return {"accuracy": None, "f1_score": None, "auc": None, "mae": None, "r2": None, "rmse": None}
+            return {
+                "accuracy": None,
+                "f1_score": None,
+                "auc": None,
+                "mae": None,
+                "r2": None,
+                "rmse": None,
+            }
 
 
 def _detect_model_type(metadata: Optional[ModelMetadata], pairs: list) -> str:
@@ -929,9 +964,7 @@ async def get_model_drift(
 
     total_predictions = sum(v.get("count", 0) for v in production_stats.values())
     if not total_predictions:
-        total_predictions = max(
-            (v.get("_count", 0) for v in cat_prod_stats.values()), default=0
-        )
+        total_predictions = max((v.get("_count", 0) for v in cat_prod_stats.values()), default=0)
 
     baseline = metadata.feature_baseline or {}
     categorical_baseline = metadata.categorical_baseline or {}
@@ -1036,7 +1069,9 @@ async def get_model_output_drift(
 @router.get("/models/{name}/readiness")
 async def get_model_readiness(
     name: ModelNamePath,
-    version: str = Query(..., description="Model version to check", pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$"),
+    version: str = Query(
+        ..., description="Model version to check", pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$"
+    ),
     user: User = Depends(verify_token),
     db: AsyncSession = Depends(get_read_db),
 ):
@@ -1211,6 +1246,7 @@ async def get_feature_importance(
             continue
         try:
             import pandas as _pd
+
             x = _pd.DataFrame([{f: input_features[f] for f in feature_names}])
             prediction_result = pred.prediction_result
             explanation = compute_shap_explanation(
@@ -2022,7 +2058,9 @@ async def get_shadow_comparison(
 async def get_model_calibration(
     name: ModelNamePath,
     version: Optional[str] = Query(
-        None, description="Model version (all if absent)", pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$"
+        None,
+        description="Model version (all if absent)",
+        pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$",
     ),
     start: Optional[datetime] = Query(None, description="Start of the time range"),
     end: Optional[datetime] = Query(None, description="End of the time range"),
@@ -2473,6 +2511,7 @@ async def _build_feature_importance_section(
                 continue
             try:
                 import pandas as _pd
+
                 x = _pd.DataFrame([{f: input_features[f] for f in feature_names}])
                 explanation = compute_shap_explanation(
                     model=model,
@@ -2586,7 +2625,9 @@ async def get_performance_report(
 async def get_confidence_trend(
     name: ModelNamePath,
     version: Optional[str] = Query(
-        None, description="Model version (all if absent)", pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$"
+        None,
+        description="Model version (all if absent)",
+        pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$",
     ),
     days: int = Query(30, ge=1, le=365, description="Sliding window in days"),
     granularity: str = Query("day", description="Temporal granularity (day)"),
@@ -2649,7 +2690,9 @@ async def get_confidence_trend(
 async def get_confidence_distribution(
     name: ModelNamePath,
     version: Optional[str] = Query(
-        None, description="Model version (all if absent)", pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$"
+        None,
+        description="Model version (all if absent)",
+        pattern=r"^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)*$",
     ),
     days: int = Query(7, ge=1, le=90, description="Sliding window in days"),
     high_threshold: float = Query(0.80, ge=0.5, le=1.0, description="High confidence threshold"),
@@ -3102,7 +3145,9 @@ async def get_model_card(
     # Drift
     drift_section: Optional[ModelCardDriftSummary] = None
     try:
-        raw_drift = _build_drift_section(name, metadata, days, production_stats, cat_prod_stats_card)
+        raw_drift = _build_drift_section(
+            name, metadata, days, production_stats, cat_prod_stats_card
+        )
         if raw_drift:
             top_drifting: Optional[List[str]] = None
             if raw_drift.drift_summary in ("warning", "critical"):
@@ -3115,9 +3160,7 @@ async def get_model_card(
                     for feat, info in raw_drift.categorical_features.items()
                     if info.drift_status in ("warning", "critical")
                 ]
-                sorted_feats = sorted(
-                    all_drifting, key=lambda x: (0 if x[1] == "critical" else 1)
-                )
+                sorted_feats = sorted(all_drifting, key=lambda x: (0 if x[1] == "critical" else 1))
                 top_drifting = [f for f, _ in sorted_feats[:3]] or None
             drift_section = ModelCardDriftSummary(
                 drift_summary=raw_drift.drift_summary,
@@ -3255,7 +3298,9 @@ async def list_golden_tests(
             description=t.description,
             created_at=t.created_at,
             created_by_user_id=t.created_by_user_id,
-            created_by_username=usernames.get(t.created_by_user_id) if t.created_by_user_id else None,
+            created_by_username=(
+                usernames.get(t.created_by_user_id) if t.created_by_user_id else None
+            ),
         )
         for t in tests
     ]
@@ -3685,8 +3730,10 @@ async def create_model(
         algorithm=algorithm,
         mlflow_run_id=mlflow_run_id,
         accuracy=accuracy,
-        auc=auc if auc is not None else (
-            training_metrics_parsed.get("roc_auc") if training_metrics_parsed else None
+        auc=(
+            auc
+            if auc is not None
+            else (training_metrics_parsed.get("roc_auc") if training_metrics_parsed else None)
         ),
         f1_score=f1_score,
         features_count=features_count,
@@ -4448,7 +4495,9 @@ async def create_golden_test(
     """Creates a golden test case for a model (admin only)."""
     # Validate expected_output against model classes if known
     ref_meta = await DBService.get_model_metadata(db, name)
-    known_classes: list = [str(c) for c in ref_meta.classes] if ref_meta and ref_meta.classes else []
+    known_classes: list = (
+        [str(c) for c in ref_meta.classes] if ref_meta and ref_meta.classes else []
+    )
     if known_classes and payload.expected_output not in known_classes:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
