@@ -278,12 +278,41 @@ def show_home():  # noqa: C901
         st.divider()
         st.subheader(t("home.alerts.subheader"))
         st.caption(t("home.alerts.subheader_caption"))
+
+        def _alert_card(m: dict, bg: str, border: str) -> str:
+            name = m.get("model_name", "?")
+            err = m.get("error_rate")
+            p95 = m.get("p95_latency_ms") or m.get("latency_p95_ms") or m.get("response_time_p95_ms")
+            details = []
+            if err is not None:
+                details.append(f"erreur {err:.1%}")
+            if p95 is not None:
+                details.append(f"P95 {int(p95)} ms")
+            detail_line = f"<br><small style='opacity:.75'>{' · '.join(details)}</small>" if details else ""
+            return (
+                f"<div style='background:{bg};border-left:4px solid {border};"
+                f"padding:8px 14px;border-radius:4px;margin:4px 0'>"
+                f"<strong>{name}</strong>{detail_line}</div>"
+            )
+
         if critical:
-            names_c = ", ".join(f"**{m.get('model_name', '?')}**" for m in critical)
-            st.error(t("home.alerts.critical", count=len(critical), names=names_c))
+            st.markdown("**🔴 Critique**")
+            _c_cols = st.columns(min(len(critical), 3))
+            for i, m in enumerate(critical):
+                with _c_cols[i % 3]:
+                    st.markdown(
+                        _alert_card(m, "rgba(231,76,60,0.15)", "#e74c3c"),
+                        unsafe_allow_html=True,
+                    )
         if warning:
-            names_w = ", ".join(f"**{m.get('model_name', '?')}**" for m in warning)
-            st.warning(t("home.alerts.warning", count=len(warning), names=names_w))
+            st.markdown("**⚠️ Warning**")
+            _w_cols = st.columns(min(len(warning), 3))
+            for i, m in enumerate(warning):
+                with _w_cols[i % 3]:
+                    st.markdown(
+                        _alert_card(m, "rgba(243,156,18,0.15)", "#f39c12"),
+                        unsafe_allow_html=True,
+                    )
         st.page_link("pages/7_Supervision.py", label=t("home.alerts.supervision_link"))
 
     # ── 4. Leaderboard ────────────────────────────────────────────────────
@@ -300,13 +329,32 @@ def show_home():  # noqa: C901
             "insufficient_data": t("stats.drift.insufficient_data"),
             "unknown":           t("stats.drift.unknown"),
         }
+        _drift_bg = {
+            t("stats.drift.ok"):       "background-color: rgba(46,204,113,0.18)",
+            t("stats.drift.warning"):  "background-color: rgba(243,156,18,0.22)",
+            t("stats.drift.critical"): "background-color: rgba(231,76,60,0.22)",
+        }
+        # Fallback: traffic weight from the full model list when not in leaderboard payload
+        _weight_lookup = {
+            (m.get("name"), m.get("version")): m.get("traffic_weight")
+            for m in all_models
+        }
+        _col_rank = "#"
+        _col_model = t("home.leaderboard.col_model")
+        _col_version = t("home.leaderboard.col_version")
+        _col_mode = t("home.leaderboard.col_mode")
+        _col_accuracy = t("home.leaderboard.col_accuracy")
+        _col_predictions = t("home.leaderboard.col_predictions")
+        _col_drift = t("home.leaderboard.col_drift")
         rows = []
         for item in leaderboard[:5]:
             acc = item.get("accuracy")
             drift_raw = item.get("drift_status")
             drift = _drift_emoji.get(drift_raw, drift_raw) if drift_raw else "—"
             mode = item.get("deployment_mode")
-            weight = item.get("traffic_weight")
+            item_name = item.get("name") or item.get("model_name")
+            item_ver = item.get("version")
+            weight = item.get("traffic_weight") or _weight_lookup.get((item_name, item_ver))
             if mode in ("ab", "ab_test"):
                 mode_label = f"🟠 A/B ({float(weight):.0%})" if weight is not None else "🟠 A/B"
             elif mode == "shadow":
@@ -317,16 +365,20 @@ def show_home():  # noqa: C901
                 mode_label = "✅ Actif"
             rows.append(
                 {
-                    "#": item.get("rank", "—"),
-                    t("home.leaderboard.col_model"): item.get("name") or item.get("model_name", "—"),
-                    t("home.leaderboard.col_version"): item.get("version", "—"),
-                    t("home.leaderboard.col_mode"): mode_label,
-                    t("home.leaderboard.col_accuracy"): f"{acc:.1%}" if acc is not None else "—",
-                    t("home.leaderboard.col_predictions"): f"{item.get('predictions_count', 0):,}",
-                    t("home.leaderboard.col_drift"): drift,
+                    _col_rank: item.get("rank", "—"),
+                    _col_model: item_name or "—",
+                    _col_version: item_ver or "—",
+                    _col_mode: mode_label,
+                    _col_accuracy: f"{acc:.1%}" if acc is not None else "—",
+                    _col_predictions: f"{item.get('predictions_count', 0):,}",
+                    _col_drift: drift,
                 }
             )
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        _df_lb = pd.DataFrame(rows)
+        _styled_lb = _df_lb.style.map(
+            lambda v: _drift_bg.get(str(v), ""), subset=[_col_drift]
+        ).hide(axis="index")
+        st.dataframe(_styled_lb, width="stretch")
         st.page_link("pages/4_Stats.py", label=t("home.leaderboard.full_link"))
     else:
         n_prod = sum(1 for m in all_models if m.get("is_production"))
@@ -389,7 +441,31 @@ def show_home():  # noqa: C901
     st.subheader(t("home.nav.subheader"))
     st.caption(t("home.nav.subheader_caption"))
 
+    # Dynamic supervision/alert card — icon, title and desc reflect alert state
+    if n_critical > 0 and n_warning > 0:
+        _sup_icon = "🔴"
+        _sup_title = f"Modèles en alerte ({n_critical + n_warning})"
+        _sup_desc = f"🔴 {n_critical} critique(s) · ⚠️ {n_warning} warning(s)"
+    elif n_critical > 0:
+        _sup_icon = "🔴"
+        _sup_title = f"Modèles en alerte ({n_critical})"
+        _sup_desc = f"🔴 {n_critical} modèle(s) critique(s) — action requise"
+    elif n_warning > 0:
+        _sup_icon = "⚠️"
+        _sup_title = f"Modèles en alerte ({n_warning})"
+        _sup_desc = f"⚠️ {n_warning} modèle(s) en warning"
+    else:
+        _sup_icon = "🛡️"
+        _sup_title = t("home.nav.supervision_title")
+        _sup_desc = t("home.nav.supervision_desc")
+
     nav_items = [
+        (
+            _sup_icon,
+            _sup_title,
+            _sup_desc,
+            "pages/7_Supervision.py",
+        ),
         (
             "🤖",
             t("home.nav.models_title"),
@@ -407,12 +483,6 @@ def show_home():  # noqa: C901
             t("home.nav.stats_title"),
             t("home.nav.stats_desc"),
             "pages/4_Stats.py",
-        ),
-        (
-            "🛡️",
-            t("home.nav.supervision_title"),
-            t("home.nav.supervision_desc"),
-            "pages/7_Supervision.py",
         ),
         (
             "🧪",
