@@ -622,6 +622,30 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def get_alert_checks(
+        self,
+        model_name: Optional[str] = None,
+        check_type: Optional[str] = None,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> dict:
+        """History of alerting checks from alert_check_logs."""
+        r = self._get(
+            "/monitoring/alert-checks",
+            params={
+                "model_name": model_name,
+                "check_type": check_type,
+                "start": start,
+                "end": end,
+                "limit": limit,
+                "offset": offset,
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
     def get_predictions_anomalies(
         self,
         model_name: str,

@@ -1,6 +1,7 @@
 """Database models"""
 
 from src.db.models.account_request import AccountRequest, AccountRequestStatus
+from src.db.models.alert_check_log import AlertCheckLog
 from src.db.models.golden_test import GoldenTest
 from src.db.models.model_history import HistoryActionType, ModelHistory
 from src.db.models.model_metadata import DeploymentMode, ModelMetadata, ModelStatus
@@ -23,4 +24,5 @@ __all__ = [
     "AccountRequest",
     "AccountRequestStatus",
     "TaskRun",
+    "AlertCheckLog",
 ]

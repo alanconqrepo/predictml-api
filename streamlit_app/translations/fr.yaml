@@ -3147,6 +3147,66 @@ autotrain:
   dates:
     train_start: Date début entraînement
     train_end: Date fin entraînement
+alert_history:
+  page_title: 🔔 Historique des alertes
+  caption: "Historique de tous les checks d'alerting de supervision : anomalies détectées, mails envoyés, checks sautés faute de nouvelles prédictions."
+  loading: Chargement de l'historique des alertes…
+  no_data: Aucun check d'alerting trouvé pour la période sélectionnée.
+  truncated_warning: "{shown} résultats affichés sur {total} au total — affinez les filtres pour voir plus."
+  tab_chart: 📊 Graphiques
+  tab_table: 📋 Tableau
+  filters:
+    from_label: Du
+    to_label: Au
+    model_label: Modèle
+    model_placeholder: Tous les modèles
+    type_label: Type de check
+    all_types: Tous les types
+    result_label: Filtrer par résultat
+    date_order_error: La date de fin doit être postérieure à la date de début.
+  kpis:
+    total: Checks exécutés
+    alerts: Alertes détectées
+    sent: Mails envoyés
+    skipped: Checks sautés
+  chart:
+    title: Évolution des checks
+    daily_title: Checks par jour et résultat
+    by_type_title: Alertes par type de check
+    by_model_title: Alertes par modèle
+    date_label: Date
+    count_label: Nombre de checks
+    result_label: Résultat
+    model_label: Modèle
+    alerts_count_label: Nombre d'alertes
+    no_alerts: Aucune alerte déclenchée sur la période.
+  table:
+    title: Détail des checks
+    col_date: Date
+    col_model: Modèle
+    col_version: Version
+    col_type: Type
+    col_result: Résultat
+    col_mail: Mail envoyé
+    col_webhook: Webhook
+    col_new_preds: Nouv. prédictions
+    col_details: Détails
+    row_count: "{count} lignes affichées"
+  results:
+    ok: "✅ OK"
+    alert_triggered: "🔴 Alerte déclenchée"
+    skipped_no_predictions: "⏭️ Sauté (aucune nouvelles prédictions)"
+    error: "⚠️ Erreur"
+  check_types:
+    error_spike: Pic d'erreurs
+    auc: AUC minimum
+    performance_drift: Drift performance
+    feature_drift: Drift features
+    output_drift: Drift sorties
+    "": Tous les types
+  errors:
+    load: "Impossible de charger l'historique des alertes : {error}"
+
 nav_pages:
   home: Accueil
   users: Utilisateurs

@@ -2888,6 +2888,66 @@ autotrain:
   dates:
     train_start: Training start date
     train_end: Training end date
+alert_history:
+  page_title: 🔔 Alerting History
+  caption: "History of all supervision alerting checks: anomalies detected, emails sent, checks skipped due to no new predictions."
+  loading: Loading alerting history…
+  no_data: No alert checks found for the selected period.
+  truncated_warning: "{shown} results shown out of {total} total — refine filters to see more."
+  tab_chart: 📊 Charts
+  tab_table: 📋 Table
+  filters:
+    from_label: From
+    to_label: To
+    model_label: Model
+    model_placeholder: All models
+    type_label: Check type
+    all_types: All types
+    result_label: Filter by result
+    date_order_error: End date must be after start date.
+  kpis:
+    total: Checks run
+    alerts: Alerts detected
+    sent: Emails sent
+    skipped: Checks skipped
+  chart:
+    title: Check evolution
+    daily_title: Checks per day and result
+    by_type_title: Alerts by check type
+    by_model_title: Alerts by model
+    date_label: Date
+    count_label: Number of checks
+    result_label: Result
+    model_label: Model
+    alerts_count_label: Number of alerts
+    no_alerts: No alerts triggered in the period.
+  table:
+    title: Check details
+    col_date: Date
+    col_model: Model
+    col_version: Version
+    col_type: Type
+    col_result: Result
+    col_mail: Email sent
+    col_webhook: Webhook
+    col_new_preds: New predictions
+    col_details: Details
+    row_count: "{count} rows shown"
+  results:
+    ok: "✅ OK"
+    alert_triggered: "🔴 Alert triggered"
+    skipped_no_predictions: "⏭️ Skipped (no new predictions)"
+    error: "⚠️ Error"
+  check_types:
+    error_spike: Error spike
+    auc: AUC minimum
+    performance_drift: Performance drift
+    feature_drift: Feature drift
+    output_drift: Output drift
+    "": All types
+  errors:
+    load: "Unable to load alerting history: {error}"
+
 nav_pages:
   home: Home
   users: Users

@@ -164,7 +164,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.pool import NullPool
 
 from src.db.database import get_db, get_read_db, Base
-from src.db.models import AccountRequest, GoldenTest, User, Prediction, ModelMetadata, ObservedResult, TaskRun  # noqa: F401 — registers models in Base
+from src.db.models import AccountRequest, AlertCheckLog, GoldenTest, User, Prediction, ModelMetadata, ObservedResult, TaskRun  # noqa: F401 — registers models in Base
 from src.main import app
 
 

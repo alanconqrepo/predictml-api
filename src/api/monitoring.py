@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.security import verify_token
 from src.db.database import get_read_db
 from src.db.models import User
+from src.schemas.alert_check import AlertCheckLogList, AlertCheckLogRead
 from src.schemas.monitoring import (
     GlobalDashboard,
     GlobalStats,
@@ -490,4 +491,47 @@ async def monitoring_model_detail(
         feature_drift=feature_drift,
         ab_comparison=ab_comparison,
         recent_errors=recent_errors,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Alert check logs
+# ---------------------------------------------------------------------------
+
+
+@router.get("/alert-checks", response_model=AlertCheckLogList)
+async def list_alert_checks(
+    model_name: Optional[str] = Query(None, description="Filter by model name"),
+    check_type: Optional[str] = Query(None, description="Filter by check type (error_spike, auc, performance_drift, feature_drift, output_drift)"),
+    start: Optional[datetime] = Query(None, description="Start of period (ISO 8601)"),
+    end: Optional[datetime] = Query(None, description="End of period (ISO 8601)"),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_read_db),
+    current_user: User = Depends(verify_token),
+) -> AlertCheckLogList:
+    """
+    Return the history of alerting checks.
+
+    Admin only. Each record represents one metric check for one model during a
+    supervision run (every 6 h). The ``result`` field indicates whether the check
+    found an anomaly and whether an email/webhook was sent.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    rows, total = await DBService.get_alert_check_logs(
+        db,
+        model_name=model_name,
+        check_type=check_type,
+        start=start,
+        end=end,
+        limit=limit,
+        offset=offset,
+    )
+    return AlertCheckLogList(
+        items=[AlertCheckLogRead.model_validate(r) for r in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
     )
