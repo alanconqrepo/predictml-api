@@ -11,7 +11,7 @@ class GoldenTestCreate(BaseModel):
 
     input_features: Dict[str, Union[float, int, str]]
     expected_output: str = Field(..., max_length=500)
-    description: str = Field(..., min_length=1, max_length=500)
+    description: Optional[str] = Field(None, max_length=500)
 
 
 class GoldenTestResponse(BaseModel):

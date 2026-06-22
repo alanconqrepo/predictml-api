@@ -24,6 +24,7 @@ import structlog
 from arq import cron
 from arq.connections import RedisSettings
 from prometheus_client import Counter, Histogram, start_http_server
+
 from src.core.config import settings
 
 TASK_TOTAL = Counter(
@@ -137,7 +138,11 @@ async def retrain_task(
     stdout_logs = await _get_redis_logs(redis, job_id) if redis else result.get("stdout", "")
     stderr_text = result.get("stderr", "")
     if stderr_text:
-        final_logs = stdout_logs + "\n\n--- STDERR ---\n" + stderr_text if stdout_logs else "--- STDERR ---\n" + stderr_text
+        final_logs = (
+            stdout_logs + "\n\n--- STDERR ---\n" + stderr_text
+            if stdout_logs
+            else "--- STDERR ---\n" + stderr_text
+        )
     else:
         final_logs = stdout_logs
 
@@ -449,8 +454,13 @@ class WorkerSettings:
     # Fixed cron jobs (alerts + weekly report)
     # Dynamic retrain crons are added at startup via on_startup
     _WEEKDAY_MAP = {
-        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
-        "friday": 4, "saturday": 5, "sunday": 6,
+        "monday": 0,
+        "tuesday": 1,
+        "wednesday": 2,
+        "thursday": 3,
+        "friday": 4,
+        "saturday": 5,
+        "sunday": 6,
     }
     cron_jobs = [
         # Alert check every 6 h (0h, 6h, 12h, 18h UTC)
@@ -478,4 +488,3 @@ class WorkerSettings:
     keep_result = 3600  # keep result 1 h in Redis
 
     redis_settings = _redis_settings()
-

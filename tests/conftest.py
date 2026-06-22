@@ -9,6 +9,39 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import joblib
 
+# prometheus_fastapi_instrumentator ≥ 8.0 iterates over app.routes and accesses
+# route.path unconditionally. Starlette 1.3+ adds _IncludedRouter objects (from
+# include_router()) which do NOT have a path attribute, causing AttributeError on
+# every test request. Patch _get_route_name before importing the app so the
+# middleware never raises.
+from prometheus_fastapi_instrumentator import routing as _pfi_routing
+from starlette.routing import Match, Mount as _Mount
+
+
+def _patched_get_route_name(scope, routes, route_name=None):
+    for route in routes:
+        if not hasattr(route, "path"):
+            continue
+        match, child_scope = route.matches(scope)
+        if match == Match.FULL:
+            route_name = route.path
+            child_scope = {**scope, **child_scope}
+            if isinstance(route, _Mount) and route.routes:
+                child_route_name = _patched_get_route_name(
+                    child_scope, route.routes, route_name
+                )
+                if child_route_name is None:
+                    route_name = None
+                else:
+                    route_name += child_route_name
+            return route_name
+        elif match == Match.PARTIAL and route_name is None:
+            route_name = route.path
+    return None
+
+
+_pfi_routing._get_route_name = _patched_get_route_name
+
 
 def make_model_bytes(model) -> bytes:
     """Serialize a sklearn model to joblib bytes."""

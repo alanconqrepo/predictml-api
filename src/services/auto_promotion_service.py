@@ -107,7 +107,9 @@ async def evaluate_auto_promotion(
             if accuracy < min_accuracy:
                 return (
                     False,
-                    (f"Accuracy insuffisante : {accuracy:.4f} < {min_accuracy:.4f} (minimum requis)."),
+                    (
+                        f"Accuracy insuffisante : {accuracy:.4f} < {min_accuracy:.4f} (minimum requis)."
+                    ),
                 )
 
         if min_auc is not None:
@@ -137,7 +139,9 @@ async def evaluate_auto_promotion(
             if p95 > max_latency_p95_ms:
                 return (
                     False,
-                    (f"Latence P95 trop élevée : {p95:.1f} ms > {max_latency_p95_ms:.1f} ms (maximum autorisé)."),
+                    (
+                        f"Latence P95 trop élevée : {p95:.1f} ms > {max_latency_p95_ms:.1f} ms (maximum autorisé)."
+                    ),
                 )
 
     # --- Golden tests check ---
@@ -150,9 +154,9 @@ async def evaluate_auto_promotion(
             return (
                 False,
                 (
-                    f"Tests de régression insuffisants : {result.pass_rate:.2%} "
-                    f"< {min_golden_test_pass_rate:.2%} requis "
-                    f"({result.failed}/{result.total_tests} échecs)."
+                    f"Golden regression tests insufficient: {result.pass_rate:.2%} "
+                    f"< {min_golden_test_pass_rate:.2%} required "
+                    f"({result.failed}/{result.total_tests} failures)."
                 ),
             )
 

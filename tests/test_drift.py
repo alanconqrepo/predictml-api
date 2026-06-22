@@ -74,11 +74,12 @@ def _make_prod_stats(mean=5.84, std=0.83, mn=4.3, mx=7.9, count=100):
     }
 
 
-def _fake_metadata(name="iris_model", version="1.0.0", feature_baseline=None):
+def _fake_metadata(name="iris_model", version="1.0.0", feature_baseline=None, categorical_baseline=None):
     return SimpleNamespace(
         name=name,
         version=version,
         feature_baseline=feature_baseline,
+        categorical_baseline=categorical_baseline,
     )
 
 

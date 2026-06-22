@@ -49,8 +49,8 @@ BATCH_INSERT_DURATION = Histogram(
 # Ensure the src/ package is importable when running the script from the project root
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from src.core.config import settings
-from src.db.models.prediction import Prediction
+from src.core.config import settings  # noqa: E402
+from src.db.models.prediction import Prediction  # noqa: E402
 
 logger = structlog.get_logger(__name__)
 
