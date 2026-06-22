@@ -19,6 +19,7 @@ from src.core.utils import _utcnow
 from src.db.models import (
     AccountRequest,
     AccountRequestStatus,
+    AlertCheckLog,
     HistoryActionType,
     ModelHistory,
     ModelMetadata,
@@ -3135,6 +3136,102 @@ class DBService:
         await db.commit()
         await db.refresh(req)
         return req
+
+    # -----------------------------------------------------------------------
+    # AlertCheckLog
+    # -----------------------------------------------------------------------
+
+    @staticmethod
+    async def create_alert_check_log(
+        db: AsyncSession,
+        check_type: str,
+        model_name: str,
+        result: str,
+        model_version: Optional[str] = None,
+        alert_sent: bool = False,
+        webhook_sent: bool = False,
+        new_predictions_count: Optional[int] = None,
+        details: Optional[dict] = None,
+    ) -> AlertCheckLog:
+        """Insert an alert check result into alert_check_logs."""
+        log = AlertCheckLog(
+            check_type=check_type,
+            model_name=model_name,
+            model_version=model_version,
+            result=result,
+            alert_sent=alert_sent,
+            webhook_sent=webhook_sent,
+            new_predictions_count=new_predictions_count,
+            details=details,
+        )
+        db.add(log)
+        await db.commit()
+        await db.refresh(log)
+        return log
+
+    @staticmethod
+    async def get_alert_check_logs(
+        db: AsyncSession,
+        model_name: Optional[str] = None,
+        check_type: Optional[str] = None,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[List[AlertCheckLog], int]:
+        """Return paginated alert check logs with optional filters."""
+        filters = []
+        if model_name:
+            filters.append(AlertCheckLog.model_name == model_name)
+        if check_type:
+            filters.append(AlertCheckLog.check_type == check_type)
+        if start:
+            filters.append(AlertCheckLog.checked_at >= start)
+        if end:
+            filters.append(AlertCheckLog.checked_at <= end)
+
+        base_query = select(AlertCheckLog)
+        if filters:
+            base_query = base_query.where(and_(*filters))
+
+        count_result = await db.execute(
+            select(func.count()).select_from(base_query.subquery())
+        )
+        total = count_result.scalar_one()
+
+        rows_result = await db.execute(
+            base_query.order_by(AlertCheckLog.checked_at.desc()).offset(offset).limit(limit)
+        )
+        rows = list(rows_result.scalars().all())
+        return rows, total
+
+    @staticmethod
+    async def get_last_alert_check_at(
+        db: AsyncSession, model_name: str
+    ) -> Optional[datetime]:
+        """Return the timestamp of the most recent alert check for this model (any type)."""
+        result = await db.execute(
+            select(func.max(AlertCheckLog.checked_at)).where(
+                AlertCheckLog.model_name == model_name
+            )
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def count_predictions_since(
+        db: AsyncSession, model_name: str, since: datetime
+    ) -> int:
+        """Count non-shadow production predictions for a model since the given timestamp."""
+        result = await db.execute(
+            select(func.count(Prediction.id)).where(
+                and_(
+                    Prediction.model_name == model_name,
+                    Prediction.is_shadow.is_(False),
+                    Prediction.timestamp > since,
+                )
+            )
+        )
+        return result.scalar_one() or 0
 
 
 # ===========================================================================
