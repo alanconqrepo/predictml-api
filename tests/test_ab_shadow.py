@@ -10,6 +10,7 @@ Strategy:
 """
 import asyncio
 import io
+import sys
 import joblib
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -133,6 +134,10 @@ asyncio.run(_setup())
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="anyio/aiosqlite deadlock on Windows SelectorEventLoop",
+)
 def test_ab_routing_distributes_traffic():
     """
     With v1 (80%) and v2 (20%), over N calls without explicit version,

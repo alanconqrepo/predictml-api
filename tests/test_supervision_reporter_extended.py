@@ -242,8 +242,7 @@ class TestWeeklyReport:
         from src.tasks.supervision_reporter import run_weekly_report
 
         with (
-            patch("src.core.config.settings.WEEKLY_REPORT_ENABLED", True),
-            patch("src.core.config.settings.ERROR_RATE_ALERT_THRESHOLD", 0.10),
+            patch("src.tasks.supervision_reporter.settings") as mock_settings,
             patch("src.db.database.AsyncSessionLocal", new=_test_session_cm),
             patch(
                 "src.services.db_service.DBService.get_global_monitoring_stats",
@@ -257,6 +256,8 @@ class TestWeeklyReport:
             ),
             patch("src.services.email_service.email_service") as mock_email,
         ):
+            mock_settings.WEEKLY_REPORT_ENABLED = True
+            mock_settings.ERROR_RATE_ALERT_THRESHOLD = 0.10
             mock_email.send_weekly_report = MagicMock()
             asyncio.run(run_weekly_report())
             mock_email.send_weekly_report.assert_called_once()
@@ -298,8 +299,7 @@ class TestWeeklyReport:
         ]
 
         with (
-            patch("src.core.config.settings.WEEKLY_REPORT_ENABLED", True),
-            patch("src.core.config.settings.ERROR_RATE_ALERT_THRESHOLD", 0.10),
+            patch("src.tasks.supervision_reporter.settings") as mock_settings,
             patch("src.db.database.AsyncSessionLocal", new=_test_session_cm),
             patch(
                 "src.services.db_service.DBService.get_global_monitoring_stats",
@@ -313,6 +313,9 @@ class TestWeeklyReport:
             ),
             patch("src.services.email_service.email_service") as mock_email,
         ):
+            mock_settings.WEEKLY_REPORT_ENABLED = True
+            mock_settings.ERROR_RATE_ALERT_THRESHOLD = 0.10
+            mock_settings.PERFORMANCE_DRIFT_ALERT_THRESHOLD = 0.10
             captured = {}
 
             def _capture(overview):

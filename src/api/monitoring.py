@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.security import verify_token
+from src.core.security import require_admin, verify_token
 from src.db.database import get_read_db
 from src.db.models import User
 from src.schemas.alert_check import AlertCheckLogList, AlertCheckLogRead
@@ -502,13 +502,16 @@ async def monitoring_model_detail(
 @router.get("/alert-checks", response_model=AlertCheckLogList)
 async def list_alert_checks(
     model_name: Optional[str] = Query(None, description="Filter by model name"),
-    check_type: Optional[str] = Query(None, description="Filter by check type (error_spike, auc, performance_drift, feature_drift, output_drift)"),
+    check_type: Optional[str] = Query(
+        None,
+        description="Filter by check type (error_spike, auc, performance_drift, feature_drift, output_drift)",
+    ),
     start: Optional[datetime] = Query(None, description="Start of period (ISO 8601)"),
     end: Optional[datetime] = Query(None, description="End of period (ISO 8601)"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_read_db),
-    current_user: User = Depends(verify_token),
+    _: User = Depends(require_admin),
 ) -> AlertCheckLogList:
     """
     Return the history of alerting checks.
@@ -517,8 +520,6 @@ async def list_alert_checks(
     supervision run (every 6 h). The ``result`` field indicates whether the check
     found an anomaly and whether an email/webhook was sent.
     """
-    if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
 
     rows, total = await DBService.get_alert_check_logs(
         db,
