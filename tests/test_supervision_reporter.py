@@ -75,7 +75,7 @@ class TestRunAlertCheck:
         ]
 
         with (
-            patch.object(__import__("src.core.config", fromlist=["settings"]).settings, "ENABLE_EMAIL_ALERTS", True),
+            patch("src.tasks.supervision_reporter.settings") as mock_settings,
             patch(
                 "src.db.database.AsyncSessionLocal",
                 new=_test_session_cm,
@@ -96,9 +96,20 @@ class TestRunAlertCheck:
                 return_value=[],
             ),
             patch(
+                "src.services.db_service.DBService.get_last_alert_check_at",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "src.services.db_service.DBService.create_alert_check_log",
+                new_callable=AsyncMock,
+            ),
+            patch(
                 "src.services.email_service.email_service"
             ) as mock_email,
         ):
+            mock_settings.ENABLE_EMAIL_ALERTS = True
+            mock_settings.ERROR_RATE_ALERT_THRESHOLD = 0.10
             mock_email.send_error_spike_alert = MagicMock(return_value=True)
             asyncio.run(run_alert_check())
             mock_email.send_error_spike_alert.assert_called_once_with("super_model", 0.50)
@@ -181,8 +192,7 @@ class TestRunAlertCheck:
         ]
 
         with (
-            patch.object(__import__("src.core.config", fromlist=["settings"]).settings, "ENABLE_EMAIL_ALERTS", True),
-            patch.object(__import__("src.core.config", fromlist=["settings"]).settings, "PERFORMANCE_DRIFT_ALERT_THRESHOLD", 0.10),
+            patch("src.tasks.supervision_reporter.settings") as mock_settings,
             patch(
                 "src.db.database.AsyncSessionLocal",
                 new=_test_session_cm,
@@ -202,8 +212,20 @@ class TestRunAlertCheck:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
+            patch(
+                "src.services.db_service.DBService.get_last_alert_check_at",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "src.services.db_service.DBService.create_alert_check_log",
+                new_callable=AsyncMock,
+            ),
             patch("src.services.email_service.email_service") as mock_email,
         ):
+            mock_settings.ENABLE_EMAIL_ALERTS = True
+            mock_settings.PERFORMANCE_DRIFT_ALERT_THRESHOLD = 0.10
+            mock_settings.ERROR_RATE_ALERT_THRESHOLD = 0.10
             mock_email.send_performance_alert = MagicMock(return_value=True)
             mock_email.send_error_spike_alert = MagicMock(return_value=False)
             asyncio.run(run_alert_check())
@@ -241,7 +263,7 @@ class TestRunWeeklyReport:
         ]
 
         with (
-            patch.object(__import__("src.core.config", fromlist=["settings"]).settings, "WEEKLY_REPORT_ENABLED", True),
+            patch("src.tasks.supervision_reporter.settings") as mock_settings,
             patch(
                 "src.db.database.AsyncSessionLocal",
                 new=_test_session_cm,
@@ -258,6 +280,9 @@ class TestRunWeeklyReport:
             ),
             patch("src.services.email_service.email_service") as mock_email,
         ):
+            mock_settings.WEEKLY_REPORT_ENABLED = True
+            mock_settings.ERROR_RATE_ALERT_THRESHOLD = 0.10
+            mock_settings.PERFORMANCE_DRIFT_ALERT_THRESHOLD = 0.10
             mock_email.send_weekly_report = MagicMock(return_value=True)
             asyncio.run(run_weekly_report())
             mock_email.send_weekly_report.assert_called_once()
@@ -312,11 +337,12 @@ class TestSchedulerLifecycle:
         mock_sched = MagicMock()
 
         with (
-            patch.object(__import__("src.core.config", fromlist=["settings"]).settings, "ENABLE_EMAIL_ALERTS", False),
-            patch.object(__import__("src.core.config", fromlist=["settings"]).settings, "WEEKLY_REPORT_ENABLED", True),
+            patch("src.tasks.supervision_reporter.settings") as mock_settings,
             patch("src.tasks.supervision_reporter._scheduler", mock_sched),
             patch("src.tasks.supervision_reporter._APSCHEDULER_AVAILABLE", True),
         ):
+            mock_settings.ENABLE_EMAIL_ALERTS = False
+            mock_settings.WEEKLY_REPORT_ENABLED = True
             start_scheduler()
             job_ids = [call.kwargs.get("id") for call in mock_sched.add_job.call_args_list]
             assert "weekly_report" in job_ids

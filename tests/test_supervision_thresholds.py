@@ -113,16 +113,7 @@ class TestRunAlertCheckWithPerModelThresholds:
         mock_meta = _make_mock_meta("strict_model", alert_thresholds={"error_rate_max": 0.03})
 
         with (
-            patch.object(
-                __import__("src.core.config", fromlist=["settings"]).settings,
-                "ENABLE_EMAIL_ALERTS",
-                True,
-            ),
-            patch.object(
-                __import__("src.core.config", fromlist=["settings"]).settings,
-                "ERROR_RATE_ALERT_THRESHOLD",
-                0.10,
-            ),
+            patch("src.tasks.supervision_reporter.settings") as mock_settings,
             patch("src.db.database.AsyncSessionLocal", new=_test_session_cm),
             patch(
                 "src.services.db_service.DBService.get_global_monitoring_stats",
@@ -139,8 +130,19 @@ class TestRunAlertCheckWithPerModelThresholds:
                 new_callable=AsyncMock,
                 return_value=[mock_meta],
             ),
+            patch(
+                "src.services.db_service.DBService.get_last_alert_check_at",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "src.services.db_service.DBService.create_alert_check_log",
+                new_callable=AsyncMock,
+            ),
             patch("src.services.email_service.email_service") as mock_email,
         ):
+            mock_settings.ENABLE_EMAIL_ALERTS = True
+            mock_settings.ERROR_RATE_ALERT_THRESHOLD = 0.10
             mock_email.send_error_spike_alert = MagicMock()
             asyncio.run(run_alert_check())
             mock_email.send_error_spike_alert.assert_called_once_with("strict_model", 0.04)
@@ -220,16 +222,7 @@ class TestRunAlertCheckWithPerModelThresholds:
         mock_meta = _make_mock_meta("abs_model", alert_thresholds={"accuracy_min": 0.90})
 
         with (
-            patch.object(
-                __import__("src.core.config", fromlist=["settings"]).settings,
-                "ENABLE_EMAIL_ALERTS",
-                True,
-            ),
-            patch.object(
-                __import__("src.core.config", fromlist=["settings"]).settings,
-                "PERFORMANCE_DRIFT_ALERT_THRESHOLD",
-                0.10,
-            ),
+            patch("src.tasks.supervision_reporter.settings") as mock_settings,
             patch("src.db.database.AsyncSessionLocal", new=_test_session_cm),
             patch(
                 "src.services.db_service.DBService.get_global_monitoring_stats",
@@ -246,8 +239,20 @@ class TestRunAlertCheckWithPerModelThresholds:
                 new_callable=AsyncMock,
                 return_value=[mock_meta],
             ),
+            patch(
+                "src.services.db_service.DBService.get_last_alert_check_at",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "src.services.db_service.DBService.create_alert_check_log",
+                new_callable=AsyncMock,
+            ),
             patch("src.services.email_service.email_service") as mock_email,
         ):
+            mock_settings.ENABLE_EMAIL_ALERTS = True
+            mock_settings.PERFORMANCE_DRIFT_ALERT_THRESHOLD = 0.10
+            mock_settings.ERROR_RATE_ALERT_THRESHOLD = 0.10
             mock_email.send_performance_alert = MagicMock()
             mock_email.send_error_spike_alert = MagicMock()
             asyncio.run(run_alert_check())
@@ -394,11 +399,7 @@ class TestRunAlertCheckWithPerModelThresholds:
         critical_feat.psi = 0.3
 
         with (
-            patch.object(
-                __import__("src.core.config", fromlist=["settings"]).settings,
-                "ENABLE_EMAIL_ALERTS",
-                True,
-            ),
+            patch("src.tasks.supervision_reporter.settings") as mock_settings,
             patch("src.db.database.AsyncSessionLocal", new=_test_session_cm),
             patch(
                 "src.services.db_service.DBService.get_global_monitoring_stats",
@@ -416,6 +417,15 @@ class TestRunAlertCheckWithPerModelThresholds:
                 return_value=[mock_meta],
             ),
             patch(
+                "src.services.db_service.DBService.get_last_alert_check_at",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "src.services.db_service.DBService.create_alert_check_log",
+                new_callable=AsyncMock,
+            ),
+            patch(
                 "src.services.db_service.DBService.get_feature_production_stats",
                 new_callable=AsyncMock,
                 return_value={},
@@ -426,6 +436,8 @@ class TestRunAlertCheckWithPerModelThresholds:
             ),
             patch("src.services.email_service.email_service") as mock_email,
         ):
+            mock_settings.ENABLE_EMAIL_ALERTS = True
+            mock_settings.ERROR_RATE_ALERT_THRESHOLD = 0.10
             mock_email.send_drift_alert = MagicMock()
             asyncio.run(run_alert_check())
             mock_email.send_drift_alert.assert_called_once_with(

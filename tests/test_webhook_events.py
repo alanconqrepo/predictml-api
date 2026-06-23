@@ -588,6 +588,14 @@ class TestSupervisionWebhooks:
                 "src.services.drift_service.compute_feature_drift",
                 return_value={"sepal_length": feat_result},
             ),
+            patch(
+                "src.services.db_service.DBService.get_last_alert_check_at",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "src.services.db_service.DBService.create_alert_check_log",
+                new=AsyncMock(),
+            ),
             patch("src.tasks.supervision_reporter.send_webhook", new_callable=AsyncMock) as mock_wh,
         ):
             asyncio.run(_run_alert_check_with_tasks())
@@ -652,6 +660,14 @@ class TestSupervisionWebhooks:
             patch(
                 "src.services.db_service.DBService.get_accuracy_drift",
                 new=AsyncMock(return_value=[]),
+            ),
+            patch(
+                "src.services.db_service.DBService.get_last_alert_check_at",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "src.services.db_service.DBService.create_alert_check_log",
+                new=AsyncMock(),
             ),
             patch("src.tasks.supervision_reporter.send_webhook", new_callable=AsyncMock) as mock_wh,
         ):
