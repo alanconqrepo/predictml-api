@@ -2,6 +2,7 @@
 Centralized management of retraining jobs and cron schedules
 """
 
+import json
 import re
 from datetime import date, timedelta
 
@@ -231,67 +232,92 @@ with tab_manual:
             elif not _version_ok:
                 st.error(t("retrain.manual.error_version_format"))
             else:
-                with st.spinner(t("retrain.manual.spinner")):
+                try:
+                    import time as _time
+                    enqueued = client.retrain_model(
+                        name=sel["name"],
+                        version=sel["version"],
+                        start_date=str(start_date),
+                        end_date=str(end_date),
+                        new_version=new_version_input.strip() or None,
+                        set_production=set_prod,
+                    )
+                    job_id = enqueued["job_id"]
+                    _TERMINAL = {"success", "failed", "cancelled"}
+
+                    # Live log streaming via SSE
+                    st.caption(t("retrain.manual.spinner"))
+                    log_area = st.empty()
+                    log_lines: list[str] = []
+                    final_status = "unknown"
+                    new_version_from_stream: str | None = None
+
                     try:
-                        import time as _time
-                        enqueued = client.retrain_model(
-                            name=sel["name"],
-                            version=sel["version"],
-                            start_date=str(start_date),
-                            end_date=str(end_date),
-                            new_version=new_version_input.strip() or None,
-                            set_production=set_prod,
-                        )
-                        job_id = enqueued["job_id"]
-                        _TERMINAL = {"success", "failed", "cancelled"}
-                        _deadline = _time.monotonic() + 750
+                        for is_done, data in client.stream_job_logs(job_id):
+                            if is_done:
+                                try:
+                                    done_payload = json.loads(data)
+                                    final_status = done_payload.get("status", "unknown")
+                                    new_version_from_stream = done_payload.get("new_version")
+                                except Exception:
+                                    pass
+                                break
+                            log_lines.append(data)
+                            log_area.code("\n".join(log_lines[-500:]), language="text")
+                    except Exception:
+                        # Fallback: polling if SSE is unavailable
                         job = enqueued
+                        _deadline = _time.monotonic() + 750
                         while job.get("status") not in _TERMINAL:
                             if _time.monotonic() > _deadline:
                                 break
                             _time.sleep(3)
                             job = client.get_job_status(job_id)
-                        _job_result = job.get("result") or {}
-                        result = {
-                            "success": job.get("status") == "success",
-                            "new_version": job.get("new_version") or _job_result.get("new_version"),
-                            "error": job.get("error"),
-                            "stdout": job.get("logs", ""),
-                            "stderr": "",
-                            "auto_promoted": _job_result.get("auto_promoted"),
-                            "auto_promote_reason": _job_result.get("auto_promote_reason"),
-                        }
-                        if result.get("success"):
-                            st.toast(
-                                t("retrain.manual.toast_success", new_version=result['new_version']),
-                                icon="✅",
-                            )
-                            auto_promoted = result.get("auto_promoted")
-                            if auto_promoted is True:
-                                st.info(t("retrain.manual.auto_promoted_yes"))
-                            elif auto_promoted is False:
-                                st.warning(
-                                    t(
-                                        "retrain.manual.auto_promoted_no",
-                                        reason=result.get('auto_promote_reason') or '—',
-                                    )
-                                )
-                        else:
-                            st.toast(
+                        final_status = job.get("status", "unknown")
+
+                    # Fetch final job state for metadata (auto_promoted, error, etc.)
+                    job = client.get_job_status(job_id)
+                    _job_result = job.get("result") or {}
+                    result = {
+                        "success": job.get("status") == "success",
+                        "new_version": (
+                            new_version_from_stream
+                            or job.get("new_version")
+                            or _job_result.get("new_version")
+                        ),
+                        "error": job.get("error"),
+                        "auto_promoted": _job_result.get("auto_promoted"),
+                        "auto_promote_reason": _job_result.get("auto_promote_reason"),
+                    }
+                    if result.get("success"):
+                        st.toast(
+                            t("retrain.manual.toast_success", new_version=result['new_version']),
+                            icon="✅",
+                        )
+                        auto_promoted = result.get("auto_promoted")
+                        if auto_promoted is True:
+                            st.info(t("retrain.manual.auto_promoted_yes"))
+                        elif auto_promoted is False:
+                            st.warning(
                                 t(
-                                    "retrain.manual.toast_failure",
-                                    error=result.get('error', t("retrain.manual.unknown_error")),
-                                ),
-                                icon="❌",
+                                    "retrain.manual.auto_promoted_no",
+                                    reason=result.get('auto_promote_reason') or '—',
+                                )
                             )
-                        with st.expander(t("retrain.manual.logs_stdout"), expanded=not result.get("success")):
-                            st.code(result.get("stdout", t("retrain.manual.logs_empty")), language="text")
-                        with st.expander(t("retrain.manual.logs_stderr"), expanded=not result.get("success")):
-                            st.code(result.get("stderr", t("retrain.manual.logs_empty")), language="text")
-                        if result.get("success"):
-                            reload()
-                    except Exception as e:
-                        st.toast(t("retrain.manual.toast_error", error=e), icon="❌")
+                    else:
+                        st.toast(
+                            t(
+                                "retrain.manual.toast_failure",
+                                error=result.get('error', t("retrain.manual.unknown_error")),
+                            ),
+                            icon="❌",
+                        )
+                    with st.expander(t("retrain.manual.logs_stdout"), expanded=not result.get("success")):
+                        st.code("\n".join(log_lines) or t("retrain.manual.logs_empty"), language="text")
+                    if result.get("success"):
+                        reload()
+                except Exception as e:
+                    st.toast(t("retrain.manual.toast_error", error=e), icon="❌")
 
 # ─── Tab 3 — Cron schedule ─────────────────────────────────────────────
 

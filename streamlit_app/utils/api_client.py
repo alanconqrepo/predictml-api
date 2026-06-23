@@ -321,6 +321,43 @@ class APIClient:
         r.raise_for_status()
         return r.json()
 
+    def stream_job_logs(self, job_id: str):
+        """Stream SSE logs from GET /jobs/{job_id}/logs.
+
+        Yields (is_done: bool, data: str) tuples.
+        - is_done=False: a plain log line to display.
+        - is_done=True:  terminal event; data is the JSON payload
+                         (e.g. '{"status": "success", "new_version": "..."}').
+        On network error, yields one terminal tuple with an error payload.
+        """
+        url = f"{self.base_url}/jobs/{job_id}/logs"
+        try:
+            with requests.get(
+                url,
+                headers=self._headers(),
+                stream=True,
+                timeout=800,
+            ) as resp:
+                resp.raise_for_status()
+                is_terminal_event = False
+                for raw_line in resp.iter_lines():
+                    if not raw_line:
+                        is_terminal_event = False
+                        continue
+                    decoded = (
+                        raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+                    )
+                    if decoded.startswith("event:"):
+                        is_terminal_event = True
+                        continue
+                    if decoded.startswith("data: "):
+                        payload = decoded[6:]
+                        yield is_terminal_event, payload
+                        if is_terminal_event:
+                            return
+        except Exception as exc:
+            yield True, f'{{"error": "{exc}", "status": "failed"}}'
+
     def set_schedule(
         self,
         name: str,

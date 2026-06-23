@@ -399,3 +399,86 @@ class TestDriftTriggeredRetrain:
         meta.retrain_schedule = None  # no schedule configured
         mock_enqueue = self._run_check_with_mocks(meta, feat_status="critical", out_status="ok")
         mock_enqueue.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests for scheduled retrain email notifications
+# ---------------------------------------------------------------------------
+
+
+class TestRetrainResultAlert:
+    """Unit tests for email_service.send_retrain_result_alert().
+
+    These verify that the correct subject, title, and parameters are used
+    for success and failure notifications without requiring SMTP.
+    """
+
+    def _send_with_mock(self, **kwargs):
+        """Call send_retrain_result_alert() with _send_email mocked out.
+        Returns the mock so callers can inspect call args.
+        """
+        from src.services.email_service import email_service
+
+        with patch.object(email_service, "_send_email", return_value=True) as mock_send:
+            with patch.object(email_service, "_is_configured", return_value=True):
+                email_service.send_retrain_result_alert(**kwargs)
+        return mock_send
+
+    def test_success_email_subject_and_content(self):
+        """Successful retrain: subject contains model name and new version."""
+        mock_send = self._send_with_mock(
+            model_name="iris",
+            source_version="1.0.0",
+            new_version="1.0.0-sched-20260623",
+            success=True,
+            trigger="scheduler",
+            accuracy=0.95,
+            f1_score=0.93,
+        )
+        mock_send.assert_called_once()
+        _, kwargs = mock_send.call_args
+        assert "iris" in kwargs["subject"]
+        assert "1.0.0-sched-20260623" in kwargs["subject"]
+        assert "iris" in kwargs["html_body"]
+        assert "0.9500" in kwargs["html_body"]  # accuracy formatted
+        assert "0.9300" in kwargs["html_body"]  # f1_score formatted
+
+    def test_failure_email_subject_and_error(self):
+        """Failed retrain: subject mentions failure, error is in body."""
+        mock_send = self._send_with_mock(
+            model_name="wine",
+            source_version="2.0.0",
+            new_version=None,
+            success=False,
+            trigger="scheduler",
+            error="subprocess timed out after 600s",
+        )
+        mock_send.assert_called_once()
+        _, kwargs = mock_send.call_args
+        assert "wine" in kwargs["subject"]
+        assert "subprocess timed out" in kwargs["html_body"]
+
+    def test_success_without_metrics_does_not_crash(self):
+        """send_retrain_result_alert(success=True) with no accuracy/f1 must not raise."""
+        mock_send = self._send_with_mock(
+            model_name="model_x",
+            source_version="1.0.0",
+            new_version="1.0.0-sched-x",
+            success=True,
+            trigger="scheduler",
+        )
+        mock_send.assert_called_once()
+
+    def test_no_email_when_smtp_not_configured(self):
+        """Returns False (silent no-op) when SMTP is not configured."""
+        from src.services.email_service import email_service
+
+        with patch.object(email_service, "_is_configured", return_value=False):
+            result = email_service.send_retrain_result_alert(
+                model_name="iris",
+                source_version="1.0.0",
+                new_version="1.0.0-x",
+                success=True,
+                trigger="scheduler",
+            )
+        assert result is False

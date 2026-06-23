@@ -269,6 +269,36 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
             "Vérifiez le tableau de bord de supervision et promouvez une version saine si nécessaire."
         ),
     },
+    # Scheduled retrain result alert
+    "retrain_success_subject": {
+        "EN": "[PredictML] ✅ Scheduled retrain — {model_name} v{new_version}",
+        "FR": "[PredictML] ✅ Réentraînement planifié — {model_name} v{new_version}",
+    },
+    "retrain_failure_subject": {
+        "EN": "[PredictML] ❌ Scheduled retrain failed — {model_name}",
+        "FR": "[PredictML] ❌ Réentraînement planifié échoué — {model_name}",
+    },
+    "retrain_success_title": {
+        "EN": "Scheduled retrain completed",
+        "FR": "Réentraînement planifié terminé",
+    },
+    "retrain_failure_title": {
+        "EN": "Scheduled retrain failed",
+        "FR": "Réentraînement planifié échoué",
+    },
+    "retrain_trigger_label": {"EN": "Trigger", "FR": "Déclencheur"},
+    "retrain_src_version":   {"EN": "Source version", "FR": "Version source"},
+    "retrain_new_version":   {"EN": "New version", "FR": "Nouvelle version"},
+    "retrain_error_label":   {"EN": "Error", "FR": "Erreur"},
+    "retrain_done_on":       {"EN": "Completed on", "FR": "Terminé le"},
+    "retrain_success_advice": {
+        "EN": "Review metrics on the dashboard and promote the version manually if the auto-promotion policy did not apply.",
+        "FR": "Examinez les métriques dans le tableau de bord et promouvez la version manuellement si la politique d'auto-promotion ne s'est pas déclenchée.",
+    },
+    "retrain_failure_advice": {
+        "EN": "Check the job logs on the Retrain page (History tab) to diagnose the issue.",
+        "FR": "Consultez les logs du job sur la page Retraining (onglet Historique) pour diagnostiquer le problème.",
+    },
 }
 
 
@@ -606,6 +636,73 @@ class EmailService:
             subject=self._t("demote_subject", model_name=model_name, version=version),
             html_body=self._base_html(self._t("demote_title"), body),
         )
+
+
+    def send_retrain_result_alert(
+        self,
+        model_name: str,
+        source_version: str,
+        new_version: str | None,
+        success: bool,
+        trigger: str = "scheduler",
+        error: str | None = None,
+        accuracy: float | None = None,
+        f1_score: float | None = None,
+    ) -> bool:
+        """Scheduled/drift-triggered retrain result notification.
+
+        Skipped when auto_promoted=True (auto-promotion sends its own alert via
+        send_auto_promotion_alert). Silent no-op if SMTP is not configured.
+        """
+        if success:
+            metrics_rows = ""
+            if accuracy is not None:
+                metrics_rows += (
+                    f"<tr><th>{self._t('lbl_accuracy')}</th>"
+                    f"<td><strong>{accuracy:.4f}</strong></td></tr>"
+                )
+            if f1_score is not None:
+                metrics_rows += (
+                    f"<tr><th>{self._t('lbl_f1')}</th>"
+                    f"<td><strong>{f1_score:.4f}</strong></td></tr>"
+                )
+            body = f"""
+            <table>
+              <tr><th>{self._t("lbl_model")}</th><td>{model_name}</td></tr>
+              <tr><th>{self._t("retrain_src_version")}</th><td>{source_version}</td></tr>
+              <tr><th>{self._t("retrain_new_version")}</th><td>{new_version or "—"}</td></tr>
+              {metrics_rows}
+              <tr><th>{self._t("retrain_trigger_label")}</th><td>{trigger}</td></tr>
+              <tr><th>{self._t("retrain_done_on")}</th>
+                  <td>{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC</td></tr>
+            </table>
+            <p>{self._t("retrain_success_advice")}</p>"""
+            return self._send_email(
+                to=settings.ALERT_EMAIL_TO,
+                subject=self._t(
+                    "retrain_success_subject",
+                    model_name=model_name,
+                    new_version=new_version or "—",
+                ),
+                html_body=self._base_html(self._t("retrain_success_title"), body),
+            )
+        else:
+            body = f"""
+            <table>
+              <tr><th>{self._t("lbl_model")}</th><td>{model_name}</td></tr>
+              <tr><th>{self._t("retrain_src_version")}</th><td>{source_version}</td></tr>
+              <tr><th>{self._t("retrain_trigger_label")}</th><td>{trigger}</td></tr>
+              <tr><th>{self._t("retrain_error_label")}</th>
+                  <td><strong style="color:#c0392b">{error or "—"}</strong></td></tr>
+              <tr><th>{self._t("retrain_done_on")}</th>
+                  <td>{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC</td></tr>
+            </table>
+            <p>{self._t("retrain_failure_advice")}</p>"""
+            return self._send_email(
+                to=settings.ALERT_EMAIL_TO,
+                subject=self._t("retrain_failure_subject", model_name=model_name),
+                html_body=self._base_html(self._t("retrain_failure_title"), body),
+            )
 
 
 # Global instance

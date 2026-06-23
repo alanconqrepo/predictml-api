@@ -2784,13 +2784,39 @@ if is_admin:
                             )
                             job_id = enqueued.get("job_id")
                             _TERMINAL = {"success", "failed", "cancelled"}
-                            job = enqueued
-                            with st.spinner(t("models.retrain.spinner")):
+
+                            # Live log streaming via SSE
+                            st.caption(t("models.retrain.spinner"))
+                            log_area = st.empty()
+                            log_lines: list[str] = []
+                            new_ver: str | None = None
+
+                            try:
+                                for is_done, data in client.stream_job_logs(job_id):
+                                    if is_done:
+                                        try:
+                                            done_payload = _json.loads(data)
+                                            new_ver = done_payload.get("new_version")
+                                        except Exception:
+                                            pass
+                                        break
+                                    log_lines.append(data)
+                                    log_area.code("\n".join(log_lines[-500:]), language="text")
+                            except Exception:
+                                # Fallback: polling if SSE is unavailable
+                                job = enqueued
                                 while job.get("status") not in _TERMINAL:
                                     _time.sleep(2)
                                     job = client.get_job_status(job_id)
+
+                            # Fetch final state for metadata
+                            job = client.get_job_status(job_id)
                             succeeded = job.get("status") == "success"
-                            new_ver = job.get("new_version") or (job.get("result") or {}).get("new_version")
+                            new_ver = (
+                                new_ver
+                                or job.get("new_version")
+                                or (job.get("result") or {}).get("new_version")
+                            )
                             err_msg = job.get("error") or t("models.retrain.unknown_error")
                             if succeeded:
                                 st.toast(
@@ -2802,7 +2828,7 @@ if is_admin:
                                     t("models.retrain.failure_toast", error=err_msg),
                                     icon="❌",
                                 )
-                            logs = job.get("logs") or t("models.retrain.logs_empty")
+                            logs = "\n".join(log_lines) or t("models.retrain.logs_empty")
                             with st.expander(t("models.retrain.stdout_expander"), expanded=not succeeded):
                                 st.code(logs, language="text")
                             if succeeded:
