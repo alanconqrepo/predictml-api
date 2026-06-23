@@ -287,10 +287,10 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "FR": "Réentraînement planifié échoué",
     },
     "retrain_trigger_label": {"EN": "Trigger", "FR": "Déclencheur"},
-    "retrain_src_version":   {"EN": "Source version", "FR": "Version source"},
-    "retrain_new_version":   {"EN": "New version", "FR": "Nouvelle version"},
-    "retrain_error_label":   {"EN": "Error", "FR": "Erreur"},
-    "retrain_done_on":       {"EN": "Completed on", "FR": "Terminé le"},
+    "retrain_src_version": {"EN": "Source version", "FR": "Version source"},
+    "retrain_new_version": {"EN": "New version", "FR": "Nouvelle version"},
+    "retrain_error_label": {"EN": "Error", "FR": "Erreur"},
+    "retrain_done_on": {"EN": "Completed on", "FR": "Terminé le"},
     "retrain_success_advice": {
         "EN": "Review metrics on the dashboard and promote the version manually if the auto-promotion policy did not apply.",
         "FR": "Examinez les métriques dans le tableau de bord et promouvez la version manuellement si la politique d'auto-promotion ne s'est pas déclenchée.",
@@ -636,7 +636,6 @@ class EmailService:
             subject=self._t("demote_subject", model_name=model_name, version=version),
             html_body=self._base_html(self._t("demote_title"), body),
         )
-
 
     def send_retrain_result_alert(
         self,

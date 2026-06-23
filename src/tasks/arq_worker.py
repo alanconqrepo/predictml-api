@@ -306,8 +306,10 @@ async def scheduled_retrain_task(
     # Notify admins of the result; skip when auto_promoted=True because
     # do_retrain() already called send_auto_promotion_alert() in that case.
     from src.core.config import settings as _cfg
+
     if _cfg.ENABLE_EMAIL_ALERTS and not result.get("auto_promoted"):
         from src.services.email_service import email_service as _email_svc
+
         _email_svc.send_retrain_result_alert(
             model_name=model_name,
             source_version=source_version,
