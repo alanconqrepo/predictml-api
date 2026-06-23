@@ -3194,9 +3194,7 @@ class DBService:
         if filters:
             base_query = base_query.where(and_(*filters))
 
-        count_result = await db.execute(
-            select(func.count()).select_from(base_query.subquery())
-        )
+        count_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
         total = count_result.scalar_one()
 
         rows_result = await db.execute(
@@ -3206,21 +3204,15 @@ class DBService:
         return rows, total
 
     @staticmethod
-    async def get_last_alert_check_at(
-        db: AsyncSession, model_name: str
-    ) -> Optional[datetime]:
+    async def get_last_alert_check_at(db: AsyncSession, model_name: str) -> Optional[datetime]:
         """Return the timestamp of the most recent alert check for this model (any type)."""
         result = await db.execute(
-            select(func.max(AlertCheckLog.checked_at)).where(
-                AlertCheckLog.model_name == model_name
-            )
+            select(func.max(AlertCheckLog.checked_at)).where(AlertCheckLog.model_name == model_name)
         )
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def count_predictions_since(
-        db: AsyncSession, model_name: str, since: datetime
-    ) -> int:
+    async def count_predictions_since(db: AsyncSession, model_name: str, since: datetime) -> int:
         """Count non-shadow production predictions for a model since the given timestamp."""
         result = await db.execute(
             select(func.count(Prediction.id)).where(

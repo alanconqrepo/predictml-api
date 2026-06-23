@@ -502,7 +502,10 @@ async def monitoring_model_detail(
 @router.get("/alert-checks", response_model=AlertCheckLogList)
 async def list_alert_checks(
     model_name: Optional[str] = Query(None, description="Filter by model name"),
-    check_type: Optional[str] = Query(None, description="Filter by check type (error_spike, auc, performance_drift, feature_drift, output_drift)"),
+    check_type: Optional[str] = Query(
+        None,
+        description="Filter by check type (error_spike, auc, performance_drift, feature_drift, output_drift)",
+    ),
     start: Optional[datetime] = Query(None, description="Start of period (ISO 8601)"),
     end: Optional[datetime] = Query(None, description="End of period (ISO 8601)"),
     limit: int = Query(100, ge=1, le=1000),

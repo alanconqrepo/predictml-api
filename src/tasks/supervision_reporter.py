@@ -146,9 +146,7 @@ async def run_alert_check() -> None:
                 _result = (
                     "alert_triggered"
                     if error_triggered and not email_blocked
-                    else "skipped_no_predictions"
-                    if error_triggered and email_blocked
-                    else "ok"
+                    else "skipped_no_predictions" if error_triggered and email_blocked else "ok"
                 )
                 await DBService.create_alert_check_log(
                     db,
@@ -207,9 +205,7 @@ async def run_alert_check() -> None:
                     _auc_result = (
                         "alert_triggered"
                         if auc_triggered and not email_blocked
-                        else "skipped_no_predictions"
-                        if auc_triggered and email_blocked
-                        else "ok"
+                        else "skipped_no_predictions" if auc_triggered and email_blocked else "ok"
                     )
                     await DBService.create_alert_check_log(
                         db,
@@ -284,9 +280,11 @@ async def run_alert_check() -> None:
                         _perf_result = (
                             "alert_triggered"
                             if perf_triggered and not email_blocked
-                            else "skipped_no_predictions"
-                            if perf_triggered and email_blocked
-                            else "ok"
+                            else (
+                                "skipped_no_predictions"
+                                if perf_triggered and email_blocked
+                                else "ok"
+                            )
                         )
                         await DBService.create_alert_check_log(
                             db,
@@ -366,9 +364,11 @@ async def run_alert_check() -> None:
                                 _feat_result = (
                                     "alert_triggered"
                                     if feat_result.drift_status == "critical" and not email_blocked
-                                    else "skipped_no_predictions"
-                                    if feat_result.drift_status == "critical" and email_blocked
-                                    else "ok"
+                                    else (
+                                        "skipped_no_predictions"
+                                        if feat_result.drift_status == "critical" and email_blocked
+                                        else "ok"
+                                    )
                                 )
                                 await DBService.create_alert_check_log(
                                     db,
@@ -442,9 +442,11 @@ async def run_alert_check() -> None:
                             _out_result = (
                                 "alert_triggered"
                                 if output_report.status == "critical" and not email_blocked
-                                else "skipped_no_predictions"
-                                if output_report.status == "critical" and email_blocked
-                                else "ok"
+                                else (
+                                    "skipped_no_predictions"
+                                    if output_report.status == "critical" and email_blocked
+                                    else "ok"
+                                )
                             )
                             await DBService.create_alert_check_log(
                                 db,
