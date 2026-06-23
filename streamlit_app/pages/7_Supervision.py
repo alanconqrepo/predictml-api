@@ -85,6 +85,38 @@ _STATUS_SEVERITY = {
 def _worst_drift(s1: str, s2: str) -> str:
     return s1 if _STATUS_SEVERITY.get(s1, 0) >= _STATUS_SEVERITY.get(s2, 0) else s2
 
+
+def _build_alert_triggers(m: dict, feat_drift: dict) -> list[dict]:
+    """Return list of triggered alert dimensions for a model summary dict."""
+    _triggers = []
+
+    _er = m.get("error_rate", 0)
+    if _er >= 0.10:
+        _triggers.append({"status": "critical", "dim": "error_rate", "value": _er, "threshold": 0.10})
+    elif _er >= 0.05:
+        _triggers.append({"status": "warning", "dim": "error_rate", "value": _er, "threshold": 0.05})
+
+    _fds = m.get("feature_drift_status", "ok")
+    if _fds in ("critical", "warning"):
+        _feat_details = [
+            {"name": fn, "status": fd.get("drift_status"), "psi": fd.get("psi"), "z_score": fd.get("z_score")}
+            for fn, fd in feat_drift.get("features", {}).items()
+            if fd.get("drift_status") in ("critical", "warning")
+        ]
+        _feat_details.sort(key=lambda f: (_STATUS_SEVERITY.get(f["status"], 0) * -1, -(f["psi"] or 0)))
+        _triggers.append({"status": _fds, "dim": "feature_drift", "feature_details": _feat_details[:5]})
+
+    _pds = m.get("performance_drift_status", "ok")
+    if _pds in ("critical", "warning"):
+        _triggers.append({"status": _pds, "dim": "performance_drift"})
+
+    _ods = m.get("output_drift_status", "ok")
+    if _ods in ("critical", "warning"):
+        _triggers.append({"status": _ods, "dim": "output_drift"})
+
+    _triggers.sort(key=lambda x: _STATUS_SEVERITY.get(x["status"], 0), reverse=True)
+    return _triggers
+
 _csv_bytes = None
 _md_bytes = None
 
@@ -229,6 +261,88 @@ with _tab_global:
             help=t("supervision.global.export_md_help"),
         )
 
+    # ── Fetch timeseries + feature drift per model ────────────────────────
+    _ts_by_model: dict[str, list] = {}
+    _feat_drift_by_model: dict[str, dict] = {}
+    _perf_by_day_by_model: dict[str, list] = {}
+    with st.spinner(t("supervision.loading.timeseries")):
+        for _m in models_data:
+            try:
+                _det = client.get_monitoring_model(
+                    name=_m["model_name"], start=start_iso, end=end_iso
+                )
+                _ts_by_model[_m["model_name"]] = _det.get("timeseries", [])
+                _feat_drift_by_model[_m["model_name"]] = _det.get("feature_drift", {})
+                _perf_by_day_by_model[_m["model_name"]] = _det.get("performance_by_day", [])
+            except Exception:
+                _ts_by_model[_m["model_name"]] = []
+                _feat_drift_by_model[_m["model_name"]] = {}
+                _perf_by_day_by_model[_m["model_name"]] = []
+
+    # ── Alert Digest ──────────────────────────────────────────────────────
+    _digest_models = sorted(
+        [m for m in models_data if m.get("health_status") in ("critical", "warning")],
+        key=lambda m: (m.get("health_status") != "critical", m["model_name"]),
+    )
+    if _digest_models:
+        st.subheader(t("supervision.alert_digest.subheader"))
+        st.caption(t("supervision.alert_digest.caption"))
+        for _dm in _digest_models:
+            _dstatus = _dm.get("health_status", "ok")
+            _dname = _dm["model_name"]
+            _triggers = _build_alert_triggers(_dm, _feat_drift_by_model.get(_dname, {}))
+            with st.container(border=True):
+                _hcol, _bcol = st.columns([5, 1])
+                _hcol.markdown(f"### {'🔴' if _dstatus == 'critical' else '🟡'} `{_dname}`")
+                _bcol.markdown(
+                    f"<div style='text-align:right;padding-top:8px;font-weight:bold;"
+                    f"color:{'#c0392b' if _dstatus == 'critical' else '#e67e22'}'>"
+                    f"{t('supervision.alert_digest.status_' + _dstatus)}</div>",
+                    unsafe_allow_html=True,
+                )
+                if not _triggers:
+                    st.caption(t("supervision.alert_digest.no_triggers"))
+                else:
+                    for _tr in _triggers:
+                        _tic = "🔴" if _tr["status"] == "critical" else "🟡"
+                        _dim = _tr["dim"]
+                        if _dim == "error_rate":
+                            st.markdown(
+                                f"- {_tic} **{t('supervision.alert_digest.dim_error_rate')}** — "
+                                + t(
+                                    "supervision.alert_digest.trigger_error_rate",
+                                    value=f"{_tr['value'] * 100:.1f}",
+                                    threshold=f"{_tr['threshold'] * 100:.0f}",
+                                )
+                            )
+                        elif _dim == "feature_drift":
+                            _flist = _tr.get("feature_details", [])
+                            st.markdown(
+                                f"- {_tic} **{t('supervision.alert_digest.dim_feature_drift')}** — "
+                                + t("supervision.alert_digest.trigger_feature_drift", count=len(_flist))
+                            )
+                            for _fd in _flist:
+                                _fic = "🔴" if _fd["status"] == "critical" else "🟡"
+                                _parts = []
+                                if _fd.get("psi") is not None:
+                                    _parts.append(f"PSI {_fd['psi']:.3f}")
+                                if _fd.get("z_score") is not None:
+                                    _parts.append(f"Z {_fd['z_score']:.2f}")
+                                st.markdown(
+                                    f"  &nbsp;&nbsp;&nbsp;&nbsp;{_fic} `{_fd['name']}` — {' · '.join(_parts)}"
+                                )
+                        elif _dim == "performance_drift":
+                            st.markdown(
+                                f"- {_tic} **{t('supervision.alert_digest.dim_performance_drift')}** — "
+                                + t(f"supervision.alert_digest.trigger_performance_drift_{_tr['status']}")
+                            )
+                        elif _dim == "output_drift":
+                            st.markdown(
+                                f"- {_tic} **{t('supervision.alert_digest.dim_output_drift')}** — "
+                                + t(f"supervision.alert_digest.trigger_output_drift_{_tr['status']}")
+                            )
+        st.divider()
+
     # ── Health table ─────────────────────────────────────────────────────
     st.subheader(t("supervision.global.health_subheader"))
     rows_table = []
@@ -319,18 +433,7 @@ with _tab_global:
         },
     )
 
-    # ── Fetch timeseries per model (for trend charts) ────────────────────
-    _ts_by_model: dict[str, list] = {}
-    with st.spinner(t("supervision.loading.timeseries")):
-        for _m in models_data:
-            try:
-                _det = client.get_monitoring_model(
-                    name=_m["model_name"], start=start_iso, end=end_iso
-                )
-                _ts_by_model[_m["model_name"]] = _det.get("timeseries", [])
-            except Exception:
-                _ts_by_model[_m["model_name"]] = []
-
+    # ── Timeseries post-processing (for trend charts) ────────────────────
     _ts_rows = []
     for _mname, _ts in _ts_by_model.items():
         for _pt in _ts:
